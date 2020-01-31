@@ -1,0 +1,251 @@
+head	1.2;
+access;
+symbols
+	cvs-200310311830:1.1.1.1
+	cvs-200310021000:1.1.1.1
+	cvs-200309281111:1.1.1.1
+	cvs-200309171515:1.1.1.1
+	cvs-200308302005:1.1.1.1
+	cvs-200308171200:1.1.1.1
+	ctm-3449:1.1.1.1
+	cvs-200307191610:1.1.1.1
+	ctm-3416:1.1.1.1
+	cvs-200307091500:1.1.1.1
+	ctm-3389:1.1.1.1
+	cvs-200306291800:1.1.1.1
+	ctm-3369:1.1.1.1
+	ctm-3341:1.1.1.1
+	MIRBSD_5:1.1.1.1
+	cvs-200306082100:1.1.1.1
+	ctm-3316:1.1.1.1
+	ctm-3272:1.1.1.1
+	ctm-3264:1.1.1.1
+	ctm-3258:1.1.1.1
+	MIRBSD_4:1.1.1.1
+	ctm-3200:1.1.1.1
+	ctm-3188:1.1.1.1
+	ctm-3155:1.1.1.1
+	ctm-3132:1.1.1.1
+	openbsd:1.1.1;
+locks; strict;
+comment	@# @;
+
+
+1.2
+date	2003.11.15.23.42.23;	author tg;	state dead;
+branches;
+next	1.1;
+
+1.1
+date	2003.03.22.19.55.25;	author tg;	state Exp;
+branches
+	1.1.1.1;
+next	;
+
+1.1.1.1
+date	2003.03.22.19.55.25;	author tg;	state Exp;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.2
+log
+@Clean up the mess, fix conflicts after import
+
+XXX @@wbx:	www/snownews
+XXX @@tg:	x11/mplayer
+have been updated; check if they still work
+
+XXX general fubar expected, USE_X11/CXX for example
+@
+text
+@$OpenBSD: patch-libmpdemux_vcd_read_fbsd_h,v 1.1 2002/06/07 23:58:14 espie Exp $
+--- libmpdemux/vcd_read_fbsd.h.orig	Sat May 18 14:49:21 2002
++++ libmpdemux/vcd_read_fbsd.h	Sat May 18 15:15:07 2002
+@@@@ -1,5 +1,7 @@@@
+ #include <sys/cdio.h>
++#if defined(__FreeBSD__)
+ #include <sys/cdrio.h>
++#endif
+ 
+ //=================== VideoCD ==========================
+ #define	CDROM_LEADOUT	0xAA
+@@@@ -13,22 +15,30 @@@@ typedef struct {
+ } cdsector_t;
+ 
+ static cdsector_t vcd_buf;
++#if defined(__FreeBSD__)
+ static struct ioc_read_toc_single_entry vcd_entry;
++#define MSF(a)	((a).entry.addr.msf)
++#endif
++#if defined(__OpenBSD__)
++static struct cd_toc_entry vcd_entry;
++#define MSF(a) ((a).addr.msf)
++#endif
+ 
+ static inline void vcd_set_msf(unsigned int sect){
+-  vcd_entry.entry.addr.msf.frame=sect%75;
++  MSF(vcd_entry).frame=sect%75;
+   sect=sect/75;
+-  vcd_entry.entry.addr.msf.second=sect%60;
++  MSF(vcd_entry).second=sect%60;
+   sect=sect/60;
+-  vcd_entry.entry.addr.msf.minute=sect;
++  MSF(vcd_entry).minute=sect;
+ }
+ 
+ static inline unsigned int vcd_get_msf(){
+-  return vcd_entry.entry.addr.msf.frame +
+-        (vcd_entry.entry.addr.msf.second+
+-         vcd_entry.entry.addr.msf.minute*60)*75;
++  return MSF(vcd_entry).frame +
++        (MSF(vcd_entry).second+
++         MSF(vcd_entry).minute*60)*75;
+ }
+ 
++#if defined(__FreeBSD__)
+ int vcd_seek_to_track(int fd,int track){
+   vcd_entry.address_format = CD_MSF_FORMAT;
+   vcd_entry.track  = track;
+@@@@ -38,20 +48,32 @@@@ int vcd_seek_to_track(int fd,int track){
+   }
+   return VCD_SECTOR_DATA*vcd_get_msf();
+ }
++#endif
++#if defined(__OpenBSD__)
++int vcd_seek_to_track(int fd,int track)
++{
++	struct ioc_read_toc_entry t;
++	t.data = &vcd_entry;
++	t.address_format = CD_MSF_FORMAT;
++	t.starting_track = track;
++	t.data_len = sizeof(vcd_entry);
++	if (ioctl(fd, CDIOREADTOCENTRYS, &t) == -1) {
++		perror("ioctl dif1");
++		return -1;
++	}
++	return VCD_SECTOR_DATA*vcd_get_msf();
++}
++#endif
+ 
+ int vcd_get_track_end(int fd,int track){
+   struct ioc_toc_header tochdr;
+   if (ioctl(fd,CDIOREADTOCHEADER,&tochdr)==-1)
+     { perror("read CDROM toc header: "); return -1; }
+-  vcd_entry.address_format = CD_MSF_FORMAT;
+-  vcd_entry.track  = track<tochdr.ending_track?(track+1):CDROM_LEADOUT;
+-  if (ioctl(fd, CDIOREADTOCENTRY, &vcd_entry)) {
+-    perror("ioctl dif2");
+-    return -1;
+-  }
+-  return VCD_SECTOR_DATA*vcd_get_msf();
++  return vcd_seek_to_track(fd, 
++  	track<tochdr.ending_track?(track+1):CDROM_LEADOUT);
+ }
+ 
++#if defined(__FreeBSD__)
+ void vcd_read_toc(int fd){
+   struct ioc_toc_header tochdr;
+   int i;
+@@@@ -77,19 +99,49 @@@@ void vcd_read_toc(int fd){
+       );
+     }
+ }
++#endif
++
++#if defined(__OpenBSD__)
++void vcd_read_toc(int fd){
++  struct ioc_toc_header tochdr;
++  struct cd_toc_entry e;
++  int i;
++  if (ioctl(fd,CDIOREADTOCHEADER,&tochdr)==-1)
++    { perror("read CDROM toc header: "); return; }
++  for (i=tochdr.starting_track ; i<=tochdr.ending_track ; i++){
++    	struct ioc_read_toc_entry t;
++	t.data = &e;
++	t.data_len = sizeof(e);
++	t.starting_track = i;
++	t.address_format = CD_MSF_FORMAT;
++      if (ioctl(fd,CDIOREADTOCENTRYS,&t)==-1)
++	{ perror("read CDROM toc entry: "); return; }
++        
++      printf("track %02d:  adr=%d  ctrl=%d  %02d:%02d:%02d\n",
++          (int)e.track,
++          (int)e.addr_type,
++          (int)e.control,
++          (int)e.addr.msf.minute,
++          (int)e.addr.msf.second,
++          (int)e.addr.msf.frame
++      );
++    }
++}
++#endif
+ 
+ static int vcd_read(int fd,char *mem){
+ 
+       if (pread(fd,&vcd_buf,VCD_SECTOR_SIZE,vcd_get_msf()*VCD_SECTOR_SIZE)
+ 	 != VCD_SECTOR_SIZE) return 0;  // EOF?
+ 
+-      vcd_entry.entry.addr.msf.frame++;
+-      if (vcd_entry.entry.addr.msf.frame==75){
+-        vcd_entry.entry.addr.msf.frame=0;
+-        vcd_entry.entry.addr.msf.second++;
+-        if (vcd_entry.entry.addr.msf.second==60){
+-          vcd_entry.entry.addr.msf.second=0;
+-          vcd_entry.entry.addr.msf.minute++;
++      MSF(vcd_entry).frame++;
++
++      if (MSF(vcd_entry).frame==75){
++        MSF(vcd_entry).frame=0;
++        MSF(vcd_entry).second++;
++        if (MSF(vcd_entry).second==60){
++          MSF(vcd_entry).second=0;
++          MSF(vcd_entry).minute++;
+         }
+       }
+       memcpy(mem,vcd_buf.data,VCD_SECTOR_DATA);
+@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@@
+
+
+1.1.1.1
+log
+@Import OpenBSD 3.3 ports repository from CTM 3132 the first time
+This continues opening an OpenBSD-mirabile (aka MirBSD) repository.
+
+### MirBSD is:
+# Copyright (c) 1982-2003 by Thorsten "mirabile" Glaser <x86@@ePost.de>
+# Copyright © 1968-2003  The authors of And contributors to UNIX®, the
+#       C Language, BSD/Berkeley Unix; 386BSD, NetBSD 1.1 and OpenBSD.
+#
+# Anyone who obtained a copy of this work is hereby permitted to freely use,
+# distribute, modify, merge, sublicence, give away or sell it as long as the
+# authors are given due credit and the following notice is retained:
+#
+# This work is provided "as is", with no explicit or implicit warranty what-
+# soever. Use it only at your own risk. In no event may an author or contri-
+# butor be held liable for any damage, directly or indirectly, that origina-
+# ted through or is caused by creation or modification of this work.
+
+MirBSD is my private tree. MirBSD does not differ very much from OpenBSD
+and intentionally tracks OpenBSD. That's why it _is_ OpenBSD, just not the
+official one. It's like with DarrenBSD.
+
+At time of this writing, no advertising for MirBSD must be done,
+because the advertising clause has not yet been sorted out.
+
+http://templeofhate.com/tglaser/MirBSD/index.php
+@
+text
+@@

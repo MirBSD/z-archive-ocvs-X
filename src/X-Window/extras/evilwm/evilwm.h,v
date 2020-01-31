@@ -1,0 +1,805 @@
+head	1.4;
+access;
+symbols
+	tg-mergetmp-2:1.4
+	MIRBSD_7quater:1.3
+	evilwm_0_99_17:1.1.3.1
+	MIRBSD_7_ALPHA:1.3.0.4
+	MIRBSD_7:1.3.0.2
+	MIRBSD_7ter:1.3
+	evilwm_0_99_16:1.1.1.2
+	evilwm_0_99_14:1.1.1.1
+	tg:1.1.3
+	MIRBSD_5:1.1
+	MIRBSD_4:1.1;
+locks; strict;
+comment	@ * @;
+
+
+1.4
+date	2004.01.31.02.17.20;	author tg;	state Stab;
+branches;
+next	1.3;
+
+1.3
+date	2003.09.18.19.20.21;	author tg;	state Exp;
+branches;
+next	1.2;
+
+1.2
+date	2003.07.07.22.03.17;	author tg;	state Exp;
+branches;
+next	1.1;
+
+1.1
+date	2003.04.10.14.50.35;	author tg;	state Exp;
+branches
+	1.1.1.1
+	1.1.3.1;
+next	;
+
+1.1.1.1
+date	2003.09.18.18.43.41;	author tg;	state Exp;
+branches;
+next	1.1.1.2;
+
+1.1.1.2
+date	2003.09.18.19.11.33;	author tg;	state Exp;
+branches;
+next	;
+
+1.1.3.1
+date	2004.01.29.19.07.50;	author tg;	state Exp;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.4
+log
+@* this time, make b-r for real
+* including X-Window
+* merge evilwm import
+* install all .cf etc. files, especially the MirBSD.cf one
+* cope in X for MirOS changes
+* refine anoncvssh: all defines in Makefile, etc.
+* cope for XFree86 1.1 licence
+* merge nlist.c import
+* nuke unused files
+* remove warnings
+* fix really bogus bug in rcdb again
+* offer bsd.slim for installation
+* fix the default route bug
+* sync distrib stuff
+(...)
+
+thanks for alpha-testing to
+ * Jannis "Kabelaffe" Konrad
+ * José António "T0ni" "jesus_" Matias de Jesus
+@
+text
+@#include <X11/Xlib.h>
+#include <X11/Xutil.h>
+#include <X11/keysym.h>
+#ifdef SHAPE
+#include <X11/extensions/shape.h>
+#endif
+#ifdef MWM_HINTS
+#include <Xm/MwmUtil.h>
+#endif
+
+#include "keymap.h"
+
+#ifdef VWM
+#ifdef VDESK
+#define VDESK_BOTH 1
+#endif
+#endif
+
+/* default settings */
+
+#define DEF_FONT	"variable"
+#define DEF_FG		"goldenrod"
+#define DEF_BG		"grey50"
+#define DEF_BW		1
+#define DEF_FC		"blue"
+#define SPACE		3
+#define MINSIZE		15
+#ifdef DEBIAN
+#define DEF_TERM	"x-terminal-emulator"
+#else
+#define DEF_TERM	"xterm"
+#endif
+
+/* readability stuff */
+#ifdef SHAPE
+#include <X11/extensions/shape.h>
+#endif
+
+#define STICKY 0	/* Desktop number for sticky clients */
+#define KEY_TO_VDESK( key ) ( ( key ) - XK_1 + 1 )
+
+#define RAISE		1
+#define NO_RAISE	0	/* for unhide() */
+
+/* some coding shorthand */
+
+#define ChildMask	(SubstructureRedirectMask|SubstructureNotifyMask)
+#define ButtonMask	(ButtonPressMask|ButtonReleaseMask)
+#define MouseMask	(ButtonMask|PointerMotionMask)
+
+#define grab_pointer(w, mask, curs) \
+	(XGrabPointer(dpy, w, False, mask, GrabModeAsync, GrabModeAsync, \
+	None, curs, CurrentTime) == GrabSuccess)
+#define grab_keysym(w, mask, keysym) \
+	XGrabKey(dpy, XKeysymToKeycode(dpy, keysym), mask, w, True, \
+			GrabModeAsync, GrabModeAsync); \
+	XGrabKey(dpy, XKeysymToKeycode(dpy, keysym), LockMask|mask, w, True, \
+			GrabModeAsync, GrabModeAsync); \
+	if (numlockmask) { \
+		XGrabKey(dpy, XKeysymToKeycode(dpy, keysym), numlockmask|mask, \
+				w, True, GrabModeAsync, GrabModeAsync); \
+		XGrabKey(dpy, XKeysymToKeycode(dpy, keysym), \
+				numlockmask|LockMask|mask, w, True, \
+				GrabModeAsync, GrabModeAsync); \
+	}
+#define grab_button(w, mask, button) \
+	XGrabButton(dpy, button, mask, w, False, ButtonMask, \
+			GrabModeAsync, GrabModeSync, None, None); \
+	XGrabButton(dpy, button, LockMask|mask, w, False, ButtonMask, \
+			GrabModeAsync, GrabModeSync, None, None); \
+	if (numlockmask) { \
+		XGrabButton(dpy, button, numlockmask|mask, w, False, \
+				ButtonMask, GrabModeAsync, GrabModeSync, \
+				None, None); \
+		XGrabButton(dpy, button, numlockmask|LockMask|mask, w, False, \
+				ButtonMask, GrabModeAsync, GrabModeSync, \
+				None, None); \
+	}
+#define setmouse(w, x, y) \
+	XWarpPointer(dpy, None, w, 0, 0, 0, 0, x, y)
+#define gravitate(c) \
+	change_gravity(c, 1)
+#define ungravitate(c) \
+	change_gravity(c, -1)
+
+/* screen structure */
+
+typedef struct ScreenInfo ScreenInfo;
+
+struct ScreenInfo {
+	int screen;
+	Window root;
+	Colormap def_cmap;
+	GC invert_gc;
+#ifdef VWM
+	XColor fg, bg, fc;
+#else
+	XColor fg, bg;
+#endif
+	char *display;
+};
+
+/* client structure */
+
+typedef struct Client Client;
+
+struct Client {
+	Client	*next;
+	Window	window;
+	Window	parent;
+	ScreenInfo	*screen;
+
+#ifdef COLOURMAP
+	Colormap	cmap;
+#endif
+	XSizeHints	*size;
+	int		ignore_unmap;
+
+	int		x, y, width, height;
+	int		oldx, oldy, oldw, oldh;  /* used when maximising */
+	int		border;
+#ifdef VWM
+	int		vdesk;
+#endif /* def VWM */
+};
+
+/* declarations for global variables in main.c */
+
+extern Display		*dpy;
+/* extern int		screen;
+extern Window		root;
+extern GC		invert_gc;
+#ifdef VWM
+extern XColor		fg, bg, fc;
+#else
+extern XColor		fg, bg;
+#endif
+*/
+extern int		num_screens;
+extern ScreenInfo	*screens;
+extern ScreenInfo	*current_screen;
+extern Client		*current;
+extern Window		initialising;
+extern XFontStruct	*font;
+extern Client		*head_client;
+extern Atom		xa_wm_state;
+extern Atom		xa_wm_change_state;
+extern Atom		xa_wm_protos;
+extern Atom		xa_wm_delete;
+extern Atom		xa_wm_cmapwins;
+extern Cursor		move_curs;
+extern Cursor		resize_curs;
+extern const char	*opt_display;
+extern const char	*opt_font;
+extern const char	*opt_fg;
+extern const char	*opt_bg;
+extern const char	**opt_term;
+extern int		opt_bw;
+#ifdef VWM
+extern const char	*opt_fc;
+extern int		vdesk;
+#endif
+#ifdef SNAP
+extern int		opt_snap;
+#endif
+#ifdef SHAPE
+extern int		have_shape, shape_event;
+#endif
+extern int		quitting;
+#ifdef MWM_HINTS
+extern Atom		mwm_hints;
+#endif
+extern unsigned int numlockmask;
+
+/* client.c */
+
+Client *find_client(Window w);
+int wm_state(Client *c);
+void change_gravity(Client *c, int multiplier);
+void remove_client(Client *c);
+void send_config(Client *c);
+void send_wm_delete(Client *c);
+void set_wm_state(Client *c, int state);
+void set_shape(Client *c);
+void client_update_current(Client *c, Client *newcurrent);
+
+/* events.c */
+
+void handle_key_event(XKeyEvent *e);
+void handle_button_event(XButtonEvent *e);
+/* static void handle_client_message(XClientMessageEvent *e); */
+#ifdef COLOURMAP
+void handle_colormap_change(XColormapEvent *e);
+#endif
+void handle_configure_request(XConfigureRequestEvent *e);
+void handle_enter_event(XCrossingEvent *e);
+void handle_leave_event(XCrossingEvent *e);
+void handle_map_request(XMapRequestEvent *e);
+void handle_property_change(XPropertyEvent *e);
+void handle_unmap_event(XUnmapEvent *e);
+#ifdef SHAPE
+void handle_shape_event(XShapeEvent *e);
+#endif
+
+/* main.c */
+
+int main(int argc, char *argv[]);
+void scan_windows(void);
+void setup_display(void);
+
+/* misc.c */
+#ifdef SANITY
+void sanity_check(void);
+#endif
+#ifdef VDESK_BOTH
+void spawn_vdesk(int todesk, Client *c);
+#endif
+
+/* void do_event_loop(void); */
+int handle_xerror(Display *dsply, XErrorEvent *e);
+int ignore_xerror(Display *dsply, XErrorEvent *e);
+void dump_clients(void);
+void spawn(const char *const cmd[]);
+void handle_signal(int signo);
+#ifdef DEBUG
+void show_event(XEvent e);
+#endif
+
+/* new.c */
+
+void init_position(Client *c);
+void make_new_client(Window w, ScreenInfo *s);
+void reparent(Client *c);
+
+/* screen.c */
+
+void drag(Client *c);
+void draw_outline(Client *c);
+void get_mouse_position(int *x, int *y, Window root);
+void move(Client *c, int set);
+void recalculate_sweep(Client *c, int x1, int y1, int x2, int y2);
+void resize(Client *c, int set);
+void maximise_vert(Client *c);
+void maximise_horiz(Client *c);
+void show_info(Client *c, KeySym key);
+void sweep(Client *c);
+void unhide(Client *c, int raise);
+void next(void);
+#ifdef VWM
+void hide(Client *c);
+void switch_vdesk(int v);
+#else
+# ifdef VDESK
+ void hide(Client *c);
+# endif
+#endif /* def VWM */
+#ifdef VDESK
+void handle_client_message(XClientMessageEvent *e);
+#endif
+ScreenInfo *find_screen(Window root);
+@
+
+
+1.3
+log
+@Upgrade evilwm to 0.99.16-mirbsd.
+
+This work sponsored by: NetzLaden.org
+@
+text
+@d163 3
+@
+
+
+1.2
+log
+@update to evilwm 0.99.14
+@
+text
+@d153 5
+a157 5
+extern char		*opt_display;
+extern char		*opt_font;
+extern char		*opt_fg;
+extern char		*opt_bg;
+extern char		**opt_term;
+d160 1
+a160 1
+extern char		*opt_fc;
+d205 2
+a206 2
+void scan_windows();
+void setup_display();
+d210 1
+a210 1
+void sanity_check();
+d216 5
+a220 5
+/* void do_event_loop(); */
+int handle_xerror(Display *dpy, XErrorEvent *e);
+int ignore_xerror(Display *dpy, XErrorEvent *e);
+void dump_clients();
+void spawn(char *cmd[]);
+@
+
+
+1.1
+log
+@evilwm is a minimalist window manager for the X Window System.
+
+Features:
+* No window decorations apart from a simple 1 pixel border.
+* No icons.
+* Good keyboard control, including repositioning and maximise toggles.
+* Solid window drags.
+* Virtual desktops.
+* Small binary size.
+
+WWW: http://evilwm.sf.net/
+@
+text
+@d7 3
+d13 6
+d21 1
+a21 2
+#define DEF_VDESK_PROP "VDESK_DESKTOP"
+#define DEF_FONT	"lucidasans-10"
+d32 1
+a32 1
+#endif /* def DEBIAN */
+d39 3
+d51 1
+a51 1
+#define grab(w, mask, curs) \
+d54 25
+d86 17
+d111 1
+a122 1
+# ifndef VDESK_BOTH
+a123 1
+# endif
+d130 1
+a130 2
+extern Client		*current;
+extern int		screen;
+d133 11
+d157 1
+a157 1
+extern char		*opt_term;
+a159 1
+extern XColor		fg, bg, fc;
+d161 1
+a161 8
+# ifndef VDESK_BOTH
+ extern int		vdesk;
+# endif
+#else
+extern XColor		fg, bg;
+#endif /* def VWM */
+#ifdef SANITY
+extern int		tracked_count;
+d166 3
+a168 2
+#ifdef VDESK_BOTH
+extern Atom vdesk_desktop;
+d170 1
+a170 1
+extern int		quitting;
+d182 1
+a182 5
+#ifdef VDESK_BOTH
+void wr_vdesk(Window win, int state);
+int rd_vdesk(Window win);
+void fix_visibility_hack(Window win);
+#endif
+d194 1
+d212 3
+d220 1
+a220 1
+void spawn(char *cmd);
+d229 1
+a229 1
+void make_new_client(Window w);
+d236 1
+a236 1
+void get_mouse_position(int *x, int *y);
+d245 1
+a245 1
+void next(Client *c);
+d257 1
+a257 15
+#ifdef VDESK_BOTH
+# define WR_DESK( desk, value ) wr_vdesk( (desk)->window, value)
+# define RD_DESK( desk ) rd_vdesk( (desk)->window )
+# define GET_VDESK rd_vdesk(root)
+# define STICKY 0
+# define KEY_TO_VDESK( key ) ( ( key ) - XK_1 + 1 )
+# define SET_VDESK( value ) wr_vdesk(root, value)
+#else
+# define WR_DESK( desk, value ) ( (desk)->vdesk = value )
+# define RD_DESK( desk ) ( (desk)->vdesk )
+# define GET_VDESK vdesk
+# define STICKY -1
+# define KEY_TO_VDESK( key ) ( key )
+# define SET_VDESK( value ) ( vdesk = value )
+#endif
+@
+
+
+1.1.3.1
+log
+@evilwm 0.99.17
+@
+text
+@a6 3
+#ifdef MWM_HINTS
+#include <Xm/MwmUtil.h>
+#endif
+a9 6
+#ifdef VWM
+#ifdef VDESK
+#define VDESK_BOTH 1
+#endif
+#endif
+
+d12 2
+a13 1
+#define DEF_FONT	"variable"
+d24 1
+a24 1
+#endif
+a30 3
+#define STICKY 0	/* Desktop number for sticky clients */
+#define KEY_TO_VDESK( key ) ( ( key ) - XK_1 + 1 )
+
+d40 1
+a40 1
+#define grab_pointer(w, mask, curs) \
+a42 25
+#define grab_keysym(w, mask, keysym) \
+	XGrabKey(dpy, XKeysymToKeycode(dpy, keysym), mask, w, True, \
+			GrabModeAsync, GrabModeAsync); \
+	XGrabKey(dpy, XKeysymToKeycode(dpy, keysym), LockMask|mask, w, True, \
+			GrabModeAsync, GrabModeAsync); \
+	if (numlockmask) { \
+		XGrabKey(dpy, XKeysymToKeycode(dpy, keysym), numlockmask|mask, \
+				w, True, GrabModeAsync, GrabModeAsync); \
+		XGrabKey(dpy, XKeysymToKeycode(dpy, keysym), \
+				numlockmask|LockMask|mask, w, True, \
+				GrabModeAsync, GrabModeAsync); \
+	}
+#define grab_button(w, mask, button) \
+	XGrabButton(dpy, button, mask, w, False, ButtonMask, \
+			GrabModeAsync, GrabModeSync, None, None); \
+	XGrabButton(dpy, button, LockMask|mask, w, False, ButtonMask, \
+			GrabModeAsync, GrabModeSync, None, None); \
+	if (numlockmask) { \
+		XGrabButton(dpy, button, numlockmask|mask, w, False, \
+				ButtonMask, GrabModeAsync, GrabModeSync, \
+				None, None); \
+		XGrabButton(dpy, button, numlockmask|LockMask|mask, w, False, \
+				ButtonMask, GrabModeAsync, GrabModeSync, \
+				None, None); \
+	}
+a49 17
+/* screen structure */
+
+typedef struct ScreenInfo ScreenInfo;
+
+struct ScreenInfo {
+	int screen;
+	Window root;
+	Colormap def_cmap;
+	GC invert_gc;
+#ifdef VWM
+	XColor fg, bg, fc;
+#else
+	XColor fg, bg;
+#endif
+	char *display;
+};
+
+a57 1
+	ScreenInfo	*screen;
+d69 1
+d71 1
+d78 2
+a79 1
+/* extern int		screen;
+a81 11
+#ifdef VWM
+extern XColor		fg, bg, fc;
+#else
+extern XColor		fg, bg;
+#endif
+*/
+extern int		num_screens;
+extern ScreenInfo	*screens;
+extern ScreenInfo	*current_screen;
+extern Client		*current;
+extern Window		initialising;
+d91 5
+a95 5
+extern const char	*opt_display;
+extern const char	*opt_font;
+extern const char	*opt_fg;
+extern const char	*opt_bg;
+extern const char	**opt_term;
+d98 10
+a107 5
+extern const char	*opt_fc;
+extern int		vdesk;
+#endif
+#ifdef SNAP
+extern int		opt_snap;
+d112 3
+a115 4
+#ifdef MWM_HINTS
+extern Atom		mwm_hints;
+#endif
+extern unsigned int numlockmask;
+d127 5
+a131 1
+void client_update_current(Client *c, Client *newcurrent);
+a142 1
+void handle_leave_event(XCrossingEvent *e);
+d153 2
+a154 2
+void scan_windows(void);
+void setup_display(void);
+d158 1
+a158 4
+void sanity_check(void);
+#endif
+#ifdef VDESK_BOTH
+void spawn_vdesk(int todesk, Client *c);
+d161 5
+a165 5
+/* void do_event_loop(void); */
+int handle_xerror(Display *dsply, XErrorEvent *e);
+int ignore_xerror(Display *dsply, XErrorEvent *e);
+void dump_clients(void);
+void spawn(const char *const cmd[]);
+d174 1
+a174 1
+void make_new_client(Window w, ScreenInfo *s);
+d181 1
+a181 1
+void get_mouse_position(int *x, int *y, Window root);
+d190 1
+a190 1
+void next(void);
+d202 15
+a216 1
+ScreenInfo *find_screen(Window root);
+@
+
+
+1.1.1.1
+log
+@Move evilwm 0.99.14 to a vendor branch, too. Facilitates easier updating.
+@
+text
+@a6 3
+#ifdef MWM_HINTS
+#include <Xm/MwmUtil.h>
+#endif
+a9 6
+#ifdef VWM
+#ifdef VDESK
+#define VDESK_BOTH 1
+#endif
+#endif
+
+d12 2
+a13 1
+#define DEF_FONT	"variable"
+d24 1
+a24 1
+#endif
+a30 3
+#define STICKY 0	/* Desktop number for sticky clients */
+#define KEY_TO_VDESK( key ) ( ( key ) - XK_1 + 1 )
+
+d40 1
+a40 1
+#define grab_pointer(w, mask, curs) \
+a42 25
+#define grab_keysym(w, mask, keysym) \
+	XGrabKey(dpy, XKeysymToKeycode(dpy, keysym), mask, w, True, \
+			GrabModeAsync, GrabModeAsync); \
+	XGrabKey(dpy, XKeysymToKeycode(dpy, keysym), LockMask|mask, w, True, \
+			GrabModeAsync, GrabModeAsync); \
+	if (numlockmask) { \
+		XGrabKey(dpy, XKeysymToKeycode(dpy, keysym), numlockmask|mask, \
+				w, True, GrabModeAsync, GrabModeAsync); \
+		XGrabKey(dpy, XKeysymToKeycode(dpy, keysym), \
+				numlockmask|LockMask|mask, w, True, \
+				GrabModeAsync, GrabModeAsync); \
+	}
+#define grab_button(w, mask, button) \
+	XGrabButton(dpy, button, mask, w, False, ButtonMask, \
+			GrabModeAsync, GrabModeSync, None, None); \
+	XGrabButton(dpy, button, LockMask|mask, w, False, ButtonMask, \
+			GrabModeAsync, GrabModeSync, None, None); \
+	if (numlockmask) { \
+		XGrabButton(dpy, button, numlockmask|mask, w, False, \
+				ButtonMask, GrabModeAsync, GrabModeSync, \
+				None, None); \
+		XGrabButton(dpy, button, numlockmask|LockMask|mask, w, False, \
+				ButtonMask, GrabModeAsync, GrabModeSync, \
+				None, None); \
+	}
+a49 17
+/* screen structure */
+
+typedef struct ScreenInfo ScreenInfo;
+
+struct ScreenInfo {
+	int screen;
+	Window root;
+	Colormap def_cmap;
+	GC invert_gc;
+#ifdef VWM
+	XColor fg, bg, fc;
+#else
+	XColor fg, bg;
+#endif
+	char *display;
+};
+
+a57 1
+	ScreenInfo	*screen;
+d69 1
+d71 1
+d78 2
+a79 1
+/* extern int		screen;
+a81 11
+#ifdef VWM
+extern XColor		fg, bg, fc;
+#else
+extern XColor		fg, bg;
+#endif
+*/
+extern int		num_screens;
+extern ScreenInfo	*screens;
+extern ScreenInfo	*current_screen;
+extern Client		*current;
+extern Window		initialising;
+d95 1
+a95 1
+extern char		**opt_term;
+d98 1
+d100 8
+a107 1
+extern int		vdesk;
+d112 3
+a115 4
+#ifdef MWM_HINTS
+extern Atom		mwm_hints;
+#endif
+extern unsigned int numlockmask;
+d127 5
+a131 1
+void client_update_current(Client *c, Client *newcurrent);
+a142 1
+void handle_leave_event(XCrossingEvent *e);
+a159 3
+#ifdef VDESK_BOTH
+void spawn_vdesk(int todesk, Client *c);
+#endif
+d165 1
+a165 1
+void spawn(char *cmd[]);
+d174 1
+a174 1
+void make_new_client(Window w, ScreenInfo *s);
+d181 1
+a181 1
+void get_mouse_position(int *x, int *y, Window root);
+d190 1
+a190 1
+void next(void);
+d202 15
+a216 1
+ScreenInfo *find_screen(Window root);
+@
+
+
+1.1.1.2
+log
+@Update evilwm to release 0.99.16
+@
+text
+@d153 5
+a157 5
+extern const char	*opt_display;
+extern const char	*opt_font;
+extern const char	*opt_fg;
+extern const char	*opt_bg;
+extern const char	**opt_term;
+d160 1
+a160 1
+extern const char	*opt_fc;
+d205 2
+a206 2
+void scan_windows(void);
+void setup_display(void);
+d210 1
+a210 1
+void sanity_check(void);
+d216 5
+a220 5
+/* void do_event_loop(void); */
+int handle_xerror(Display *dsply, XErrorEvent *e);
+int ignore_xerror(Display *dsply, XErrorEvent *e);
+void dump_clients(void);
+void spawn(const char *const cmd[]);
+@
+
+

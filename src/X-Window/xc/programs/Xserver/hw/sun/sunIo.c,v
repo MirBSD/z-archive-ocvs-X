@@ -1,0 +1,441 @@
+head	1.1;
+branch	1.1.1;
+access;
+symbols
+	tg-mergetmp-2:1.1.1.2
+	cvs-200410241530:1.1.1.2
+	cvs-200410012000:1.1.1.2
+	cvs-200407141120:1.1.1.2
+	cvs-200406231010:1.1.1.2
+	MIRBSD_7quater:1.1.1.1
+	cvs-200405271510:1.1.1.2
+	XFree86_4_4_0:1.1.9.1
+	cvs-200403021700:1.1.1.2
+	XFREE86_20040213:1.1.9.1
+	xc:1.1.9
+	cvs-200401291925:1.1.1.1
+	MIRBSD_7_ALPHA:1.1.1.1.0.4
+	MIRBSD_7:1.1.1.1.0.2
+	MIRBSD_7ter:1.1.1.1
+	cvs-20011091815:1.1.1.1
+	cvs-200309162130:1.1.1.1
+	cvs-200308302005:1.1.1.1
+	ctmx-0387:1.1.1.1
+	ctmx-0384:1.1.1.1
+	MIRBSD_5:1.1.1.1
+	ctmx-0375:1.1.1.1
+	ctmx-0373:1.1.1.1
+	ctm-0371:1.1.1.1
+	ctm-0370:1.1.1.1
+	MIRBSD_4:1.1.1.1
+	ctm-0363:1.1.1.1
+	ctm-0359:1.1.1.1
+	ctm-0349:1.1.1.1
+	openbsd:1.1.1;
+locks; strict;
+comment	@ * @;
+
+
+1.1
+date	2003.03.22.20.06.35;	author tg;	state Exp;
+branches
+	1.1.1.1
+	1.1.9.1;
+next	;
+
+1.1.1.1
+date	2003.03.22.20.06.35;	author tg;	state Exp;
+branches;
+next	1.1.1.2;
+
+1.1.1.2
+date	2004.03.02.18.14.11;	author tg;	state Stab;
+branches;
+next	;
+
+1.1.9.1
+date	2004.02.14.19.22.19;	author tg;	state Exp;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@/* $Xorg: sunIo.c,v 1.4 2001/03/07 17:34:19 pookie Exp $ */
+/*-
+ * sunIo.c --
+ *	Functions to handle input from the keyboard and mouse.
+ *
+ * Copyright 1987 by the Regents of the University of California
+ *
+ * Permission to use, copy, modify, and distribute this
+ * software and its documentation for any purpose and without
+ * fee is hereby granted, provided that the above copyright
+ * notice appear in all copies.  The University of California
+ * makes no representations about the suitability of this
+ * software for any purpose.  It is provided "as is" without
+ * express or implied warranty.
+ *
+ *
+ */
+/* $XFree86: xc/programs/Xserver/hw/sun/sunIo.c,v 3.9 2001/12/19 21:28:45 dawes Exp $ */
+
+/************************************************************
+Copyright 1987 by Sun Microsystems, Inc. Mountain View, CA.
+
+                    All Rights Reserved
+
+Permission  to  use,  copy,  modify,  and  distribute   this
+software  and  its documentation for any purpose and without
+fee is hereby granted, provided that the above copyright no-
+tice  appear  in all copies and that both that copyright no-
+tice and this permission notice appear in  supporting  docu-
+mentation,  and  that the names of Sun or The Open Group
+not be used in advertising or publicity pertaining to 
+distribution  of  the software  without specific prior 
+written permission. Sun and The Open Group make no 
+representations about the suitability of this software for 
+any purpose. It is provided "as is" without any express or 
+implied warranty.
+
+SUN DISCLAIMS ALL WARRANTIES WITH REGARD TO  THIS  SOFTWARE,
+INCLUDING ALL IMPLIED WARRANTIES OF MERCHANTABILITY AND FIT-
+NESS FOR A PARTICULAR PURPOSE. IN NO EVENT SHALL SUN BE  LI-
+ABLE  FOR  ANY SPECIAL, INDIRECT OR CONSEQUENTIAL DAMAGES OR
+ANY DAMAGES WHATSOEVER RESULTING FROM LOSS OF USE,  DATA  OR
+PROFITS,  WHETHER  IN  AN  ACTION OF CONTRACT, NEGLIGENCE OR
+OTHER TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION  WITH
+THE USE OR PERFORMANCE OF THIS SOFTWARE.
+
+********************************************************/
+
+#define NEED_EVENTS
+#include    "sun.h"
+#include    "mi.h"
+
+/*-
+ *-----------------------------------------------------------------------
+ * ProcessInputEvents --
+ *	Retrieve all waiting input events and pass them to DIX in their
+ *	correct chronological order. Only reads from the system pointer
+ *	and keyboard.
+ *
+ * Results:
+ *	None.
+ *
+ * Side Effects:
+ *	Events are passed to the DIX layer.
+ *
+ *-----------------------------------------------------------------------
+ */
+void
+ProcessInputEvents ()
+{
+    mieqProcessInputEvents ();
+    miPointerUpdate ();
+}
+
+/*
+ *-----------------------------------------------------------------------
+ * sunEnqueueEvents
+ *	When a SIGIO is received, read device hard events and
+ *	enqueue them using the mi event queue
+ */
+
+void sunEnqueueEvents (
+#if NeedFunctionPrototypes
+    void
+#endif
+)
+{
+    Firm_event	*ptrEvents,    	/* Current pointer event */
+		*kbdEvents;    	/* Current keyboard event */
+    int		numPtrEvents, 	/* Number of remaining pointer events */
+		numKbdEvents;   /* Number of remaining keyboard events */
+    int		nPE,   	    	/* Original number of pointer events */
+		nKE;   	    	/* Original number of keyboard events */
+    Bool	PtrAgain,	/* need to (re)read */
+		KbdAgain;	/* need to (re)read */
+    DeviceIntPtr	pPointer;
+    DeviceIntPtr	pKeyboard;
+    sunKbdPrivPtr       kbdPriv;
+    sunPtrPrivPtr       ptrPriv;
+
+    pPointer = (DeviceIntPtr)LookupPointerDevice();
+    pKeyboard = (DeviceIntPtr)LookupKeyboardDevice();
+    ptrPriv = (sunPtrPrivPtr) pPointer->public.devicePrivate;
+    kbdPriv = (sunKbdPrivPtr) pKeyboard->public.devicePrivate;
+    if (!pPointer->public.on || !pKeyboard->public.on)
+	return;
+
+    numPtrEvents = 0;
+    ptrEvents = NULL;
+    PtrAgain = TRUE;
+    numKbdEvents = 0;
+    kbdEvents = NULL;
+    KbdAgain = TRUE;
+
+    /*
+     * So long as one event from either device remains unprocess, we loop:
+     * Take the oldest remaining event and pass it to the proper module
+     * for processing. The DDXEvent will be sent to ProcessInput by the
+     * function called.
+     */
+    while (1) {
+	/*
+	 * Get events from both the pointer and the keyboard, storing the number
+	 * of events gotten in nPE and nKE and keeping the start of both arrays
+	 * in pE and kE
+	 */
+	if ((numPtrEvents == 0) && PtrAgain) {
+	    ptrEvents = sunMouseGetEvents (ptrPriv->fd, pPointer->public.on, 
+					   &nPE, &PtrAgain);
+	    numPtrEvents = nPE;
+	}
+	if ((numKbdEvents == 0) && KbdAgain) {
+	    kbdEvents = sunKbdGetEvents (kbdPriv->fd, pKeyboard->public.on,
+					 &nKE, &KbdAgain);
+	    numKbdEvents = nKE;
+	}
+	if ((numPtrEvents == 0) && (numKbdEvents == 0))
+	    break;
+	if (numPtrEvents && numKbdEvents) {
+	    if (timercmp (&kbdEvents->time, &ptrEvents->time, <)) {
+		sunKbdEnqueueEvent (pKeyboard, kbdEvents);
+		numKbdEvents--;
+		kbdEvents++;
+	    } else {
+		sunMouseEnqueueEvent (pPointer, ptrEvents);
+		numPtrEvents--;
+		ptrEvents++;
+	    }
+	} else if (numKbdEvents) {
+	    sunKbdEnqueueEvent (pKeyboard, kbdEvents);
+	    numKbdEvents--;
+	    kbdEvents++;
+	} else {
+	    sunMouseEnqueueEvent (pPointer, ptrEvents);
+	    numPtrEvents--;
+	    ptrEvents++;
+	}
+    }
+}
+
+/*
+ * DDX - specific abort routine.  Called by AbortServer().
+ */
+void AbortDDX()
+{
+    int		i;
+    ScreenPtr	pScreen;
+    DevicePtr	devPtr;
+
+#ifdef SVR4
+    (void) OsSignal (SIGPOLL, SIG_IGN);
+#else
+    (void) OsSignal (SIGIO, SIG_IGN);
+#endif
+    devPtr = LookupKeyboardDevice();
+    if (devPtr)
+	(void) sunChangeKbdTranslation (((sunKbdPrivPtr)(devPtr->devicePrivate))->fd, FALSE);
+#if defined(SVR4) || defined(CSRG_BASED)
+    sunNonBlockConsoleOff ();
+#else
+    sunNonBlockConsoleOff (NULL);
+#endif
+    for (i = 0; i < screenInfo.numScreens; i++)
+    {
+	pScreen = screenInfo.screens[i];
+	(*pScreen->SaveScreen) (pScreen, SCREEN_SAVER_OFF);
+	sunDisableCursor (pScreen);
+    }
+}
+
+/* Called by GiveUp(). */
+void
+ddxGiveUp()
+{
+    AbortDDX ();
+}
+
+int
+ddxProcessArgument (argc, argv, i)
+    int	argc;
+    char *argv[];
+    int	i;
+{
+    extern void UseMsg();
+    extern int XprintOptions(int, char **, int);
+
+#ifdef XKB
+    int noxkb = 0, n;
+    /* 
+     * peek in argv and see if -kb because noXkbExtension won't 
+     * get set until too late to useful here.
+     */
+    for (n = 1; n < argc; n++)
+	if (strcmp (argv[n], "-kb") == 0)
+	    noxkb = 1;
+
+    if (noxkb)
+#endif
+    if (strcmp (argv[i], "-ar1") == 0) {	/* -ar1 int */
+	if (++i >= argc) UseMsg ();
+	sunAutoRepeatInitiate = 1000 * (long)atoi(argv[i]); /* cvt to usec */
+	if (sunAutoRepeatInitiate > 1000000)
+	    sunAutoRepeatInitiate =  999000;
+	return 2;
+    }
+#ifdef XKB
+    if (noxkb)
+#endif
+    if (strcmp (argv[i], "-ar2") == 0) {	/* -ar2 int */
+	if (++i >= argc) UseMsg ();
+	sunAutoRepeatDelay = 1000 * (long)atoi(argv[i]); /* cvt to usec */
+	if (sunAutoRepeatDelay > 1000000)
+	    sunAutoRepeatDelay =  999000;
+	return 2;
+    }
+    if (strcmp (argv[i], "-swapLkeys") == 0) {	/* -swapLkeys */
+	sunSwapLkeys = TRUE;
+	return 1;
+    }
+    if (strcmp (argv[i], "-debug") == 0) {	/* -debug */
+	return 1;
+    }
+    if (strcmp (argv[i], "-dev") == 0) {	/* -dev /dev/mumble */
+	if (++i >= argc) UseMsg ();
+	return 2;
+    }
+    if (strcmp (argv[i], "-mono") == 0) {	/* -mono */
+	return 1;
+    }
+    if (strcmp (argv[i], "-zaphod") == 0) {	/* -zaphod */
+	sunActiveZaphod = FALSE;
+	return 1;
+    }
+    if (strcmp (argv[i], "-flipPixels") == 0) {	/* -flipPixels */
+	sunFlipPixels = TRUE;
+	return 1;
+    }
+    if (strcmp (argv[i], "-fbinfo") == 0) {	/* -fbinfo */
+	sunFbInfo = TRUE;
+	return 1;
+    }
+    if (strcmp (argv[i], "-kbd") == 0) {	/* -kbd */
+	if (++i >= argc) UseMsg();
+	return 2;
+    }
+    if (strcmp (argv[i], "-protect") == 0) {	/* -protect */
+	if (++i >= argc) UseMsg();
+	return 2;
+    }
+    if (strcmp (argv[i], "-cg4frob") == 0) {
+	sunCG4Frob = TRUE;
+	return 1;
+    }
+    if (strcmp (argv[i], "-noGX") == 0) {
+	sunNoGX = TRUE;
+	return 1;
+    }
+    if (strcmp(argv[i], "-XpFile") == 0) {
+	return XprintOptions(argc, argv, i) - i;
+    }
+    return 0;
+}
+
+void
+ddxUseMsg()
+{
+#ifndef XKB
+    ErrorF("-ar1 int            set autorepeat initiate time\n");
+    ErrorF("-ar2 int            set autorepeat interval time\n");
+#endif
+    ErrorF("-swapLkeys          swap keysyms on L1..L10\n");
+    ErrorF("-debug              disable non-blocking console mode\n");
+    ErrorF("-dev fn[:fn][:fn]   name of device[s] to open\n");
+    ErrorF("-mono               force monochrome-only screen\n");
+    ErrorF("-zaphod             disable active Zaphod mode\n");
+    ErrorF("-fbinfo             tell more about the found frame buffer(s)\n");
+#ifdef UNDOCUMENTED
+    ErrorF("-cg4frob            don't use the mono plane of the cgfour\n");
+    ErrorF("-noGX               treat the GX as a dumb frame buffer\n");
+#endif
+    ErrorF("-XpFile             specifies an alternate `Xprinters' file (Xprt only)\n");
+}
+@
+
+
+1.1.9.1
+log
+@OpenBSD just has imported exactly this tree into their vendor branch,
+called the same tag, in XF4/xc
+This is, apparently, the last XFree86 snapshot before the licence change
+(ie, addition of the advertising clause)
+
+Since the developers don't see any problems with that, and we would like
+to integrate improvements done by the remaining one or two (or so) XFree86
+developers (j/k), this prepares enabling us to update X-Window in the future.
+@
+text
+@d18 1
+a18 1
+/* $XFree86: xc/programs/Xserver/hw/sun/sunIo.c,v 3.10 2003/11/17 22:20:36 dawes Exp $ */
+d83 1
+d85 1
+@
+
+
+1.1.1.1
+log
+@Import OpenBSD 3.3 XF4 repository from CTM 3132 the first time
+This finalizes starting an OpenBSD-mirabile (aka MirBSD) repository.
+
+### MirBSD is:
+# Copyright (c) 1982-2003 by Thorsten "mirabile" Glaser <x86@@ePost.de>
+# Copyright © 1968-2003  The authors of And contributors to UNIX®, the
+#       C Language, BSD/Berkeley Unix; 386BSD, NetBSD 1.1 and OpenBSD.
+#
+# Anyone who obtained a copy of this work is hereby permitted to freely use,
+# distribute, modify, merge, sublicence, give away or sell it as long as the
+# authors are given due credit and the following notice is retained:
+#
+# This work is provided "as is", with no explicit or implicit warranty what-
+# soever. Use it only at your own risk. In no event may an author or contri-
+# butor be held liable for any damage, directly or indirectly, that origina-
+# ted through or is caused by creation or modification of this work.
+
+MirBSD is my private tree. MirBSD does not differ very much from OpenBSD
+and intentionally tracks OpenBSD. That's why it _is_ OpenBSD, just not the
+official one. It's like with DarrenBSD.
+
+At time of this writing, no advertising for MirBSD must be done,
+because the advertising clause has not yet been sorted out.
+
+http://templeofhate.com/tglaser/MirBSD/index.php
+@
+text
+@@
+
+
+1.1.1.2
+log
+@That's what OpenBSD will, probably, ship as XF4 in 3.5
+their last sync against XFree86 4.3-current has been
+imported into our vendor branch, too
+@
+text
+@d18 1
+a18 1
+/* $XFree86: xc/programs/Xserver/hw/sun/sunIo.c,v 3.10 2003/11/17 22:20:36 dawes Exp $ */
+d83 1
+d85 1
+@
+

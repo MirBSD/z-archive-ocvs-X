@@ -1,0 +1,1124 @@
+head	1.1;
+branch	1.1.1;
+access;
+symbols
+	tg-mergetmp-2:1.1.1.3
+	cvs-200410241530:1.1.1.3
+	cvs-200410012000:1.1.1.3
+	cvs-200407141120:1.1.1.3
+	cvs-200406231010:1.1.1.3
+	MIRBSD_7quater:1.1.1.2
+	cvs-200405271510:1.1.1.3
+	XFree86_4_4_0:1.1.9.1
+	cvs-200403021700:1.1.1.3
+	XFREE86_20040213:1.1.9.1
+	xc:1.1.9
+	cvs-200401291925:1.1.1.2
+	MIRBSD_7_ALPHA:1.1.1.2.0.4
+	MIRBSD_7:1.1.1.2.0.2
+	MIRBSD_7ter:1.1.1.2
+	cvs-20011091815:1.1.1.2
+	cvs-200309162130:1.1.1.2
+	cvs-200308302005:1.1.1.2
+	ctmx-0387:1.1.1.2
+	ctmx-0384:1.1.1.2
+	MIRBSD_5:1.1.1.2
+	ctmx-0375:1.1.1.2
+	ctmx-0373:1.1.1.2
+	ctm-0371:1.1.1.2
+	ctm-0370:1.1.1.2
+	MIRBSD_4:1.1.1.2
+	ctm-0363:1.1.1.2
+	ctm-0359:1.1.1.2
+	ctm-0349:1.1.1.1
+	openbsd:1.1.1;
+locks; strict;
+comment	@ * @;
+
+
+1.1
+date	2003.03.22.20.10.19;	author tg;	state Exp;
+branches
+	1.1.1.1
+	1.1.9.1;
+next	;
+
+1.1.1.1
+date	2003.03.22.20.10.19;	author tg;	state Exp;
+branches;
+next	1.1.1.2;
+
+1.1.1.2
+date	2003.04.08.18.39.51;	author tg;	state Exp;
+branches;
+next	1.1.1.3;
+
+1.1.1.3
+date	2004.03.02.18.39.29;	author tg;	state Stab;
+branches;
+next	;
+
+1.1.9.1
+date	2004.02.14.19.28.34;	author tg;	state Exp;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@/*
+ * Copyright (c) 2001 by The XFree86 Project, Inc.
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a
+ * copy of this software and associated documentation files (the "Software"),
+ * to deal in the Software without restriction, including without limitation
+ * the rights to use, copy, modify, merge, publish, distribute, sublicense,
+ * and/or sell copies of the Software, and to permit persons to whom the
+ * Software is furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in
+ * all copies or substantial portions of the Software.
+ *  
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL
+ * THE XFREE86 PROJECT BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY,
+ * WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF
+ * OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+ * SOFTWARE.
+ *
+ * Except as contained in this notice, the name of the XFree86 Project shall
+ * not be used in advertising or otherwise to promote the sale, use or other
+ * dealings in this Software without prior written authorization from the
+ * XFree86 Project.
+ *
+ * Author: Paulo César Pereira de Andrade
+ */
+
+/* $XFree86: xc/programs/xedit/lisp/struct.c,v 1.5 2001/10/28 03:34:31 tsi Exp $ */
+
+#include "struct.h"
+
+/*
+ * Implementation
+ */
+LispObj *
+Lisp_Defstruct(LispMac *mac, LispObj *list, char *fname)
+{
+    LispAtom *atom;
+    int i, sz, len, slen;
+    char *name, *strname, *sname;
+    LispObj *str = list, *obj;
+
+    /* get structure name */
+    if (!SYMBOL_P(CAR(list)) ||
+	/* reserved name(s) */
+	strcmp(STRPTR(CAR(list)), "ARRAY") == 0)
+	LispDestroy(mac, "%s cannot be a structure name, at %s",
+		    LispStrObj(mac, CAR(list)), fname);
+
+    strname = STRPTR(CAR(list));
+    len = strlen(strname);
+
+    /* get structure fields and default values */
+    for (list = CDR(list); list != NIL; list = CDR(list)) {
+	if ((!SYMBOL_P(CAR(list)) &&
+	     /* if not field name, with NIL as default value */
+	     (CAR(list)->type != LispCons_t ||
+	      !SYMBOL_P(CAR(CAR(list))))) ||
+	    /* and not a pair, with field name and default value */
+	    STRPTR(CAR(list))[0] == ':' ||
+	    /* and it is a valid field name */
+	    strcmp(STRPTR(CAR(list)), "P") == 0)
+	    /* p is invalid as a field name due to `type'-p */
+	    LispDestroy(mac, "%s cannot be a field for %s, at %s",
+			LispStrObj(mac, CAR(list)), STRPTR(CAR(str)), fname);
+
+	/* check for repeated field names */
+	for (obj = CDR(str); obj != list; obj = CDR(obj)) {
+	    if (STRPTR(CAR(obj)) == STRPTR(CAR(list)))
+		LispDestroy(mac, "only one slot named :%s allowed, at %s",
+			    LispStrObj(mac, CAR(obj)), fname);
+	}
+    }
+
+    /* XXX any memory allocation failure below should be a fatal error */
+
+	    /* MAKE- */
+    sz = len + 6;
+    name = LispMalloc(mac, sz);
+
+    sprintf(name, "MAKE-%s", strname);
+    atom = ATOM(name)->data.atom;
+    LispSetAtomStructProperty(mac, atom, str, STRUCT_CONSTRUCTOR);
+
+    sprintf(name, "%s-P", strname);
+    atom = ATOM(name)->data.atom;
+    LispSetAtomStructProperty(mac, atom, str, STRUCT_CHECK);
+
+    for (i = 0, list = CDR(str); list != NIL; i++, list = CDR(list)) {
+	sname = STRPTR(CAR(list));
+	slen = strlen(sname);
+	if (len + slen + 2 > sz) {
+	    sz = len + slen + 2;
+	    name = LispRealloc(mac, name, sz);
+	}
+	sprintf(name, "%s-%s", strname, sname);
+	atom = ATOM(name)->data.atom;
+	LispSetAtomStructProperty(mac, atom, str, i);
+    }
+
+    LispFree(mac, name);
+
+    atom = CAR(str)->data.atom;
+    if (atom->property && atom->property->defstruct)
+	fprintf(lisp_stderr, "*** Warning: structure %s is being redefined\n",
+		strname);
+
+    return (CAR(str));
+}
+
+/* helper functions
+ *	DONT explicitly call them. Non standard functions.
+ */
+LispObj *
+Lisp_XeditMakeStruct(LispMac *mac, LispObj *list, char *fname)
+{
+    int count;
+    LispAtom *atom = NULL;
+    LispObj *obj, *str = CAR(list), *fld, *nam, *val, *frm;
+
+    if (!SYMBOL_P(str) ||
+	(atom = str->data.atom)->property == NULL ||
+	atom->property->defstruct == 0 ||
+	atom->property->structure.function != STRUCT_CONSTRUCTOR)
+	LispDestroy(mac, "invalid arguments, at %s", fname);
+    str = atom->property->structure.definition;
+
+    fld = NIL;
+    frm = FRM;
+
+    /* create structure fields, using default initial values */
+    for (obj = CDR(str); obj != NIL; obj = CDR(obj)) {
+	if (SYMBOL_P(CAR(obj)))
+	    val = NIL;
+	else
+	    val = EVAL(CAR(CDR(CAR(obj))));
+
+	if (fld == NIL) {
+	    GCProtect();
+	    fld = CONS(val, NIL);
+	    FRM = CONS(fld, FRM);	/* GC protect fld linking to FRM */
+	    GCUProtect();
+	}
+	else {
+	    CDR(fld) = CONS(CAR(fld), CDR(fld));
+	    CAR(fld) = val;
+	}
+    }
+    fld = CAR(FRM) = LispReverse(fld);
+
+    for (list = CDR(list); list != NIL; list = CDR(list)) {
+	if ((nam = EVAL(CAR(list)))->type != LispAtom_t ||
+	    STRPTR(nam)[0] != ':')
+	    LispDestroy(mac, "%s is a illegal field for %s",
+			LispStrObj(mac, nam), fname);
+
+	/* check if field name is a valid field name */
+	for (count = 0, obj = CDR(str); obj != NIL; ++count, obj = CDR(obj)) {
+	    if ((SYMBOL_P(CAR(obj)) &&
+		 strcmp(STRPTR(CAR(obj)), STRPTR(nam) + 1) == 0) ||
+		(CAR(obj)->type == LispCons_t &&
+		 strcmp(STRPTR(CAR(CAR(obj))), STRPTR(nam) + 1) == 0))
+		break;
+	}
+
+	/* check if structure has named field */
+	if (obj == NIL)
+	    LispDestroy(mac, ":%s is not a %s field, at %s",
+			STRPTR(nam), STRPTR(CAR(str)), fname);
+
+	/* value supplied? */
+	if ((list = CDR(list)) == NIL)
+	    LispDestroy(mac, "expecting value for field, at %s", fname);
+
+	/* set structure field value */
+	for (obj = fld; count; obj = CDR(obj))
+	    --count;
+	if (obj->prot == LispNil_t) {
+	    CAR(obj) = CAR(list);
+	    /* set value only if the first time */
+	    obj->prot = LispTrue_t;
+	}
+    }
+
+    /* clean protect flag */
+    for (obj = fld; obj != NIL; obj = CDR(obj))
+	obj->prot = LispNil_t;
+
+    FRM = frm;	/* GC Uprotect fld */
+
+    return (STRUCT(fld, str));
+}
+
+LispObj *
+Lisp_XeditStructAccess(LispMac *mac, LispObj *list, char *fname)
+{
+    int len = 0;
+    LispAtom *atom = NULL;
+    LispObj *str = CAR(list), *obj = CAR(CDR(list));
+
+    if (!SYMBOL_P(str) ||
+	(atom = str->data.atom)->property == NULL ||
+	atom->property->defstruct == 0 ||
+	(len = atom->property->structure.function) < 0)
+	LispDestroy(mac, "invalid arguments, at %s", fname);
+    str = atom->property->structure.definition;
+
+    /* check if the object is of the required type */
+    if (obj->type != LispStruct_t || obj->data.struc.def != str)
+	LispDestroy(mac, "%s is not a %s",
+		    LispStrObj(mac, obj), STRPTR(CAR(str)));
+
+    for (obj = CAR(obj); len; obj = CDR(obj))
+	--len;
+
+    return (CAR(obj));
+}
+
+LispObj *
+Lisp_XeditStructStore(LispMac *mac, LispObj *list, char *fname)
+{
+    int len = 0;
+    LispAtom *atom = NULL;
+    LispObj *strdef, *str, *value;
+
+    strdef = CAR(list);
+    list = CDR(list);
+    str = CAR(list);
+    list = CDR(list);
+    value = CAR(list);
+
+    if (!SYMBOL_P(strdef) ||
+	(atom = strdef->data.atom)->property == NULL ||
+	atom->property->defstruct == 0 ||
+	(len = atom->property->structure.function) < 0)
+	LispDestroy(mac, "invalid arguments, at %s", fname);
+    strdef = atom->property->structure.definition;
+
+    /* check if the object is of the required type */
+    if (str->type != LispStruct_t || str->data.struc.def != strdef)
+	LispDestroy(mac, "%s is not a %s",
+		    LispStrObj(mac, str),
+		    STRPTR(CAR(strdef)));
+
+    for (str = CAR(str); len; str = CDR(str))
+	--len;
+
+    return (CAR(str) = value);
+}
+
+LispObj *
+Lisp_XeditStructType(LispMac *mac, LispObj *list, char *fname)
+{
+    LispAtom *atom = NULL;
+    LispObj *str = CAR(list), *obj = CAR(CDR(list));
+
+    if (!SYMBOL_P(str) ||
+	(atom = str->data.atom)->property == NULL ||
+	atom->property->defstruct == 0 ||
+	atom->property->structure.function != STRUCT_CHECK)
+	LispDestroy(mac, "invalid arguments, at %s", fname);
+    str = atom->property->structure.definition;
+
+    /* check if the object is of the required type */
+    if (obj->type == LispStruct_t && obj->data.struc.def == str)
+	return (T);
+
+    return (NIL);
+}
+@
+
+
+1.1.9.1
+log
+@OpenBSD just has imported exactly this tree into their vendor branch,
+called the same tag, in XF4/xc
+This is, apparently, the last XFree86 snapshot before the licence change
+(ie, addition of the advertising clause)
+
+Since the developers don't see any problems with that, and we would like
+to integrate improvements done by the remaining one or two (or so) XFree86
+developers (j/k), this prepares enabling us to update X-Window in the future.
+@
+text
+@d30 1
+a30 1
+/* $XFree86: xc/programs/xedit/lisp/struct.c,v 1.23 2003/04/27 18:17:34 tsi Exp $ */
+d32 1
+a32 13
+#include "lisp/struct.h"
+
+/*
+ * Prototypes
+ */
+static LispObj *LispStructAccessOrStore(LispBuiltin*, int);
+
+/*
+ * Initialization
+ */
+LispObj *Omake_struct, *Ostruct_access, *Ostruct_store, *Ostruct_type;
+
+Atom_id Smake_struct, Sstruct_access, Sstruct_store, Sstruct_type;
+d38 1
+a38 4
+Lisp_Defstruct(LispBuiltin *builtin)
+/*
+ defstruct name &rest description
+ */
+a39 1
+    int intern;
+d41 1
+a41 1
+    int i, size, length, slength;
+d43 1
+a43 18
+    LispObj *list, *cons, *object, *definition, *documentation;
+
+    LispObj *oname, *description;
+
+    description = ARGUMENT(1);
+    oname = ARGUMENT(0);
+
+    CHECK_SYMBOL(oname);
+
+    strname = ATOMID(oname);
+    length = strlen(strname);
+
+	    /* MAKE- */
+    size = length + 6;
+    name = LispMalloc(size);
+
+    sprintf(name, "MAKE-%s", strname);
+    atom = (object = ATOM(name))->data.atom;
+d45 6
+a50 3
+    if (atom->a_builtin)
+	LispDestroy("%s: %s cannot be a structure name",
+		    STRFUN(builtin), STROBJ(oname));
+d52 2
+a53 8
+    intern = !atom->ext;
+
+    if (CONSP(description) && STRINGP(CAR(description))) {
+	documentation = CAR(description);
+	description = CDR(description);
+    }
+    else
+	documentation = NIL;
+d56 9
+a64 13
+    for (list = description; CONSP(list); list = CDR(list)) {
+	object = CAR(list);
+
+	cons = list;
+	if (CONSP(object)) {
+	    if ((CONSP(CDR(object)) && CDR(CDR(object)) != NIL) ||
+		(!CONSP(CDR(object)) && CDR(object) != NIL))
+	    LispDestroy("%s: bad initialization %s",
+			STRFUN(builtin), STROBJ(object));
+	    cons = object;
+	    object = CAR(object);
+	}
+	if (!SYMBOLP(object) || strcmp(ATOMID(object), "P") == 0)
+d66 2
+a67 5
+	    LispDestroy("%s: %s cannot be a field for %s",
+			STRFUN(builtin), STROBJ(object), ATOMID(oname));
+
+	if (!KEYWORDP(object))
+	    CAR(cons) = KEYWORD(ATOMID(object));
+d70 4
+a73 11
+	for (object = description; object != list; object = CDR(object)) {
+	    LispObj *left = CAR(object), *right = CAR(list);
+
+	    if (CONSP(left))
+		left = CAR(left);
+	    if (CONSP(right))
+		right = CAR(right);
+
+	    if (ATOMID(left) == ATOMID(right))
+		LispDestroy("%s: only one slot named %s allowed",
+			    STRFUN(builtin), STROBJ(left));
+d77 9
+a85 11
+    /* atom should not have been modified */
+    definition = CONS(oname, description);
+    LispSetAtomStructProperty(atom, definition, STRUCT_CONSTRUCTOR);
+    if (!intern)
+	LispExportSymbol(object);
+
+    atom = oname->data.atom;
+    if (atom->a_defstruct)
+	LispWarning("%s: structure %s is being redefined",
+		    STRFUN(builtin), strname);
+    LispSetAtomStructProperty(atom, definition, STRUCT_NAME);
+d88 9
+a96 14
+    atom = (object = ATOM(name))->data.atom;
+    LispSetAtomStructProperty(atom, definition, STRUCT_CHECK);
+    if (!intern)
+	LispExportSymbol(object);
+
+    for (i = 0, list = description; CONSP(list); i++, list = CDR(list)) {
+	if (CONSP(CAR(list)))
+	    sname = ATOMID(CAR(CAR(list)));
+	else
+	    sname = ATOMID(CAR(list));
+	slength = strlen(sname);
+	if (length + slength + 2 > size) {
+	    size = length + slength + 2;
+	    name = LispRealloc(name, size);
+d99 2
+a100 4
+	atom = (object = ATOM(name))->data.atom;
+	LispSetAtomStructProperty(atom, definition, i);
+	if (!intern)
+	    LispExportSymbol(object);
+d103 1
+a103 1
+    LispFree(name);
+d105 4
+a108 2
+    if (documentation != NIL)
+	LispAddDocumentation(oname, documentation, LispDocStructure);
+d110 1
+a110 1
+    return (oname);
+d117 1
+a117 4
+Lisp_XeditMakeStruct(LispBuiltin *builtin)
+/*
+ lisp::make-struct atom &rest init
+ */
+d119 1
+a119 1
+    int nfld, ncvt, length = lisp__data.protect.length;
+d121 1
+d123 16
+a138 2
+    LispObj *definition, *object, *field, *fields, *value = NIL, *cons, *list;
+    LispObj *struc, *init;
+d140 10
+a149 23
+    init = ARGUMENT(1);
+    struc = ARGUMENT(0);
+
+    field = cons = NIL;
+    if (!POINTERP(struc) ||
+	!(XSYMBOLP(struc) || XFUNCTIONP(struc)) ||
+	(atom = struc->data.atom)->a_defstruct == 0 ||
+	 atom->property->structure.function != STRUCT_CONSTRUCTOR)
+	LispDestroy("%s: invalid constructor %s",
+		    STRFUN(builtin), STROBJ(struc));
+    definition = atom->property->structure.definition;
+
+    ncvt = nfld = 0;
+    fields = NIL;
+
+    /* check for errors in argument list */
+    for (list = init, nfld = 0; CONSP(list); list = CDR(list)) {
+	CHECK_KEYWORD(CAR(list));
+	if (!CONSP(CDR(list)))
+	    LispDestroy("%s: values must be provided as pairs",
+			ATOMID(struc));
+	nfld++;
+	list = CDR(list);
+d151 1
+d153 13
+a165 12
+    /* create structure, CAR(definition) is structure name */
+    for (list = CDR(definition); CONSP(list); list = CDR(list)) {
+	Atom_id id;
+	LispObj *defvalue = NIL;
+
+	++nfld;
+	field = CAR(list);
+	if (CONSP(field)) {
+	    /* if default value provided */
+	    if (CONSP(CDR(field)))
+		defvalue = CAR(CDR(field));
+	    field = CAR(field);
+a166 1
+	id = ATOMID(field);
+d168 4
+a171 11
+	for (object = init; CONSP(object); object = CDR(object)) {
+	    /* field is a keyword, test above checked it */
+	    field = CAR(object);
+	    if (id == ATOMID(field)) {
+		/* value provided */
+		value = CAR(CDR(object));
+		ncvt++;
+		break;
+	    }
+	    object = CDR(object);
+	}
+d173 3
+a175 8
+	/* if no initialization given */
+	if (!CONSP(object)) {
+	    /* if default value in structure definition */
+	    if (defvalue != NIL)
+		value = EVAL(defvalue);
+	    else
+		value = NIL;
+	}
+d177 7
+a183 9
+	if (fields == NIL) {
+	    fields = cons = CONS(value, NIL);
+	    if (length + 1 >= lisp__data.protect.space)
+		LispMoreProtects();
+	    lisp__data.protect.objects[lisp__data.protect.length++] = fields;
+	}
+	else {
+	    RPLACD(cons, CONS(value, NIL));
+	    cons = CDR(cons);
+d187 3
+a189 22
+    /* if not enough arguments were converted, need to check because
+     * it is acceptable to set a field more than once, but in that case,
+     * only the first value will be used. */
+    if (nfld > ncvt) {
+	for (list = init; CONSP(list); list = CDR(list)) {
+	    Atom_id id = ATOMID(CAR(list));
+
+	    for (object = CDR(definition); CONSP(object);
+		 object = CDR(object)) {
+		field = CAR(object);
+		if (CONSP(field))
+		    field = CAR(field);
+		if (ATOMID(field) == id)
+		    break;
+	    }
+	    if (!CONSP(object))
+		LispDestroy("%s: %s is not a field for %s",
+			    ATOMID(struc), STROBJ(CAR(list)),
+			    ATOMID(CAR(definition)));
+	    list = CDR(list);
+	}
+    }
+d191 1
+a191 1
+    lisp__data.protect.length = length;
+d193 1
+a193 1
+    return (STRUCT(fields, definition));
+d196 2
+a197 6
+static LispObj *
+LispStructAccessOrStore(LispBuiltin *builtin, int store)
+/*
+ lisp::struct-access atom struct
+ lisp::struct-store atom struct value
+ */
+d199 3
+a201 3
+    long offset;
+    LispAtom *atom;
+    LispObj *definition, *list;
+d203 6
+a208 18
+    LispObj *name, *struc, *value = NIL;
+
+    if (store)
+	value = ARGUMENT(2);
+    struc = ARGUMENT(1);
+    name = ARGUMENT(0);
+
+    if (!POINTERP(name) ||
+	!(XSYMBOLP(name) || XFUNCTIONP(name)) ||
+	(atom = name->data.atom)->a_defstruct == 0 ||
+	(offset = atom->property->structure.function) < 0) {
+	LispDestroy("%s: invalid argument %s",
+		    STRFUN(builtin), STROBJ(name));
+	/*NOTREACHED*/
+	offset = 0;
+	atom = NULL;
+    }
+    definition = atom->property->structure.definition;
+d211 3
+a213 3
+    if (!STRUCTP(struc) || struc->data.struc.def != definition)
+	LispDestroy("%s: %s is not a %s",
+		    ATOMID(name), STROBJ(struc), ATOMID(CAR(definition)));
+d215 2
+a216 2
+    for (list = struc->data.struc.fields; offset; list = CDR(list), offset--)
+	;
+d218 1
+a218 1
+    return (store ? RPLACA(list, value) : CAR(list));
+d222 1
+a222 4
+Lisp_XeditStructAccess(LispBuiltin *builtin)
+/*
+ lisp::struct-access atom struct
+ */
+d224 25
+a248 2
+    return (LispStructAccessOrStore(builtin, 0));
+}
+d250 1
+a250 7
+LispObj *
+Lisp_XeditStructStore(LispBuiltin *builtin)
+/*
+ lisp::struct-store atom struct value
+ */
+{
+    return (LispStructAccessOrStore(builtin, 1));
+d254 1
+a254 4
+Lisp_XeditStructType(LispBuiltin *builtin)
+/*
+ lisp::struct-type atom struct
+ */
+d257 1
+d259 6
+a264 12
+    LispObj *definition, *struc, *name;
+
+    struc = ARGUMENT(1);
+    name = ARGUMENT(0);
+
+    if (!POINTERP(name) ||
+	!(XSYMBOLP(name) || XFUNCTIONP(name)) ||
+	(atom = name->data.atom)->a_defstruct == 0 ||
+	(atom->property->structure.function != STRUCT_CHECK))
+	LispDestroy("%s: invalid argument %s",
+		    STRFUN(builtin), STROBJ(name));
+    definition = atom->property->structure.definition;
+d267 1
+a267 1
+    if (STRUCTP(struc) && struc->data.struc.def == definition)
+@
+
+
+1.1.1.1
+log
+@Import OpenBSD 3.3 XF4 repository from CTM 3132 the first time
+This finalizes starting an OpenBSD-mirabile (aka MirBSD) repository.
+
+### MirBSD is:
+# Copyright (c) 1982-2003 by Thorsten "mirabile" Glaser <x86@@ePost.de>
+# Copyright © 1968-2003  The authors of And contributors to UNIX®, the
+#       C Language, BSD/Berkeley Unix; 386BSD, NetBSD 1.1 and OpenBSD.
+#
+# Anyone who obtained a copy of this work is hereby permitted to freely use,
+# distribute, modify, merge, sublicence, give away or sell it as long as the
+# authors are given due credit and the following notice is retained:
+#
+# This work is provided "as is", with no explicit or implicit warranty what-
+# soever. Use it only at your own risk. In no event may an author or contri-
+# butor be held liable for any damage, directly or indirectly, that origina-
+# ted through or is caused by creation or modification of this work.
+
+MirBSD is my private tree. MirBSD does not differ very much from OpenBSD
+and intentionally tracks OpenBSD. That's why it _is_ OpenBSD, just not the
+official one. It's like with DarrenBSD.
+
+At time of this writing, no advertising for MirBSD must be done,
+because the advertising clause has not yet been sorted out.
+
+http://templeofhate.com/tglaser/MirBSD/index.php
+@
+text
+@@
+
+
+1.1.1.2
+log
+@The X-Windowing System
+
+Import XFree86 4.3 from OpenBSD by CTM, in the hope it's stable
+@
+text
+@d30 1
+a30 1
+/* $XFree86: xc/programs/xedit/lisp/struct.c,v 1.22 2002/11/23 08:26:50 paulo Exp $ */
+a34 12
+ * Prototypes
+ */
+static LispObj *LispStructAccessOrStore(LispBuiltin*, int);
+
+/*
+ * Initialization
+ */
+LispObj *Omake_struct, *Ostruct_access, *Ostruct_store, *Ostruct_type;
+
+Atom_id Smake_struct, Sstruct_access, Sstruct_store, Sstruct_type;
+
+/*
+d38 1
+a38 4
+Lisp_Defstruct(LispBuiltin *builtin)
+/*
+ defstruct name &rest description
+ */
+a39 1
+    int intern;
+d41 1
+a41 1
+    int i, size, length, slength;
+d43 1
+a43 18
+    LispObj *list, *cons, *object, *definition, *documentation;
+
+    LispObj *oname, *description;
+
+    description = ARGUMENT(1);
+    oname = ARGUMENT(0);
+
+    CHECK_SYMBOL(oname);
+
+    strname = ATOMID(oname);
+    length = strlen(strname);
+
+	    /* MAKE- */
+    size = length + 6;
+    name = LispMalloc(size);
+
+    sprintf(name, "MAKE-%s", strname);
+    atom = (object = ATOM(name))->data.atom;
+d45 6
+a50 3
+    if (atom->a_builtin)
+	LispDestroy("%s: %s cannot be a structure name",
+		    STRFUN(builtin), STROBJ(oname));
+d52 2
+a53 8
+    intern = !atom->ext;
+
+    if (CONSP(description) && STRINGP(CAR(description))) {
+	documentation = CAR(description);
+	description = CDR(description);
+    }
+    else
+	documentation = NIL;
+d56 9
+a64 13
+    for (list = description; CONSP(list); list = CDR(list)) {
+	object = CAR(list);
+
+	cons = list;
+	if (CONSP(object)) {
+	    if ((CONSP(CDR(object)) && CDR(CDR(object)) != NIL) ||
+		(!CONSP(CDR(object)) && CDR(object) != NIL))
+	    LispDestroy("%s: bad initialization %s",
+			STRFUN(builtin), STROBJ(object));
+	    cons = object;
+	    object = CAR(object);
+	}
+	if (!SYMBOLP(object) || strcmp(ATOMID(object), "P") == 0)
+d66 2
+a67 5
+	    LispDestroy("%s: %s cannot be a field for %s",
+			STRFUN(builtin), STROBJ(object), ATOMID(oname));
+
+	if (!KEYWORDP(object))
+	    CAR(cons) = KEYWORD(ATOMID(object));
+d70 4
+a73 11
+	for (object = description; object != list; object = CDR(object)) {
+	    LispObj *left = CAR(object), *right = CAR(list);
+
+	    if (CONSP(left))
+		left = CAR(left);
+	    if (CONSP(right))
+		right = CAR(right);
+
+	    if (ATOMID(left) == ATOMID(right))
+		LispDestroy("%s: only one slot named %s allowed",
+			    STRFUN(builtin), STROBJ(left));
+d77 9
+a85 11
+    /* atom should not have been modified */
+    definition = CONS(oname, description);
+    LispSetAtomStructProperty(atom, definition, STRUCT_CONSTRUCTOR);
+    if (!intern)
+	LispExportSymbol(object);
+
+    atom = oname->data.atom;
+    if (atom->a_defstruct)
+	LispWarning("%s: structure %s is being redefined",
+		    STRFUN(builtin), strname);
+    LispSetAtomStructProperty(atom, definition, STRUCT_NAME);
+d88 9
+a96 14
+    atom = (object = ATOM(name))->data.atom;
+    LispSetAtomStructProperty(atom, definition, STRUCT_CHECK);
+    if (!intern)
+	LispExportSymbol(object);
+
+    for (i = 0, list = description; CONSP(list); i++, list = CDR(list)) {
+	if (CONSP(CAR(list)))
+	    sname = ATOMID(CAR(CAR(list)));
+	else
+	    sname = ATOMID(CAR(list));
+	slength = strlen(sname);
+	if (length + slength + 2 > size) {
+	    size = length + slength + 2;
+	    name = LispRealloc(name, size);
+d99 2
+a100 4
+	atom = (object = ATOM(name))->data.atom;
+	LispSetAtomStructProperty(atom, definition, i);
+	if (!intern)
+	    LispExportSymbol(object);
+d103 1
+a103 1
+    LispFree(name);
+d105 4
+a108 2
+    if (documentation != NIL)
+	LispAddDocumentation(oname, documentation, LispDocStructure);
+d110 1
+a110 1
+    return (oname);
+d117 1
+a117 4
+Lisp_XeditMakeStruct(LispBuiltin *builtin)
+/*
+ lisp::make-struct atom &rest init
+ */
+d119 1
+a119 1
+    int nfld, ncvt, length = lisp__data.protect.length;
+d121 1
+d123 16
+a138 2
+    LispObj *definition, *object, *field, *fields, *value = NIL, *cons, *list;
+    LispObj *struc, *init;
+d140 10
+a149 23
+    init = ARGUMENT(1);
+    struc = ARGUMENT(0);
+
+    field = cons = NIL;
+    if (!POINTERP(struc) ||
+	!(XSYMBOLP(struc) || XFUNCTIONP(struc)) ||
+	(atom = struc->data.atom)->a_defstruct == 0 ||
+	 atom->property->structure.function != STRUCT_CONSTRUCTOR)
+	LispDestroy("%s: invalid constructor %s",
+		    STRFUN(builtin), STROBJ(struc));
+    definition = atom->property->structure.definition;
+
+    ncvt = nfld = 0;
+    fields = NIL;
+
+    /* check for errors in argument list */
+    for (list = init, nfld = 0; CONSP(list); list = CDR(list)) {
+	CHECK_KEYWORD(CAR(list));
+	if (!CONSP(CDR(list)))
+	    LispDestroy("%s: values must be provided as pairs",
+			ATOMID(struc));
+	nfld++;
+	list = CDR(list);
+d151 1
+d153 13
+a165 12
+    /* create structure, CAR(definition) is structure name */
+    for (list = CDR(definition); CONSP(list); list = CDR(list)) {
+	Atom_id id;
+	LispObj *defvalue = NIL;
+
+	++nfld;
+	field = CAR(list);
+	if (CONSP(field)) {
+	    /* if default value provided */
+	    if (CONSP(CDR(field)))
+		defvalue = CAR(CDR(field));
+	    field = CAR(field);
+a166 1
+	id = ATOMID(field);
+d168 4
+a171 11
+	for (object = init; CONSP(object); object = CDR(object)) {
+	    /* field is a keyword, test above checked it */
+	    field = CAR(object);
+	    if (id == ATOMID(field)) {
+		/* value provided */
+		value = CAR(CDR(object));
+		ncvt++;
+		break;
+	    }
+	    object = CDR(object);
+	}
+d173 3
+a175 8
+	/* if no initialization given */
+	if (!CONSP(object)) {
+	    /* if default value in structure definition */
+	    if (defvalue != NIL)
+		value = EVAL(defvalue);
+	    else
+		value = NIL;
+	}
+d177 7
+a183 9
+	if (fields == NIL) {
+	    fields = cons = CONS(value, NIL);
+	    if (length + 1 >= lisp__data.protect.space)
+		LispMoreProtects();
+	    lisp__data.protect.objects[lisp__data.protect.length++] = fields;
+	}
+	else {
+	    RPLACD(cons, CONS(value, NIL));
+	    cons = CDR(cons);
+d187 3
+a189 22
+    /* if not enough arguments were converted, need to check because
+     * it is acceptable to set a field more than once, but in that case,
+     * only the first value will be used. */
+    if (nfld > ncvt) {
+	for (list = init; CONSP(list); list = CDR(list)) {
+	    Atom_id id = ATOMID(CAR(list));
+
+	    for (object = CDR(definition); CONSP(object);
+		 object = CDR(object)) {
+		field = CAR(object);
+		if (CONSP(field))
+		    field = CAR(field);
+		if (ATOMID(field) == id)
+		    break;
+	    }
+	    if (!CONSP(object))
+		LispDestroy("%s: %s is not a field for %s",
+			    ATOMID(struc), STROBJ(CAR(list)),
+			    ATOMID(CAR(definition)));
+	    list = CDR(list);
+	}
+    }
+d191 1
+a191 1
+    lisp__data.protect.length = length;
+d193 1
+a193 1
+    return (STRUCT(fields, definition));
+d196 2
+a197 6
+static LispObj *
+LispStructAccessOrStore(LispBuiltin *builtin, int store)
+/*
+ lisp::struct-access atom struct
+ lisp::struct-store atom struct value
+ */
+d199 3
+a201 3
+    long offset;
+    LispAtom *atom;
+    LispObj *definition, *list;
+d203 6
+a208 18
+    LispObj *name, *struc, *value = NIL;
+
+    if (store)
+	value = ARGUMENT(2);
+    struc = ARGUMENT(1);
+    name = ARGUMENT(0);
+
+    if (!POINTERP(name) ||
+	!(XSYMBOLP(name) || XFUNCTIONP(name)) ||
+	(atom = name->data.atom)->a_defstruct == 0 ||
+	(offset = atom->property->structure.function) < 0) {
+	LispDestroy("%s: invalid argument %s",
+		    STRFUN(builtin), STROBJ(name));
+	/*NOTREACHED*/
+	offset = 0;
+	atom = NULL;
+    }
+    definition = atom->property->structure.definition;
+d211 3
+a213 3
+    if (!STRUCTP(struc) || struc->data.struc.def != definition)
+	LispDestroy("%s: %s is not a %s",
+		    ATOMID(name), STROBJ(struc), ATOMID(CAR(definition)));
+d215 2
+a216 2
+    for (list = struc->data.struc.fields; offset; list = CDR(list), offset--)
+	;
+d218 1
+a218 1
+    return (store ? RPLACA(list, value) : CAR(list));
+d222 1
+a222 4
+Lisp_XeditStructAccess(LispBuiltin *builtin)
+/*
+ lisp::struct-access atom struct
+ */
+d224 25
+a248 2
+    return (LispStructAccessOrStore(builtin, 0));
+}
+d250 1
+a250 7
+LispObj *
+Lisp_XeditStructStore(LispBuiltin *builtin)
+/*
+ lisp::struct-store atom struct value
+ */
+{
+    return (LispStructAccessOrStore(builtin, 1));
+d254 1
+a254 4
+Lisp_XeditStructType(LispBuiltin *builtin)
+/*
+ lisp::struct-type atom struct
+ */
+d257 1
+d259 6
+a264 12
+    LispObj *definition, *struc, *name;
+
+    struc = ARGUMENT(1);
+    name = ARGUMENT(0);
+
+    if (!POINTERP(name) ||
+	!(XSYMBOLP(name) || XFUNCTIONP(name)) ||
+	(atom = name->data.atom)->a_defstruct == 0 ||
+	(atom->property->structure.function != STRUCT_CHECK))
+	LispDestroy("%s: invalid argument %s",
+		    STRFUN(builtin), STROBJ(name));
+    definition = atom->property->structure.definition;
+d267 1
+a267 1
+    if (STRUCTP(struc) && struc->data.struc.def == definition)
+@
+
+
+1.1.1.3
+log
+@That's what OpenBSD will, probably, ship as XF4 in 3.5
+their last sync against XFree86 4.3-current has been
+imported into our vendor branch, too
+@
+text
+@d30 1
+a30 1
+/* $XFree86: xc/programs/xedit/lisp/struct.c,v 1.23 2003/04/27 18:17:34 tsi Exp $ */
+d32 1
+a32 1
+#include "lisp/struct.h"
+@
+
+

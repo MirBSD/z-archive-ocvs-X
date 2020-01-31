@@ -1,0 +1,172 @@
+head	1.2;
+access;
+symbols
+	MIRBSD_5:1.1.1.1
+	ctm-3272:1.1.1.1
+	ctm-3264:1.1.1.1
+	ctm-3258:1.1.1.1
+	MIRBSD_4:1.1.1.1
+	ctm-3200:1.1.1.1
+	ctm-3188:1.1.1.1
+	ctm-3155:1.1.1.1
+	ctm-3132:1.1.1.1
+	openbsd:1.1.1;
+locks; strict;
+comment	@# @;
+
+
+1.2
+date	2003.10.03.22.03.06;	author bsiegert;	state dead;
+branches;
+next	1.1;
+
+1.1
+date	2003.03.22.19.52.33;	author tg;	state Exp;
+branches
+	1.1.1.1;
+next	;
+
+1.1.1.1
+date	2003.03.22.19.52.33;	author tg;	state Exp;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.2
+log
+@Bring BIND 9 port to shape:
+
+* Change maintainer to me since the port is no longer maintained in OpenBSD
+* Use OpenBSD's sources (distfile is a CVS checkout of src/usr.bin/bind)
+* Remove obsolete patches
+* Version is now 9.2.2-P3 with the "delegation-only" patch
+@
+text
+@$OpenBSD: patch-lib_dns_dispatch_c,v 1.1 2003/01/25 14:14:37 jakob Exp $
+--- lib/dns/dispatch.c.orig	Wed May  8 08:38:14 2002
++++ lib/dns/dispatch.c	Tue Jan 21 08:55:13 2003
+@@@@ -22,7 +22,7 @@@@
+ #include <stdlib.h>
+ 
+ #include <isc/entropy.h>
+-#include <isc/lfsr.h>
++#include <isc/lcg.h>
+ #include <isc/mem.h>
+ #include <isc/mutex.h>
+ #include <isc/print.h>
+@@@@ -45,8 +45,7 @@@@ typedef struct dns_qid {
+ 	unsigned int	qid_nbuckets;	/* hash table size */
+ 	unsigned int	qid_increment;	/* id increment on collision */
+ 	isc_mutex_t	lock;
+-	isc_lfsr_t	qid_lfsr1;	/* state generator info */
+-	isc_lfsr_t	qid_lfsr2;	/* state generator info */
++	isc_lcg_t	qid_lcg;	/* state generator info */
+ 	dns_displist_t	*qid_table;	/* the table itself */
+ } dns_qid_t;
+ 
+@@@@ -256,36 +255,14 @@@@ request_log(dns_dispatch_t *disp, dns_di
+ 	}
+ }
+ 
+-static void
+-reseed_lfsr(isc_lfsr_t *lfsr, void *arg)
+-{
+-	dns_dispatchmgr_t *mgr = arg;
+-	isc_result_t result;
+-	isc_uint32_t val;
+-
+-	REQUIRE(VALID_DISPATCHMGR(mgr));
+-
+-	if (mgr->entropy != NULL) {
+-		result = isc_entropy_getdata(mgr->entropy, &val, sizeof val,
+-					     NULL, 0);
+-		INSIST(result == ISC_R_SUCCESS);
+-		lfsr->count = (val & 0x1f) + 32;
+-		lfsr->state = val;
+-		return;
+-	}
+-
+-	lfsr->count = (random() & 0x1f) + 32;	/* From 32 to 63 states */
+-	lfsr->state = random();
+-}
+-
+ /*
+  * Return an unpredictable message ID.
+  */
+ static dns_messageid_t
+ dns_randomid(dns_qid_t *qid) {
+-	isc_uint32_t id;
++	isc_uint16_t id;
+ 
+-	id = isc_lfsr_generate32(&qid->qid_lfsr1, &qid->qid_lfsr2);
++	id = isc_lcg_generate16(&qid->qid_lcg);
+ 
+ 	return (dns_messageid_t)(id & 0xFFFF);
+ }
+@@@@ -1304,20 +1281,7 @@@@ qid_allocate(dns_dispatchmgr_t *mgr, uns
+ 	qid->qid_increment = increment;
+ 	qid->magic = QID_MAGIC;
+ 
+-	/*
+-	 * Initialize to a 32-bit LFSR.  Both of these are from Applied
+-	 * Cryptography.
+-	 *
+-	 * lfsr1:
+-	 *	x^32 + x^7 + x^5 + x^3 + x^2 + x + 1
+-	 *
+-	 * lfsr2:
+-	 *	x^32 + x^7 + x^6 + x^2 + 1
+-	 */
+-	isc_lfsr_init(&qid->qid_lfsr1, 0, 32, 0x80000057U,
+-		      0, reseed_lfsr, mgr);
+-	isc_lfsr_init(&qid->qid_lfsr2, 0, 32, 0x800000c2U,
+-		      0, reseed_lfsr, mgr);
++	isc_lcg_init(&qid->qid_lcg);
+ 	*qidp = qid;
+ 	return (ISC_R_SUCCESS);
+ }
+@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@@
+
+
+1.1.1.1
+log
+@Import OpenBSD 3.3 ports repository from CTM 3132 the first time
+This continues opening an OpenBSD-mirabile (aka MirBSD) repository.
+
+### MirBSD is:
+# Copyright (c) 1982-2003 by Thorsten "mirabile" Glaser <x86@@ePost.de>
+# Copyright © 1968-2003  The authors of And contributors to UNIX®, the
+#       C Language, BSD/Berkeley Unix; 386BSD, NetBSD 1.1 and OpenBSD.
+#
+# Anyone who obtained a copy of this work is hereby permitted to freely use,
+# distribute, modify, merge, sublicence, give away or sell it as long as the
+# authors are given due credit and the following notice is retained:
+#
+# This work is provided "as is", with no explicit or implicit warranty what-
+# soever. Use it only at your own risk. In no event may an author or contri-
+# butor be held liable for any damage, directly or indirectly, that origina-
+# ted through or is caused by creation or modification of this work.
+
+MirBSD is my private tree. MirBSD does not differ very much from OpenBSD
+and intentionally tracks OpenBSD. That's why it _is_ OpenBSD, just not the
+official one. It's like with DarrenBSD.
+
+At time of this writing, no advertising for MirBSD must be done,
+because the advertising clause has not yet been sorted out.
+
+http://templeofhate.com/tglaser/MirBSD/index.php
+@
+text
+@@

@@ -1,0 +1,433 @@
+head	1.4;
+access;
+symbols
+	ctm-3389:1.1.1.1
+	openbsd:1.1.1
+	MIRBSD_5:1.1
+	MIRBSD_4:1.1;
+locks; strict;
+comment	@# @;
+
+
+1.4
+date	2004.02.26.19.16.27;	author tg;	state Stab;
+branches;
+next	1.3;
+
+1.3
+date	2003.06.11.19.26.30;	author tg;	state Exp;
+branches;
+next	1.2;
+
+1.2
+date	2003.06.11.17.38.20;	author tg;	state Exp;
+branches;
+next	1.1;
+
+1.1
+date	2003.03.29.13.59.55;	author tg;	state Exp;
+branches
+	1.1.1.1;
+next	;
+
+1.1.1.1
+date	2003.07.06.13.23.57;	author tg;	state Exp;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.4
+log
+@upgrade to current of today winex
+
+the distfiles are already on advo, happy hacking
+XXX it doesn't find the xrender/xrandr and freetype libs,
+XXX which are said to be dynamically loaded. someone?
+@
+text
+@$MirBSD: patch-dlls_ntdll_signal_i386_c,v 1.3 2003/06/11 19:26:30 tg Exp $
+
+	just move stuff around, until it magically compiles
+
+--- dlls/ntdll/signal_i386.c.orig	2004-02-25 18:52:14.000000000 +0000
++++ dlls/ntdll/signal_i386.c	2004-02-25 18:55:22.000000000 +0000
+@@@@ -65,7 +65,7 @@@@ static int wine_sigaltstack( const struc
+ #endif // linux
+     return -1;
+ }
+-#endif // linux
++#endif	/* HAVE_SIGALTSTACK */
+ 
+ #ifdef linux
+ typedef struct
+@@@@ -199,7 +199,7 @@@@ typedef struct sigcontext SIGCONTEXT;
+ #define HANDLER_DEF(name) void name( int __signal, int code, SIGCONTEXT *__context )
+ #define HANDLER_CONTEXT __context
+ 
+-#endif  /* FreeBSD */
++#endif  /* Free/Net/OpenBSD */
+ 
+ #if defined(__svr4__) || defined(_SCO_DS) || defined(__sun)
+ 
+@@@@ -335,7 +335,7 @@@@ typedef struct
+ 
+ 
+ /* exception code definitions (already defined by FreeBSD/NetBSD) */
+-#if !defined(__FreeBSD__) && !defined(__NetBSD__) /* FIXME: other BSDs? */
++#if !defined(__FreeBSD__) && !defined(__NetBSD__) && !defined(__OpenBSD__) /* FIXME: other BSDs? */
+ #define T_DIVIDE        0   /* Division by zero exception */
+ #define T_TRCTRAP       1   /* Single-step exception */
+ #define T_NMI           2   /* NMI interrupt */
+@@@@ -731,7 +731,9 @@@@ static void do_segv( CONTEXT *context, i
+     case T_DOUBLEFLT: /* Double fault exception */
+     case T_TSSFLT:    /* Invalid TSS exception */
+     case T_RESERVED:  /* Unknown exception */
++#ifdef T_MCHK
+     case T_MCHK:      /* Machine check exception */
++#endif
+ #ifdef T_CACHEFLT
+     case T_CACHEFLT:  /* Cache flush exception */
+ #endif
+@
+
+
+1.3
+log
+@and it finally builds again
+@
+text
+@d1 1
+a1 1
+$MirBSD: patch-dlls_ntdll_signal_i386_c,v 1.2 2003/06/11 17:38:20 tg Exp $
+d5 5
+a9 3
+--- dlls/ntdll/signal_i386.c.orig	Wed Jun 11 15:54:24 2003
++++ dlls/ntdll/signal_i386.c	Wed Jun 11 19:22:14 2003
+@@@@ -100,30 +100,6 @@@@ static inline int wine_sigaction( int si
+d11 11
+a21 1
+ #endif
+d23 1
+a23 56
+-#ifdef HAVE_SIGALTSTACK
+-static int wine_sigaltstack( const struct sigaltstack *new,
+-                             struct sigaltstack *old )
+-{
+-    int ret;
+-
+-    ret = sigaltstack(new, old);
+-    if (ret >= 0) return 0;
+-
+-#ifdef linux
+-/* direct syscall for sigaltstack: glibc 2.0 just has an ENOSYS stub. */
+-    __asm__ __volatile__( "pushl %%ebx\n\t"
+-                          "movl %2,%%ebx\n\t"
+-                          "int $0x80\n\t"
+-                          "popl %%ebx"
+-                          : "=a" (ret)
+-                          : "0" (SYS_sigaltstack), "r" (new), "c" (old) );
+-    if (ret >= 0) return 0;
+-    errno = -ret;
+-#endif
+-    return -1;
+-}
+-#endif
+-
+ #define VM86_EAX 0 /* the %eax value while vm86_enter is executing */
+ 
+ int vm86_enter( void **vm86_ptr );
+@@@@ -163,6 +139,30 @@@@ __ASM_GLOBAL_FUNC(vm86_enter,
+ 
+ #endif  /* linux */
+ 
++#ifdef HAVE_SIGALTSTACK
++static int wine_sigaltstack( const struct sigaltstack *new,
++                             struct sigaltstack *old )
++{
++    int ret;
++
++    ret = sigaltstack(new, old);
++    if (ret >= 0) return 0;
++
++#ifdef linux
++/* direct syscall for sigaltstack: glibc 2.0 just has an ENOSYS stub. */
++    __asm__ __volatile__( "pushl %%ebx\n\t"
++                          "movl %2,%%ebx\n\t"
++                          "int $0x80\n\t"
++                          "popl %%ebx"
++                          : "=a" (ret)
++                          : "0" (SYS_sigaltstack), "r" (new), "c" (old) );
++    if (ret >= 0) return 0;
++    errno = -ret;
++#endif
++    return -1;
++}
++#endif
++
+ #ifdef BSDI
+d25 1
+a25 2
+ #define EAX_sig(context)     ((context)->tf_eax)
+@@@@ -334,7 +334,7 @@@@ typedef struct
+d34 1
+a34 1
+@@@@ -730,7 +730,9 @@@@ static void do_segv( CONTEXT *context, i
+d38 1
+a38 1
++#ifndef __OpenBSD__
+a43 71
+@@@@ -816,6 +818,24 @@@@ static void do_fpe( CONTEXT *context, in
+     EXC_RtlRaiseException( &rec, context );
+ }
+ 
++#if defined(USE_PTHREADS)
++static void raise_signal_if_unexpected_thread( int sig, int sig_to_raise )
++{
++# if defined(__i386__)
++    if ( __get_fs() == 0 || NtCurrentTeb()->unix_tid != wine_gettid() )
++# else
++    if ( NtCurrentTeb()->unix_tid != wine_gettid() )
++# endif
++    {
++        fprintf( stderr, "tid %d received signal %d. Raising signal %d\n",
++                   wine_gettid(), sig, sig_to_raise );
++        raise(sig_to_raise);
++    }
++}
++#else
++#  define raise_signal_if_unexpected_thread(a,b) /* nothing */
++#endif /* USE_PTHREADS */
++
+ 
+ #ifdef __HAVE_VM86
+ /**********************************************************************
+@@@@ -878,24 +898,6 @@@@ static void set_vm86_pend( CONTEXT *cont
+     }
+ }
+ 
+-#if defined(USE_PTHREADS)
+-static void raise_signal_if_unexpected_thread( int sig, int sig_to_raise )
+-{
+-# if defined(__i386__)
+-    if ( __get_fs() == 0 || NtCurrentTeb()->unix_tid != wine_gettid() )
+-# else
+-    if ( NtCurrentTeb()->unix_tid != wine_gettid() )
+-# endif
+-    {
+-        fprintf( stderr, "tid %d received signal %d. Raising signal %d\n",
+-                   wine_gettid(), sig, sig_to_raise );
+-        raise(sig_to_raise);
+-    }
+-}
+-#else
+-#  define raise_signal_if_unexpected_thread(a,b)
+-#endif /* USE_PTHREADS */
+-
+ /**********************************************************************
+  *		usr1_handler
+  *
+@@@@ -1197,9 +1199,8 @@@@ BOOL SIGNAL_Init(void)
+     if (set_handler( SIGTRAP, have_sigaltstack, (void (*)())trap_handler ) == -1) goto error;
+ #endif
+ 
+-    if (set_handler( SIGUSR1, have_sigaltstack, (void (*)())usr1_handler ) == -1) goto error;
+-
+ #ifdef __HAVE_VM86
++    if (set_handler( SIGUSR1, have_sigaltstack, (void (*)())usr1_handler ) == -1) goto error;
+     if (set_handler( SIGALRM, have_sigaltstack, (void (*)())alrm_handler ) == -1) goto error;
+     if (set_handler( SIGUSR2, have_sigaltstack, (void (*)())usr2_handler ) == -1) goto error;
+ #endif
+@@@@ -1254,7 +1255,9 @@@@ void SIGNAL_Reset(void)
+ 
+ void __wine_hook_user_signal( void (*func)(CONTEXT*) )
+ {
++#ifdef __HAVE_VM86
+     usr1_callback = func;
++#endif
+ }
+ 
+ #ifdef __HAVE_VM86
+@
+
+
+1.2
+log
+@update the WineX snapshot (CVS)
+not built yet
+@
+text
+@d1 4
+a4 1
+$MirBSD: patch-dlls_ntdll_signal_i386_c,v 1.1 2003/03/29 13:59:55 tg Exp $
+d6 63
+a68 1
++++ dlls/ntdll/signal_i386.c	Wed Jun 11 17:25:54 2003
+d88 50
+@
+
+
+1.1
+log
+@some more GNU/LINUXisms and some broken coder whose head is to be broken
+@
+text
+@d1 4
+a4 4
+$MirBSD$
+--- dlls/ntdll/signal_i386.c.orig	Sat Mar 29 13:48:40 2003
++++ dlls/ntdll/signal_i386.c	Sat Mar 29 13:56:30 2003
+@@@@ -325,7 +325,7 @@@@ typedef struct
+d13 1
+a13 1
+@@@@ -721,7 +721,9 @@@@ static void do_segv( CONTEXT *context, i
+d23 1
+a23 1
+@@@@ -1099,9 +1101,8 @@@@ BOOL SIGNAL_Init(void)
+d34 1
+a34 1
+@@@@ -1145,7 +1146,9 @@@@ void SIGNAL_Reset(void)
+@
+
+
+1.1.1.1
+log
+@Import OpenBSD ports tree
+@
+text
+@d1 4
+a4 69
+$MirBSD: patch-dlls_ntdll_signal_i386_c,v 1.3 2003/06/11 19:26:30 tg Exp $
+
+	just move stuff around, until it magically compiles
+
+--- dlls/ntdll/signal_i386.c.orig	Wed Jun 11 15:54:24 2003
++++ dlls/ntdll/signal_i386.c	Wed Jun 11 19:22:14 2003
+@@@@ -100,30 +100,6 @@@@ static inline int wine_sigaction( int si
+ }
+ #endif
+ 
+-#ifdef HAVE_SIGALTSTACK
+-static int wine_sigaltstack( const struct sigaltstack *new,
+-                             struct sigaltstack *old )
+-{
+-    int ret;
+-
+-    ret = sigaltstack(new, old);
+-    if (ret >= 0) return 0;
+-
+-#ifdef linux
+-/* direct syscall for sigaltstack: glibc 2.0 just has an ENOSYS stub. */
+-    __asm__ __volatile__( "pushl %%ebx\n\t"
+-                          "movl %2,%%ebx\n\t"
+-                          "int $0x80\n\t"
+-                          "popl %%ebx"
+-                          : "=a" (ret)
+-                          : "0" (SYS_sigaltstack), "r" (new), "c" (old) );
+-    if (ret >= 0) return 0;
+-    errno = -ret;
+-#endif
+-    return -1;
+-}
+-#endif
+-
+ #define VM86_EAX 0 /* the %eax value while vm86_enter is executing */
+ 
+ int vm86_enter( void **vm86_ptr );
+@@@@ -163,6 +139,30 @@@@ __ASM_GLOBAL_FUNC(vm86_enter,
+ 
+ #endif  /* linux */
+ 
++#ifdef HAVE_SIGALTSTACK
++static int wine_sigaltstack( const struct sigaltstack *new,
++                             struct sigaltstack *old )
++{
++    int ret;
++
++    ret = sigaltstack(new, old);
++    if (ret >= 0) return 0;
++
++#ifdef linux
++/* direct syscall for sigaltstack: glibc 2.0 just has an ENOSYS stub. */
++    __asm__ __volatile__( "pushl %%ebx\n\t"
++                          "movl %2,%%ebx\n\t"
++                          "int $0x80\n\t"
++                          "popl %%ebx"
++                          : "=a" (ret)
++                          : "0" (SYS_sigaltstack), "r" (new), "c" (old) );
++    if (ret >= 0) return 0;
++    errno = -ret;
++#endif
++    return -1;
++}
++#endif
++
+ #ifdef BSDI
+ 
+ #define EAX_sig(context)     ((context)->tf_eax)
+@@@@ -334,7 +334,7 @@@@ typedef struct
+d13 1
+a13 1
+@@@@ -730,7 +730,9 @@@@ static void do_segv( CONTEXT *context, i
+d23 1
+a23 51
+@@@@ -816,6 +818,24 @@@@ static void do_fpe( CONTEXT *context, in
+     EXC_RtlRaiseException( &rec, context );
+ }
+ 
++#if defined(USE_PTHREADS)
++static void raise_signal_if_unexpected_thread( int sig, int sig_to_raise )
++{
++# if defined(__i386__)
++    if ( __get_fs() == 0 || NtCurrentTeb()->unix_tid != wine_gettid() )
++# else
++    if ( NtCurrentTeb()->unix_tid != wine_gettid() )
++# endif
++    {
++        fprintf( stderr, "tid %d received signal %d. Raising signal %d\n",
++                   wine_gettid(), sig, sig_to_raise );
++        raise(sig_to_raise);
++    }
++}
++#else
++#  define raise_signal_if_unexpected_thread(a,b) /* nothing */
++#endif /* USE_PTHREADS */
++
+ 
+ #ifdef __HAVE_VM86
+ /**********************************************************************
+@@@@ -878,24 +898,6 @@@@ static void set_vm86_pend( CONTEXT *cont
+     }
+ }
+ 
+-#if defined(USE_PTHREADS)
+-static void raise_signal_if_unexpected_thread( int sig, int sig_to_raise )
+-{
+-# if defined(__i386__)
+-    if ( __get_fs() == 0 || NtCurrentTeb()->unix_tid != wine_gettid() )
+-# else
+-    if ( NtCurrentTeb()->unix_tid != wine_gettid() )
+-# endif
+-    {
+-        fprintf( stderr, "tid %d received signal %d. Raising signal %d\n",
+-                   wine_gettid(), sig, sig_to_raise );
+-        raise(sig_to_raise);
+-    }
+-}
+-#else
+-#  define raise_signal_if_unexpected_thread(a,b)
+-#endif /* USE_PTHREADS */
+-
+ /**********************************************************************
+  *		usr1_handler
+  *
+@@@@ -1197,9 +1199,8 @@@@ BOOL SIGNAL_Init(void)
+d34 1
+a34 1
+@@@@ -1254,7 +1255,9 @@@@ void SIGNAL_Reset(void)
+@
+
+

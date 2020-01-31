@@ -1,0 +1,316 @@
+head	1.1;
+branch	1.1.1;
+access;
+symbols
+	tg-mergetmp-2:1.1.1.1
+	cvs-200410241530:1.1.1.1
+	cvs-200410012000:1.1.1.1
+	cvs-200407141120:1.1.1.1
+	cvs-200406231010:1.1.1.1
+	MIRBSD_7quater:1.1.1.1
+	cvs-200405271510:1.1.1.1
+	XFree86_4_4_0:1.1.9.1
+	cvs-200403021700:1.1.1.1
+	XFREE86_20040213:1.1.9.1
+	xc:1.1.9
+	cvs-200401291925:1.1.1.1
+	MIRBSD_7_ALPHA:1.1.1.1.0.4
+	MIRBSD_7:1.1.1.1.0.2
+	MIRBSD_7ter:1.1.1.1
+	cvs-20011091815:1.1.1.1
+	cvs-200309162130:1.1.1.1
+	cvs-200308302005:1.1.1.1
+	ctmx-0387:1.1.1.1
+	ctmx-0384:1.1.1.1
+	MIRBSD_5:1.1.1.1
+	ctmx-0375:1.1.1.1
+	ctmx-0373:1.1.1.1
+	ctm-0371:1.1.1.1
+	ctm-0370:1.1.1.1
+	MIRBSD_4:1.1.1.1
+	ctm-0363:1.1.1.1
+	ctm-0359:1.1.1.1
+	openbsd:1.1.1;
+locks; strict;
+comment	@ * @;
+
+
+1.1
+date	2003.04.08.18.35.14;	author tg;	state Exp;
+branches
+	1.1.1.1
+	1.1.9.1;
+next	;
+
+1.1.1.1
+date	2003.04.08.18.35.14;	author tg;	state Stab;
+branches;
+next	;
+
+1.1.9.1
+date	2004.02.14.19.22.04;	author tg;	state Exp;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@/*
+ * Generic rootless to Aqua specific glue code
+ *
+ * This code acts as a glue between the generic rootless X server code
+ * and the Aqua specific implementation, which includes definitions that
+ * conflict with stardard X types.
+ *
+ * Greg Parker     gparker@@cs.stanford.edu
+ */
+/* $XFree86: xc/programs/Xserver/hw/darwin/quartz_1.3/rootlessAquaGlue.c,v 1.1 2002/03/28 02:21:20 torrey Exp $ */
+
+#include "quartzCommon.h"
+#include "darwin.h"
+#include "rootlessAqua.h"
+#include "rootlessAquaImp.h"
+#include "rootless.h"
+
+#include "regionstr.h"
+#include "scrnintstr.h"
+#include "globals.h" // dixScreenOrigins[]
+
+
+/////////////////////////////////////////
+// Rootless mode callback glue
+
+static void
+AquaGlueCreateFrame(ScreenPtr pScreen, RootlessFramePtr pFrame,
+                    RootlessFramePtr pUpper)
+{
+    int sx = dixScreenOrigins[pScreen->myNum].x + darwinMainScreenX;
+    int sy = dixScreenOrigins[pScreen->myNum].y + darwinMainScreenY;
+
+    pFrame->devPrivate = AquaNewWindow(pUpper ? pUpper->devPrivate : NULL,
+                                       pFrame->x + sx, pFrame->y + sy,
+                                       pFrame->w, pFrame->h,
+                                       pFrame->isRoot);
+    AquaGetPixmap(pFrame->devPrivate, &pFrame->pixelData,
+                  &pFrame->bytesPerRow, &pFrame->depth,
+                  &pFrame->bitsPerPixel);
+}
+
+
+static void
+AquaGlueDestroyFrame(ScreenPtr pScreen, RootlessFramePtr pFrame)
+{
+    AquaDestroyWindow(pFrame->devPrivate);
+}
+
+static void
+AquaGlueMoveFrame(ScreenPtr pScreen, RootlessFramePtr pFrame,
+                  int oldX, int oldY)
+{
+    int sx = dixScreenOrigins[pScreen->myNum].x + darwinMainScreenX;
+    int sy = dixScreenOrigins[pScreen->myNum].y + darwinMainScreenY;
+
+    AquaMoveWindow(pFrame->devPrivate, pFrame->x + sx, pFrame->y + sy);
+}
+
+
+static void
+AquaGlueStartResizeFrame(ScreenPtr pScreen, RootlessFramePtr pFrame,
+                         int oldX, int oldY,
+                         unsigned int oldW, unsigned int oldH)
+{
+    int sx = dixScreenOrigins[pScreen->myNum].x + darwinMainScreenX;
+    int sy = dixScreenOrigins[pScreen->myNum].y + darwinMainScreenY;
+
+    AquaStartResizeWindow(pFrame->devPrivate,
+                          pFrame->x + sx, pFrame->y + sy, pFrame->w, pFrame->h);
+    AquaGetPixmap(pFrame->devPrivate, &pFrame->pixelData,
+                  &pFrame->bytesPerRow, &pFrame->depth,
+                  &pFrame->bitsPerPixel);
+}
+
+static void
+AquaGlueFinishResizeFrame(ScreenPtr pScreen, RootlessFramePtr pFrame,
+                          int oldX, int oldY,
+                          unsigned int oldW, unsigned int oldH)
+{
+    int sx = dixScreenOrigins[pScreen->myNum].x + darwinMainScreenX;
+    int sy = dixScreenOrigins[pScreen->myNum].y + darwinMainScreenY;
+
+    AquaFinishResizeWindow(pFrame->devPrivate,
+                           pFrame->x + sx, pFrame->y + sy,
+                           pFrame->w, pFrame->h);
+}
+
+
+static void
+AquaGlueRestackFrame(ScreenPtr pScreen, RootlessFramePtr pFrame,
+                     RootlessFramePtr pOldPrev,
+                     RootlessFramePtr pNewPrev)
+{
+    AquaRestackWindow(pFrame->devPrivate,
+                      pNewPrev ? pNewPrev->devPrivate : NULL);
+}
+
+static void
+AquaGlueReshapeFrame(ScreenPtr pScreen, RootlessFramePtr pFrame,
+                     RegionPtr pNewShape)
+{
+    // Don't correct for dixScreenOrigins here.
+    // pNewShape is in window-local coordinates.
+    BoxRec shapeBox = {0, 0, pFrame->w, pFrame->h};
+    if (pFrame->isRoot) return; // shouldn't happen; mi or dix covers this
+
+    REGION_INVERSE(pScreen, pNewShape, pNewShape, &shapeBox);
+    AquaReshapeWindow(pFrame->devPrivate,
+                      (fakeBoxRec *) REGION_RECTS(pNewShape),
+                      REGION_NUM_RECTS(pNewShape));
+}
+
+static void
+AquaGlueUpdateRegion(ScreenPtr pScreen, RootlessFramePtr pFrame,
+                     RegionPtr pDamage)
+{
+    AquaUpdateRects(pFrame->devPrivate,
+                    (fakeBoxRec *) REGION_RECTS(pDamage),
+                    REGION_NUM_RECTS(pDamage));
+}
+
+#if 0
+static void
+AquaGlueStartDrawing(ScreenPtr pScreen, RootlessFramePtr pFrame)
+{
+    AquaStartDrawing(pFrame->devPrivate, &pFrame->pixelData,
+                     &pFrame->bytesPerRow, &pFrame->depth,
+                     &pFrame->bitsPerPixel);
+}
+
+static void
+AquaGlueStopDrawing(ScreenPtr pScreen, RootlessFramePtr pFrame)
+{
+    AquaStopDrawing(pFrame->devPrivate);
+}
+#endif
+
+static RootlessFrameProcs aquaRootlessProcs = {
+    AquaGlueCreateFrame,
+    AquaGlueDestroyFrame,
+    AquaGlueMoveFrame,
+    AquaGlueStartResizeFrame,
+    AquaGlueFinishResizeFrame,
+    AquaGlueRestackFrame,
+    AquaGlueReshapeFrame,
+    AquaGlueUpdateRegion
+};
+
+
+///////////////////////////////////////
+// Rootless mode initialization.
+// Exported by rootlessAqua.h
+
+/*
+ * AquaDisplayInit
+ *  Find all Aqua screens.
+ */
+void
+AquaDisplayInit(void)
+{
+    darwinScreensFound = AquaDisplayCount();
+}
+
+
+/*
+ * AquaAddScreen
+ *  Init the framebuffer and record pixmap parameters for the screen.
+ */
+Bool
+AquaAddScreen(int index, ScreenPtr pScreen)
+{
+    DarwinFramebufferPtr dfb = SCREEN_PRIV(pScreen);
+    QuartzScreenPtr displayInfo = QUARTZ_PRIV(pScreen);
+    CGRect cgRect;
+    CGDisplayCount numDisplays;
+    CGDisplayCount allocatedDisplays = 0;
+    CGDirectDisplayID *displays = NULL;
+    CGDisplayErr cgErr;
+
+    dfb->pixelInfo.pixelType = kIORGBDirectPixels;
+    AquaScreenInit(index, &dfb->x, &dfb->y, &dfb->width, &dfb->height,
+                    &dfb->pitch, &dfb->pixelInfo.bitsPerComponent,
+                    &dfb->pixelInfo.componentCount, &dfb->bitsPerPixel);
+    dfb->colorBitsPerPixel = dfb->pixelInfo.bitsPerComponent *
+                             dfb->pixelInfo.componentCount;
+
+    // No frame buffer - it's all in window pixmaps.
+    dfb->framebuffer = NULL; // malloc(dfb.pitch * dfb.height);
+
+    // Get all CoreGraphics displays covered by this X11 display.
+    cgRect = CGRectMake(dfb->x, dfb->y, dfb->width, dfb->height);
+    do {
+        cgErr = CGGetDisplaysWithRect(cgRect, 0, NULL, &numDisplays);
+        if (cgErr) break;
+        allocatedDisplays = numDisplays;
+        displays = xrealloc(displays,
+                            numDisplays * sizeof(CGDirectDisplayID));
+        cgErr = CGGetDisplaysWithRect(cgRect, allocatedDisplays, displays,
+                                      &numDisplays);
+        if (cgErr != CGDisplayNoErr) break;
+    } while (numDisplays > allocatedDisplays);
+
+    if (cgErr != CGDisplayNoErr || numDisplays == 0) {
+        ErrorF("Could not find CGDirectDisplayID(s) for X11 screen %d: %dx%d @@ %d,%d.\n",
+               index, dfb->width, dfb->height, dfb->x, dfb->y);
+        return FALSE;
+    }
+
+    // This X11 screen covers all CoreGraphics displays we just found.
+    // If there's more than one CG display, then video mirroring is on
+    // or PseudoramiX is on.
+    displayInfo->displayCount = allocatedDisplays;
+    displayInfo->displayIDs = displays;
+
+    return TRUE;
+}
+
+/*
+ * AquaSetupScreen
+ *  Setup the screen for rootless access.
+ */
+Bool
+AquaSetupScreen(int index, ScreenPtr pScreen)
+{
+    return RootlessInit(pScreen, &aquaRootlessProcs);
+}
+@
+
+
+1.1.9.1
+log
+@OpenBSD just has imported exactly this tree into their vendor branch,
+called the same tag, in XF4/xc
+This is, apparently, the last XFree86 snapshot before the licence change
+(ie, addition of the advertising clause)
+
+Since the developers don't see any problems with that, and we would like
+to integrate improvements done by the remaining one or two (or so) XFree86
+developers (j/k), this prepares enabling us to update X-Window in the future.
+@
+text
+@@
+
+
+1.1.1.1
+log
+@The X-Windowing System
+
+Import XFree86 4.3 from OpenBSD by CTM, in the hope it's stable
+@
+text
+@@

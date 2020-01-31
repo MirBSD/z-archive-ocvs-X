@@ -1,0 +1,71 @@
+head	1.1;
+access;
+symbols;
+locks; strict;
+comment	@# @;
+
+
+1.1
+date	2004.11.24.21.04.04;	author tg;	state Exp;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.1
+log
+@compiler warnings similar to the following are the most dangerous:
+| adrbklib.c:4920: warning: int format, different type arg (arg 4)
+| phile.c:295: warning: int format, different type arg (arg 6)
+They almost always point to problems with time_t.
+
+(Of course, if fixing these, you might want to fix the others in
+ the file too. Don't if you aren't 100% sure of the fix or got it
+ ok'd by me, though. And test on sparc, i386/#7quater and OpenBSD.)
+
+Two possible truncation types:
+a) convert to int64_t, output with %lld or %llX
+-  sprintf (tmp,"%s, %d %s %d %02d:%02d:%02d %c%02d%02d",
+-          days[t->tm_wday],t->tm_mday,months[t->tm_mon],t->tm_year+1900,
++  sprintf (tmp,"%s, %d %s %lld %02d:%02d:%02d %c%02d%02d",
++          days[t->tm_wday],t->tm_mday,months[t->tm_mon],
++          (int64_t)t->tm_year+1900,
+
+b) truncate to int after modulo operation, output as usual
+   ATTENTION: the extra braches here are actually required!
+-                   DELETED, (tm_now->tm_year)%100, tm_now->tm_mon+1,
++                   DELETED, (int)((tm_now->tm_year)%100), tm_now->tm_mon+1,
+
+Be careful.
+@
+text
+@$MirBSD$
+--- pine/reply.c.orig	Wed Nov 24 20:58:49 2004
++++ pine/reply.c	Wed Nov 24 20:59:13 2004
+@@@@ -4455,10 +4455,10 @@@@ bounce(pine_state, role)
+ 
+     if(mn_total_cur(pine_state->msgmap) > 1L){
+ 	save_toptr = &save_to;
+-	sprintf(tmp_20k_buf, "BOUNCE (redirect) %d messages to : ",
++	sprintf(tmp_20k_buf, "BOUNCE (redirect) %ld messages to : ",
+ 		mn_total_cur(pine_state->msgmap));
+ 	prmpt_who = cpystr(tmp_20k_buf);
+-	sprintf(tmp_20k_buf, "Send %d messages ",
++	sprintf(tmp_20k_buf, "Send %ld messages ",
+ 		mn_total_cur(pine_state->msgmap));
+ 	prmpt_cnf = cpystr(tmp_20k_buf);
+     }
+@@@@ -5405,7 +5405,8 @@@@ generate_message_id()
+       hostpart = cpystr("huh");
+ 
+     sprintf(id,"<Pine.%.4s.%.20s.%02d%02d%02d%02d%02d%02d%X.%d@@%.50s>",
+-	    SYSTYPE, pine_version, (now_x->tm_year) % 100, now_x->tm_mon + 1,
++	    SYSTYPE, pine_version, (int)((now_x->tm_year) % 100),
++	    now_x->tm_mon + 1,
+ 	    now_x->tm_mday, now_x->tm_hour, now_x->tm_min, now_x->tm_sec, 
+ 	    cnt, getpid(), hostpart);
+ 
+@

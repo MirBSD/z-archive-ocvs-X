@@ -1,0 +1,347 @@
+head	1.1;
+branch	1.1.1;
+access;
+symbols
+	tg-mergetmp-2:1.1.1.3
+	cvs-200410241530:1.1.1.3
+	cvs-200410012000:1.1.1.3
+	cvs-200407141120:1.1.1.3
+	cvs-200406231010:1.1.1.3
+	MIRBSD_7quater:1.1.1.2
+	cvs-200405271510:1.1.1.3
+	XFree86_4_4_0:1.1.9.1
+	cvs-200403021700:1.1.1.3
+	XFREE86_20040213:1.1.9.1
+	xc:1.1.9
+	cvs-200401291925:1.1.1.2
+	MIRBSD_7_ALPHA:1.1.1.2.0.4
+	MIRBSD_7:1.1.1.2.0.2
+	MIRBSD_7ter:1.1.1.2
+	cvs-20011091815:1.1.1.2
+	cvs-200309162130:1.1.1.2
+	cvs-200308302005:1.1.1.2
+	ctmx-0387:1.1.1.2
+	ctmx-0384:1.1.1.2
+	MIRBSD_5:1.1.1.2
+	ctmx-0375:1.1.1.2
+	ctmx-0373:1.1.1.2
+	ctm-0371:1.1.1.2
+	ctm-0370:1.1.1.2
+	MIRBSD_4:1.1.1.2
+	ctm-0363:1.1.1.2
+	ctm-0359:1.1.1.2
+	ctm-0349:1.1.1.1
+	openbsd:1.1.1;
+locks; strict;
+comment	@ * @;
+
+
+1.1
+date	2003.03.22.20.04.19;	author tg;	state Exp;
+branches
+	1.1.1.1
+	1.1.9.1;
+next	;
+
+1.1.1.1
+date	2003.03.22.20.04.19;	author tg;	state Exp;
+branches;
+next	1.1.1.2;
+
+1.1.1.2
+date	2003.04.08.18.31.31;	author tg;	state Exp;
+branches;
+next	1.1.1.3;
+
+1.1.1.3
+date	2004.03.02.17.58.44;	author tg;	state Stab;
+branches;
+next	;
+
+1.1.9.1
+date	2004.02.14.19.18.01;	author tg;	state Exp;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@/* $XFree86: xc/lib/GL/mesa/src/drv/r128/r128_lock.c,v 1.3 2001/03/21 16:14:23 dawes Exp $ */
+/**************************************************************************
+
+Copyright 1999, 2000 ATI Technologies Inc. and Precision Insight, Inc.,
+                                               Cedar Park, Texas.
+All Rights Reserved.
+
+Permission is hereby granted, free of charge, to any person obtaining a
+copy of this software and associated documentation files (the "Software"),
+to deal in the Software without restriction, including without limitation
+on the rights to use, copy, modify, merge, publish, distribute, sub
+license, and/or sell copies of the Software, and to permit persons to whom
+the Software is furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice (including the next
+paragraph) shall be included in all copies or substantial portions of the
+Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NON-INFRINGEMENT. IN NO EVENT SHALL
+ATI, PRECISION INSIGHT AND/OR THEIR SUPPLIERS BE LIABLE FOR ANY CLAIM,
+DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR
+OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE
+USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+**************************************************************************/
+
+/*
+ * Authors:
+ *   Gareth Hughes <gareth@@valinux.com>
+ *
+ */
+
+#include "r128_context.h"
+#include "r128_lock.h"
+#include "r128_tex.h"
+
+#if DEBUG_LOCKING
+char *prevLockFile = NULL;
+int prevLockLine = 0;
+#endif
+
+
+/* Update the hardware state.  This is called if another context has
+ * grabbed the hardware lock, which includes the X server.  This
+ * function also updates the driver's window state after the X server
+ * moves, resizes or restacks a window -- the change will be reflected
+ * in the drawable position and clip rects.  Since the X server grabs
+ * the hardware lock when it changes the window state, this routine will
+ * automatically be called after such a change.
+ */
+void r128GetLock( r128ContextPtr rmesa, GLuint flags )
+{
+   __DRIdrawablePrivate *dPriv = rmesa->driDrawable;
+   __DRIscreenPrivate *sPriv = rmesa->driScreen;
+   R128SAREAPrivPtr sarea = rmesa->sarea;
+   int i;
+
+   drmGetLock( rmesa->driFd, rmesa->hHWContext, flags );
+
+   /* The window might have moved, so we might need to get new clip
+    * rects.
+    *
+    * NOTE: This releases and regrabs the hw lock to allow the X server
+    * to respond to the DRI protocol request for new drawable info.
+    * Since the hardware state depends on having the latest drawable
+    * clip rects, all state checking must be done _after_ this call.
+    */
+   XMESA_VALIDATE_DRAWABLE_INFO( rmesa->display, sPriv, dPriv );
+
+   if ( rmesa->lastStamp != dPriv->lastStamp ) {
+      rmesa->lastStamp = dPriv->lastStamp;
+      rmesa->new_state |= R128_NEW_WINDOW | R128_NEW_CLIP;
+      rmesa->SetupDone = 0;
+   }
+
+   rmesa->dirty |= R128_UPLOAD_CONTEXT | R128_UPLOAD_CLIPRECTS;
+
+   rmesa->numClipRects = dPriv->numClipRects;
+   rmesa->pClipRects = dPriv->pClipRects;
+
+   if ( sarea->ctxOwner != rmesa->hHWContext ) {
+      sarea->ctxOwner = rmesa->hHWContext;
+      rmesa->dirty = R128_UPLOAD_ALL;
+   }
+
+   for ( i = 0 ; i < rmesa->lastTexHeap ; i++ ) {
+      if ( sarea->texAge[i] != rmesa->lastTexAge[i] ) {
+	 r128AgeTextures( rmesa, i );
+      }
+   }
+}
+@
+
+
+1.1.9.1
+log
+@OpenBSD just has imported exactly this tree into their vendor branch,
+called the same tag, in XF4/xc
+This is, apparently, the last XFree86 snapshot before the licence change
+(ie, addition of the advertising clause)
+
+Since the developers don't see any problems with that, and we would like
+to integrate improvements done by the remaining one or two (or so) XFree86
+developers (j/k), this prepares enabling us to update X-Window in the future.
+@
+text
+@d1 1
+a1 1
+/* $XFree86: xc/lib/GL/mesa/src/drv/r128/r128_lock.c,v 1.6 2003/09/28 20:15:20 alanh Exp $ */
+a37 1
+#include "r128_state.h"
+a44 30
+/* Turn on/off page flipping according to the flags in the sarea:
+ */
+static void
+r128UpdatePageFlipping( r128ContextPtr rmesa )
+{
+   int use_back;
+
+   rmesa->doPageFlip = rmesa->sarea->pfAllowPageFlip;
+
+   use_back = (rmesa->glCtx->Color._DrawDestMask == BACK_LEFT_BIT);
+   use_back ^= (rmesa->sarea->pfCurrentPage == 1);
+
+   if ( R128_DEBUG & DEBUG_VERBOSE_API )
+      fprintf(stderr, "%s allow %d current %d\n", __FUNCTION__, 
+	      rmesa->doPageFlip,
+	      rmesa->sarea->pfCurrentPage );
+
+   if ( use_back ) {
+	 rmesa->drawOffset = rmesa->r128Screen->backOffset;
+	 rmesa->drawPitch  = rmesa->r128Screen->backPitch;
+   } else {
+	 rmesa->drawOffset = rmesa->r128Screen->frontOffset;
+	 rmesa->drawPitch  = rmesa->r128Screen->frontPitch;
+   }
+
+   rmesa->setup.dst_pitch_offset_c = (((rmesa->drawPitch/8) << 21) |
+                                      (rmesa->drawOffset >> 5));
+   rmesa->new_state |= R128_NEW_WINDOW;
+}
+
+d70 1
+a70 1
+   DRI_VALIDATE_DRAWABLE_INFO( sPriv, dPriv );
+a72 1
+      r128UpdatePageFlipping( rmesa );
+d74 2
+a75 2
+      rmesa->new_state |= R128_NEW_CLIP;
+      rmesa->SetupNewInputs = ~0;
+d88 4
+a91 2
+   for ( i = 0 ; i < rmesa->nr_heaps ; i++ ) {
+      DRI_AGE_TEXTURES( rmesa->texture_heaps[i] );
+@
+
+
+1.1.1.1
+log
+@Import OpenBSD 3.3 XF4 repository from CTM 3132 the first time
+This finalizes starting an OpenBSD-mirabile (aka MirBSD) repository.
+
+### MirBSD is:
+# Copyright (c) 1982-2003 by Thorsten "mirabile" Glaser <x86@@ePost.de>
+# Copyright © 1968-2003  The authors of And contributors to UNIX®, the
+#       C Language, BSD/Berkeley Unix; 386BSD, NetBSD 1.1 and OpenBSD.
+#
+# Anyone who obtained a copy of this work is hereby permitted to freely use,
+# distribute, modify, merge, sublicence, give away or sell it as long as the
+# authors are given due credit and the following notice is retained:
+#
+# This work is provided "as is", with no explicit or implicit warranty what-
+# soever. Use it only at your own risk. In no event may an author or contri-
+# butor be held liable for any damage, directly or indirectly, that origina-
+# ted through or is caused by creation or modification of this work.
+
+MirBSD is my private tree. MirBSD does not differ very much from OpenBSD
+and intentionally tracks OpenBSD. That's why it _is_ OpenBSD, just not the
+official one. It's like with DarrenBSD.
+
+At time of this writing, no advertising for MirBSD must be done,
+because the advertising clause has not yet been sorted out.
+
+http://templeofhate.com/tglaser/MirBSD/index.php
+@
+text
+@@
+
+
+1.1.1.2
+log
+@The X-Windowing System
+
+Import XFree86 4.3 from OpenBSD by CTM, in the hope it's stable
+@
+text
+@d1 1
+a1 1
+/* $XFree86: xc/lib/GL/mesa/src/drv/r128/r128_lock.c,v 1.5 2002/10/30 12:51:38 alanh Exp $ */
+d70 1
+a70 1
+   DRI_VALIDATE_DRAWABLE_INFO( rmesa->display, sPriv, dPriv );
+d75 1
+a75 1
+      rmesa->SetupNewInputs = ~0;
+d89 1
+a89 1
+      if ( rmesa->texHeap[i] && sarea->texAge[i] != rmesa->lastTexAge[i] ) {
+@
+
+
+1.1.1.3
+log
+@That's what OpenBSD will, probably, ship as XF4 in 3.5
+their last sync against XFree86 4.3-current has been
+imported into our vendor branch, too
+@
+text
+@d1 1
+a1 1
+/* $XFree86: xc/lib/GL/mesa/src/drv/r128/r128_lock.c,v 1.6 2003/09/28 20:15:20 alanh Exp $ */
+a37 1
+#include "r128_state.h"
+a44 30
+/* Turn on/off page flipping according to the flags in the sarea:
+ */
+static void
+r128UpdatePageFlipping( r128ContextPtr rmesa )
+{
+   int use_back;
+
+   rmesa->doPageFlip = rmesa->sarea->pfAllowPageFlip;
+
+   use_back = (rmesa->glCtx->Color._DrawDestMask == BACK_LEFT_BIT);
+   use_back ^= (rmesa->sarea->pfCurrentPage == 1);
+
+   if ( R128_DEBUG & DEBUG_VERBOSE_API )
+      fprintf(stderr, "%s allow %d current %d\n", __FUNCTION__, 
+	      rmesa->doPageFlip,
+	      rmesa->sarea->pfCurrentPage );
+
+   if ( use_back ) {
+	 rmesa->drawOffset = rmesa->r128Screen->backOffset;
+	 rmesa->drawPitch  = rmesa->r128Screen->backPitch;
+   } else {
+	 rmesa->drawOffset = rmesa->r128Screen->frontOffset;
+	 rmesa->drawPitch  = rmesa->r128Screen->frontPitch;
+   }
+
+   rmesa->setup.dst_pitch_offset_c = (((rmesa->drawPitch/8) << 21) |
+                                      (rmesa->drawOffset >> 5));
+   rmesa->new_state |= R128_NEW_WINDOW;
+}
+
+d70 1
+a70 1
+   DRI_VALIDATE_DRAWABLE_INFO( sPriv, dPriv );
+a72 1
+      r128UpdatePageFlipping( rmesa );
+d74 1
+a74 1
+      rmesa->new_state |= R128_NEW_CLIP;
+d88 4
+a91 2
+   for ( i = 0 ; i < rmesa->nr_heaps ; i++ ) {
+      DRI_AGE_TEXTURES( rmesa->texture_heaps[i] );
+@
+
+

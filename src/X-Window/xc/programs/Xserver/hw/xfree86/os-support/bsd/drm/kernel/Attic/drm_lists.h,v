@@ -1,0 +1,406 @@
+head	1.2;
+access;
+symbols
+	MIRBSD_7quater:1.1.1.2
+	cvs-200401291925:1.1.1.2
+	MIRBSD_7_ALPHA:1.1.1.2.0.4
+	MIRBSD_7:1.1.1.2.0.2
+	MIRBSD_7ter:1.1.1.2
+	cvs-20011091815:1.1.1.2
+	cvs-200309162130:1.1.1.2
+	cvs-200308302005:1.1.1.2
+	ctmx-0387:1.1.1.2
+	ctmx-0384:1.1.1.2
+	MIRBSD_5:1.1.1.2
+	ctmx-0375:1.1.1.2
+	ctmx-0373:1.1.1.2
+	ctm-0371:1.1.1.2
+	ctm-0370:1.1.1.2
+	MIRBSD_4:1.1.1.2
+	ctm-0363:1.1.1.2
+	ctm-0359:1.1.1.2
+	ctm-0349:1.1.1.1
+	openbsd:1.1.1;
+locks; strict;
+comment	@ * @;
+
+
+1.2
+date	2004.03.02.20.17.25;	author tg;	state dead;
+branches;
+next	1.1;
+
+1.1
+date	2003.03.22.20.08.32;	author tg;	state Exp;
+branches
+	1.1.1.1;
+next	;
+
+1.1.1.1
+date	2003.03.22.20.08.32;	author tg;	state Exp;
+branches;
+next	1.1.1.2;
+
+1.1.1.2
+date	2003.04.08.18.37.30;	author tg;	state Exp;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.2
+log
+@semi-automatic merge and whitespace adjustment of OpenBSD XF4 subtree
+@
+text
+@/* drm_lists.h -- Buffer list handling routines -*- linux-c -*-
+ * Created: Mon Apr 19 20:54:22 1999 by faith@@valinux.com
+ *
+ * Copyright 1999 Precision Insight, Inc., Cedar Park, Texas.
+ * Copyright 2000 VA Linux Systems, Inc., Sunnyvale, California.
+ * All Rights Reserved.
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a
+ * copy of this software and associated documentation files (the "Software"),
+ * to deal in the Software without restriction, including without limitation
+ * the rights to use, copy, modify, merge, publish, distribute, sublicense,
+ * and/or sell copies of the Software, and to permit persons to whom the
+ * Software is furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice (including the next
+ * paragraph) shall be included in all copies or substantial portions of the
+ * Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL
+ * VA LINUX SYSTEMS AND/OR ITS SUPPLIERS BE LIABLE FOR ANY CLAIM, DAMAGES OR
+ * OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE,
+ * ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR
+ * OTHER DEALINGS IN THE SOFTWARE.
+ *
+ * Authors:
+ *    Rickard E. (Rik) Faith <faith@@valinux.com>
+ *    Gareth Hughes <gareth@@valinux.com>
+ */
+
+#define __NO_VERSION__
+#include "drmP.h"
+
+#if __HAVE_DMA_WAITLIST
+
+int DRM(waitlist_create)(drm_waitlist_t *bl, int count)
+{
+	if (bl->count)
+		DRM_OS_RETURN( EINVAL );
+
+	bl->bufs       = DRM(alloc)((bl->count + 2) * sizeof(*bl->bufs),
+				    DRM_MEM_BUFLISTS);
+
+	if(!bl->bufs) DRM_OS_RETURN(ENOMEM);
+
+	bl->count      = count;
+	bl->rp	       = bl->bufs;
+	bl->wp	       = bl->bufs;
+	bl->end	       = &bl->bufs[bl->count+1];
+	DRM_OS_SPININIT( bl->write_lock, "writelock" );
+	DRM_OS_SPININIT( bl->read_lock, "readlock" );
+	return 0;
+}
+
+int DRM(waitlist_destroy)(drm_waitlist_t *bl)
+{
+	if (bl->rp != bl->wp)
+		DRM_OS_RETURN( EINVAL );
+	if (bl->bufs) DRM(free)(bl->bufs,
+				(bl->count + 2) * sizeof(*bl->bufs),
+				DRM_MEM_BUFLISTS);
+	bl->count = 0;
+	bl->bufs  = NULL;
+	bl->rp	  = NULL;
+	bl->wp	  = NULL;
+	bl->end	  = NULL;
+	return 0;
+}
+
+int DRM(waitlist_put)(drm_waitlist_t *bl, drm_buf_t *buf)
+{
+	int	      left;
+	int		s;
+	left = DRM_LEFTCOUNT(bl);
+	if (!left) {
+		DRM_ERROR("Overflow while adding buffer %d from pid %d\n",
+			  buf->idx, buf->pid);
+		DRM_OS_RETURN( EINVAL );
+	}
+#if __HAVE_DMA_HISTOGRAM
+	getnanotime(&buf->time_queued);
+#endif
+	buf->list	 = DRM_LIST_WAIT;
+
+	DRM_OS_SPINLOCK(&bl->write_lock);
+	s = spldrm();
+	*bl->wp = buf;
+	if (++bl->wp >= bl->end) bl->wp = bl->bufs;
+	splx(s);
+	DRM_OS_SPINUNLOCK(&bl->write_lock);
+
+	return 0;
+}
+
+drm_buf_t *DRM(waitlist_get)(drm_waitlist_t *bl)
+{
+	drm_buf_t     *buf;
+	int		s;
+
+	DRM_OS_SPINLOCK(&bl->read_lock);
+	s = spldrm();
+	buf = *bl->rp;
+	if (bl->rp == bl->wp) {
+		splx(s);
+		DRM_OS_SPINUNLOCK(&bl->read_lock);
+		return NULL;
+	}				     
+	if (++bl->rp >= bl->end) bl->rp = bl->bufs;
+	splx(s);
+	DRM_OS_SPINUNLOCK(&bl->read_lock);
+	
+	return buf;
+}
+
+#endif /* __HAVE_DMA_WAITLIST */
+
+
+#if __HAVE_DMA_FREELIST
+
+int DRM(freelist_create)(drm_freelist_t *bl, int count)
+{
+	atomic_set(&bl->count, 0);
+	bl->next      = NULL;
+	bl->waiting = 0;
+
+	bl->low_mark  = 0;
+	bl->high_mark = 0;
+	atomic_set(&bl->wfh,   0);
+	DRM_OS_SPININIT( bl->lock, "freelistlock" );
+	++bl->initialized;
+	return 0;
+}
+
+int DRM(freelist_destroy)(drm_freelist_t *bl)
+{
+	atomic_set(&bl->count, 0);
+	bl->next = NULL;
+	return 0;
+}
+
+int DRM(freelist_put)(drm_device_t *dev, drm_freelist_t *bl, drm_buf_t *buf)
+{
+	drm_device_dma_t *dma  = dev->dma;
+
+	if (!dma) {
+		DRM_ERROR("No DMA support\n");
+		return 1;
+	}
+
+	if (buf->waiting || buf->pending || buf->list == DRM_LIST_FREE) {
+		DRM_ERROR("Freed buffer %d: w%d, p%d, l%d\n",
+			  buf->idx, buf->waiting, buf->pending, buf->list);
+	}
+	if (!bl) return 1;
+#if __HAVE_DMA_HISTOGRAM
+	getnanotime(&buf->time_queued);
+	DRM(histogram_compute)(dev, buf);
+#endif
+	buf->list	= DRM_LIST_FREE;
+
+	DRM_OS_SPINLOCK( &bl->lock );
+	buf->next	= bl->next;
+	bl->next	= buf;
+	DRM_OS_SPINUNLOCK( &bl->lock );
+
+	atomic_inc(&bl->count);
+	if (atomic_read(&bl->count) > dma->buf_count) {
+		DRM_ERROR("%ld of %d buffers free after addition of %d\n",
+			  (unsigned long)atomic_read(&bl->count), 
+				dma->buf_count, buf->idx);
+		return 1;
+	}
+				/* Check for high water mark */
+	if (atomic_read(&bl->wfh) && atomic_read(&bl->count)>=bl->high_mark) {
+		atomic_set(&bl->wfh, 0);
+		DRM_OS_WAKEUP_INT(&bl->waiting);
+	}
+	return 0;
+}
+
+static drm_buf_t *DRM(freelist_try)(drm_freelist_t *bl)
+{
+	drm_buf_t	  *buf;
+
+	if (!bl) return NULL;
+
+				/* Get buffer */
+	DRM_OS_SPINLOCK(&bl->lock);
+	if (!bl->next) {
+		DRM_OS_SPINUNLOCK(&bl->lock);
+		return NULL;
+	}
+	buf	  = bl->next;
+	bl->next  = bl->next->next;
+	DRM_OS_SPINUNLOCK(&bl->lock);
+
+	atomic_dec(&bl->count);
+	buf->next = NULL;
+	buf->list = DRM_LIST_NONE;
+	if (buf->waiting || buf->pending) {
+		DRM_ERROR("Free buffer %d: w%d, p%d, l%d\n",
+			  buf->idx, buf->waiting, buf->pending, buf->list);
+	}
+
+	return buf;
+}
+
+drm_buf_t *DRM(freelist_get)(drm_freelist_t *bl, int block)
+{
+	drm_buf_t	  *buf	= NULL;
+	int	error;
+
+	if (!bl || !bl->initialized) return NULL;
+
+				/* Check for low water mark */
+	if (atomic_read(&bl->count) <= bl->low_mark) /* Became low */
+		atomic_set(&bl->wfh, 1);
+	if (atomic_read(&bl->wfh)) {
+		if (block) {
+			for (;;) {
+				if (!atomic_read(&bl->wfh)
+				    && (buf = DRM(freelist_try(bl)))) break;
+				error = tsleep(&bl->waiting, PZERO|PCATCH,
+					       "drmfg", 0);
+				if (error)
+					break;
+			}
+		}
+		return buf;
+	}
+
+	return DRM(freelist_try)(bl);
+}
+
+#endif /* __HAVE_DMA_FREELIST */
+@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@@
+
+
+1.1.1.1
+log
+@Import OpenBSD 3.3 XF4 repository from CTM 3132 the first time
+This finalizes starting an OpenBSD-mirabile (aka MirBSD) repository.
+
+### MirBSD is:
+# Copyright (c) 1982-2003 by Thorsten "mirabile" Glaser <x86@@ePost.de>
+# Copyright © 1968-2003  The authors of And contributors to UNIX®, the
+#       C Language, BSD/Berkeley Unix; 386BSD, NetBSD 1.1 and OpenBSD.
+#
+# Anyone who obtained a copy of this work is hereby permitted to freely use,
+# distribute, modify, merge, sublicence, give away or sell it as long as the
+# authors are given due credit and the following notice is retained:
+#
+# This work is provided "as is", with no explicit or implicit warranty what-
+# soever. Use it only at your own risk. In no event may an author or contri-
+# butor be held liable for any damage, directly or indirectly, that origina-
+# ted through or is caused by creation or modification of this work.
+
+MirBSD is my private tree. MirBSD does not differ very much from OpenBSD
+and intentionally tracks OpenBSD. That's why it _is_ OpenBSD, just not the
+official one. It's like with DarrenBSD.
+
+At time of this writing, no advertising for MirBSD must be done,
+because the advertising clause has not yet been sorted out.
+
+http://templeofhate.com/tglaser/MirBSD/index.php
+@
+text
+@@
+
+
+1.1.1.2
+log
+@The X-Windowing System
+
+Import XFree86 4.3 from OpenBSD by CTM, in the hope it's stable
+@
+text
+@d32 1
+d40 1
+a40 1
+		return DRM_ERR( EINVAL );
+d45 1
+a45 3
+	if(!bl->bufs) return DRM_ERR(ENOMEM);
+
+	bzero(bl->bufs, sizeof(*bl->bufs));
+d51 2
+a52 2
+	DRM_SPININIT( bl->write_lock, "writelock" );
+	DRM_SPININIT( bl->read_lock, "readlock" );
+d59 1
+a59 1
+		return DRM_ERR( EINVAL );
+a67 2
+	DRM_SPINUNINIT( bl->write_lock );
+	DRM_SPINUNINIT( bl->read_lock );
+d79 1
+a79 1
+		return DRM_ERR( EINVAL );
+d86 1
+a86 1
+	DRM_SPINLOCK(&bl->write_lock);
+d91 1
+a91 1
+	DRM_SPINUNLOCK(&bl->write_lock);
+d101 1
+a101 1
+	DRM_SPINLOCK(&bl->read_lock);
+d106 1
+a106 1
+		DRM_SPINUNLOCK(&bl->read_lock);
+d111 1
+a111 1
+	DRM_SPINUNLOCK(&bl->read_lock);
+d130 1
+a130 1
+	DRM_SPININIT( bl->lock, "freelistlock" );
+a138 1
+	DRM_SPINUNINIT( bl->lock );
+d162 1
+a162 1
+	DRM_SPINLOCK( &bl->lock );
+d165 1
+a165 1
+	DRM_SPINUNLOCK( &bl->lock );
+d177 1
+a177 1
+		DRM_WAKEUP_INT(&bl->waiting);
+d189 1
+a189 1
+	DRM_SPINLOCK(&bl->lock);
+d191 1
+a191 1
+		DRM_SPINUNLOCK(&bl->lock);
+d196 1
+a196 1
+	DRM_SPINUNLOCK(&bl->lock);
+@
+

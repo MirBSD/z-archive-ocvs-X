@@ -1,0 +1,345 @@
+head	1.1;
+branch	1.1.1;
+access;
+symbols
+	tg-mergetmp-2:1.1.1.2
+	cvs-200410241530:1.1.1.2
+	cvs-200410012000:1.1.1.2
+	cvs-200407221130:1.1.1.2
+	cvs-200407141120:1.1.1.2
+	cvs-200406231010:1.1.1.2
+	MIRBSD_7quater:1.1.1.1
+	cvs-200405271510:1.1.1.2
+	XFree86_4_4_0:1.1.9.1
+	cvs-200403021700:1.1.1.2
+	XFREE86_20040213:1.1.9.1
+	xc:1.1.9
+	cvs-200401291925:1.1.1.1
+	MIRBSD_7_ALPHA:1.1.1.1.0.4
+	MIRBSD_7:1.1.1.1.0.2
+	MIRBSD_7ter:1.1.1.1
+	cvs-20011091815:1.1.1.1
+	cvs-200309162130:1.1.1.1
+	cvs-200308302005:1.1.1.1
+	ctmx-0387:1.1.1.1
+	ctmx-0384:1.1.1.1
+	MIRBSD_5:1.1.1.1
+	ctmx-0375:1.1.1.1
+	ctmx-0373:1.1.1.1
+	ctm-0371:1.1.1.1
+	ctm-0370:1.1.1.1
+	MIRBSD_4:1.1.1.1
+	ctm-0363:1.1.1.1
+	ctm-0359:1.1.1.1
+	ctm-0349:1.1.1.1
+	openbsd:1.1.1;
+locks; strict;
+comment	@ * @;
+
+
+1.1
+date	2003.03.22.20.08.40;	author tg;	state Exp;
+branches
+	1.1.1.1
+	1.1.9.1;
+next	;
+
+1.1.1.1
+date	2003.03.22.20.08.40;	author tg;	state Exp;
+branches;
+next	1.1.1.2;
+
+1.1.1.2
+date	2004.03.02.18.24.56;	author tg;	state Stab;
+branches;
+next	;
+
+1.1.9.1
+date	2004.02.14.19.25.10;	author tg;	state Exp;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@/* $XFree86: xc/programs/Xserver/hw/xfree86/os-support/bsdi/bsdi_video.c,v 3.9 2000/10/24 22:45:10 dawes Exp $ */
+/*
+ * Copyright 1992 by Rich Murphey <Rich@@Rice.edu>
+ * Copyright 1993 by David Wexelblat <dwex@@goblin.org>
+ *
+ * Permission to use, copy, modify, distribute, and sell this software and its
+ * documentation for any purpose is hereby granted without fee, provided that
+ * the above copyright notice appear in all copies and that both that
+ * copyright notice and this permission notice appear in supporting
+ * documentation, and that the names of Rich Murphey and David Wexelblat 
+ * not be used in advertising or publicity pertaining to distribution of 
+ * the software without specific, written prior permission.  Rich Murphey and
+ * David Wexelblat make no representations about the suitability of this 
+ * software for any purpose.  It is provided "as is" without express or 
+ * implied warranty.
+ *
+ * RICH MURPHEY AND DAVID WEXELBLAT DISCLAIM ALL WARRANTIES WITH REGARD TO 
+ * THIS SOFTWARE, INCLUDING ALL IMPLIED WARRANTIES OF MERCHANTABILITY AND 
+ * FITNESS, IN NO EVENT SHALL RICH MURPHEY OR DAVID WEXELBLAT BE LIABLE FOR 
+ * ANY SPECIAL, INDIRECT OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES WHATSOEVER 
+ * RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN ACTION OF 
+ * CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF OR IN 
+ * CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+ *
+ */
+/* $XConsortium: bsdi_video.c /main/4 1996/02/21 17:51:22 kaleb $ */
+
+#include "X.h"
+#include "input.h"
+#include "scrnintstr.h"
+
+#include "xf86.h"
+#include "xf86Priv.h"
+#include "xf86_OSlib.h"
+#include "xf86OSpriv.h"
+
+#ifndef MAP_FAILED
+#define MAP_FAILED ((void *)-1)
+#endif
+
+/***************************************************************************/
+/* Video Memory Mapping section                                            */
+/***************************************************************************/
+
+pointer
+xf86MapVidMem(int ScreenNum, int Flags, unsigned long Base, unsigned long Size)
+{
+        pointer base;
+
+	if (Base >= 0xA0000)
+	{
+		base = mmap(0, Size, PROT_READ|PROT_WRITE, MAP_FILE,
+			     xf86Info.screenFd,
+			     Base - 0xA0000);
+		if (base == MAP_FAILED)
+		{
+		    FatalError("xf86MapVidMem: Could not mmap /dev/vga (%s)\n",
+			       strerror(errno));
+		}
+		return(base);
+	}
+	else /* Base < 0xA0000 */
+	{
+	    FatalError("xf86MapVidMem: cannot mmap /dev/vga below 0xA0000\n");
+	}
+}
+
+void
+xf86UnMapVidMem(int ScreenNum, pointer Base, unsigned long Size)
+{
+	munmap((caddr_t)Base, Size);
+}
+
+Bool
+xf86LinearVidMem()
+{
+	return(TRUE);
+}
+
+/***************************************************************************/
+/* I/O Permissions section                                                 */
+/***************************************************************************/
+
+/*
+ * BSDI has a single system-wide TSS I/O bitmap that covers ports up to
+ * 0xFFFF.  By default, the TSS has ports 0x3B0-0x3DF enabled.
+ *
+ * It also allows the IOPL to be enabled or disabled on a per-process
+ * basis.  Here, we use the IOPL only.
+ */
+
+static Bool ExtendedEnabled = FALSE;
+
+void
+xf86EnableIO()
+{
+	if (ExtendedEnabled)
+		return;
+
+	if (ioctl(xf86Info.consoleFd, PCCONENABIOPL, 0) < 0)
+	{
+		FatalError("%s: Failed to set IOPL for extended I/O\n",
+			   "xf86EnableIOPorts");
+	}
+	ExtendedEnabled = TRUE;
+}
+
+void
+xf86DisableIO()
+{
+	if (!ExtendedEnabled)
+		return;
+
+	ioctl(xf86Info.consoleFd, PCCONDISABIOPL, 0);
+	ExtendedEnabled = FALSE;
+}
+
+
+/***************************************************************************/
+/* Interrupt Handling section                                              */
+/***************************************************************************/
+
+Bool
+xf86DisableInterrupts()
+{
+	if (!ExtendedEnabled)
+	{
+		if (ioctl(xf86Info.consoleFd, PCCONENABIOPL, 0) < 0)
+		{
+			return(FALSE);
+		}
+	}
+
+#ifdef __GNUC__
+	__asm__ __volatile__("cli");
+#else 
+	asm("cli");
+#endif /* __GNUC__ */
+
+	if (!ExtendedEnabled)
+	{
+		ioctl(xf86Info.consoleFd, PCCONDISABIOPL, 0);
+	}
+
+	return(TRUE);
+}
+
+void
+xf86EnableInterrupts()
+{
+	if (!ExtendedEnabled)
+	{
+		ioctl(xf86Info.consoleFd, PCCONENABIOPL, 0);
+	}
+
+#ifdef __GNUC__
+	__asm__ __volatile__("sti");
+#else 
+	asm("sti");
+#endif /* __GNUC__ */
+
+	if (!ExtendedEnabled)
+	{
+		ioctl(xf86Info.consoleFd, PCCONDISABIOPL, 0);
+	}
+
+	return;
+}
+
+void
+xf86MapReadSideEffects(int ScreenNum, int Flags, pointer Base,
+	unsigned long Size)
+{
+}
+
+Bool
+xf86CheckMTRR(int ScreenNum)
+{
+	return FALSE;
+}
+
+@
+
+
+1.1.9.1
+log
+@OpenBSD just has imported exactly this tree into their vendor branch,
+called the same tag, in XF4/xc
+This is, apparently, the last XFree86 snapshot before the licence change
+(ie, addition of the advertising clause)
+
+Since the developers don't see any problems with that, and we would like
+to integrate improvements done by the remaining one or two (or so) XFree86
+developers (j/k), this prepares enabling us to update X-Window in the future.
+@
+text
+@d1 1
+a1 1
+/* $XFree86: xc/programs/Xserver/hw/xfree86/os-support/bsdi/bsdi_video.c,v 3.11 2004/01/25 01:12:24 dawes Exp $ */
+d50 1
+a50 6
+	/* just try the mapping, and either it will work, or not */
+	base = mmap(0, Size,
+		    (Flags & VIDMEM_READONLY) ?
+		     PROT_READ : (PROT_READ | PROT_WRITE),
+		     MAP_FILE, xf86Info.screenFd, Base - 0xA0000);
+	if (base == MAP_FAILED)
+d52 13
+a64 2
+	    FatalError("xf86MapVidMem: Could not mmap /dev/vga (%s) at 0x%x\n",
+		       strerror(errno), Base);
+a65 1
+	return(base);
+@
+
+
+1.1.1.1
+log
+@Import OpenBSD 3.3 XF4 repository from CTM 3132 the first time
+This finalizes starting an OpenBSD-mirabile (aka MirBSD) repository.
+
+### MirBSD is:
+# Copyright (c) 1982-2003 by Thorsten "mirabile" Glaser <x86@@ePost.de>
+# Copyright © 1968-2003  The authors of And contributors to UNIX®, the
+#       C Language, BSD/Berkeley Unix; 386BSD, NetBSD 1.1 and OpenBSD.
+#
+# Anyone who obtained a copy of this work is hereby permitted to freely use,
+# distribute, modify, merge, sublicence, give away or sell it as long as the
+# authors are given due credit and the following notice is retained:
+#
+# This work is provided "as is", with no explicit or implicit warranty what-
+# soever. Use it only at your own risk. In no event may an author or contri-
+# butor be held liable for any damage, directly or indirectly, that origina-
+# ted through or is caused by creation or modification of this work.
+
+MirBSD is my private tree. MirBSD does not differ very much from OpenBSD
+and intentionally tracks OpenBSD. That's why it _is_ OpenBSD, just not the
+official one. It's like with DarrenBSD.
+
+At time of this writing, no advertising for MirBSD must be done,
+because the advertising clause has not yet been sorted out.
+
+http://templeofhate.com/tglaser/MirBSD/index.php
+@
+text
+@@
+
+
+1.1.1.2
+log
+@That's what OpenBSD will, probably, ship as XF4 in 3.5
+their last sync against XFree86 4.3-current has been
+imported into our vendor branch, too
+@
+text
+@d1 1
+a1 1
+/* $XFree86: xc/programs/Xserver/hw/xfree86/os-support/bsdi/bsdi_video.c,v 3.11 2004/01/25 01:12:24 dawes Exp $ */
+d50 1
+a50 6
+	/* just try the mapping, and either it will work, or not */
+	base = mmap(0, Size,
+		    (Flags & VIDMEM_READONLY) ?
+		     PROT_READ : (PROT_READ | PROT_WRITE),
+		     MAP_FILE, xf86Info.screenFd, Base - 0xA0000);
+	if (base == MAP_FAILED)
+d52 13
+a64 2
+	    FatalError("xf86MapVidMem: Could not mmap /dev/vga (%s) at 0x%x\n",
+		       strerror(errno), Base);
+a65 1
+	return(base);
+@
+

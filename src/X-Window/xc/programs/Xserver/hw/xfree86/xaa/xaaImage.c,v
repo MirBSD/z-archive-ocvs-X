@@ -1,0 +1,662 @@
+head	1.1;
+branch	1.1.1;
+access;
+symbols
+	tg-mergetmp-2:1.1.1.2
+	cvs-200410241530:1.1.1.2
+	cvs-200410012000:1.1.1.2
+	cvs-200407221130:1.1.1.2
+	cvs-200407141120:1.1.1.2
+	cvs-200406231010:1.1.1.2
+	MIRBSD_7quater:1.1.1.1
+	cvs-200405271510:1.1.1.2
+	XFree86_4_4_0:1.1.9.1
+	cvs-200403021700:1.1.1.2
+	XFREE86_20040213:1.1.9.1
+	xc:1.1.9
+	cvs-200401291925:1.1.1.1
+	MIRBSD_7_ALPHA:1.1.1.1.0.4
+	MIRBSD_7:1.1.1.1.0.2
+	MIRBSD_7ter:1.1.1.1
+	cvs-20011091815:1.1.1.1
+	cvs-200309162130:1.1.1.1
+	cvs-200308302005:1.1.1.1
+	ctmx-0387:1.1.1.1
+	ctmx-0384:1.1.1.1
+	MIRBSD_5:1.1.1.1
+	ctmx-0375:1.1.1.1
+	ctmx-0373:1.1.1.1
+	ctm-0371:1.1.1.1
+	ctm-0370:1.1.1.1
+	MIRBSD_4:1.1.1.1
+	ctm-0363:1.1.1.1
+	ctm-0359:1.1.1.1
+	ctm-0349:1.1.1.1
+	openbsd:1.1.1;
+locks; strict;
+comment	@ * @;
+
+
+1.1
+date	2003.03.22.20.09.03;	author tg;	state Exp;
+branches
+	1.1.1.1
+	1.1.9.1;
+next	;
+
+1.1.1.1
+date	2003.03.22.20.09.03;	author tg;	state Exp;
+branches;
+next	1.1.1.2;
+
+1.1.1.2
+date	2004.03.02.18.27.06;	author tg;	state Stab;
+branches;
+next	;
+
+1.1.9.1
+date	2004.02.14.19.25.44;	author tg;	state Exp;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@/* $XFree86: xc/programs/Xserver/hw/xfree86/xaa/xaaImage.c,v 1.20 2000/09/25 23:56:14 mvojkovi Exp $ */
+
+#include "misc.h"
+#include "xf86.h"
+#include "xf86_ansic.h"
+#include "xf86_OSproc.h"
+#include "servermd.h"
+
+#include "X.h"
+#include "scrnintstr.h"
+#include "mi.h"
+#include "pixmapstr.h"
+#include "xf86str.h"
+#include "xaa.h"
+#include "xaalocal.h"
+
+void XAAMoveDWORDS_FixedBase(
+   register CARD32* dest,
+   register CARD32* src,
+   register int dwords )
+{
+     while(dwords & ~0x03) {
+	 *dest = *src;
+	 *dest = *(src + 1);
+	 *dest = *(src + 2);
+	 *dest = *(src + 3);	
+	 dwords -= 4;
+	 src += 4;
+     }
+
+     if(!dwords) return;
+     *dest = *src;
+     if(dwords == 1) return;
+     *dest = *(src + 1);
+     if(dwords == 2) return;
+     *dest = *(src + 2);
+}
+
+void XAAMoveDWORDS(
+   register CARD32* dest,
+   register CARD32* src,
+   register int dwords )
+{
+     while(dwords & ~0x03) {
+	*dest = *src;
+	*(dest + 1) = *(src + 1);
+	*(dest + 2) = *(src + 2);
+	*(dest + 3) = *(src + 3);
+	src += 4;
+	dest += 4;
+	dwords -= 4;
+     }	
+     if(!dwords) return;
+     *dest = *src;
+     if(dwords == 1) return;
+     *(dest + 1) = *(src + 1);
+     if(dwords == 2) return;
+     *(dest + 2) = *(src + 2);
+}
+
+void XAAMoveDWORDS_FixedSrc(
+   register CARD32* dest,
+   register CARD32* src,
+   register int dwords )
+{
+     while(dwords & ~0x03) {
+	*dest = *src;
+	*(dest + 1) = *src;
+	*(dest + 2) = *src;
+	*(dest + 3) = *src;
+	dest += 4;
+	dwords -= 4;
+     }	
+     if(!dwords) return;
+     *dest = *src;
+     if(dwords == 1) return;
+     *(dest + 1) = *src;
+     if(dwords == 2) return;
+     *(dest + 2) = *src;
+}
+
+static void
+XAAWritePixmap32To24(
+   ScrnInfoPtr pScrn,
+   int x, int y, int w, int h,
+   unsigned char *srcInit,	
+   int srcwidth,	/* bytes */
+   int rop,
+   unsigned int planemask,
+   int trans
+){
+    XAAInfoRecPtr infoRec = GET_XAAINFORECPTR_FROM_SCRNINFOPTR(pScrn);
+    int count, dwords = ((w * 3) + 3) >> 2;
+    CARD32 *src, *dst;
+    Bool PlusOne = FALSE;
+
+    if((infoRec->ImageWriteFlags & CPU_TRANSFER_PAD_QWORD) && 
+					((dwords * h) & 0x01)) {
+	PlusOne = TRUE;
+    }
+
+    (*infoRec->SetupForImageWrite)(pScrn, rop, planemask, trans, 24, 24);
+    (*infoRec->SubsequentImageWriteRect)(pScrn, x, y, w, h, 0);
+  
+    if(dwords > infoRec->ImageWriteRange) {
+	dst = (CARD32*)infoRec->ImageWriteBase;
+	while(h--) {
+	    src = (CARD32*)srcInit;
+  	    count = w;
+
+	    while(count >= 4) {
+		*dst = (src[0] & 0x00ffffff) | (src[1] << 24);
+		*dst = ((src[1] >> 8) & 0x0000ffff) | (src[2] << 16);
+		*dst = ((src[2] >> 16) & 0x000000ff) | (src[3] << 8);
+		src += 4;
+		count -= 4;
+	    }
+	    switch(count) {
+	    case 0:	break;
+	    case 1:	*dst = src[0];
+			break;
+	    case 2:	*dst = (src[0] & 0x00ffffff) | (src[1] << 24);
+			*dst = src[1] >> 8;
+			break;
+	    default:	*dst = (src[0] & 0x00ffffff) | (src[1] << 24);
+			*dst = ((src[1] >> 8) & 0x0000ffff) | (src[2] << 16);
+			*dst = src[2] >> 16;
+			break;
+	    }
+	    srcInit += srcwidth;
+	}
+    } else {
+	while(h--) {
+	    dst = (CARD32*)infoRec->ImageWriteBase;
+	    src = (CARD32*)srcInit;
+  	    count = w;
+
+	    while(count >= 4) {
+		dst[0] = (src[0] & 0x00ffffff) | (src[1] << 24);
+		dst[1] = ((src[1] >> 8) & 0x0000ffff) | (src[2] << 16);
+		dst[2] = ((src[2] >> 16) & 0x000000ff) | (src[3] << 8);
+		dst += 3;
+		src += 4;
+		count -= 4;
+	    }
+	    switch(count) {
+	    case 0:	break;
+	    case 1:	dst[0] = src[0];
+			break;
+	    case 2:	dst[0] = (src[0] & 0x00ffffff) | (src[1] << 24);
+			dst[1] = src[1] >> 8;
+			break;
+	    default:	dst[0] = (src[0] & 0x00ffffff) | (src[1] << 24);
+			dst[1] = ((src[1] >> 8) & 0x0000ffff) | (src[2] << 16);
+			dst[2] = src[2] >> 16;
+			break;
+	    }
+	    srcInit += srcwidth;
+	}
+    }
+
+    if(PlusOne) {
+	CARD32* base = (CARD32*)infoRec->ImageWriteBase;
+	*base = 0x00000000;
+    }
+
+    if(infoRec->ImageWriteFlags & SYNC_AFTER_IMAGE_WRITE)
+	(*infoRec->Sync)(pScrn);
+    else SET_SYNC_FLAG(infoRec);
+
+}
+
+void 
+XAAWritePixmap (
+   ScrnInfoPtr pScrn,
+   int x, int y, int w, int h,
+   unsigned char *src,	
+   int srcwidth,	/* bytes */
+   int rop,
+   unsigned int planemask,
+   int trans,
+   int bpp, int depth
+){
+    XAAInfoRecPtr infoRec;
+    int dwords, skipleft, Bpp; 
+    Bool beCareful, PlusOne;
+
+    if((bpp == 32) && (pScrn->bitsPerPixel == 24)) {
+	XAAWritePixmap32To24(pScrn, x, y, w, h, src, srcwidth, 
+						rop, planemask, trans);	
+	return;
+    }
+
+    infoRec = GET_XAAINFORECPTR_FROM_SCRNINFOPTR(pScrn);
+    beCareful = PlusOne = FALSE;
+    Bpp = bpp >> 3;
+
+    if((skipleft = (long)src & 0x03L)) {
+	if(!(infoRec->ImageWriteFlags & LEFT_EDGE_CLIPPING)) {
+	   skipleft = 0;
+	   beCareful = TRUE;
+	   goto BAD_ALIGNMENT;
+	}
+
+	if(Bpp == 3)
+	   skipleft = 4 - skipleft;
+	else
+	   skipleft /= Bpp;
+
+	if((x < skipleft) && !(infoRec->ImageWriteFlags &
+				 LEFT_EDGE_CLIPPING_NEGATIVE_X)) {
+	   skipleft = 0;
+	   beCareful = TRUE;
+	   goto BAD_ALIGNMENT;
+	}
+
+	x -= skipleft;	     
+	w += skipleft;
+	
+	if(Bpp == 3)
+	   src -= 3 * skipleft;  
+	else   /* is this Alpha friendly ? */
+	   src = (unsigned char*)((long)src & ~0x03L);     
+    }
+
+BAD_ALIGNMENT:
+
+    dwords = ((w * Bpp) + 3) >> 2;
+
+    if((infoRec->ImageWriteFlags & CPU_TRANSFER_PAD_QWORD) && 
+						((dwords * h) & 0x01)) {
+	PlusOne = TRUE;
+    } 
+		
+	
+    (*infoRec->SetupForImageWrite)(pScrn, rop, planemask, trans, bpp, depth);
+    (*infoRec->SubsequentImageWriteRect)(pScrn, x, y, w, h, skipleft);
+
+    if(beCareful) {
+	/* in cases with bad alignment we have to be careful not
+	   to read beyond the end of the source */
+	if(((x * Bpp) + (dwords << 2)) > srcwidth) h--;
+	else beCareful = FALSE;
+    }
+
+    if(dwords > infoRec->ImageWriteRange) {
+	while(h--) {
+	    XAAMoveDWORDS_FixedBase((CARD32*)infoRec->ImageWriteBase,
+		(CARD32*)src, dwords);
+	    src += srcwidth;
+	}
+	if(beCareful) {
+	   int shift = ((long)src & 0x03L) << 3;
+	   if(--dwords)
+		XAAMoveDWORDS_FixedBase((CARD32*)infoRec->ImageWriteBase,
+			(CARD32*)src, dwords);
+	   src = (unsigned char*)((long)(src + (dwords << 2)) & ~0x03L);
+	   *((CARD32*)infoRec->ImageWriteBase) = *((CARD32*)src) >> shift;
+	}
+    } else {
+	if(srcwidth == (dwords << 2)) {
+	   int decrement = infoRec->ImageWriteRange/dwords;
+
+	   while(h > decrement) {
+		XAAMoveDWORDS((CARD32*)infoRec->ImageWriteBase,
+	 		(CARD32*)src, dwords * decrement);
+		src += (srcwidth * decrement);
+		h -= decrement;
+	   }
+	   if(h) {
+		XAAMoveDWORDS((CARD32*)infoRec->ImageWriteBase,
+	 		(CARD32*)src, dwords * h);
+		if(beCareful) src += (srcwidth * h);
+	   }
+	} else {
+	    while(h--) {
+		XAAMoveDWORDS((CARD32*)infoRec->ImageWriteBase,
+	 		(CARD32*)src, dwords);
+		src += srcwidth;
+	    }
+	}
+
+	if(beCareful) {
+	    int shift = ((long)src & 0x03L) << 3;
+	    if(--dwords)
+		XAAMoveDWORDS((CARD32*)infoRec->ImageWriteBase,
+					(CARD32*)src, dwords);
+	    src = (unsigned char*)((long)(src + (dwords << 2)) & ~0x03L);
+     
+	    ((CARD32*)infoRec->ImageWriteBase)[dwords] = 
+			*((CARD32*)src) >> shift;
+	}
+    }
+
+    if(PlusOne) {
+	CARD32* base = (CARD32*)infoRec->ImageWriteBase;
+	*base = 0x00000000;
+    }
+
+    if(infoRec->ImageWriteFlags & SYNC_AFTER_IMAGE_WRITE)
+	(*infoRec->Sync)(pScrn);
+    else SET_SYNC_FLAG(infoRec);
+}
+
+
+void 
+XAAWritePixmapScanline (
+   ScrnInfoPtr pScrn,
+   int x, int y, int w, int h,
+   unsigned char *src,	
+   int srcwidth,	/* bytes */
+   int rop,
+   unsigned int planemask,
+   int trans,
+   int bpp, int depth
+){
+    XAAInfoRecPtr infoRec = GET_XAAINFORECPTR_FROM_SCRNINFOPTR(pScrn);
+    int dwords, skipleft, bufferNo = 0, Bpp = bpp >> 3; 
+    Bool beCareful = FALSE;
+    CARD32* base;
+
+    if((skipleft = (long)src & 0x03L)) {
+	if(!(infoRec->ScanlineImageWriteFlags & LEFT_EDGE_CLIPPING)) {
+	   skipleft = 0;
+	   beCareful = TRUE;
+	   goto BAD_ALIGNMENT;
+	}
+
+	if(Bpp == 3)
+	   skipleft = 4 - skipleft;
+	else
+	   skipleft /= Bpp;
+
+	if((x < skipleft) && !(infoRec->ScanlineImageWriteFlags &
+				 LEFT_EDGE_CLIPPING_NEGATIVE_X)) {
+	   skipleft = 0;
+	   beCareful = TRUE;
+	   goto BAD_ALIGNMENT;
+	}
+
+	x -= skipleft;	     
+	w += skipleft;
+	
+	if(Bpp == 3)
+	   src -= 3 * skipleft;  
+	else
+	   src = (unsigned char*)((long)src & ~0x03L);     
+    }
+
+BAD_ALIGNMENT:
+
+    dwords = ((w * Bpp) + 3) >> 2;
+
+    (*infoRec->SetupForScanlineImageWrite)(
+				pScrn, rop, planemask, trans, bpp, depth);
+    (*infoRec->SubsequentScanlineImageWriteRect)(pScrn, x, y, w, h, skipleft);
+
+    if(beCareful) {
+	/* in cases with bad alignment we have to be careful not
+	   to read beyond the end of the source */
+	if(((x * Bpp) + (dwords << 2)) > srcwidth) h--;
+	else beCareful = FALSE;
+    }
+
+    while(h--) {
+	base = (CARD32*)infoRec->ScanlineImageWriteBuffers[bufferNo];
+	XAAMoveDWORDS(base, (CARD32*)src, dwords);
+	(*infoRec->SubsequentImageWriteScanline)(pScrn, bufferNo++);
+	src += srcwidth;
+	if(bufferNo >= infoRec->NumScanlineImageWriteBuffers)
+	    bufferNo = 0;
+    }
+
+    if(beCareful) {
+	int shift = ((long)src & 0x03L) << 3;
+	base = (CARD32*)infoRec->ScanlineImageWriteBuffers[bufferNo];
+	if(--dwords)
+	    XAAMoveDWORDS(base,(CARD32*)src, dwords);
+	src = (unsigned char*)((long)(src + (dwords << 2)) & ~0x03L);
+     
+	base[dwords] = *((CARD32*)src) >> shift;
+	(*infoRec->SubsequentImageWriteScanline)(pScrn, bufferNo);
+    }
+
+    SET_SYNC_FLAG(infoRec);
+}
+
+
+void
+XAAPutImage(
+    DrawablePtr pDraw,
+    GCPtr       pGC,
+    int         depth, 
+    int 	x, 
+    int		y, 
+    int		w, 
+    int		h,
+    int         leftPad,
+    int         format,
+    char        *pImage
+){
+    XAAInfoRecPtr infoRec = GET_XAAINFORECPTR_FROM_GC(pGC);
+    int bpp = BitsPerPixel(depth);
+    Bool depthBug = FALSE;
+    if(!w || !h) return;
+
+    if(!REGION_NUM_RECTS(pGC->pCompositeClip))
+	return;
+
+    depthBug = XAA_DEPTH_BUG(pGC);
+
+    if(((format == ZPixmap) && infoRec->WritePixmap &&
+	     ((pDraw->bitsPerPixel == bpp) ||
+		((pDraw->bitsPerPixel == 24) &&  (bpp == 32) &&
+		(infoRec->WritePixmapFlags & CONVERT_32BPP_TO_24BPP))) &&
+	     CHECK_ROP(pGC,infoRec->WritePixmapFlags) &&
+	     CHECK_ROPSRC(pGC,infoRec->WritePixmapFlags) &&
+	     CHECK_PLANEMASK(pGC,infoRec->WritePixmapFlags) &&
+	     CHECK_NO_GXCOPY(pGC,infoRec->WritePixmapFlags)) ||
+       ((format == XYBitmap) && !depthBug && infoRec->WriteBitmap &&
+	     CHECK_ROP(pGC,infoRec->WriteBitmapFlags) &&
+	     CHECK_ROPSRC(pGC,infoRec->WriteBitmapFlags) &&
+	     CHECK_PLANEMASK(pGC,infoRec->WriteBitmapFlags) &&
+	     CHECK_COLORS(pGC,infoRec->WriteBitmapFlags) &&
+	     !(infoRec->WriteBitmapFlags & TRANSPARENCY_ONLY)) ||
+       ((format == XYPixmap) && !depthBug && infoRec->WriteBitmap &&
+	     CHECK_ROP(pGC,infoRec->WriteBitmapFlags) &&
+	     CHECK_ROPSRC(pGC,infoRec->WriteBitmapFlags) &&
+	     !(infoRec->WriteBitmapFlags & NO_PLANEMASK) &&
+	     !(infoRec->WriteBitmapFlags & TRANSPARENCY_ONLY))){
+
+	int MaxBoxes = REGION_NUM_RECTS(pGC->pCompositeClip);
+	BoxPtr pbox, pClipBoxes;
+	int nboxes, srcx, srcy, srcwidth;
+	xRectangle TheRect;
+
+	TheRect.x = pDraw->x + x;
+	TheRect.y = pDraw->y + y;
+	TheRect.width = w;
+	TheRect.height = h; 
+
+	if(MaxBoxes > (infoRec->PreAllocSize/sizeof(BoxRec))) {
+	    pClipBoxes = xalloc(MaxBoxes * sizeof(BoxRec));
+	    if(!pClipBoxes) return;	
+	} else pClipBoxes = (BoxPtr)infoRec->PreAllocMem;
+
+	nboxes = 
+	  XAAGetRectClipBoxes(pGC->pCompositeClip, pClipBoxes, 1, &TheRect);
+	pbox = pClipBoxes;
+
+	if(format == XYBitmap) {
+	    srcwidth = BitmapBytePad(leftPad + w);
+	    while(nboxes--) {
+		srcx = pbox->x1 - TheRect.x + leftPad;
+		srcy = pbox->y1 - TheRect.y;
+		(*infoRec->WriteBitmap)(infoRec->pScrn, pbox->x1, pbox->y1, 
+			pbox->x2 - pbox->x1, pbox->y2 - pbox->y1, 
+			(unsigned char*)pImage + 
+				(srcwidth * srcy) + ((srcx >> 5) << 2), 
+			srcwidth, srcx & 31, pGC->fgPixel, pGC->bgPixel,
+	 		pGC->alu, pGC->planemask);
+		pbox++;
+	    }
+        } else if(format == ZPixmap) {
+	    int Bpp = bpp >> 3;
+	    srcwidth = PixmapBytePad(leftPad + w, depth);
+	    while(nboxes--) {
+		srcx = pbox->x1 - TheRect.x + leftPad;
+		srcy = pbox->y1 - TheRect.y;
+		(*infoRec->WritePixmap)(infoRec->pScrn, pbox->x1, pbox->y1, 
+			pbox->x2 - pbox->x1, pbox->y2 - pbox->y1, 
+			(unsigned char*)pImage + 
+				(srcwidth * srcy) + (srcx * Bpp), 
+			srcwidth, pGC->alu, pGC->planemask, -1, 
+			Bpp << 3, depth);
+		pbox++;
+	    }
+	} else { /* XYPixmap */
+	    int depth = pGC->depth;
+	    int numBox, increment;
+	    unsigned long i, mask;
+	    BoxPtr pntBox;
+	    
+	    srcwidth = BitmapBytePad(w + leftPad);
+	    increment = h * srcwidth;
+ 	    i = 1 << (depth - 1);
+	    mask = ~0;
+
+	    if((infoRec->pScrn->overlayFlags & OVERLAY_8_32_PLANAR) &&
+							 (pGC->depth == 8)){
+		i = 0x80000000;  mask = 0xff000000;
+	    }
+
+	    for(; i & mask; i >>= 1, pImage += increment) {
+		if(i & pGC->planemask) {
+		    pntBox = pbox;
+		    numBox = nboxes;
+		    while(numBox--) {
+			srcx = pntBox->x1 - TheRect.x + leftPad;
+			srcy = pntBox->y1 - TheRect.y;
+			(*infoRec->WriteBitmap)(infoRec->pScrn, 
+				pntBox->x1, pntBox->y1, 
+				pntBox->x2 - pntBox->x1, 
+				pntBox->y2 - pntBox->y1, 
+				(unsigned char*)pImage + 
+				(srcwidth * srcy) + ((srcx >> 5) << 2), 
+				srcwidth, srcx & 31, ~0, 0, pGC->alu, i);
+			pntBox++;
+	    	    }
+		}
+	    }
+
+	}
+
+	if(pClipBoxes != (BoxPtr)infoRec->PreAllocMem)
+	    xfree(pClipBoxes);
+    } else 
+	XAAFallbackOps.PutImage(pDraw, pGC, depth, x, y, w, h, leftPad, 
+				format, pImage);
+}
+@
+
+
+1.1.9.1
+log
+@OpenBSD just has imported exactly this tree into their vendor branch,
+called the same tag, in XF4/xc
+This is, apparently, the last XFree86 snapshot before the licence change
+(ie, addition of the advertising clause)
+
+Since the developers don't see any problems with that, and we would like
+to integrate improvements done by the remaining one or two (or so) XFree86
+developers (j/k), this prepares enabling us to update X-Window in the future.
+@
+text
+@d1 1
+a1 1
+/* $XFree86: xc/programs/Xserver/hw/xfree86/xaa/xaaImage.c,v 1.21 2003/11/10 18:22:41 tsi Exp $ */
+d447 2
+a448 1
+	nboxes = XAAGetRectClipBoxes(pGC, pClipBoxes, 1, &TheRect);
+@
+
+
+1.1.1.1
+log
+@Import OpenBSD 3.3 XF4 repository from CTM 3132 the first time
+This finalizes starting an OpenBSD-mirabile (aka MirBSD) repository.
+
+### MirBSD is:
+# Copyright (c) 1982-2003 by Thorsten "mirabile" Glaser <x86@@ePost.de>
+# Copyright © 1968-2003  The authors of And contributors to UNIX®, the
+#       C Language, BSD/Berkeley Unix; 386BSD, NetBSD 1.1 and OpenBSD.
+#
+# Anyone who obtained a copy of this work is hereby permitted to freely use,
+# distribute, modify, merge, sublicence, give away or sell it as long as the
+# authors are given due credit and the following notice is retained:
+#
+# This work is provided "as is", with no explicit or implicit warranty what-
+# soever. Use it only at your own risk. In no event may an author or contri-
+# butor be held liable for any damage, directly or indirectly, that origina-
+# ted through or is caused by creation or modification of this work.
+
+MirBSD is my private tree. MirBSD does not differ very much from OpenBSD
+and intentionally tracks OpenBSD. That's why it _is_ OpenBSD, just not the
+official one. It's like with DarrenBSD.
+
+At time of this writing, no advertising for MirBSD must be done,
+because the advertising clause has not yet been sorted out.
+
+http://templeofhate.com/tglaser/MirBSD/index.php
+@
+text
+@@
+
+
+1.1.1.2
+log
+@That's what OpenBSD will, probably, ship as XF4 in 3.5
+their last sync against XFree86 4.3-current has been
+imported into our vendor branch, too
+@
+text
+@d1 1
+a1 1
+/* $XFree86: xc/programs/Xserver/hw/xfree86/xaa/xaaImage.c,v 1.21 2003/11/10 18:22:41 tsi Exp $ */
+d447 2
+a448 1
+	nboxes = XAAGetRectClipBoxes(pGC, pClipBoxes, 1, &TheRect);
+@
+

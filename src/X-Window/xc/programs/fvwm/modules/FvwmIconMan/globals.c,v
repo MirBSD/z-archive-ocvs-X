@@ -1,0 +1,263 @@
+head	1.1;
+branch	1.1.1;
+access;
+symbols
+	tg-mergetmp-2:1.1.1.2
+	cvs-200410241530:1.1.1.2
+	cvs-200410012000:1.1.1.2
+	cvs-200407141120:1.1.1.2
+	cvs-200406231010:1.1.1.2
+	MIRBSD_7quater:1.1.1.2
+	cvs-200405271510:1.1.1.2
+	cvs-200403021700:1.1.1.2
+	cvs-200401291925:1.1.1.2
+	MIRBSD_7_ALPHA:1.1.1.2.0.4
+	MIRBSD_7:1.1.1.2.0.2
+	MIRBSD_7ter:1.1.1.2
+	cvs-20011091815:1.1.1.2
+	cvs-200309162130:1.1.1.2
+	cvs-200308302005:1.1.1.2
+	ctmx-0387:1.1.1.2
+	ctmx-0384:1.1.1.2
+	MIRBSD_5:1.1.1.2
+	ctmx-0375:1.1.1.2
+	ctmx-0373:1.1.1.2
+	ctm-0371:1.1.1.2
+	ctm-0370:1.1.1.2
+	MIRBSD_4:1.1.1.2
+	ctm-0363:1.1.1.2
+	ctm-0359:1.1.1.2
+	ctm-0349:1.1.1.1
+	openbsd:1.1.1;
+locks; strict;
+comment	@ * @;
+
+
+1.1
+date	2003.03.22.20.09.58;	author tg;	state Exp;
+branches
+	1.1.1.1;
+next	;
+
+1.1.1.1
+date	2003.03.22.20.09.58;	author tg;	state Exp;
+branches;
+next	1.1.1.2;
+
+1.1.1.2
+date	2003.04.08.18.38.56;	author tg;	state Stab;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@#include <limits.h>
+#include "FvwmIconMan.h"
+#include "xmanager.h"
+#include "readconfig.h"
+
+#define DEFAULT_MOUSE "0 N sendcommand Iconify"
+
+static char const rcsid[] =
+  "$Id: globals.c,v 1.2 2001/06/28 22:32:34 matthieu Exp $";
+
+GlobalData globals;
+ContextDefaults contextDefaults[] = {
+  { "plain", BUTTON_UP, { "black", "black" }, { "white", "gray"} },
+  { "focus", BUTTON_UP, { "white", "gray" }, { "black", "black" } },
+  { "select", BUTTON_FLAT, { "black", "black" }, { "white", "gray" } },
+  { "focusandselect", BUTTON_FLAT, { "white", "gray" }, { "black", "black" } },
+  { "title", BUTTON_EDGEUP, { "black", "black"}, {"white", "gray"} }
+};
+
+int Fvwm_fd[2];
+int x_fd;
+char *Module = "*FvwmIconMan";
+int ModuleLen = 12;
+
+/* This is solely so that we can turn a string constant into something
+   which can be freed */
+
+static char *alloc_string (char *string)
+{
+  int len = strlen (string);
+  char *ret = (char *)safemalloc ((len + 1) * sizeof (char));
+  strcpy (ret, string);
+  return ret;
+}
+
+static void init_win_manager (int id)
+{
+  int i;
+
+  globals.managers[id].magic = 0x12344321;
+  globals.managers[id].index = id;
+#ifdef MINI_ICONS
+  globals.managers[id].draw_icons = 0;
+#endif
+  globals.managers[id].res = SHOW_PAGE;
+  globals.managers[id].window_up = 0;
+  globals.managers[id].can_draw = 0;
+  globals.managers[id].window_mapped = 0;
+  globals.managers[id].fontname = NULL;
+  globals.managers[id].titlename = alloc_string ("FvwmIconMan");
+  globals.managers[id].iconname = alloc_string ("FvwmIconMan");
+  globals.managers[id].formatstring = alloc_string ("%c: %i");
+  globals.managers[id].format_depend = CLASS_NAME | ICON_NAME;
+  globals.managers[id].geometry.dir = 0;
+  globals.managers[id].geometry.boxwidth = 0;
+#ifdef SHAPE
+  globals.managers[id].shape.num_rects = 0;
+#endif
+  globals.managers[id].shaped = 0;
+  init_button_array (&globals.managers[id].buttons);
+
+  for ( i = 0; i < NUM_CONTEXTS; i++ ) {
+    globals.managers[id].backColorName[i] = NULL;
+    globals.managers[id].foreColorName[i] = NULL;
+    globals.managers[id].buttonState[i] = contextDefaults[i].state;
+  }
+  globals.managers[id].geometry_str = NULL;
+  globals.managers[id].button_geometry_str = NULL;
+  globals.managers[id].show.list = NULL;
+  globals.managers[id].show.mask = ALL_NAME;
+  globals.managers[id].dontshow.list = NULL;
+  globals.managers[id].dontshow.mask = ALL_NAME;
+  globals.managers[id].followFocus = 0;
+  globals.managers[id].usewinlist = 1;
+  globals.managers[id].sort = SortName;
+  globals.managers[id].focus_button = NULL;
+  globals.managers[id].select_button = NULL;
+  globals.managers[id].bindings[MOUSE]    = ParseMouseEntry (DEFAULT_MOUSE);
+  globals.managers[id].bindings[KEYPRESS] = NULL;
+  globals.managers[id].bindings[SELECT]   = NULL;
+  globals.managers[id].we_are_drawing = 1;
+  globals.managers[id].configures_expected = 0;
+}
+
+void print_managers (void)
+{
+#ifdef PRINT_DEBUG
+  int i;
+
+  for (i = 0; i < globals.num_managers; i++) {
+    ConsoleDebug (CORE, "Manager %d:\n", i + 1);
+    if (globals.managers[i].res == SHOW_GLOBAL)
+      ConsoleDebug (CORE, "ShowGlobal\n");
+    else if (globals.managers[i].res == SHOW_DESKTOP)
+      ConsoleDebug (CORE, "ShowDesktop\n");
+    else if (globals.managers[i].res == SHOW_PAGE)
+      ConsoleDebug (CORE, "ShowPage\n");
+
+    ConsoleDebug (CORE, "DontShow:\n");
+    print_stringlist (&globals.managers[i].dontshow);
+    ConsoleDebug (CORE, "Show:\n");
+    print_stringlist (&globals.managers[i].show);
+
+    ConsoleDebug (CORE, "Font: %s\n", (globals.managers[i].fontname)?
+      globals.managers[i].fontname : "(NULL)");
+    ConsoleDebug (CORE, "Geometry: %s\n", globals.managers[i].geometry_str);
+    ConsoleDebug (CORE, "Button geometry: %s\n",
+		  (globals.managers[i].button_geometry_str)?
+      globals.managers[i].button_geometry_str : "(NULL)");
+    ConsoleDebug (CORE, "\n");
+  }
+
+#endif
+
+}
+
+int allocate_managers (int num)
+{
+  int i;
+
+  if (globals.managers) {
+    ConsoleMessage ("Already have set the number of managers\n");
+    return 0;
+  }
+
+  if (num < 1) {
+    ConsoleMessage ("Can't have %d managers\n", num);
+    return 0;
+  }
+
+  globals.num_managers = num;
+  globals.managers = (WinManager *)safemalloc (num * sizeof (WinManager));
+
+  for (i = 0; i < num; i++) {
+    init_win_manager (i);
+  }
+
+  return 1;
+}
+
+void init_globals (void)
+{
+  globals.desknum = ULONG_MAX;
+  globals.x = ULONG_MAX;
+  globals.y = ULONG_MAX;
+  globals.screenx = 0;
+  globals.screeny = 0;
+  globals.num_managers = 1;
+  globals.managers = NULL;
+  globals.focus_win = NULL;
+  globals.select_win = NULL;
+  globals.transient = 0;
+  globals.shapes_supported = 0;
+  globals.got_window_list = 0;
+}
+@
+
+
+1.1.1.1
+log
+@Import OpenBSD 3.3 XF4 repository from CTM 3132 the first time
+This finalizes starting an OpenBSD-mirabile (aka MirBSD) repository.
+
+### MirBSD is:
+# Copyright (c) 1982-2003 by Thorsten "mirabile" Glaser <x86@@ePost.de>
+# Copyright © 1968-2003  The authors of And contributors to UNIX®, the
+#       C Language, BSD/Berkeley Unix; 386BSD, NetBSD 1.1 and OpenBSD.
+#
+# Anyone who obtained a copy of this work is hereby permitted to freely use,
+# distribute, modify, merge, sublicence, give away or sell it as long as the
+# authors are given due credit and the following notice is retained:
+#
+# This work is provided "as is", with no explicit or implicit warranty what-
+# soever. Use it only at your own risk. In no event may an author or contri-
+# butor be held liable for any damage, directly or indirectly, that origina-
+# ted through or is caused by creation or modification of this work.
+
+MirBSD is my private tree. MirBSD does not differ very much from OpenBSD
+and intentionally tracks OpenBSD. That's why it _is_ OpenBSD, just not the
+official one. It's like with DarrenBSD.
+
+At time of this writing, no advertising for MirBSD must be done,
+because the advertising clause has not yet been sorted out.
+
+http://templeofhate.com/tglaser/MirBSD/index.php
+@
+text
+@@
+
+
+1.1.1.2
+log
+@The X-Windowing System
+
+Import XFree86 4.3 from OpenBSD by CTM, in the hope it's stable
+@
+text
+@d9 1
+a9 1
+  "$Id: globals.c,v 1.3 2003/04/01 22:36:59 matthieu Exp $";
+@
+

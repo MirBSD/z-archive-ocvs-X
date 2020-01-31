@@ -1,0 +1,334 @@
+head	1.1;
+branch	1.1.1;
+access;
+symbols
+	tg-mergetmp-2:1.1.1.2
+	cvs-200410241530:1.1.1.2
+	cvs-200410012000:1.1.1.2
+	cvs-200407141120:1.1.1.2
+	cvs-200406231010:1.1.1.2
+	MIRBSD_7quater:1.1.1.1
+	cvs-200405271510:1.1.1.2
+	cvs-200403021700:1.1.1.2
+	cvs-200401291925:1.1.1.1
+	MIRBSD_7_ALPHA:1.1.1.1.0.4
+	MIRBSD_7:1.1.1.1.0.2
+	MIRBSD_7ter:1.1.1.1
+	cvs-20011091815:1.1.1.1
+	cvs-200309162130:1.1.1.1
+	cvs-200308302005:1.1.1.1
+	ctmx-0387:1.1.1.1
+	ctmx-0384:1.1.1.1
+	MIRBSD_5:1.1.1.1
+	ctmx-0375:1.1.1.1
+	ctmx-0373:1.1.1.1
+	ctm-0371:1.1.1.1
+	ctm-0370:1.1.1.1
+	MIRBSD_4:1.1.1.1
+	ctm-0363:1.1.1.1
+	ctm-0359:1.1.1.1
+	ctm-0349:1.1.1.1
+	openbsd:1.1.1;
+locks; strict;
+comment	@ * @;
+
+
+1.1
+date	2003.03.22.20.09.50;	author tg;	state Exp;
+branches
+	1.1.1.1;
+next	;
+
+1.1.1.1
+date	2003.03.22.20.09.50;	author tg;	state Exp;
+branches;
+next	1.1.1.2;
+
+1.1.1.2
+date	2004.03.02.18.32.14;	author tg;	state Stab;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@/****************************************************************************
+ * This module is all original code
+ * by Rob Nation
+ * Copyright 1993, Robert Nation
+ *     You may use this code for any purpose, as long as the original
+ *     copyright remains in the source code and all documentation
+ ****************************************************************************/
+
+/*
+ * ********************************************************************
+ *
+ * code for processing module configuration commands
+ *
+ * Modification History
+ *
+ * Created 09/23/98 by Dan Espen:
+ *
+ * - Some  of  this Logic   used to reside  in  "read.c",  preceeded by a
+ * comment about whether it belonged there.  Time tells.
+ *
+ * - Added  logic to  execute module config  commands by  passing to  the
+ * modules that want "active command pipes".
+ *
+ * ********************************************************************
+ */
+
+#include "config.h"
+
+#include <stdio.h>
+#include <unistd.h>
+#include <signal.h>
+#include <string.h>
+#include <fcntl.h>
+#include <ctype.h>
+#include <sys/types.h>
+#include <sys/socket.h>
+
+#include "fvwm.h"
+#include "menus.h"
+#include "misc.h"
+#include "parse.h"
+#include "screen.h"
+#include "module.h"
+
+unsigned long *PipeMask;                /* in module.c */
+
+extern Boolean debugging;
+
+struct moduleInfoList
+{
+  char *data;
+  struct moduleInfoList *next;
+};
+
+struct moduleInfoList *modlistroot = NULL;
+
+void AddToModList(char *tline);         /* prototypes */
+extern void StartupStuff(void);
+
+
+/*
+ * ModuleConfig handles commands starting with "*".
+ *
+ * Each command is added to a list from which modules  request playback
+ * thru "sendconfig".
+ *
+ * Some modules request that module config commands be sent to them
+ * as the commands are entered.  Send to modules that want it.
+ */
+void  ModuleConfig(XEvent *eventp,Window w,FvwmWindow *tmp_win,
+                   unsigned long context,
+                   char *action, int *Module) {
+  int module;
+  AddToModList(action);                 /* save for config request */
+  for (module=0;module<npipes;module++) {/* look at all possible pipes */
+    if (PipeMask[module] & M_SENDCONFIG) { /* does module want config cmds */
+      SendName(module,M_CONFIG_INFO,0,0,0,action); /* send cmd to module */
+    }
+  }
+}
+
+void AddToModList(char *tline)
+{
+  struct moduleInfoList *t, *prev, *this;
+
+  /* Find end of list */
+  t = modlistroot;
+  prev = NULL;
+
+  while(t != NULL)
+  {
+    prev = t;
+    t = t->next;
+  }
+
+  this = (struct moduleInfoList *)safemalloc(sizeof(struct moduleInfoList));
+  this->data = (char *)safemalloc(strlen(tline)+1);
+  this->next = NULL;
+  strcpy(this->data, tline);
+  if(prev == NULL)
+  {
+    modlistroot = this;
+  }
+  else
+    prev->next = this;
+}
+
+/* interface function for AddToModList */
+/* dje, this doesn't seem to be used? */
+void AddModConfig(XEvent *eventp,Window junk,FvwmWindow *tmp_win,
+                  unsigned long context, char *action,int* Module)
+{
+  AddToModList( action );
+}
+
+/**************************************************************/
+/* delete from module configuration                           */
+/**************************************************************/
+void DestroyModConfig(XEvent *eventp,Window junk,FvwmWindow *tmp_win,
+                      unsigned long context, char *action,int* Module)
+{
+  struct moduleInfoList *current, *next, *prev;
+  char *info;   /* info to be deleted - may contain wildcards */
+  char *mi;
+
+  GetNextToken(action, &info);
+  if( info == NULL )
+  {
+    return;
+  }
+
+  current = modlistroot;
+  prev = NULL;
+
+  while(current != NULL)
+  {
+    GetNextToken( current->data, &mi);
+    next = current->next;
+    if( matchWildcards(info, mi+1) )
+    {
+      free(current->data);
+      free(current);
+      if( prev )
+      {
+        prev->next = next;
+      }
+      else
+      {
+        modlistroot = next;
+      }
+    }
+    else
+    {
+      prev = current;
+    }
+    current = next;
+    if (mi)
+      free(mi);
+  }
+  free(info);
+}
+
+void SendDataToModule(XEvent *eventp,Window w,FvwmWindow *tmp_win,
+	      unsigned long context, char *action, int *Module)
+{
+  struct moduleInfoList *t;
+  char *message,msg2[32];
+  extern char *IconPath;
+  extern char *PixmapPath;
+
+  if (IconPath && strlen(IconPath))
+  {
+    message=safemalloc(strlen(IconPath)+11);
+    sprintf(message,"IconPath %s\n",IconPath);
+    SendName(*Module,M_CONFIG_INFO,0,0,0,message);
+    free(message);
+  }
+#ifdef XPM
+  if (PixmapPath && strlen(PixmapPath))
+  {
+    message=safemalloc(strlen(PixmapPath)+13);
+    sprintf(message,"PixmapPath %s\n",PixmapPath);
+    SendName(*Module,M_CONFIG_INFO,0,0,0,message);
+    sprintf(message,"ColorLimit %d\n",Scr.ColorLimit);
+    SendName(*Module,M_CONFIG_INFO,0,0,0,message);
+    free(message);
+  }
+#endif
+  /* Dominik Vogt (8-Nov-1998): Scr.ClickTime patch to set ClickTime to
+   * 'not at all' during InitFunction and RestartFunction. */
+  sprintf(msg2,"ClickTime %d\n", (Scr.ClickTime < 0) ?
+	  -Scr.ClickTime : Scr.ClickTime);
+  SendName(*Module,M_CONFIG_INFO,0,0,0,msg2);
+
+  t = modlistroot;
+  while(t != NULL)
+  {
+    SendName(*Module,M_CONFIG_INFO,0,0,0,t->data);
+    t = t->next;
+  }
+  SendPacket(*Module,M_END_CONFIG_INFO,0,0,0,0,0,0,0,0);
+}
+@
+
+
+1.1.1.1
+log
+@Import OpenBSD 3.3 XF4 repository from CTM 3132 the first time
+This finalizes starting an OpenBSD-mirabile (aka MirBSD) repository.
+
+### MirBSD is:
+# Copyright (c) 1982-2003 by Thorsten "mirabile" Glaser <x86@@ePost.de>
+# Copyright © 1968-2003  The authors of And contributors to UNIX®, the
+#       C Language, BSD/Berkeley Unix; 386BSD, NetBSD 1.1 and OpenBSD.
+#
+# Anyone who obtained a copy of this work is hereby permitted to freely use,
+# distribute, modify, merge, sublicence, give away or sell it as long as the
+# authors are given due credit and the following notice is retained:
+#
+# This work is provided "as is", with no explicit or implicit warranty what-
+# soever. Use it only at your own risk. In no event may an author or contri-
+# butor be held liable for any damage, directly or indirectly, that origina-
+# ted through or is caused by creation or modification of this work.
+
+MirBSD is my private tree. MirBSD does not differ very much from OpenBSD
+and intentionally tracks OpenBSD. That's why it _is_ OpenBSD, just not the
+official one. It's like with DarrenBSD.
+
+At time of this writing, no advertising for MirBSD must be done,
+because the advertising clause has not yet been sorted out.
+
+http://templeofhate.com/tglaser/MirBSD/index.php
+@
+text
+@@
+
+
+1.1.1.2
+log
+@That's what OpenBSD will, probably, ship as XF4 in 3.5
+their last sync against XFree86 4.3-current has been
+imported into our vendor branch, too
+@
+text
+@a84 1
+  size_t len;
+d97 1
+a97 2
+  len = strlen(tline)+1;
+  this->data = (char *)safemalloc(len);
+d99 1
+a99 1
+  strlcpy(this->data, tline, len);
+a169 1
+  size_t len;
+d173 2
+a174 3
+    len=strlen(IconPath)+11;
+    message=safemalloc(len);
+    snprintf(message,len,"IconPath %s\n",IconPath);
+d181 2
+a182 3
+    len=strlen(PixmapPath)+13;
+    message=safemalloc(len);
+    snprintf(message,len,"PixmapPath %s\n",PixmapPath);
+d184 1
+a184 1
+    snprintf(message,len,"ColorLimit %d\n",Scr.ColorLimit);
+d191 1
+a191 1
+  snprintf(msg2,sizeof(msg2),"ClickTime %d\n", (Scr.ClickTime < 0) ?
+@
+

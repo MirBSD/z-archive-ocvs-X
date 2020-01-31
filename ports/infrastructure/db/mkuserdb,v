@@ -1,0 +1,89 @@
+head	1.1;
+access;
+symbols;
+locks; strict;
+comment	@# @;
+
+
+1.1
+date	2004.10.10.21.06.43;	author tg;	state Exp;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.1
+log
+@move ports/infrastructure/etc/{mkuserdb,userlist} to ports/in.../db/
+@
+text
+@#!/bin/ksh
+# $MirBSD: ports/infrastructure/etc/mkuserdb,v 1.2 2004/10/10 21:04:41 tg Exp $
+#-
+# Copyright (c) 2004
+#	Thorsten "mirabile" Glaser <tg@@66h.42h.de>
+#
+# Licensee is hereby permitted to deal in this work without restric-
+# tion, including unlimited rights to use, publically perform, modi-
+# fy, merge, distribute, sell, give away or sublicence, provided the
+# above copyright notices, these terms and the disclaimer are retai-
+# ned in all redistributions, or reproduced in accompanying documen-
+# tation or other materials provided with binary redistributions.
+#
+# Licensor hereby provides this work "AS IS" and WITHOUT WARRANTY of
+# any kind, expressed or implied, to the maximum extent permitted by
+# applicable law, but with the warranty of being written without ma-
+# licious intent or gross negligence; in no event shall licensor, an
+# author or contributor be held liable for any damage, direct, indi-
+# rect or other, however caused, arising in any way out of the usage
+# of covered work, even if advised of the possibility of such damage.
+#-
+# Updates $1/etc/master.passwd and $1/etc/group from userlist
+# If $2 == -n, *don't* call pwd_mkdb(8) after that.
+
+cd "$(dirname "$0")"
+G_CHANGED=0
+P_CHANGED=0
+while read uid uname gecos; do
+	[[ $uid = @@(#)* ]] && continue
+	LINE="${uname}:*:${uid}:"
+	if ! egrep '^[^:]*:[^:]*:'$uid':' $1/etc/group >/dev/null 2>&1; then
+		[[ $gecos = @@(NO,)* ]] && LINE="${LINE}${gecos#NO,}"
+		if [[ $gecos != @@(!)* ]]; then
+			print -r -- "${LINE}" >>$1/etc/group
+			G_CHANGED=1
+		fi
+	fi
+	[[ $gecos = @@(NO|NO,*) ]] && continue
+	[[ $gecos = @@(!)* ]] && MYLINE="${LINE}${gecos#!}"
+	[[ $uid = 0 ]] && MYLINE="root::${MYLINE#@@(root:*:)}"
+	gecos="MirPorts -- $(print -r -- "$gecos" | sed s/:/!ERROR!/g)"
+	if (( uid < 256 || uid > 999 )); then
+		# system user, not MirPorts
+		gecos=${gecos#@@(MirPorts -- )}
+		if [[ $uname = @@(popa3d|sshd|_*) ]]; then
+			hsf="/var/empty:/sbin/nologin"
+		elif [[ $uname = www ]]; then
+			hsf="/var/www:/sbin/nologin"
+		else
+			hsf="/nonexistent:/sbin/nologin"
+		fi
+	else
+		hsf="/nonexistent:/sbin/nologin"
+	fi
+	if ! egrep '^[^:]*:[^:]*:'$uid':' $1/etc/master.passwd \
+	    >/dev/null 2>&1; then
+		P_CHANGED=1
+		LINE="${LINE}${uid}::0:0:${gecos}:${hsf}"
+		[[ $gecos = @@(!)* ]] && LINE="$MYLINE"
+		print -r -- "${LINE}" >>$1/etc/master.passwd
+	fi
+done <userlist
+[[ $G_CHANGED = 1 ]] && sort -t: -nk3 -o $1/etc/group $1/etc/group
+[[ $P_CHANGED = 0 ]] && exit 0
+sort -t: -nk3 -o $1/etc/master.passwd $1/etc/master.passwd
+[[ $2 = -n ]] || pwd_mkdb -p -d $1/etc master.passwd
+@

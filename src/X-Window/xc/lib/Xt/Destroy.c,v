@@ -1,0 +1,574 @@
+head	1.1;
+branch	1.1.1;
+access;
+symbols
+	tg-mergetmp-2:1.1.1.2
+	cvs-200410241530:1.1.1.2
+	cvs-200410012000:1.1.1.2
+	cvs-200407141120:1.1.1.2
+	cvs-200406231010:1.1.1.1
+	MIRBSD_7quater:1.1.1.1
+	cvs-200405271510:1.1.1.1
+	XFree86_4_4_0:1.1.9.1
+	cvs-200403021700:1.1.1.1
+	XFREE86_20040213:1.1.9.1
+	xc:1.1.9
+	cvs-200401291925:1.1.1.1
+	MIRBSD_7_ALPHA:1.1.1.1.0.4
+	MIRBSD_7:1.1.1.1.0.2
+	MIRBSD_7ter:1.1.1.1
+	cvs-20011091815:1.1.1.1
+	cvs-200309162130:1.1.1.1
+	cvs-200308302005:1.1.1.1
+	ctmx-0387:1.1.1.1
+	ctmx-0384:1.1.1.1
+	MIRBSD_5:1.1.1.1
+	ctmx-0375:1.1.1.1
+	ctmx-0373:1.1.1.1
+	ctm-0371:1.1.1.1
+	ctm-0370:1.1.1.1
+	MIRBSD_4:1.1.1.1
+	ctm-0363:1.1.1.1
+	ctm-0359:1.1.1.1
+	ctm-0349:1.1.1.1
+	openbsd:1.1.1;
+locks; strict;
+comment	@ * @;
+
+
+1.1
+date	2003.03.22.20.04.57;	author tg;	state Exp;
+branches
+	1.1.1.1
+	1.1.9.1;
+next	;
+
+1.1.1.1
+date	2003.03.22.20.04.57;	author tg;	state Exp;
+branches;
+next	1.1.1.2;
+
+1.1.1.2
+date	2004.07.14.11.58.23;	author tg;	state Stab;
+branches;
+next	;
+
+1.1.9.1
+date	2004.02.14.19.19.35;	author tg;	state Exp;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@/* $Xorg: Destroy.c,v 1.4 2001/02/09 02:03:54 xorgcvs Exp $ */
+
+/***********************************************************
+Copyright 1987, 1988 by Digital Equipment Corporation, Maynard, Massachusetts
+Copyright 1993 by Sun Microsystems, Inc. Mountain View, CA.
+
+                        All Rights Reserved
+
+Permission to use, copy, modify, and distribute this software and its 
+documentation for any purpose and without fee is hereby granted, 
+provided that the above copyright notice appear in all copies and that
+both that copyright notice and this permission notice appear in 
+supporting documentation, and that the names of Digital or Sun not be
+used in advertising or publicity pertaining to distribution of the
+software without specific, written prior permission.  
+
+DIGITAL DISCLAIMS ALL WARRANTIES WITH REGARD TO THIS SOFTWARE, INCLUDING
+ALL IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS, IN NO EVENT SHALL
+DIGITAL BE LIABLE FOR ANY SPECIAL, INDIRECT OR CONSEQUENTIAL DAMAGES OR
+ANY DAMAGES WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS,
+WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION,
+ARISING OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS
+SOFTWARE.
+
+SUN DISCLAIMS ALL WARRANTIES WITH REGARD TO  THIS  SOFTWARE,
+INCLUDING ALL IMPLIED WARRANTIES OF MERCHANTABILITY AND FIT-
+NESS FOR A PARTICULAR PURPOSE. IN NO EVENT SHALL SUN BE  LI-
+ABLE  FOR  ANY SPECIAL, INDIRECT OR CONSEQUENTIAL DAMAGES OR
+ANY DAMAGES WHATSOEVER RESULTING FROM LOSS OF USE,  DATA  OR
+PROFITS,  WHETHER  IN  AN  ACTION OF CONTRACT, NEGLIGENCE OR
+OTHER TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION  WITH
+THE USE OR PERFORMANCE OF THIS SOFTWARE.
+
+******************************************************************/
+
+/*
+
+Copyright 1987, 1988, 1994, 1998  The Open Group
+
+Permission to use, copy, modify, distribute, and sell this software and its
+documentation for any purpose is hereby granted without fee, provided that
+the above copyright notice appear in all copies and that both that
+copyright notice and this permission notice appear in supporting
+documentation.
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
+OPEN GROUP BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN
+AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
+CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+Except as contained in this notice, the name of The Open Group shall not be
+used in advertising or otherwise to promote the sale, use or other dealings
+in this Software without prior written authorization from The Open Group.
+
+*/
+/* $XFree86: xc/lib/Xt/Destroy.c,v 1.3 2001/12/14 19:56:11 dawes Exp $ */
+
+#include "IntrinsicI.h"
+
+struct _DestroyRec {
+    int dispatch_level;
+    Widget widget;
+};
+
+static void Recursive(widget, proc)
+    Widget       widget;
+    XtWidgetProc proc;
+{
+    register int    i;
+    CompositePart   *cwp;
+
+    /* Recurse down normal children */
+    if (XtIsComposite(widget)) {
+	cwp = &(((CompositeWidget) widget)->composite);
+	for (i = 0; i < cwp->num_children; i++) {
+	    Recursive(cwp->children[i], proc);
+	}
+    }
+
+    /* Recurse down popup children */
+    if (XtIsWidget(widget)) {
+	for (i = 0; i < widget->core.num_popups; i++) {
+	    Recursive(widget->core.popup_list[i], proc);
+	}
+    }
+
+    /* Finally, apply procedure to this widget */
+    (*proc) (widget);  
+} /* Recursive */
+
+static void Phase1Destroy (widget)
+    Widget    widget;
+{
+    Widget hookobj = XtHooksOfDisplay(XtDisplayOfObject(widget));
+
+    widget->core.being_destroyed = TRUE;
+    if (XtHasCallbacks(hookobj, XtNdestroyHook) == XtCallbackHasSome) {
+	XtDestroyHookDataRec call_data;
+
+	call_data.type = XtHdestroy;
+	call_data.widget = widget;
+	XtCallCallbackList(hookobj, 
+		((HookObject)hookobj)->hooks.destroyhook_callbacks, 
+		(XtPointer) &call_data);
+    }
+} /* Phase1Destroy */
+
+static void Phase2Callbacks(widget)
+    Widget    widget;
+{
+    if (widget->core.destroy_callbacks != NULL) {
+	XtCallCallbackList(widget,
+			   widget->core.destroy_callbacks, (XtPointer) NULL);
+    }
+} /* Phase2Callbacks */
+
+static void Phase2Destroy(widget)
+    register Widget widget;
+{
+    register WidgetClass	    class;
+    register ConstraintWidgetClass  cwClass;
+    ObjectClassExtension	    ext;
+
+    /* Call constraint destroy procedures */
+    if (XtParent(widget) != NULL && !XtIsShell(widget) && XtIsConstraint(XtParent(widget))) {
+	LOCK_PROCESS;
+	cwClass = (ConstraintWidgetClass)XtParent(widget)->core.widget_class;
+	UNLOCK_PROCESS;
+	for (;;) {
+	    XtWidgetProc destroy;
+
+	    LOCK_PROCESS;
+	    destroy = cwClass->constraint_class.destroy;
+	    UNLOCK_PROCESS;
+	    if (destroy)
+		(*destroy) (widget);
+            if (cwClass == (ConstraintWidgetClass)constraintWidgetClass) break;
+	    LOCK_PROCESS;
+	    cwClass = (ConstraintWidgetClass) cwClass->core_class.superclass;
+	    UNLOCK_PROCESS;
+	}
+    }
+
+    /* Call widget destroy procedures */
+    LOCK_PROCESS;
+    for (class = widget->core.widget_class;
+	 class != NULL; 
+	 class = class->core_class.superclass) {
+	XtWidgetProc destroy;
+
+	destroy = class->core_class.destroy;
+	UNLOCK_PROCESS;
+	if (destroy)
+	    (*destroy) (widget);
+	LOCK_PROCESS;
+    }
+
+    /* Call widget deallocate procedure */
+    ext = (ObjectClassExtension)
+	XtGetClassExtension(widget->core.widget_class, 
+			    XtOffsetOf(CoreClassPart, extension),
+			    NULLQUARK, XtObjectExtensionVersion, 
+			    sizeof(ObjectClassExtensionRec));
+    if (ext && ext->deallocate) {
+	XtDeallocateProc deallocate;
+	deallocate = ext->deallocate;
+	UNLOCK_PROCESS;
+	(*deallocate)(widget, NULL);
+    } else {
+	UNLOCK_PROCESS;
+	XtFree((char *)widget);
+    }
+} /* Phase2Destroy */
+
+static Boolean IsDescendant(widget, root)
+    register Widget widget, root;
+{
+    while ((widget = XtParent(widget)) != root) {
+	if (widget == NULL) return False;
+    }
+    return True;
+}
+
+static void XtPhase2Destroy (widget)
+    register Widget widget;
+{
+    Display	    *display = NULL;
+    Window	    window;
+    Widget          parent;
+    XtAppContext    app = XtWidgetToApplicationContext(widget);
+    Widget	    outerInPhase2Destroy = app->in_phase2_destroy;
+    int		    starting_count = app->destroy_count;
+    Boolean	    isPopup = False;
+
+    /* invalidate focus trace cache for this display */
+    _XtGetPerDisplay(XtDisplayOfObject(widget))->pdi.traceDepth = 0;
+
+    parent = widget->core.parent;
+
+    if (parent && XtIsWidget(parent) && parent->core.num_popups) {
+	int i;
+	for (i = 0; i < parent->core.num_popups; i++) {
+	    if (parent->core.popup_list[i] == widget) {
+		isPopup = True;
+		break;
+	    }
+	}
+    }
+
+    if (!isPopup && parent && XtIsComposite(parent)) {
+	XtWidgetProc delete_child;
+
+	LOCK_PROCESS;
+	delete_child =
+	    ((CompositeWidgetClass) parent->core.widget_class)->
+		composite_class.delete_child;
+	UNLOCK_PROCESS;
+        if (XtIsRectObj(widget)) {
+       	    XtUnmanageChild(widget);
+        }
+	if (delete_child == NULL) {
+	    String param;
+	    Cardinal num_params = 1;
+
+	    LOCK_PROCESS;
+	    param = parent->core.widget_class->core_class.class_name;
+	    UNLOCK_PROCESS;
+	    XtAppWarningMsg(XtWidgetToApplicationContext(widget),
+		"invalidProcedure","deleteChild",XtCXtToolkitError,
+		"null delete_child procedure for class %s in XtDestroy",
+		&param, &num_params);
+	} else {
+	    (*delete_child) (widget);
+	}
+    }
+
+    /* widget is freed in Phase2Destroy, so retrieve window now.
+     * Shells destroy their own windows, to prevent window leaks in
+     * popups; this test is practical only when XtIsShell() is cheap.
+     */
+    if (XtIsShell(widget) || !XtIsWidget(widget)) {
+	window = 0;
+    }
+    else {
+	display = XtDisplay(widget);
+	window = widget->core.window;
+    }
+
+    Recursive(widget, Phase2Callbacks);
+    if (app->destroy_count > starting_count) {
+	int i = starting_count;
+	while (i < app->destroy_count) {
+
+	    DestroyRec * dr = app->destroy_list + i;
+	    if (IsDescendant(dr->widget, widget)) {
+		Widget descendant = dr->widget;
+		register int j;
+		app->destroy_count--;
+		for (j = app->destroy_count - i; --j >= 0; dr++)
+		    *dr = *(dr + 1);
+		XtPhase2Destroy(descendant);
+	    }
+	    else i++;
+	}
+    }
+
+    app->in_phase2_destroy = widget;
+    Recursive(widget, Phase2Destroy);
+    app->in_phase2_destroy = outerInPhase2Destroy;
+
+    if (isPopup) {
+	int i;
+	for (i = 0; i < parent->core.num_popups; i++)
+	    if (parent->core.popup_list[i] == widget) {
+		parent->core.num_popups--;
+		while (i < parent->core.num_popups) {
+		    parent->core.popup_list[i] = parent->core.popup_list[i+1];
+		    i++;
+		}
+		break;
+	    }
+    }
+
+    /* %%% the following parent test hides a more serious problem,
+       but it avoids breaking those who depended on the old bug
+       until we have time to fix it properly. */
+
+    if (window && (parent == NULL || !parent->core.being_destroyed))
+	XDestroyWindow(display, window);
+} /* XtPhase2Destroy */
+
+
+void _XtDoPhase2Destroy(app, dispatch_level)
+    XtAppContext app;
+    int dispatch_level;
+{
+    /* Phase 2 must occur in fifo order.  List is not necessarily
+     * contiguous in dispatch_level.
+     */
+
+    int i = 0;
+    while (i < app->destroy_count) {
+
+	/* XtPhase2Destroy can result in calls to XtDestroyWidget,
+	 * and these could cause app->destroy_list to be reallocated.
+	 */
+
+	DestroyRec* dr = app->destroy_list + i;
+	if (dr->dispatch_level >= dispatch_level)  {
+	    Widget w = dr->widget;
+	    register int j;
+	    app->destroy_count--;
+	    for (j = app->destroy_count - i; --j >=0; dr++)
+		*dr = *(dr + 1);
+	    XtPhase2Destroy(w);
+	}
+	else i++;
+    }
+}
+
+
+void XtDestroyWidget (widget)
+    Widget    widget;
+{
+    XtAppContext app;
+    DestroyRec *dr, *dr2;
+
+    app = XtWidgetToApplicationContext(widget);
+    LOCK_APP(app);
+    if (widget->core.being_destroyed) {
+	UNLOCK_APP(app);
+	return;
+    }
+    Recursive(widget, Phase1Destroy);
+
+    if (app->in_phase2_destroy &&
+	IsDescendant(widget, app->in_phase2_destroy))
+    {
+	XtPhase2Destroy(widget);
+	UNLOCK_APP(app);
+	return;
+    }
+
+    if (app->destroy_count == app->destroy_list_size) {
+	app->destroy_list_size += 10;
+	app->destroy_list = (DestroyRec*)
+	    XtRealloc( (char*)app->destroy_list,
+		       (unsigned)sizeof(DestroyRec)*app->destroy_list_size
+		      );
+    }
+    dr = app->destroy_list + app->destroy_count++;
+    dr->dispatch_level = app->dispatch_level;
+    dr->widget = widget;
+
+    if (app->dispatch_level > 1) {
+	int i;
+	for (i = app->destroy_count - 1; i;) {
+	    /* this handles only one case of nesting difficulties */
+ 	    dr = app->destroy_list + (--i);
+ 	    if (dr->dispatch_level < app->dispatch_level &&
+ 		IsDescendant(dr->widget, widget)) {
+ 	        dr2 = app->destroy_list + (app->destroy_count-1);
+ 		dr2->dispatch_level = dr->dispatch_level;
+  		break;
+  	    }
+  	}
+    }
+
+    if (_XtSafeToDestroy(app)) {
+	app->dispatch_level = 1; /* avoid nested _XtDoPhase2Destroy */
+	_XtDoPhase2Destroy(app, 0);
+	app->dispatch_level = 0;
+    }
+    UNLOCK_APP(app);
+	
+} /* XtDestroyWidget */
+@
+
+
+1.1.9.1
+log
+@OpenBSD just has imported exactly this tree into their vendor branch,
+called the same tag, in XF4/xc
+This is, apparently, the last XFree86 snapshot before the licence change
+(ie, addition of the advertising clause)
+
+Since the developers don't see any problems with that, and we would like
+to integrate improvements done by the remaining one or two (or so) XFree86
+developers (j/k), this prepares enabling us to update X-Window in the future.
+@
+text
+@@
+
+
+1.1.1.1
+log
+@Import OpenBSD 3.3 XF4 repository from CTM 3132 the first time
+This finalizes starting an OpenBSD-mirabile (aka MirBSD) repository.
+
+### MirBSD is:
+# Copyright (c) 1982-2003 by Thorsten "mirabile" Glaser <x86@@ePost.de>
+# Copyright © 1968-2003  The authors of And contributors to UNIX®, the
+#       C Language, BSD/Berkeley Unix; 386BSD, NetBSD 1.1 and OpenBSD.
+#
+# Anyone who obtained a copy of this work is hereby permitted to freely use,
+# distribute, modify, merge, sublicence, give away or sell it as long as the
+# authors are given due credit and the following notice is retained:
+#
+# This work is provided "as is", with no explicit or implicit warranty what-
+# soever. Use it only at your own risk. In no event may an author or contri-
+# butor be held liable for any damage, directly or indirectly, that origina-
+# ted through or is caused by creation or modification of this work.
+
+MirBSD is my private tree. MirBSD does not differ very much from OpenBSD
+and intentionally tracks OpenBSD. That's why it _is_ OpenBSD, just not the
+official one. It's like with DarrenBSD.
+
+At time of this writing, no advertising for MirBSD must be done,
+because the advertising clause has not yet been sorted out.
+
+http://templeofhate.com/tglaser/MirBSD/index.php
+@
+text
+@@
+
+
+1.1.1.2
+log
+@OpenBSD XF4 tree (minus old and mit) as of today
+-> lib and fvwm fixes
+@
+text
+@d9 2
+a10 2
+Permission to use, copy, modify, and distribute this software and its
+documentation for any purpose and without fee is hereby granted,
+d12 1
+a12 1
+both that copyright notice and this permission notice appear in
+d15 1
+a15 1
+software without specific, written prior permission.
+d61 1
+a61 1
+/* $XFree86: xc/lib/Xt/Destroy.c,v 1.4 2004/05/05 00:07:03 dickey Exp $ */
+d70 3
+a72 1
+static void Recursive(Widget widget, XtWidgetProc proc)
+d74 1
+a74 1
+    register Cardinal i;
+d93 1
+a93 1
+    (*proc) (widget);
+d96 2
+a97 1
+static void Phase1Destroy (Widget widget)
+d107 2
+a108 2
+	XtCallCallbackList(hookobj,
+		((HookObject)hookobj)->hooks.destroyhook_callbacks,
+d113 2
+a114 1
+static void Phase2Callbacks(Widget widget)
+d122 2
+a123 1
+static void Phase2Destroy(register Widget widget)
+d152 1
+a152 1
+	 class != NULL;
+d165 1
+a165 1
+	XtGetClassExtension(widget->core.widget_class,
+d167 1
+a167 1
+			    NULLQUARK, XtObjectExtensionVersion,
+d180 2
+a181 1
+static Boolean IsDescendant(Widget widget, Widget root)
+d189 2
+a190 1
+static void XtPhase2Destroy (Widget widget)
+d206 1
+a206 1
+	Cardinal i;
+d277 1
+a277 1
+	Cardinal i;
+d298 3
+a300 1
+void _XtDoPhase2Destroy(XtAppContext app, int dispatch_level)
+d327 2
+a328 1
+void XtDestroyWidget (Widget widget)
+d380 1
+a380 1
+
+@
+

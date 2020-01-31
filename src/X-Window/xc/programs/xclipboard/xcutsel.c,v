@@ -1,0 +1,426 @@
+head	1.1;
+branch	1.1.1;
+access;
+symbols
+	tg-mergetmp-2:1.1.1.1
+	cvs-200410241530:1.1.1.1
+	cvs-200410012000:1.1.1.1
+	cvs-200407141120:1.1.1.1
+	cvs-200406231010:1.1.1.1
+	MIRBSD_7quater:1.1.1.1
+	cvs-200405271510:1.1.1.1
+	XFree86_4_4_0:1.1.9.1
+	cvs-200403021700:1.1.1.1
+	XFREE86_20040213:1.1.9.1
+	xc:1.1.9
+	cvs-200401291925:1.1.1.1
+	MIRBSD_7_ALPHA:1.1.1.1.0.4
+	MIRBSD_7:1.1.1.1.0.2
+	MIRBSD_7ter:1.1.1.1
+	cvs-20011091815:1.1.1.1
+	cvs-200309162130:1.1.1.1
+	cvs-200308302005:1.1.1.1
+	ctmx-0387:1.1.1.1
+	ctmx-0384:1.1.1.1
+	MIRBSD_5:1.1.1.1
+	ctmx-0375:1.1.1.1
+	ctmx-0373:1.1.1.1
+	ctm-0371:1.1.1.1
+	ctm-0370:1.1.1.1
+	MIRBSD_4:1.1.1.1
+	ctm-0363:1.1.1.1
+	ctm-0359:1.1.1.1
+	ctm-0349:1.1.1.1
+	openbsd:1.1.1;
+locks; strict;
+comment	@ * @;
+
+
+1.1
+date	2003.03.22.20.10.11;	author tg;	state Exp;
+branches
+	1.1.1.1
+	1.1.9.1;
+next	;
+
+1.1.1.1
+date	2003.03.22.20.10.11;	author tg;	state Stab;
+branches;
+next	;
+
+1.1.9.1
+date	2004.02.14.19.27.12;	author tg;	state Exp;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@/*
+ * $Xorg: xcutsel.c,v 1.4 2001/02/09 02:05:39 xorgcvs Exp $
+ *
+ * 
+Copyright 1989, 1998  The Open Group
+
+Permission to use, copy, modify, distribute, and sell this software and its
+documentation for any purpose is hereby granted without fee, provided that
+the above copyright notice appear in all copies and that both that
+copyright notice and this permission notice appear in supporting
+documentation.
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
+OPEN GROUP BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN
+AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
+CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+Except as contained in this notice, the name of The Open Group shall not be
+used in advertising or otherwise to promote the sale, use or other dealings
+in this Software without prior written authorization from The Open Group.
+ * *
+ * Author:  Ralph Swick, DEC/Project Athena
+ */
+/* $XFree86: xc/programs/xclipboard/xcutsel.c,v 1.8 2001/12/14 20:01:16 dawes Exp $ */
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <X11/Intrinsic.h>
+#include <X11/StringDefs.h>
+#include <X11/Xatom.h>
+
+#include <X11/Xmu/Atoms.h>
+#include <X11/Xmu/StdSel.h>
+
+#include <X11/Xaw/Command.h>
+#include <X11/Xaw/Box.h>
+#include <X11/Xaw/Cardinals.h>
+#include <X11/Xfuncs.h>
+
+#ifdef XKB
+#include <X11/extensions/XKBbells.h>
+#endif
+
+static XrmOptionDescRec optionDesc[] = {
+    {"-selection", "selection",	XrmoptionSepArg, NULL},
+    {"-select",    "selection",	XrmoptionSepArg, NULL},
+    {"-sel",	   "selection",	XrmoptionSepArg, NULL},
+    {"-s",	   "selection",	XrmoptionSepArg, NULL},
+    {"-cutbuffer", "cutBuffer",	XrmoptionSepArg, NULL},
+};
+
+typedef struct {
+    String  selection_name;
+    int	    buffer;
+    Atom    selection;
+    char*   value;
+    int     length;
+} OptionsRec;
+
+OptionsRec options;
+
+#define Offset(field) XtOffsetOf(OptionsRec, field)
+
+static XtResource resources[] = {
+    {"selection", "Selection", XtRString, sizeof(String),
+       Offset(selection_name), XtRString, "PRIMARY"},
+    {"cutBuffer", "CutBuffer", XtRInt, sizeof(int),
+       Offset(buffer), XtRImmediate, (XtPointer)0},
+};
+
+#undef Offset
+
+typedef struct {
+    Widget button;
+    Boolean is_on;
+} ButtonState;
+
+static ButtonState state;
+
+static void
+Syntax(char *call)
+{
+    fprintf (stderr, "usage:  %s [-selection name] [-cutbuffer number]\n", 
+	     call);
+    exit (1);
+}
+
+
+static void 
+StoreBuffer(Widget w, XtPointer client_data, Atom *selection, Atom *type, 
+	    XtPointer value, unsigned long *length, int *format)
+{
+
+    if (*type == 0 || *type == XT_CONVERT_FAIL || *length == 0) {
+#ifdef XKB
+	XkbStdBell( XtDisplay(w), XtWindow(w), 0, XkbBI_MinorError );
+#else
+	XBell( XtDisplay(w), 0 );
+#endif
+	return;
+    }
+
+    XStoreBuffer( XtDisplay(w), (char*)value, (int)(*length),
+		  options.buffer );
+   
+    XtFree(value);
+}
+
+
+static Boolean 
+ConvertSelection(Widget w, Atom *selection, Atom *target,
+		 Atom *type, XtPointer *value, unsigned long *length, 
+		 int *format)
+{
+    Display* d = XtDisplay(w);
+    XSelectionRequestEvent* req =
+	XtGetSelectionRequest(w, *selection, (XtRequestId)NULL);
+	
+    if (*target == XA_TARGETS(d)) {
+	Atom* targetP;
+	Atom* std_targets;
+	unsigned long std_length;
+	XmuConvertStandardSelection(w, req->time, selection, target, type,
+				    (XPointer*)&std_targets, &std_length,
+				    format);
+	*value = XtMalloc(sizeof(Atom)*(std_length + 4));
+	targetP = *(Atom**)value;
+	*length = std_length + 4;
+	*targetP++ = XA_STRING;
+	*targetP++ = XA_TEXT(d);
+	*targetP++ = XA_LENGTH(d);
+	*targetP++ = XA_LIST_LENGTH(d);
+/*
+	*targetP++ = XA_CHARACTER_POSITION(d);
+*/
+	memmove( (char*)targetP, (char*)std_targets, sizeof(Atom)*std_length);
+	XtFree((char*)std_targets);
+	*type = XA_ATOM;
+	*format = 32;
+	return True;
+    }
+    if (*target == XA_STRING || *target == XA_TEXT(d)) {
+	*type = XA_STRING;
+	*value = XtMalloc((Cardinal) options.length);
+	memmove( (char *) *value, options.value, options.length);
+	*length = options.length;
+	*format = 8;
+	return True;
+    }
+    if (*target == XA_LIST_LENGTH(d)) {
+	long *temp = (long *) XtMalloc (sizeof(long));
+	*temp = 1L;
+	*value = (XtPointer) temp;
+	*type = XA_INTEGER;
+	*length = 1;
+	*format = 32;
+	return True;
+    }
+    if (*target == XA_LENGTH(d)) {
+	long *temp = (long *) XtMalloc (sizeof(long));
+	*temp = options.length;
+	*value = (XtPointer) temp;
+	*type = XA_INTEGER;
+	*length = 1;
+	*format = 32;
+	return True;
+    }
+#ifdef notdef
+    if (*target == XA_CHARACTER_POSITION(d)) {
+	long *temp = (long *) XtMalloc (2 * sizeof(long));
+	temp[0] = ctx->text.s.left + 1;
+	temp[1] = ctx->text.s.right;
+	*value = (XtPointer) temp;
+	*type = XA_SPAN(d);
+	*length = 2;
+	*format = 32;
+	return True;
+    }
+#endif /* notdef */
+    if (XmuConvertStandardSelection(w, req->time, selection, target, type,
+				    (XPointer *)value, length, format))
+	return True;
+
+    /* else */
+    return False;
+}
+
+
+static void 
+SetButton(ButtonState *state, Boolean on)
+{
+    if (state->is_on != on) {
+	Arg args[2];
+	Pixel fg, bg;
+	XtSetArg( args[0], XtNforeground, &fg );
+	XtSetArg( args[1], XtNbackground, &bg );
+	XtGetValues( state->button, args, TWO );
+	args[0].value = (XtArgVal)bg;
+	args[1].value = (XtArgVal)fg;
+	XtSetValues( state->button, args, TWO );
+	state->is_on = on;
+    }
+}
+
+
+static void 
+LoseSelection(Widget w, Atom *selection)
+{
+    if (options.value) {
+	XFree( options.value );
+	options.value = NULL;
+    }
+    SetButton(&state, False);
+}
+
+
+/* ARGSUSED */
+static void 
+Quit(Widget w, XtPointer closure, XtPointer callData)
+{
+    XtCloseDisplay( XtDisplay(w) );
+    exit(0);
+}
+
+
+/* ARGSUSED */
+static void 
+GetSelection(Widget w, XtPointer closure, XtPointer callData)
+{
+    XtGetSelectionValue(w, options.selection, XA_STRING,
+			StoreBuffer, NULL,
+			XtLastTimestampProcessed(XtDisplay(w)));
+}
+
+
+/* ARGSUSED */
+static void 
+GetBuffer(Widget w, XtPointer closure, XtPointer callData)
+{
+    if (options.value) XFree( options.value );
+    options.value =
+	XFetchBuffer(XtDisplay(w), &options.length, options.buffer);
+    if (options.value != NULL) {
+	if (XtOwnSelection(w, options.selection,
+			   XtLastTimestampProcessed(XtDisplay(w)),
+			   ConvertSelection, LoseSelection, NULL))
+	    SetButton((ButtonState*)closure, True);
+    }
+}
+
+
+int 
+main(int argc, char *argv[])
+{
+    char label[100];
+    Widget box, button;
+    XtAppContext appcon;
+    Widget shell;
+    XrmDatabase rdb;
+
+    XtSetLanguageProc(NULL, NULL, NULL);
+
+    shell =
+	XtAppInitialize( &appcon, "XCutsel", optionDesc, XtNumber(optionDesc),
+			 &argc, argv, NULL, NULL, 0 );
+    rdb = XtDatabase(XtDisplay(shell));
+
+    if (argc != 1) Syntax(argv[0]);
+
+    XtGetApplicationResources( shell, (XtPointer)&options,
+			       resources, XtNumber(resources),
+			       NULL, ZERO );
+
+    options.value = NULL;
+    XmuInternStrings( XtDisplay(shell), &options.selection_name, ONE,
+		      &options.selection );
+
+    box = XtCreateManagedWidget("box", boxWidgetClass, shell, NULL, ZERO);
+
+    button =
+	XtCreateManagedWidget("quit", commandWidgetClass, box, NULL, ZERO);
+	XtAddCallback( button, XtNcallback, Quit, NULL );
+
+    /* %%% hack alert... */
+    sprintf(label, "*label:copy %s to %d",
+	    options.selection_name,
+	    options.buffer);
+    XrmPutLineResource( &rdb, label );
+
+    button =
+	XtCreateManagedWidget("sel-cut", commandWidgetClass, box, NULL, ZERO);
+	XtAddCallback( button, XtNcallback, GetSelection, NULL );
+
+    sprintf(label, "*label:copy %d to %s",
+	    options.buffer,
+	    options.selection_name);
+    XrmPutLineResource( &rdb, label );
+
+    button =
+	XtCreateManagedWidget("cut-sel", commandWidgetClass, box, NULL, ZERO);
+	XtAddCallback( button, XtNcallback, GetBuffer, (XtPointer)&state );
+ 	state.button = button;
+	state.is_on = False;
+   
+    XtRealizeWidget(shell);
+    XtAppMainLoop(appcon);
+    exit(0);
+}
+@
+
+
+1.1.9.1
+log
+@OpenBSD just has imported exactly this tree into their vendor branch,
+called the same tag, in XF4/xc
+This is, apparently, the last XFree86 snapshot before the licence change
+(ie, addition of the advertising clause)
+
+Since the developers don't see any problems with that, and we would like
+to integrate improvements done by the remaining one or two (or so) XFree86
+developers (j/k), this prepares enabling us to update X-Window in the future.
+@
+text
+@@
+
+
+1.1.1.1
+log
+@Import OpenBSD 3.3 XF4 repository from CTM 3132 the first time
+This finalizes starting an OpenBSD-mirabile (aka MirBSD) repository.
+
+### MirBSD is:
+# Copyright (c) 1982-2003 by Thorsten "mirabile" Glaser <x86@@ePost.de>
+# Copyright © 1968-2003  The authors of And contributors to UNIX®, the
+#       C Language, BSD/Berkeley Unix; 386BSD, NetBSD 1.1 and OpenBSD.
+#
+# Anyone who obtained a copy of this work is hereby permitted to freely use,
+# distribute, modify, merge, sublicence, give away or sell it as long as the
+# authors are given due credit and the following notice is retained:
+#
+# This work is provided "as is", with no explicit or implicit warranty what-
+# soever. Use it only at your own risk. In no event may an author or contri-
+# butor be held liable for any damage, directly or indirectly, that origina-
+# ted through or is caused by creation or modification of this work.
+
+MirBSD is my private tree. MirBSD does not differ very much from OpenBSD
+and intentionally tracks OpenBSD. That's why it _is_ OpenBSD, just not the
+official one. It's like with DarrenBSD.
+
+At time of this writing, no advertising for MirBSD must be done,
+because the advertising clause has not yet been sorted out.
+
+http://templeofhate.com/tglaser/MirBSD/index.php
+@
+text
+@@

@@ -1,0 +1,328 @@
+head	1.1;
+branch	1.1.1;
+access;
+symbols
+	tg-mergetmp-2:1.1.1.2
+	cvs-200410241530:1.1.1.2
+	cvs-200410012000:1.1.1.2
+	cvs-200407141120:1.1.1.2
+	cvs-200406231010:1.1.1.2
+	MIRBSD_7quater:1.1.1.2
+	cvs-200405271510:1.1.1.2
+	XFree86_4_4_0:1.1.9.1
+	cvs-200403021700:1.1.1.2
+	XFREE86_20040213:1.1.9.1
+	xc:1.1.9
+	cvs-200401291925:1.1.1.2
+	MIRBSD_7_ALPHA:1.1.1.2.0.4
+	MIRBSD_7:1.1.1.2.0.2
+	MIRBSD_7ter:1.1.1.2
+	cvs-20011091815:1.1.1.2
+	cvs-200309162130:1.1.1.2
+	cvs-200308302005:1.1.1.2
+	ctmx-0387:1.1.1.2
+	ctmx-0384:1.1.1.2
+	MIRBSD_5:1.1.1.2
+	ctmx-0375:1.1.1.2
+	ctmx-0373:1.1.1.2
+	ctm-0371:1.1.1.2
+	ctm-0370:1.1.1.2
+	MIRBSD_4:1.1.1.2
+	ctm-0363:1.1.1.2
+	ctm-0359:1.1.1.2
+	ctm-0349:1.1.1.1
+	openbsd:1.1.1;
+locks; strict;
+comment	@ * @;
+
+
+1.1
+date	2003.03.22.20.04.16;	author tg;	state Exp;
+branches
+	1.1.1.1
+	1.1.9.1;
+next	;
+
+1.1.1.1
+date	2003.03.22.20.04.16;	author tg;	state Exp;
+branches;
+next	1.1.1.2;
+
+1.1.1.2
+date	2003.04.08.18.31.25;	author tg;	state Stab;
+branches;
+next	;
+
+1.1.9.1
+date	2004.02.14.19.17.54;	author tg;	state Exp;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@/*
+ * GLX Hardware Device Driver for Intel i810
+ * Copyright (C) 1999 Keith Whitwell
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a
+ * copy of this software and associated documentation files (the "Software"),
+ * to deal in the Software without restriction, including without limitation
+ * the rights to use, copy, modify, merge, publish, distribute, sublicense,
+ * and/or sell copies of the Software, and to permit persons to whom the
+ * Software is furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included
+ * in all copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
+ * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL
+ * KEITH WHITWELL, OR ANY OTHER CONTRIBUTORS BE LIABLE FOR ANY CLAIM,
+ * DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR
+ * OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE
+ * OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+ *
+ *
+ */
+/* $XFree86: xc/lib/GL/mesa/src/drv/i810/i810tris.h,v 1.9 2001/03/21 16:14:21 dawes Exp $ */
+
+#ifndef I810TRIS_INC
+#define I810TRIS_INC
+
+#include "types.h"
+#include "i810ioctl.h"
+#include "i810vb.h"
+
+extern void i810PrintRenderState( const char *msg, GLuint state );
+extern void i810DDChooseRenderState(GLcontext *ctx);
+extern void i810DDTrifuncInit( void );
+
+
+#define I810_FLAT_BIT 	     0x1
+#define I810_OFFSET_BIT	     0x2
+#define I810_TWOSIDE_BIT     0x4
+#define I810_FALLBACK_BIT    0x8
+
+
+
+
+static void __inline__ i810_draw_triangle( i810ContextPtr imesa,
+					   i810VertexPtr v0,
+					   i810VertexPtr v1,
+					   i810VertexPtr v2 )
+{
+   GLuint vertsize = imesa->vertsize;
+   GLuint *vb = i810AllocDwordsInline( imesa, 3 * vertsize );
+   int j;
+
+#if defined(USE_X86_ASM)
+    __asm__ __volatile__( "rep ; movsl"
+			  : "=%c" (j)
+			  : "0" (vertsize), "D" ((long)vb), "S" ((long)v0)
+			  : "memory" );
+    __asm__ __volatile__( "rep ; movsl"
+			  : "=%c" (j)
+			  : "0" (vertsize), "S" ((long)v1)
+			  : "memory" );
+    __asm__ __volatile__( "rep ; movsl"
+			  : "=%c" (j)
+			  : "0" (vertsize), "S" ((long)v2)
+			  : "memory" );
+#else
+   for (j = 0 ; j < vertsize ; j++)
+      vb[j] = v0->ui[j];
+
+   vb += vertsize;
+   for (j = 0 ; j < vertsize ; j++)
+      vb[j] = v1->ui[j];
+
+   vb += vertsize;
+   for (j = 0 ; j < vertsize ; j++)
+      vb[j] = v2->ui[j];
+#endif
+}
+
+
+static __inline__ void i810_draw_point( i810ContextPtr imesa,
+					i810VertexPtr tmp,
+					float sz )
+{
+   int vertsize = imesa->vertsize;
+   GLuint *vb = i810AllocDwordsInline( imesa, 6 * vertsize );
+   const GLfloat x = tmp->v.x + 0.125;
+   const GLfloat y = tmp->v.y - 0.5F;
+   int j;
+
+   *(float *)&vb[0] = x - sz;
+   *(float *)&vb[1] = y - sz;
+   for (j = 2 ; j < vertsize ; j++)
+      vb[j] = tmp->ui[j];
+   vb += vertsize;
+
+   *(float *)&vb[0] = x + sz;
+   *(float *)&vb[1] = y - sz;
+   for (j = 2 ; j < vertsize ; j++)
+      vb[j] = tmp->ui[j];
+   vb += vertsize;
+
+   *(float *)&vb[0] = x + sz;
+   *(float *)&vb[1] = y + sz;
+   for (j = 2 ; j < vertsize ; j++)
+      vb[j] = tmp->ui[j];
+   vb += vertsize;
+
+   *(float *)&vb[0] = x + sz;
+   *(float *)&vb[1] = y + sz;
+   for (j = 2 ; j < vertsize ; j++)
+      vb[j] = tmp->ui[j];
+   vb += vertsize;
+
+   *(float *)&vb[0] = x - sz;
+   *(float *)&vb[1] = y + sz;
+   for (j = 2 ; j < vertsize ; j++)
+      vb[j] = tmp->ui[j];
+   vb += vertsize;
+
+   *(float *)&vb[0] = x - sz;
+   *(float *)&vb[1] = y - sz;
+   for (j = 2 ; j < vertsize ; j++)
+      vb[j] = tmp->ui[j];
+}
+
+
+static __inline__ void i810_draw_line( i810ContextPtr imesa,
+				       i810VertexPtr v0,
+				       i810VertexPtr v1 )
+{
+   GLuint vertsize = imesa->vertsize;
+   GLuint *vb = i810AllocDwordsInline( imesa, 2 * vertsize );
+   int j;
+
+#if defined(USE_X86_ASM)
+   __asm__ __volatile__( "rep ; movsl"
+			 : "=%c" (j)
+			 : "0" (vertsize), "D" ((long)vb), "S" ((long)v0)
+			 : "memory" );
+   __asm__ __volatile__( "rep ; movsl"
+			 : "=%c" (j)
+			 : "0" (vertsize), "S" ((long)v1)
+			 : "memory" );
+#elif 0
+   for (j = 0 ; j < vertsize ; j++)
+      vb[j] = v0->ui[j];
+
+   vb += vertsize;
+   for (j = 0 ; j < vertsize ; j++)
+      vb[j] = v1->ui[j];
+#else
+   const GLfloat dx = -0.5;
+   const GLfloat dy = -0.5;
+
+   v0->v.x += dx;
+   v0->v.y += dy;
+   v1->v.x += dx;
+   v1->v.y += dy;
+
+   for (j = 0 ; j < vertsize ; j++)
+      vb[j] = v0->ui[j];
+
+   vb += vertsize;
+   for (j = 0 ; j < vertsize ; j++)
+      vb[j] = v1->ui[j];
+
+   v0->v.x -= dx;
+   v0->v.y -= dy;
+   v1->v.x -= dx;
+   v1->v.y -= dy;
+#endif
+}
+
+
+#endif
+@
+
+
+1.1.9.1
+log
+@OpenBSD just has imported exactly this tree into their vendor branch,
+called the same tag, in XF4/xc
+This is, apparently, the last XFree86 snapshot before the licence change
+(ie, addition of the advertising clause)
+
+Since the developers don't see any problems with that, and we would like
+to integrate improvements done by the remaining one or two (or so) XFree86
+developers (j/k), this prepares enabling us to update X-Window in the future.
+@
+text
+@d25 1
+a25 1
+/* $XFree86: xc/lib/GL/mesa/src/drv/i810/i810tris.h,v 1.10 2002/02/22 21:33:04 dawes Exp $ */
+d30 3
+a32 1
+#include "mtypes.h"
+d35 143
+a177 2
+extern void i810InitTriFuncs( GLcontext *ctx );
+extern void i810RasterPrimitive( GLcontext *ctx, GLenum rprim, GLuint hwprim );
+@
+
+
+1.1.1.1
+log
+@Import OpenBSD 3.3 XF4 repository from CTM 3132 the first time
+This finalizes starting an OpenBSD-mirabile (aka MirBSD) repository.
+
+### MirBSD is:
+# Copyright (c) 1982-2003 by Thorsten "mirabile" Glaser <x86@@ePost.de>
+# Copyright © 1968-2003  The authors of And contributors to UNIX®, the
+#       C Language, BSD/Berkeley Unix; 386BSD, NetBSD 1.1 and OpenBSD.
+#
+# Anyone who obtained a copy of this work is hereby permitted to freely use,
+# distribute, modify, merge, sublicence, give away or sell it as long as the
+# authors are given due credit and the following notice is retained:
+#
+# This work is provided "as is", with no explicit or implicit warranty what-
+# soever. Use it only at your own risk. In no event may an author or contri-
+# butor be held liable for any damage, directly or indirectly, that origina-
+# ted through or is caused by creation or modification of this work.
+
+MirBSD is my private tree. MirBSD does not differ very much from OpenBSD
+and intentionally tracks OpenBSD. That's why it _is_ OpenBSD, just not the
+official one. It's like with DarrenBSD.
+
+At time of this writing, no advertising for MirBSD must be done,
+because the advertising clause has not yet been sorted out.
+
+http://templeofhate.com/tglaser/MirBSD/index.php
+@
+text
+@@
+
+
+1.1.1.2
+log
+@The X-Windowing System
+
+Import XFree86 4.3 from OpenBSD by CTM, in the hope it's stable
+@
+text
+@d25 1
+a25 1
+/* $XFree86: xc/lib/GL/mesa/src/drv/i810/i810tris.h,v 1.10 2002/02/22 21:33:04 dawes Exp $ */
+d30 3
+a32 1
+#include "mtypes.h"
+d35 143
+a177 2
+extern void i810InitTriFuncs( GLcontext *ctx );
+extern void i810RasterPrimitive( GLcontext *ctx, GLenum rprim, GLuint hwprim );
+@
+

@@ -1,0 +1,1228 @@
+head	1.1;
+branch	1.1.1;
+access;
+symbols
+	tg-mergetmp-2:1.1.1.2
+	cvs-200410241530:1.1.1.2
+	cvs-200410012000:1.1.1.2
+	cvs-200407141120:1.1.1.2
+	cvs-200406231010:1.1.1.2
+	MIRBSD_7quater:1.1.1.1
+	cvs-200405271510:1.1.1.2
+	XFree86_4_4_0:1.1.9.1
+	cvs-200403021700:1.1.1.2
+	XFREE86_20040213:1.1.9.1
+	xc:1.1.9
+	cvs-200401291925:1.1.1.1
+	MIRBSD_7_ALPHA:1.1.1.1.0.4
+	MIRBSD_7:1.1.1.1.0.2
+	MIRBSD_7ter:1.1.1.1
+	cvs-20011091815:1.1.1.1
+	cvs-200309162130:1.1.1.1
+	cvs-200308302005:1.1.1.1
+	ctmx-0387:1.1.1.1
+	ctmx-0384:1.1.1.1
+	MIRBSD_5:1.1.1.1
+	ctmx-0375:1.1.1.1
+	ctmx-0373:1.1.1.1
+	ctm-0371:1.1.1.1
+	ctm-0370:1.1.1.1
+	MIRBSD_4:1.1.1.1
+	ctm-0363:1.1.1.1
+	ctm-0359:1.1.1.1
+	ctm-0349:1.1.1.1
+	openbsd:1.1.1;
+locks; strict;
+comment	@ * @;
+
+
+1.1
+date	2003.03.22.20.04.20;	author tg;	state Exp;
+branches
+	1.1.1.1
+	1.1.9.1;
+next	;
+
+1.1.1.1
+date	2003.03.22.20.04.20;	author tg;	state Exp;
+branches;
+next	1.1.1.2;
+
+1.1.1.2
+date	2004.03.02.17.59.28;	author tg;	state Stab;
+branches;
+next	;
+
+1.1.9.1
+date	2004.02.14.19.18.11;	author tg;	state Exp;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@/**************************************************************************
+
+Copyright 2000 Silicon Integrated Systems Corp, Inc., HsinChu, Taiwan.
+All Rights Reserved.
+
+Permission is hereby granted, free of charge, to any person obtaining a
+copy of this software and associated documentation files (the
+"Software"), to deal in the Software without restriction, including
+without limitation the rights to use, copy, modify, merge, publish,
+distribute, sub license, and/or sell copies of the Software, and to
+permit persons to whom the Software is furnished to do so, subject to
+the following conditions:
+
+The above copyright notice and this permission notice (including the
+next paragraph) shall be included in all copies or substantial portions
+of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
+OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NON-INFRINGEMENT.
+IN NO EVENT SHALL PRECISION INSIGHT AND/OR ITS SUPPLIERS BE LIABLE FOR
+ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,
+TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
+SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+**************************************************************************/
+/* $XFree86: xc/lib/GL/mesa/src/drv/sis/sis_alloc.c,v 1.7 2001/01/08 01:07:29 martin Exp $ */
+
+/*
+ * Authors:
+ *    Sung-Ching Lin <sclin@@sis.com.tw>
+ *
+ */
+
+#include <assert.h>
+
+#include "sis_ctx.h"
+#include "sis_mesa.h"
+
+#if defined(XFree86Server) && !defined(XF86DRI)
+# include "xf86fbman.h"
+#else
+# define CONFIG_DRM_SIS
+# include "drm.h"
+# undef CONFIG_DRM_SIS
+# include "sis_drm.h"
+# include <sys/ioctl.h>
+#endif
+
+#define Z_BUFFER_HW_ALIGNMENT 16
+#define Z_BUFFER_HW_PLUS (16 + 4)
+
+/* 3D engine uses 2, and bitblt uses 4 */
+#define DRAW_BUFFER_HW_ALIGNMENT 16
+#define DRAW_BUFFER_HW_PLUS (16 + 4)
+
+#define TEXTURE_HW_ALIGNMENT 4
+#define TEXTURE_HW_PLUS (4 + 4)
+
+#ifdef ROUNDUP
+#undef ROUNDUP
+#endif
+#define ROUNDUP(nbytes, pad) (((nbytes)+(pad-1))/(pad))
+
+#ifdef ALIGNMENT
+#undef ALIGNMENT
+#endif
+#define ALIGNMENT(value, align) (ROUNDUP((value),(align))*(align))
+
+#if defined(XFree86Server) && !defined(XF86DRI)
+
+static void *
+sis_alloc_fb (__GLSiScontext * hwcx, GLuint size, void **free)
+{
+  GLcontext *ctx = hwcx->gc;
+  XMesaContext xmesa = (XMesaContext) ctx->DriverCtx;
+
+  ScreenPtr pScreen = xmesa->display;
+
+  GLuint offset;
+  BoxPtr pBox;
+
+  size = ROUNDUP (size, GET_DEPTH (hwcx));
+  *free = xf86AllocateLinearOffscreenArea (pScreen, size, 1,
+					   NULL, NULL, NULL);
+
+  if (!*free)
+    return NULL;
+
+  pBox = &((FBAreaPtr) (*free))->box;
+  offset = pBox->y1 * GET_PITCH (hwcx) + pBox->x1 * GET_DEPTH (hwcx);
+
+  return GET_FbBase (hwcx) + offset;
+}
+
+static void
+sis_free_fb (int hHWContext, void *free)
+{
+  xf86FreeOffscreenArea ((FBAreaPtr) free);
+}
+
+#else
+
+int gDRMSubFD = -1;
+
+/* debug */
+#if 1
+
+static int _total_video_memory_used = 0;
+static int _total_video_memory_count = 0;
+
+static void *
+sis_alloc_fb (__GLSiScontext * hwcx, GLuint size, void **free)
+{
+  GLcontext *ctx = hwcx->gc;
+  XMesaContext xmesa = (XMesaContext) ctx->DriverCtx;
+
+  drm_sis_mem_t fb;
+
+  _total_video_memory_used += size;
+
+  fb.context = xmesa->driContextPriv->hHWContext;
+  fb.size = size;
+  if(ioctl(hwcx->drmSubFD, SIS_IOCTL_FB_ALLOC, &fb) || !fb.offset)
+    return NULL;
+  *free = (void *)fb.free;
+
+  /* debug */
+  /* memset(fb.offset + GET_FbBase(hwcx), 0xff, size); */
+
+  if (SIS_VERBOSE&VERBOSE_SIS_MEMORY)
+  {
+    fprintf(stderr, "sis_alloc_fb: size=%u, offset=%lu, pid=%lu, count=%d\n", 
+           size, (DWORD)fb.offset, (DWORD)getpid(), 
+           ++_total_video_memory_count);
+  }
+
+  return (void *)(fb.offset + GET_FbBase(hwcx));
+}
+
+static void
+sis_free_fb (int hHWContext, void *free)
+{
+  drm_sis_mem_t fb;
+
+  if (SIS_VERBOSE&VERBOSE_SIS_MEMORY)
+  {
+    fprintf(stderr, "sis_free_fb: free=%lu, pid=%lu, count=%d\n", 
+            (DWORD)free, (DWORD)getpid(), --_total_video_memory_count);
+  }
+  
+  fb.context = hHWContext;
+  fb.free = (unsigned long)free;
+  ioctl(gDRMSubFD, SIS_IOCTL_FB_FREE, &fb);
+}
+
+#else
+
+static void *
+sis_alloc_fb (__GLSiScontext * hwcx, GLuint size, void **free)
+{
+  static char *vidmem_base = 0x400000;
+  char *rval = vidmem_base;
+
+  vidmem_base += size;
+  if(vidmem_base >= 31*0x100000)
+    return NULL;
+  
+  *free = rval + (DWORD)hwcx->FbBase;
+
+  return rval + (DWORD)hwcx->FbBase;
+}
+
+static void
+sis_free_fb (int hHWContext, void *free)
+{
+  return;
+}
+
+#endif
+
+#endif
+
+static void *
+sis_alloc_agp (__GLSiScontext * hwcx, GLuint size, void **free)
+{
+  GLcontext *ctx = hwcx->gc;
+  XMesaContext xmesa = (XMesaContext) ctx->DriverCtx;
+
+  drm_sis_mem_t agp;
+  
+  if(!hwcx->AGPSize)
+    return NULL;
+
+  agp.context = xmesa->driContextPriv->hHWContext;
+  agp.size = size;
+  if(ioctl(hwcx->drmSubFD, SIS_IOCTL_AGP_ALLOC, &agp) || !agp.offset)
+    return NULL;
+  *free = (void *)agp.free;
+
+  if (SIS_VERBOSE&VERBOSE_SIS_MEMORY)
+  {
+    fprintf(stderr, "sis_alloc_agp: size=%u, offset=%lu, pid=%lu, count=%d\n", 
+           size, (DWORD)agp.offset, (DWORD)getpid(), 
+           ++_total_video_memory_count);
+  }
+
+  return (void *)(agp.offset + GET_AGPBase(hwcx));
+}
+
+static void
+sis_free_agp (int hHWContext, void *free)
+{
+  drm_sis_mem_t agp;
+
+  if (SIS_VERBOSE&VERBOSE_SIS_MEMORY)
+  {
+    fprintf(stderr, "sis_free_agp: free=%lu, pid=%lu, count=%d\n", 
+            (DWORD)free, (DWORD)getpid(), --_total_video_memory_count);
+  }
+  
+  agp.context = hHWContext;
+  agp.free = (unsigned long)free;
+  ioctl(gDRMSubFD, SIS_IOCTL_AGP_FREE, &agp);
+}
+
+/* debug */
+static unsigned int Total_Real_Textures_Used = 0;
+static unsigned int Total_Textures_Used = 0;
+
+void
+sis_alloc_z_stencil_buffer (GLcontext * ctx)
+{
+  XMesaContext xmesa = (XMesaContext) ctx->DriverCtx;
+  __GLSiScontext *hwcx = (__GLSiScontext *) xmesa->private;
+
+  XMesaBuffer xm_buffer = xmesa->xm_buffer;
+  sisBufferInfo *priv = (sisBufferInfo *) xm_buffer->private;
+
+  GLuint z_depth;
+  GLuint totalBytes;
+  int width2;
+
+  GLubyte *addr;
+
+  z_depth = (ctx->Visual->DepthBits + ctx->Visual->StencilBits) / 8;
+
+  width2 = ALIGNMENT (xm_buffer->width * z_depth, 4);
+
+  totalBytes = xm_buffer->height * width2 + Z_BUFFER_HW_PLUS;
+
+  if (xm_buffer->depthbuffer)
+    {
+      sis_free_z_stencil_buffer (xm_buffer);
+    }
+
+  addr = sis_alloc_fb (hwcx, totalBytes, &priv->zbFree);
+  if (!addr)
+    {
+      fprintf (stderr, "SIS driver : out of video memory\n");
+      sis_fatal_error ();
+    }
+
+  if (SIS_VERBOSE&VERBOSE_SIS_BUFFER)
+  {
+    fprintf(stderr, "sis_alloc_z_stencil_buffer: addr=%lu\n", (DWORD)addr);
+  }
+
+  addr = (GLubyte *) ALIGNMENT ((unsigned long) addr, Z_BUFFER_HW_ALIGNMENT);
+
+  xm_buffer->depthbuffer = (void *) addr;
+
+  /* software render */
+  hwcx->swZBase = addr;
+  hwcx->swZPitch = width2;
+
+  /* set pZClearPacket */
+  memset (priv->pZClearPacket, 0, sizeof (ENGPACKET));
+
+  priv->pZClearPacket->dwSrcPitch = (z_depth == 2) ? 0x80000000 : 0xf0000000;
+  priv->pZClearPacket->dwDestBaseAddr =
+    (DWORD) addr - (DWORD) GET_FbBase (hwcx);
+  priv->pZClearPacket->wDestPitch = width2;
+  priv->pZClearPacket->stdwDestPos.wY = 0;
+  priv->pZClearPacket->stdwDestPos.wX = 0;
+
+  priv->pZClearPacket->wDestHeight = hwcx->virtualY;
+  priv->pZClearPacket->stdwDim.wWidth = (WORD) width2 / z_depth;
+  priv->pZClearPacket->stdwDim.wHeight = (WORD) xm_buffer->height;
+  priv->pZClearPacket->stdwCmd.cRop = 0xf0;
+
+  if (hwcx->blockWrite)
+    {
+      priv->pZClearPacket->stdwCmd.cCmd0 = (BYTE) (CMD0_PAT_FG_COLOR);
+      priv->pZClearPacket->stdwCmd.cCmd1 =
+	(BYTE) (CMD1_DIR_X_INC | CMD1_DIR_Y_INC);
+    }
+  else
+    {
+      priv->pZClearPacket->stdwCmd.cCmd0 = 0;
+      priv->pZClearPacket->stdwCmd.cCmd1 =
+	(BYTE) (CMD1_DIR_X_INC | CMD1_DIR_Y_INC);
+    }
+}
+
+void
+sis_free_z_stencil_buffer (XMesaBuffer buf)
+{
+  sisBufferInfo *priv = (sisBufferInfo *) buf->private;
+  XMesaContext xmesa = buf->xm_context;
+
+  sis_free_fb (xmesa->driContextPriv->hHWContext, priv->zbFree);
+  priv->zbFree = NULL;
+  buf->depthbuffer = NULL;
+}
+
+void
+sis_alloc_back_image (GLcontext * ctx, XMesaImage *image, void **free,
+                      ENGPACKET *packet)
+{
+  XMesaContext xmesa = (XMesaContext) ctx->DriverCtx;
+  __GLSiScontext *hwcx = (__GLSiScontext *) xmesa->private;
+
+  XMesaBuffer xm_buffer = xmesa->xm_buffer;
+
+  GLuint depth = GET_DEPTH (hwcx);
+  GLuint size, width2;
+
+  GLbyte *addr;
+
+  if (image->data)
+    {
+      sis_free_back_image (xm_buffer, image, *free);
+      *free = NULL;
+    }
+
+  width2 = (depth == 2) ? ALIGNMENT (xm_buffer->width, 2) : xm_buffer->width;
+  size = width2 * xm_buffer->height * depth + DRAW_BUFFER_HW_PLUS;
+
+  /* Fixme: unique context alloc/free back-buffer? */
+  addr = sis_alloc_fb (hwcx, size, free);
+  if (!addr)
+    {
+      fprintf (stderr, "SIS driver : out of video memory\n");
+      sis_fatal_error ();
+    }
+
+  addr = (GLbyte *) ALIGNMENT ((unsigned long) addr, DRAW_BUFFER_HW_ALIGNMENT);
+
+  image->data = (char *)addr;
+
+  image->bytes_per_line = width2 * depth;
+  image->bits_per_pixel = depth * 8;
+
+  memset (packet, 0, sizeof (ENGPACKET));
+
+  packet->dwSrcPitch = (depth == 2) ? 0x80000000 : 0xf0000000;
+  packet->dwDestBaseAddr =
+    (DWORD) addr - (DWORD) GET_FbBase (hwcx);
+  packet->wDestPitch = image->bytes_per_line;
+  packet->stdwDestPos.wY = 0;
+  packet->stdwDestPos.wX = 0;
+
+  packet->wDestHeight = hwcx->virtualY;
+  packet->stdwDim.wWidth = (WORD) width2;
+  packet->stdwDim.wHeight = (WORD) xm_buffer->height;
+  packet->stdwCmd.cRop = 0xf0;
+
+  if (hwcx->blockWrite)
+    {
+      packet->stdwCmd.cCmd0 = (BYTE) (CMD0_PAT_FG_COLOR);
+      packet->stdwCmd.cCmd1 =
+	(BYTE) (CMD1_DIR_X_INC | CMD1_DIR_Y_INC);
+    }
+  else
+    {
+      packet->stdwCmd.cCmd0 = 0;
+      packet->stdwCmd.cCmd1 = (BYTE) (CMD1_DIR_X_INC | CMD1_DIR_Y_INC);
+    }
+}
+
+void
+sis_free_back_image (XMesaBuffer buf, XMesaImage *image, void *free)
+{
+  XMesaContext xmesa = buf->xm_context;
+
+  sis_free_fb (xmesa->driContextPriv->hHWContext, free);
+  image->data = NULL; 
+}
+
+void
+sis_alloc_texture_image (GLcontext * ctx, GLtextureImage * image)
+{
+  XMesaContext xmesa = (XMesaContext) ctx->DriverCtx;
+  __GLSiScontext *hwcx = (__GLSiScontext *) xmesa->private;
+
+  GLuint size;
+
+  SIStextureArea *area = image->DriverData;
+  char *addr;
+
+  GLuint texel_size;
+  GLenum driver_format;
+
+  if (area)
+    sis_free_texture_image (image);
+
+  area = calloc (1, sizeof (SIStextureArea));
+  if (!area){
+    fprintf (stderr, "SIS Driver : allocating context fails\n");
+    sis_fatal_error ();
+    return;
+  }
+
+  switch (image->IntFormat)
+    {
+    case GL_ALPHA:
+    case GL_ALPHA4:
+    case GL_ALPHA8:
+    case GL_ALPHA12:
+    case GL_ALPHA16:
+      texel_size = 1;
+      driver_format = GL_ALPHA8;
+      break;
+    case 1:
+    case GL_LUMINANCE:
+    case GL_LUMINANCE4:
+    case GL_LUMINANCE8:
+    case GL_LUMINANCE12:
+    case GL_LUMINANCE16:
+      texel_size = 1;
+      driver_format = GL_LUMINANCE8;
+      break;
+    case 2:
+    case GL_LUMINANCE_ALPHA:
+    case GL_LUMINANCE4_ALPHA4:
+    case GL_LUMINANCE6_ALPHA2:
+    case GL_LUMINANCE8_ALPHA8:
+    case GL_LUMINANCE12_ALPHA4:
+    case GL_LUMINANCE12_ALPHA12:
+    case GL_LUMINANCE16_ALPHA16:
+      texel_size = 2;
+      driver_format = GL_LUMINANCE8_ALPHA8;
+      break;
+    case GL_INTENSITY:
+    case GL_INTENSITY4:
+    case GL_INTENSITY8:
+    case GL_INTENSITY12:
+    case GL_INTENSITY16:
+      texel_size = 1;
+      driver_format = GL_INTENSITY8;
+      break;
+    case 3:
+    case GL_RGB:
+    case GL_R3_G3_B2:
+    case GL_RGB4:
+    case GL_RGB5:
+    case GL_RGB8:
+    case GL_RGB10:
+    case GL_RGB12:
+    case GL_RGB16:
+      texel_size = 4;
+      driver_format = GL_RGB8;
+      break;
+    case 4:
+    case GL_RGBA:
+    case GL_RGBA2:
+    case GL_RGBA4:
+    case GL_RGB5_A1:
+    case GL_RGBA8:
+    case GL_RGB10_A2:
+    case GL_RGBA12:
+    case GL_RGBA16:
+      texel_size = 4;
+      driver_format = GL_RGBA8;
+      break;
+    default:
+      assert(0);
+      return;
+    }
+
+  size = image->Width * image->Height * texel_size + TEXTURE_HW_PLUS;
+
+  do{
+    addr = sis_alloc_fb (hwcx, size, &area->free);
+    area->memType = VIDEO_TYPE;
+    if(addr) break;
+    
+    /* TODO: swap to agp memory*/
+    /* video memory allocation fails */
+    addr = sis_alloc_agp(hwcx, size, &area->free);
+    area->memType = AGP_TYPE;
+    if(addr) break;
+    
+    /* TODO: swap to system memory */
+  }  
+  while(0);
+
+  if (!addr){
+    fprintf (stderr, "SIS driver : out of video/agp memory\n");
+    sis_fatal_error ();
+    return;
+  }
+
+  area->Data =
+    (GLbyte *) ALIGNMENT ((unsigned long) addr, TEXTURE_HW_ALIGNMENT);
+  area->Pitch = image->Width * texel_size;
+  area->Format = driver_format;
+  area->Size = image->Width * image->Height * texel_size;
+  area->texelSize = texel_size;
+  area->hHWContext = xmesa->driContextPriv->hHWContext;
+
+  /* debug */
+  area->realSize = area->Size;
+  Total_Real_Textures_Used += area->realSize;
+  Total_Textures_Used++;
+
+  image->DriverData = area;
+}
+
+void
+sis_free_texture_image (GLtextureImage * image)
+{
+  SIStextureArea *area = (SIStextureArea *) image->DriverData;
+
+  /* debug */
+  Total_Real_Textures_Used -= area->realSize;
+  Total_Textures_Used--;
+
+  if (!area)
+    return;
+  
+  if (area->Data)
+    switch(area->memType){
+    case VIDEO_TYPE:  
+      sis_free_fb (area->hHWContext, area->free);
+      break;
+    case AGP_TYPE:  
+      sis_free_agp (area->hHWContext, area->free);
+      break;
+    default:
+      assert(0);
+    }
+
+  free (area);
+  image->DriverData = NULL;
+}
+@
+
+
+1.1.9.1
+log
+@OpenBSD just has imported exactly this tree into their vendor branch,
+called the same tag, in XF4/xc
+This is, apparently, the last XFree86 snapshot before the licence change
+(ie, addition of the advertising clause)
+
+Since the developers don't see any problems with that, and we would like
+to integrate improvements done by the remaining one or two (or so) XFree86
+developers (j/k), this prepares enabling us to update X-Window in the future.
+@
+text
+@a3 1
+Copyright 2003 Eric Anholt
+d7 18
+a24 17
+copy of this software and associated documentation files (the "Software"),
+to deal in the Software without restriction, including without limitation
+on the rights to use, copy, modify, merge, publish, distribute, sub
+license, and/or sell copies of the Software, and to permit persons to whom
+the Software is furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice (including the next
+paragraph) shall be included in all copies or substantial portions of the
+Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NON-INFRINGEMENT. IN NO EVENT SHALL
+ERIC ANHOLT OR SILICON INTEGRATED SYSTEMS CORP BE LIABLE FOR ANY CLAIM,
+DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR
+OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE
+USE OR OTHER DEALINGS IN THE SOFTWARE.
+d27 1
+a27 1
+/* $XFree86: xc/lib/GL/mesa/src/drv/sis/sis_alloc.c,v 1.11 2003/12/22 17:48:03 tsi Exp $ */
+d31 2
+a32 2
+ *   Sung-Ching Lin <sclin@@sis.com.tw>
+ *   Eric Anholt <anholt@@FreeBSD.org>
+d35 1
+a35 2
+#include "sis_context.h"
+#include "sis_alloc.h"
+d37 2
+a38 1
+#include "sis_common.h"
+d40 9
+a48 1
+#include <unistd.h>
+d57 51
+a107 1
+#define ALIGNMENT(value, align) (((value) + (align) - 1) / (align) * (align))
+d112 2
+a113 2
+void *
+sisAllocFB( sisContextPtr smesa, GLuint size, void **handle )
+d115 2
+a116 1
+   drm_sis_mem_t fb;
+d118 1
+a118 1
+   _total_video_memory_used += size;
+d120 1
+a120 8
+   fb.context = smesa->hHWContext;
+   fb.size = size;
+   if (drmCommandWriteRead( smesa->driFd, DRM_SIS_FB_ALLOC, &fb, 
+      sizeof(drm_sis_mem_t) ) || fb.offset == 0)
+   {
+      return NULL;
+   }
+   *handle = (void *)fb.free;
+d122 15
+a136 5
+   if (SIS_VERBOSE & VERBOSE_SIS_MEMORY) {
+      fprintf(stderr, "sisAllocFB: size=%d, offset=%lu, pid=%d, count=%d\n", 
+              size, fb.offset, (GLint)getpid(), 
+              ++_total_video_memory_count);
+   }
+d138 1
+a138 1
+   return (void *)(smesa->FbBase + fb.offset);
+d141 2
+a142 2
+void
+sisFreeFB( sisContextPtr smesa, void *handle )
+d144 1
+a144 1
+   drm_sis_mem_t fb;
+d146 10
+a155 4
+   if (SIS_VERBOSE & VERBOSE_SIS_MEMORY) {
+      fprintf(stderr, "sisFreeFB: free=%p, pid=%d, count=%d\n", 
+              handle, (GLint)getpid(), --_total_video_memory_count);
+   }
+d157 1
+a157 4
+   fb.context = smesa->hHWContext;
+   fb.free = handle;
+   drmCommandWrite( smesa->driFd, DRM_SIS_FB_FREE, &fb, sizeof(drm_sis_mem_t) );
+}
+d159 2
+a160 2
+void *
+sisAllocAGP( sisContextPtr smesa, GLuint size, void **handle )
+d162 2
+a163 4
+   drm_sis_mem_t agp;
+   
+   if (smesa->AGPSize == 0)
+      return NULL;
+d165 5
+a169 8
+   agp.context = smesa->hHWContext;
+   agp.size = size;
+   if (drmCommandWriteRead( smesa->driFd, DRM_SIS_AGP_ALLOC, &agp,
+      sizeof(drm_sis_mem_t) ) || agp.offset == 0)
+   {
+      return NULL;
+   }
+   *handle = (void *)agp.free;
+d171 2
+a172 5
+   if (SIS_VERBOSE & VERBOSE_SIS_MEMORY) {
+      fprintf(stderr, "sisAllocAGP: size=%u, offset=%lu, pid=%d, count=%d\n", 
+              size, agp.offset, (GLint)getpid(), 
+              ++_total_video_memory_count);
+   }
+d174 4
+a177 1
+   return (void *)(smesa->AGPBase + agp.offset);
+d180 6
+a185 2
+void
+sisFreeAGP( sisContextPtr smesa, void *handle )
+d187 2
+a188 1
+   drm_sis_mem_t agp;
+d190 1
+a190 4
+   if (SIS_VERBOSE & VERBOSE_SIS_MEMORY) {
+      fprintf(stderr, "sisFreeAGP: free=%p, pid=%d, count=%d\n", 
+              handle, (GLint)getpid(), --_total_video_memory_count);
+   }
+d192 17
+a208 4
+   agp.context = smesa->hHWContext;
+   agp.free = handle;
+   drmCommandWrite( smesa->driFd, DRM_SIS_AGP_FREE, &agp,
+      sizeof(drm_sis_mem_t) );
+d211 2
+a212 2
+void
+sisAllocZStencilBuffer( sisContextPtr smesa )
+d214 1
+a214 3
+   GLuint z_depth;
+   GLuint totalBytes;
+   int width2;
+d216 10
+a225 1
+   GLubyte *addr;
+d227 3
+a229 2
+   z_depth = ( smesa->glCtx->Visual.depthBits +
+               smesa->glCtx->Visual.stencilBits ) / 8;
+d231 5
+a235 1
+   width2 = ALIGNMENT( smesa->width * z_depth, 4 );
+d237 2
+a238 1
+   totalBytes = smesa->height * width2 + Z_BUFFER_HW_PLUS;
+d240 3
+a242 6
+   addr = sisAllocFB( smesa, totalBytes, &smesa->zbFree );
+   if (addr == NULL)
+   {
+      fprintf (stderr, "SIS driver : out of video memory\n");
+      sis_fatal_error ();
+   }
+d244 1
+a244 3
+   if (SIS_VERBOSE & VERBOSE_SIS_BUFFER) {
+      fprintf(stderr, "sis_alloc_z_stencil_buffer: addr=%p\n", addr);
+   }
+d246 1
+a246 1
+   addr = (GLubyte *)ALIGNMENT( (unsigned long)addr, Z_BUFFER_HW_ALIGNMENT );
+d248 1
+a248 3
+   smesa->depthbuffer = (void *) addr;
+   smesa->depthPitch = width2;
+   smesa->depthOffset = (unsigned long)addr - (unsigned long)smesa->FbBase;
+d250 1
+a250 2
+   /* set pZClearPacket */
+   memset( &smesa->zClearPacket, 0, sizeof(ENGPACKET) );
+d252 4
+a255 6
+   smesa->zClearPacket.dwSrcPitch = (z_depth == 2) ? 0x80000000 : 0xf0000000;
+   smesa->zClearPacket.dwDestBaseAddr = (unsigned long)(addr -
+      (unsigned long)smesa->FbBase);
+   smesa->zClearPacket.wDestPitch = width2;
+   smesa->zClearPacket.stdwDestPos.wY = 0;
+   smesa->zClearPacket.stdwDestPos.wX = 0;
+d257 6
+a262 4
+   smesa->zClearPacket.wDestHeight = smesa->virtualY;
+   smesa->zClearPacket.stdwDim.wWidth = (GLshort)width2 / z_depth;
+   smesa->zClearPacket.stdwDim.wHeight = (GLshort)smesa->height;
+   smesa->zClearPacket.stdwCmd.cRop = 0xf0;
+d264 40
+a303 5
+   if (smesa->blockWrite)
+      smesa->zClearPacket.stdwCmd.cCmd0 = CMD0_PAT_FG_COLOR;
+   else
+      smesa->zClearPacket.stdwCmd.cCmd0 = 0;
+   smesa->zClearPacket.stdwCmd.cCmd1 = CMD1_DIR_X_INC | CMD1_DIR_Y_INC;
+d307 1
+a307 1
+sisFreeZStencilBuffer( sisContextPtr smesa )
+d309 6
+a314 3
+   sisFreeFB( smesa, smesa->zbFree );
+   smesa->zbFree = NULL;
+   smesa->depthbuffer = NULL;
+d318 2
+a319 1
+sisAllocBackbuffer( sisContextPtr smesa )
+d321 4
+a324 2
+   GLuint depth = smesa->bytesPerPixel;
+   GLuint size, width2;
+d326 2
+a327 1
+   char *addr;
+d329 1
+a329 2
+   width2 = (depth == 2) ? ALIGNMENT (smesa->width, 2) : smesa->width;
+   size = width2 * smesa->height * depth + DRAW_BUFFER_HW_PLUS;
+d331 13
+a343 4
+   /* Fixme: unique context alloc/free back-buffer? */
+   addr = sisAllocFB( smesa, size, &smesa->bbFree );
+   if (addr == NULL)
+   {
+d346 3
+a348 1
+   }
+d350 1
+a350 1
+   addr = (char *)ALIGNMENT( (unsigned long)addr, DRAW_BUFFER_HW_ALIGNMENT );
+d352 2
+a353 3
+   smesa->backbuffer = addr;
+   smesa->backOffset = (unsigned long)(addr - (unsigned long)smesa->FbBase);
+   smesa->backPitch = width2 * depth;
+d355 41
+a395 1
+   memset ( &smesa->cbClearPacket, 0, sizeof(ENGPACKET) );
+d397 1
+a397 5
+   smesa->cbClearPacket.dwSrcPitch = (depth == 2) ? 0x80000000 : 0xf0000000;
+   smesa->cbClearPacket.dwDestBaseAddr = smesa->backOffset;
+   smesa->cbClearPacket.wDestPitch = smesa->backPitch;
+   smesa->cbClearPacket.stdwDestPos.wY = 0;
+   smesa->cbClearPacket.stdwDestPos.wX = 0;
+d399 2
+a400 4
+   smesa->cbClearPacket.wDestHeight = smesa->virtualY;
+   smesa->cbClearPacket.stdwDim.wWidth = (GLshort) width2;
+   smesa->cbClearPacket.stdwDim.wHeight = (GLshort) smesa->height;
+   smesa->cbClearPacket.stdwCmd.cRop = 0xf0;
+d402 117
+a518 5
+   if (smesa->blockWrite)
+      smesa->cbClearPacket.stdwCmd.cCmd0 = (GLbyte)(CMD0_PAT_FG_COLOR);
+   else
+      smesa->cbClearPacket.stdwCmd.cCmd0 = 0;
+   smesa->cbClearPacket.stdwCmd.cCmd1 = CMD1_DIR_X_INC | CMD1_DIR_Y_INC;
+d522 1
+a522 1
+sisFreeBackbuffer( sisContextPtr smesa )
+d524 23
+a546 2
+   sisFreeFB( smesa, smesa->bbFree );
+   smesa->backbuffer = NULL; 
+@
+
+
+1.1.1.1
+log
+@Import OpenBSD 3.3 XF4 repository from CTM 3132 the first time
+This finalizes starting an OpenBSD-mirabile (aka MirBSD) repository.
+
+### MirBSD is:
+# Copyright (c) 1982-2003 by Thorsten "mirabile" Glaser <x86@@ePost.de>
+# Copyright © 1968-2003  The authors of And contributors to UNIX®, the
+#       C Language, BSD/Berkeley Unix; 386BSD, NetBSD 1.1 and OpenBSD.
+#
+# Anyone who obtained a copy of this work is hereby permitted to freely use,
+# distribute, modify, merge, sublicence, give away or sell it as long as the
+# authors are given due credit and the following notice is retained:
+#
+# This work is provided "as is", with no explicit or implicit warranty what-
+# soever. Use it only at your own risk. In no event may an author or contri-
+# butor be held liable for any damage, directly or indirectly, that origina-
+# ted through or is caused by creation or modification of this work.
+
+MirBSD is my private tree. MirBSD does not differ very much from OpenBSD
+and intentionally tracks OpenBSD. That's why it _is_ OpenBSD, just not the
+official one. It's like with DarrenBSD.
+
+At time of this writing, no advertising for MirBSD must be done,
+because the advertising clause has not yet been sorted out.
+
+http://templeofhate.com/tglaser/MirBSD/index.php
+@
+text
+@@
+
+
+1.1.1.2
+log
+@That's what OpenBSD will, probably, ship as XF4 in 3.5
+their last sync against XFree86 4.3-current has been
+imported into our vendor branch, too
+@
+text
+@a3 1
+Copyright 2003 Eric Anholt
+d7 18
+a24 17
+copy of this software and associated documentation files (the "Software"),
+to deal in the Software without restriction, including without limitation
+on the rights to use, copy, modify, merge, publish, distribute, sub
+license, and/or sell copies of the Software, and to permit persons to whom
+the Software is furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice (including the next
+paragraph) shall be included in all copies or substantial portions of the
+Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NON-INFRINGEMENT. IN NO EVENT SHALL
+ERIC ANHOLT OR SILICON INTEGRATED SYSTEMS CORP BE LIABLE FOR ANY CLAIM,
+DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR
+OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE
+USE OR OTHER DEALINGS IN THE SOFTWARE.
+d27 1
+a27 1
+/* $XFree86: xc/lib/GL/mesa/src/drv/sis/sis_alloc.c,v 1.11 2003/12/22 17:48:03 tsi Exp $ */
+d31 2
+a32 2
+ *   Sung-Ching Lin <sclin@@sis.com.tw>
+ *   Eric Anholt <anholt@@FreeBSD.org>
+d35 1
+a35 2
+#include "sis_context.h"
+#include "sis_alloc.h"
+d37 2
+a38 1
+#include "sis_common.h"
+d40 9
+a48 1
+#include <unistd.h>
+d57 51
+a107 1
+#define ALIGNMENT(value, align) (((value) + (align) - 1) / (align) * (align))
+d112 2
+a113 2
+void *
+sisAllocFB( sisContextPtr smesa, GLuint size, void **handle )
+d115 2
+a116 1
+   drm_sis_mem_t fb;
+d118 1
+a118 1
+   _total_video_memory_used += size;
+d120 1
+a120 8
+   fb.context = smesa->hHWContext;
+   fb.size = size;
+   if (drmCommandWriteRead( smesa->driFd, DRM_SIS_FB_ALLOC, &fb, 
+      sizeof(drm_sis_mem_t) ) || fb.offset == 0)
+   {
+      return NULL;
+   }
+   *handle = (void *)fb.free;
+d122 15
+a136 5
+   if (SIS_VERBOSE & VERBOSE_SIS_MEMORY) {
+      fprintf(stderr, "sisAllocFB: size=%d, offset=%lu, pid=%d, count=%d\n", 
+              size, fb.offset, (GLint)getpid(), 
+              ++_total_video_memory_count);
+   }
+d138 1
+a138 1
+   return (void *)(smesa->FbBase + fb.offset);
+d141 2
+a142 2
+void
+sisFreeFB( sisContextPtr smesa, void *handle )
+d144 1
+a144 1
+   drm_sis_mem_t fb;
+d146 10
+a155 4
+   if (SIS_VERBOSE & VERBOSE_SIS_MEMORY) {
+      fprintf(stderr, "sisFreeFB: free=%p, pid=%d, count=%d\n", 
+              handle, (GLint)getpid(), --_total_video_memory_count);
+   }
+d157 1
+a157 4
+   fb.context = smesa->hHWContext;
+   fb.free = handle;
+   drmCommandWrite( smesa->driFd, DRM_SIS_FB_FREE, &fb, sizeof(drm_sis_mem_t) );
+}
+d159 2
+a160 2
+void *
+sisAllocAGP( sisContextPtr smesa, GLuint size, void **handle )
+d162 2
+a163 4
+   drm_sis_mem_t agp;
+   
+   if (smesa->AGPSize == 0)
+      return NULL;
+d165 5
+a169 8
+   agp.context = smesa->hHWContext;
+   agp.size = size;
+   if (drmCommandWriteRead( smesa->driFd, DRM_SIS_AGP_ALLOC, &agp,
+      sizeof(drm_sis_mem_t) ) || agp.offset == 0)
+   {
+      return NULL;
+   }
+   *handle = (void *)agp.free;
+d171 2
+a172 5
+   if (SIS_VERBOSE & VERBOSE_SIS_MEMORY) {
+      fprintf(stderr, "sisAllocAGP: size=%u, offset=%lu, pid=%d, count=%d\n", 
+              size, agp.offset, (GLint)getpid(), 
+              ++_total_video_memory_count);
+   }
+d174 4
+a177 1
+   return (void *)(smesa->AGPBase + agp.offset);
+d180 6
+a185 2
+void
+sisFreeAGP( sisContextPtr smesa, void *handle )
+d187 2
+a188 1
+   drm_sis_mem_t agp;
+d190 1
+a190 4
+   if (SIS_VERBOSE & VERBOSE_SIS_MEMORY) {
+      fprintf(stderr, "sisFreeAGP: free=%p, pid=%d, count=%d\n", 
+              handle, (GLint)getpid(), --_total_video_memory_count);
+   }
+d192 17
+a208 4
+   agp.context = smesa->hHWContext;
+   agp.free = handle;
+   drmCommandWrite( smesa->driFd, DRM_SIS_AGP_FREE, &agp,
+      sizeof(drm_sis_mem_t) );
+d211 2
+a212 2
+void
+sisAllocZStencilBuffer( sisContextPtr smesa )
+d214 1
+a214 3
+   GLuint z_depth;
+   GLuint totalBytes;
+   int width2;
+d216 10
+a225 1
+   GLubyte *addr;
+d227 3
+a229 2
+   z_depth = ( smesa->glCtx->Visual.depthBits +
+               smesa->glCtx->Visual.stencilBits ) / 8;
+d231 5
+a235 1
+   width2 = ALIGNMENT( smesa->width * z_depth, 4 );
+d237 2
+a238 1
+   totalBytes = smesa->height * width2 + Z_BUFFER_HW_PLUS;
+d240 3
+a242 6
+   addr = sisAllocFB( smesa, totalBytes, &smesa->zbFree );
+   if (addr == NULL)
+   {
+      fprintf (stderr, "SIS driver : out of video memory\n");
+      sis_fatal_error ();
+   }
+d244 1
+a244 3
+   if (SIS_VERBOSE & VERBOSE_SIS_BUFFER) {
+      fprintf(stderr, "sis_alloc_z_stencil_buffer: addr=%p\n", addr);
+   }
+d246 1
+a246 1
+   addr = (GLubyte *)ALIGNMENT( (unsigned long)addr, Z_BUFFER_HW_ALIGNMENT );
+d248 1
+a248 3
+   smesa->depthbuffer = (void *) addr;
+   smesa->depthPitch = width2;
+   smesa->depthOffset = (unsigned long)addr - (unsigned long)smesa->FbBase;
+d250 1
+a250 2
+   /* set pZClearPacket */
+   memset( &smesa->zClearPacket, 0, sizeof(ENGPACKET) );
+d252 4
+a255 6
+   smesa->zClearPacket.dwSrcPitch = (z_depth == 2) ? 0x80000000 : 0xf0000000;
+   smesa->zClearPacket.dwDestBaseAddr = (unsigned long)(addr -
+      (unsigned long)smesa->FbBase);
+   smesa->zClearPacket.wDestPitch = width2;
+   smesa->zClearPacket.stdwDestPos.wY = 0;
+   smesa->zClearPacket.stdwDestPos.wX = 0;
+d257 6
+a262 4
+   smesa->zClearPacket.wDestHeight = smesa->virtualY;
+   smesa->zClearPacket.stdwDim.wWidth = (GLshort)width2 / z_depth;
+   smesa->zClearPacket.stdwDim.wHeight = (GLshort)smesa->height;
+   smesa->zClearPacket.stdwCmd.cRop = 0xf0;
+d264 40
+a303 5
+   if (smesa->blockWrite)
+      smesa->zClearPacket.stdwCmd.cCmd0 = CMD0_PAT_FG_COLOR;
+   else
+      smesa->zClearPacket.stdwCmd.cCmd0 = 0;
+   smesa->zClearPacket.stdwCmd.cCmd1 = CMD1_DIR_X_INC | CMD1_DIR_Y_INC;
+d307 1
+a307 1
+sisFreeZStencilBuffer( sisContextPtr smesa )
+d309 6
+a314 3
+   sisFreeFB( smesa, smesa->zbFree );
+   smesa->zbFree = NULL;
+   smesa->depthbuffer = NULL;
+d318 2
+a319 1
+sisAllocBackbuffer( sisContextPtr smesa )
+d321 4
+a324 2
+   GLuint depth = smesa->bytesPerPixel;
+   GLuint size, width2;
+d326 2
+a327 1
+   char *addr;
+d329 1
+a329 2
+   width2 = (depth == 2) ? ALIGNMENT (smesa->width, 2) : smesa->width;
+   size = width2 * smesa->height * depth + DRAW_BUFFER_HW_PLUS;
+d331 13
+a343 4
+   /* Fixme: unique context alloc/free back-buffer? */
+   addr = sisAllocFB( smesa, size, &smesa->bbFree );
+   if (addr == NULL)
+   {
+d346 3
+a348 1
+   }
+d350 1
+a350 1
+   addr = (char *)ALIGNMENT( (unsigned long)addr, DRAW_BUFFER_HW_ALIGNMENT );
+d352 2
+a353 3
+   smesa->backbuffer = addr;
+   smesa->backOffset = (unsigned long)(addr - (unsigned long)smesa->FbBase);
+   smesa->backPitch = width2 * depth;
+d355 41
+a395 1
+   memset ( &smesa->cbClearPacket, 0, sizeof(ENGPACKET) );
+d397 1
+a397 5
+   smesa->cbClearPacket.dwSrcPitch = (depth == 2) ? 0x80000000 : 0xf0000000;
+   smesa->cbClearPacket.dwDestBaseAddr = smesa->backOffset;
+   smesa->cbClearPacket.wDestPitch = smesa->backPitch;
+   smesa->cbClearPacket.stdwDestPos.wY = 0;
+   smesa->cbClearPacket.stdwDestPos.wX = 0;
+d399 2
+a400 4
+   smesa->cbClearPacket.wDestHeight = smesa->virtualY;
+   smesa->cbClearPacket.stdwDim.wWidth = (GLshort) width2;
+   smesa->cbClearPacket.stdwDim.wHeight = (GLshort) smesa->height;
+   smesa->cbClearPacket.stdwCmd.cRop = 0xf0;
+d402 117
+a518 5
+   if (smesa->blockWrite)
+      smesa->cbClearPacket.stdwCmd.cCmd0 = (GLbyte)(CMD0_PAT_FG_COLOR);
+   else
+      smesa->cbClearPacket.stdwCmd.cCmd0 = 0;
+   smesa->cbClearPacket.stdwCmd.cCmd1 = CMD1_DIR_X_INC | CMD1_DIR_Y_INC;
+d522 1
+a522 1
+sisFreeBackbuffer( sisContextPtr smesa )
+d524 23
+a546 2
+   sisFreeFB( smesa, smesa->bbFree );
+   smesa->backbuffer = NULL; 
+@
+

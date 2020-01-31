@@ -1,0 +1,349 @@
+head	1.2;
+branch	1.1.1;
+access;
+symbols
+	tg-mergetmp-2:1.1.1.2
+	cvs-200410241530:1.1.1.2
+	cvs-200410012000:1.1.1.2
+	cvs-200407141120:1.1.1.2
+	cvs-200406231010:1.1.1.2
+	MIRBSD_7quater:1.1.1.1
+	cvs-200405271510:1.1.1.2
+	XFree86_4_4_0:1.1.9.1
+	cvs-200403021700:1.1.1.2
+	XFREE86_20040213:1.1.9.1
+	xc:1.1.9
+	cvs-200401291925:1.1.1.1
+	MIRBSD_7_ALPHA:1.1.1.1.0.4
+	MIRBSD_7:1.1.1.1.0.2
+	MIRBSD_7ter:1.1.1.1
+	cvs-20011091815:1.1.1.1
+	cvs-200309162130:1.1.1.1
+	cvs-200308302005:1.1.1.1
+	ctmx-0387:1.1.1.1
+	ctmx-0384:1.1.1.1
+	MIRBSD_5:1.1.1.1
+	ctmx-0375:1.1.1.1
+	ctmx-0373:1.1.1.1
+	ctm-0371:1.1.1.1
+	ctm-0370:1.1.1.1
+	MIRBSD_4:1.1.1.1
+	ctm-0363:1.1.1.1
+	ctm-0359:1.1.1.1
+	openbsd:1.1.1;
+locks; strict;
+comment	@ * @;
+
+
+1.2
+date	2003.05.16.16.28.22;	author tg;	state dead;
+branches;
+next	1.1;
+
+1.1
+date	2003.04.08.18.20.05;	author tg;	state Exp;
+branches
+	1.1.1.1
+	1.1.9.1;
+next	;
+
+1.1.1.1
+date	2003.04.08.18.20.05;	author tg;	state Exp;
+branches;
+next	1.1.1.2;
+
+1.1.1.2
+date	2004.03.02.17.29.12;	author tg;	state Stab;
+branches;
+next	;
+
+1.1.9.1
+date	2004.02.14.19.04.51;	author tg;	state Exp;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.2
+log
+@remove a bunch of files not used in MirBSD - clean tree. People who want them got cvs.
+@
+text
+@
+/*
+ * Mesa 3-D graphics library
+ * Version:  3.5
+ *
+ * Copyright (C) 1999-2001  Brian Paul   All Rights Reserved.
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a
+ * copy of this software and associated documentation files (the "Software"),
+ * to deal in the Software without restriction, including without limitation
+ * the rights to use, copy, modify, merge, publish, distribute, sublicense,
+ * and/or sell copies of the Software, and to permit persons to whom the
+ * Software is furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included
+ * in all copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
+ * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL
+ * BRIAN PAUL BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN
+ * AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
+ * CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+ *
+ * Authors:
+ *    Keith Whitwell <keithw@@valinux.com>
+ *    Gareth Hughes <gareth@@valinux.com>
+ */
+
+#include "glheader.h"
+#include "api_loopback.h"
+#include "context.h"
+#include "mtypes.h"
+#include "state.h"
+#include "vtxfmt.h"
+
+
+/* The neutral vertex format.  This wraps all tnl module functions,
+ * verifying that the currently-installed module is valid and then
+ * installing the function pointers in a lazy fashion.  It records the
+ * function pointers that have been swapped out, which allows a fast
+ * restoration of the neutral module in almost all cases -- a typical
+ * app might only require 4-6 functions to be modified from the neutral
+ * baseline, and only restoring these is certainly preferable to doing
+ * the entire module's 60 or so function pointers.
+ */
+
+#define PRE_LOOPBACK( FUNC )						\
+{									\
+   GET_CURRENT_CONTEXT(ctx);						\
+   struct gl_tnl_module *tnl = &(ctx->TnlModule);			\
+									\
+   ASSERT( tnl->Current );						\
+   ASSERT( tnl->SwapCount < NUM_VERTEX_FORMAT_ENTRIES );		\
+									\
+   /* Save the swapped function's dispatch entry so it can be		\
+    * restored later.							\
+    */									\
+   tnl->Swapped[tnl->SwapCount][0] = (void *)&(ctx->Exec->FUNC);	\
+   tnl->Swapped[tnl->SwapCount][1] = (void *)TAG(FUNC);			\
+   tnl->SwapCount++;							\
+									\
+   if ( 0 )								\
+      fprintf( stderr, "   swapping gl" #FUNC"...\n" );			\
+									\
+   /* Install the tnl function pointer.					\
+    */									\
+   ctx->Exec->FUNC = tnl->Current->FUNC;				\
+}
+
+#define TAG(x) neutral_##x
+#include "vtxfmt_tmp.h"
+
+
+
+static void install_vtxfmt( struct _glapi_table *tab, GLvertexformat *vfmt )
+{
+   tab->ArrayElement = vfmt->ArrayElement;
+   tab->Color3f = vfmt->Color3f;
+   tab->Color3fv = vfmt->Color3fv;
+   tab->Color3ub = vfmt->Color3ub;
+   tab->Color3ubv = vfmt->Color3ubv;
+   tab->Color4f = vfmt->Color4f;
+   tab->Color4fv = vfmt->Color4fv;
+   tab->Color4ub = vfmt->Color4ub;
+   tab->Color4ubv = vfmt->Color4ubv;
+   tab->EdgeFlag = vfmt->EdgeFlag;
+   tab->EdgeFlagv = vfmt->EdgeFlagv;
+   tab->EvalCoord1f = vfmt->EvalCoord1f;
+   tab->EvalCoord1fv = vfmt->EvalCoord1fv;
+   tab->EvalCoord2f = vfmt->EvalCoord2f;
+   tab->EvalCoord2fv = vfmt->EvalCoord2fv;
+   tab->EvalPoint1 = vfmt->EvalPoint1;
+   tab->EvalPoint2 = vfmt->EvalPoint2;
+   tab->FogCoordfEXT = vfmt->FogCoordfEXT;
+   tab->FogCoordfvEXT = vfmt->FogCoordfvEXT;
+   tab->Indexi = vfmt->Indexi;
+   tab->Indexiv = vfmt->Indexiv;
+   tab->Materialfv = vfmt->Materialfv;
+   tab->MultiTexCoord1fARB = vfmt->MultiTexCoord1fARB;
+   tab->MultiTexCoord1fvARB = vfmt->MultiTexCoord1fvARB;
+   tab->MultiTexCoord2fARB = vfmt->MultiTexCoord2fARB;
+   tab->MultiTexCoord2fvARB = vfmt->MultiTexCoord2fvARB;
+   tab->MultiTexCoord3fARB = vfmt->MultiTexCoord3fARB;
+   tab->MultiTexCoord3fvARB = vfmt->MultiTexCoord3fvARB;
+   tab->MultiTexCoord4fARB = vfmt->MultiTexCoord4fARB;
+   tab->MultiTexCoord4fvARB = vfmt->MultiTexCoord4fvARB;
+   tab->Normal3f = vfmt->Normal3f;
+   tab->Normal3fv = vfmt->Normal3fv;
+   tab->SecondaryColor3fEXT = vfmt->SecondaryColor3fEXT;
+   tab->SecondaryColor3fvEXT = vfmt->SecondaryColor3fvEXT;
+   tab->SecondaryColor3ubEXT = vfmt->SecondaryColor3ubEXT;
+   tab->SecondaryColor3ubvEXT = vfmt->SecondaryColor3ubvEXT;
+   tab->TexCoord1f = vfmt->TexCoord1f;
+   tab->TexCoord1fv = vfmt->TexCoord1fv;
+   tab->TexCoord2f = vfmt->TexCoord2f;
+   tab->TexCoord2fv = vfmt->TexCoord2fv;
+   tab->TexCoord3f = vfmt->TexCoord3f;
+   tab->TexCoord3fv = vfmt->TexCoord3fv;
+   tab->TexCoord4f = vfmt->TexCoord4f;
+   tab->TexCoord4fv = vfmt->TexCoord4fv;
+   tab->Vertex2f = vfmt->Vertex2f;
+   tab->Vertex2fv = vfmt->Vertex2fv;
+   tab->Vertex3f = vfmt->Vertex3f;
+   tab->Vertex3fv = vfmt->Vertex3fv;
+   tab->Vertex4f = vfmt->Vertex4f;
+   tab->Vertex4fv = vfmt->Vertex4fv;
+   tab->Begin = vfmt->Begin;
+   tab->End = vfmt->End;
+
+/*     tab->NewList = vfmt->NewList; */
+   tab->CallList = vfmt->CallList;
+
+   tab->Rectf = vfmt->Rectf;
+   tab->DrawArrays = vfmt->DrawArrays;
+   tab->DrawElements = vfmt->DrawElements;
+   tab->DrawRangeElements = vfmt->DrawRangeElements;
+   tab->EvalMesh1 = vfmt->EvalMesh1;
+   tab->EvalMesh2 = vfmt->EvalMesh2;
+}
+
+
+void _mesa_init_exec_vtxfmt( GLcontext *ctx )
+{
+   install_vtxfmt( ctx->Exec, &neutral_vtxfmt );
+   ctx->TnlModule.SwapCount = 0;
+}
+
+
+void _mesa_install_exec_vtxfmt( GLcontext *ctx, GLvertexformat *vfmt )
+{
+   ctx->TnlModule.Current = vfmt;
+   _mesa_restore_exec_vtxfmt( ctx );
+   if ( ctx->ExecPrefersFloat != vfmt->prefer_float_colors )
+      _mesa_loopback_prefer_float( ctx->Exec, vfmt->prefer_float_colors );
+}
+
+void _mesa_install_save_vtxfmt( GLcontext *ctx, GLvertexformat *vfmt )
+{
+   install_vtxfmt( ctx->Save, vfmt );
+   if ( ctx->SavePrefersFloat != vfmt->prefer_float_colors )
+      _mesa_loopback_prefer_float( ctx->Save, vfmt->prefer_float_colors );
+}
+
+
+void _mesa_restore_exec_vtxfmt( GLcontext *ctx )
+{
+   struct gl_tnl_module *tnl = &(ctx->TnlModule);
+   GLuint i;
+
+   /* Restore the neutral tnl module wrapper.
+    */
+   for ( i = 0 ; i < tnl->SwapCount ; i++ ) {
+      *(void **)tnl->Swapped[i][0] = tnl->Swapped[i][1];
+   }
+
+   tnl->SwapCount = 0;
+}
+@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@@
+
+
+1.1.9.1
+log
+@OpenBSD just has imported exactly this tree into their vendor branch,
+called the same tag, in XF4/xc
+This is, apparently, the last XFree86 snapshot before the licence change
+(ie, addition of the advertising clause)
+
+Since the developers don't see any problems with that, and we would like
+to integrate improvements done by the remaining one or two (or so) XFree86
+developers (j/k), this prepares enabling us to update X-Window in the future.
+@
+text
+@d4 1
+a4 1
+ * Version:  4.1
+d26 2
+a27 2
+ *    Keith Whitwell <keith@@tungstengraphics.com>
+ *    Gareth Hughes
+a32 1
+#include "imports.h"
+d56 3
+a58 2
+   /* Save the swapped function's dispatch entry so it can be */	\
+   /* restored later. */						\
+d64 1
+a64 1
+      _mesa_debug(ctx, "   swapping gl" #FUNC"...\n" );			\
+d66 2
+a67 1
+   /* Install the tnl function pointer.	*/				\
+a127 1
+   tab->CallList = vfmt->CallList;
+d130 4
+a133 1
+   tab->VertexAttrib4fNV = vfmt->VertexAttrib4fNV;
+a139 1
+   assert(tab->EvalMesh2);
+@
+
+
+1.1.1.1
+log
+@The X-Windowing System
+
+Import XFree86 4.3 from OpenBSD by CTM, in the hope it's stable
+@
+text
+@@
+
+
+1.1.1.2
+log
+@That's what OpenBSD will, probably, ship as XF4 in 3.5
+their last sync against XFree86 4.3-current has been
+imported into our vendor branch, too
+@
+text
+@d4 1
+a4 1
+ * Version:  4.1
+d26 2
+a27 2
+ *    Keith Whitwell <keith@@tungstengraphics.com>
+ *    Gareth Hughes
+a32 1
+#include "imports.h"
+d56 3
+a58 2
+   /* Save the swapped function's dispatch entry so it can be */	\
+   /* restored later. */						\
+d64 1
+a64 1
+      _mesa_debug(ctx, "   swapping gl" #FUNC"...\n" );			\
+d66 2
+a67 1
+   /* Install the tnl function pointer.	*/				\
+a127 1
+   tab->CallList = vfmt->CallList;
+d130 4
+a133 1
+   tab->VertexAttrib4fNV = vfmt->VertexAttrib4fNV;
+a139 1
+   assert(tab->EvalMesh2);
+@
+

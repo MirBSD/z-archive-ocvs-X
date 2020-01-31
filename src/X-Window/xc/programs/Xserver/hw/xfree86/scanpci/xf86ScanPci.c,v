@@ -1,0 +1,1154 @@
+head	1.1;
+branch	1.1.1;
+access;
+symbols
+	tg-mergetmp-2:1.1.1.3
+	cvs-200410241530:1.1.1.3
+	cvs-200410012000:1.1.1.3
+	cvs-200407221130:1.1.1.3
+	cvs-200407141120:1.1.1.3
+	cvs-200406231010:1.1.1.3
+	MIRBSD_7quater:1.1.1.2
+	cvs-200405271510:1.1.1.3
+	XFree86_4_4_0:1.1.9.1
+	cvs-200403021700:1.1.1.3
+	XFREE86_20040213:1.1.9.1
+	xc:1.1.9
+	cvs-200401291925:1.1.1.2
+	MIRBSD_7_ALPHA:1.1.1.2.0.4
+	MIRBSD_7:1.1.1.2.0.2
+	MIRBSD_7ter:1.1.1.2
+	cvs-20011091815:1.1.1.2
+	cvs-200309162130:1.1.1.2
+	cvs-200308302005:1.1.1.2
+	ctmx-0387:1.1.1.2
+	ctmx-0384:1.1.1.2
+	MIRBSD_5:1.1.1.2
+	ctmx-0375:1.1.1.2
+	ctmx-0373:1.1.1.2
+	ctm-0371:1.1.1.2
+	ctm-0370:1.1.1.2
+	MIRBSD_4:1.1.1.2
+	ctm-0363:1.1.1.2
+	ctm-0359:1.1.1.2
+	ctm-0349:1.1.1.1
+	openbsd:1.1.1;
+locks; strict;
+comment	@ * @;
+
+
+1.1
+date	2003.03.22.20.09.02;	author tg;	state Exp;
+branches
+	1.1.1.1
+	1.1.9.1;
+next	;
+
+1.1.1.1
+date	2003.03.22.20.09.02;	author tg;	state Exp;
+branches;
+next	1.1.1.2;
+
+1.1.1.2
+date	2003.04.08.18.37.44;	author tg;	state Exp;
+branches;
+next	1.1.1.3;
+
+1.1.1.3
+date	2004.03.02.18.26.54;	author tg;	state Stab;
+branches;
+next	;
+
+1.1.9.1
+date	2004.02.14.19.25.40;	author tg;	state Exp;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@/* $XFree86: xc/programs/Xserver/hw/xfree86/scanpci/xf86ScanPci.c,v 1.11 2000/04/05 18:13:58 dawes Exp $ */
+/*
+ * Display the Subsystem Vendor Id and Subsystem Id in order to identify
+ * the cards installed in this computer
+ *
+ * Copyright 1995-2000 by The XFree86 Project, Inc.
+ *
+ * A lot of this comes from Robin Cutshaw's scanpci
+ *
+ */
+
+/* XXX This is including a lot of stuff that modules should not include! */
+
+#include "X.h"
+#include "os.h"
+#include "xf86.h"
+#include "xf86Priv.h"
+#include "xf86Pci.h"
+#include "xf86_OSproc.h"
+
+#ifndef IN_MODULE
+#include <ctype.h>
+#include <stdlib.h>
+#else
+#include <xf86_ansic.h>
+#endif
+
+#define INIT_PCI_CARD_INFO		TRUE
+#define DECLARE_CARD_DATASTRUCTURES	TRUE
+#define INIT_PCI_VENDOR_INFO		TRUE
+#define INIT_PCI_VENDOR_NAME_INFO	TRUE
+#define VENDOR_INCLUDE_NONVIDEO		TRUE
+#include "xf86PciInfo.h"
+#include "xf86ScanPci.h"
+
+/*
+ * PCI classes that have messages printed always.  The others are only
+ * have a message printed when the vendor/dev IDs are recognised.
+ */
+#define PCIALWAYSPRINTCLASSES(b,s)					      \
+    (((b) == PCI_CLASS_PREHISTORIC && (s) == PCI_SUBCLASS_PREHISTORIC_VGA) || \
+     ((b) == PCI_CLASS_DISPLAY) ||					      \
+     ((b) == PCI_CLASS_MULTIMEDIA && (s) == PCI_SUBCLASS_MULTIMEDIA_VIDEO))
+
+
+#ifdef XFree86LOADER
+
+#include "xf86Module.h"
+
+static XF86ModuleVersionInfo scanPciVersRec = {
+	"scanpci",
+	MODULEVENDORSTRING,
+	MODINFOSTRING1,
+	MODINFOSTRING2,
+	XF86_VERSION_CURRENT,
+	0, 1, 0,
+	ABI_CLASS_VIDEODRV,
+	ABI_VIDEODRV_VERSION,
+	NULL,
+	{0, 0, 0, 0}
+};
+
+XF86ModuleData scanpciModuleData = { &scanPciVersRec, NULL, NULL };
+
+#else
+
+#endif /* XFree86LOADER */
+
+void
+xf86SetupScanPci(SymTabPtr *NameInfo,
+		 pciVendorDeviceInfo **DeviceInfo,
+		 pciVendorCardInfo **CardInfo)
+{
+    *CardInfo = xf86PCICardInfoData;
+    *DeviceInfo = xf86PCIVendorInfoData;
+    *NameInfo = xf86PCIVendorNameInfoData;
+}
+
+
+void
+xf86DisplayPCICardInfo(int verbosity)
+{
+    pciConfigPtr pcrp, *pcrpp;
+    int i = 0, j, k;
+
+    xf86EnableIO();
+    pcrpp = xf86scanpci(0);
+   
+    if (pcrpp == NULL) {
+        xf86MsgVerb(X_NONE,0,"No PCI info available\n");
+	return;
+    }
+    xf86MsgVerb(X_NONE,0,"Probing for PCI devices (Bus:Device:Function)\n\n");
+    while ((pcrp = pcrpp[i])) {
+	char *vendorname = NULL, *cardname = NULL;
+	char *chipvendorname = NULL, *chipname = NULL;
+	Bool noCard = FALSE;
+
+	xf86MsgVerb(X_NONE,-verbosity,
+		    "(%d:%d:%d) ", pcrp->busnum, pcrp->devnum,
+		pcrp->funcnum);
+
+	/* first let's look for the card itself, but only if information
+	 * is available
+	 */
+	if ( pcrp->pci_subsys_vendor || pcrp->pci_subsys_card ) {
+	    k = 0;
+	    while (xf86PCIVendorNameInfoData[k].token) {
+	      if (xf86PCIVendorNameInfoData[k].token == pcrp->pci_subsys_vendor) 
+		vendorname = (char*)xf86PCIVendorNameInfoData[k].name;
+	      k++;
+	    }
+	    k = 0; j = -1;
+	    while(xf86PCICardInfoData[k].VendorID) {
+		if (xf86PCICardInfoData[k].VendorID == pcrp->pci_subsys_vendor) {
+		    j = 0;
+		    while (xf86PCICardInfoData[k].Device[j].CardName) {
+			if (xf86PCICardInfoData[k].Device[j].SubsystemID ==
+			    pcrp->pci_subsys_card) {
+			    cardname =
+			      xf86PCICardInfoData[k].Device[j].CardName;
+			    break;
+			}
+			j++;
+		    }
+		    break;
+		}
+		k++;
+	    }
+	    if (vendorname)
+		xf86MsgVerb(X_NONE,-verbosity,"%s ", vendorname);
+	    if (cardname)
+		xf86MsgVerb(X_NONE,-verbosity,"%s ", cardname);
+	    if (vendorname && !cardname) {
+	        if (pcrp->pci_subsys_card && (j >= 0))
+		    xf86MsgVerb(X_NONE,-verbosity,"unknown card (0x%04x) ",
+				pcrp->pci_subsys_card);
+		else
+		    xf86MsgVerb(X_NONE,-verbosity,"card ",
+				pcrp->pci_subsys_card);
+	    }
+	}
+	if (!(cardname || vendorname)) {
+	    /*
+	     * we didn't find text representation of the information 
+	     * about the card
+	     */
+	    if ( pcrp->pci_subsys_vendor || pcrp->pci_subsys_card ) {
+		/*
+		 * if there was information and we just couldn't interpret
+		 * it, print it out as unknown, anyway
+		 */
+		xf86MsgVerb(X_NONE,-verbosity,
+			    "unknown card (0x%04x/0x%04x) ",
+			    pcrp->pci_subsys_vendor, pcrp->pci_subsys_card);
+	    }
+	    else {
+		/*
+		 * if there was no info to begin with, only print in
+		 * verbose mode
+		 */
+		if (verbosity > 1)
+		    xf86MsgVerb(X_NONE,-verbosity,
+				"unknown card (0x%04x/0x%04x) ",
+				pcrp->pci_subsys_vendor, pcrp->pci_subsys_card);
+		else
+		    noCard = TRUE;
+	    }
+	}
+	/* now check for the chipset used */
+	k = 0;
+	while (xf86PCIVendorNameInfoData[k].token) {
+	  if (xf86PCIVendorNameInfoData[k].token == pcrp->pci_vendor) 
+	    chipvendorname = (char *)xf86PCIVendorNameInfoData[k].name;
+	  k++;
+	}
+	k = 0;
+	while(xf86PCIVendorInfoData[k].VendorID) {
+	    if (xf86PCIVendorInfoData[k].VendorID == pcrp->pci_vendor) {
+		j = 0;
+		while (xf86PCIVendorInfoData[k].Device[j].DeviceName) {
+		    if (xf86PCIVendorInfoData[k].Device[j].DeviceID ==
+			pcrp->pci_device) {
+			chipname =
+			  xf86PCIVendorInfoData[k].Device[j].DeviceName;
+			break;
+		    }
+		    j++;
+		}
+		break;
+	    }
+	    k++;
+	}
+	if (noCard) {
+	  if (chipvendorname && chipname)
+	    xf86MsgVerb(X_NONE,-verbosity,"%s %s",
+			chipvendorname,chipname);
+	  else if (chipvendorname)
+	    xf86MsgVerb(X_NONE,-verbosity,
+			"unknown chip (DeviceId 0x%04x) from %s",
+			pcrp->pci_device,chipvendorname);
+	  else
+	    xf86MsgVerb(X_NONE,-verbosity,
+			"unknown chipset(0x%04x/0x%04x)",
+			pcrp->pci_vendor,pcrp->pci_device);
+	  xf86MsgVerb(X_NONE,-verbosity,"\n");
+	}
+	else
+	{
+	  if (chipvendorname && chipname)
+	    xf86MsgVerb(X_NONE,-verbosity,"using a %s %s",
+			chipvendorname,chipname);
+	  else if (chipvendorname)
+	    xf86MsgVerb(X_NONE,-verbosity,
+			"using an unknown chip (DeviceId 0x%04x) from %s",
+			pcrp->pci_device,chipvendorname);
+	  else
+	    xf86MsgVerb(X_NONE,-verbosity,
+			"using an unknown chipset(0x%04x/0x%04x)",
+			pcrp->pci_vendor,pcrp->pci_device);
+	  xf86MsgVerb(X_NONE,-verbosity,"\n");
+	}
+	i++;
+    }
+}
+
+CARD32
+xf86FindPCIClassInCardList(unsigned short vendorID, unsigned short subsystemID)
+{
+    pciVendorCardInfo   *cardInfo = xf86PCICardInfoData;
+    int i,j;
+    
+    for(i = 0; cardInfo[i].VendorID != 0;i++) {
+	if (cardInfo[i].VendorID == vendorID) {
+	    for (j = 0; cardInfo[i].Device[j].SubsystemID != 0; j++) {
+		if (cardInfo[i].Device[j].SubsystemID == subsystemID) 
+		    return cardInfo[i].Device[j].class;
+	    }
+	    break;
+	}
+    }
+    return 0;
+}
+
+CARD32
+xf86FindPCIClassInDeviceList(unsigned short vendorID, unsigned short deviceID)
+{
+    pciVendorDeviceInfo *vendorInfo = xf86PCIVendorInfoData;
+     int i,j;
+
+    for(i = 0; vendorInfo[i].VendorID != 0;i++) {
+	if (vendorInfo[i].VendorID == vendorID) {
+	    for (j = 0; vendorInfo[i].Device[j].DeviceID != 0; j++) {
+		if (vendorInfo[i].Device[j].DeviceID == deviceID) 
+		    return vendorInfo[i].Device[j].class;
+	    }
+	    break;
+	}
+    }
+    return 0;
+}
+
+@
+
+
+1.1.9.1
+log
+@OpenBSD just has imported exactly this tree into their vendor branch,
+called the same tag, in XF4/xc
+This is, apparently, the last XFree86 snapshot before the licence change
+(ie, addition of the advertising clause)
+
+Since the developers don't see any problems with that, and we would like
+to integrate improvements done by the remaining one or two (or so) XFree86
+developers (j/k), this prepares enabling us to update X-Window in the future.
+@
+text
+@d1 1
+a1 1
+/* $XFree86: xc/programs/Xserver/hw/xfree86/scanpci/xf86ScanPci.c,v 1.14 2003/09/23 05:21:46 dawes Exp $ */
+d6 2
+a10 42
+/*
+ * Copyright (c) 1995-2002 by The XFree86 Project, Inc.
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a
+ * copy of this software and associated documentation files (the "Software"),
+ * to deal in the Software without restriction, including without limitation
+ * the rights to use, copy, modify, merge, publish, distribute, sublicense,
+ * and/or sell copies of the Software, and to permit persons to whom the
+ * Software is furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in
+ * all copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL
+ * THE COPYRIGHT HOLDER(S) OR AUTHOR(S) BE LIABLE FOR ANY CLAIM, DAMAGES OR
+ * OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE,
+ * ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR
+ * OTHER DEALINGS IN THE SOFTWARE.
+ *
+ * Except as contained in this notice, the name of the copyright holder(s)
+ * and author(s) shall not be used in advertising or otherwise to promote
+ * the sale, use or other dealings in this Software without prior written
+ * authorization from the copyright holder(s) and author(s).
+ */
+
+/*
+ * This file is used to build both the scanpci and pcidata modules.
+ * The interfaces have changed compared with XFree86 4.2.0 and earlier.
+ * The data is no longer exported directly.  Lookup functions are provided.
+ * This means that the data format can change in the future without affecting
+ * the exported interfaces.
+ *
+ * The namespaces for pcidata and scanpci clash, so both modules can't be
+ * loaded at the same time.  The X server should only load the scanpci module
+ * when run with the '-scanpci' flag.  The main difference between the
+ * two modules is size.  pcidata only holds the subset of data that is
+ * "interesting" to the X server.  "Interesting" is determined by the
+ * PCI_VENDOR_* defines in ../common/xf86PciInfo.h.
+ */
+
+d28 6
+a33 8
+#ifndef PCIDATA
+#define VENDOR_INCLUDE_NONVIDEO
+#endif
+#define INIT_SUBSYS_INFO
+#define INIT_VENDOR_SUBSYS_INFO
+
+#include "xf86PciStr.h"
+#include "xf86PciIds.h"
+a49 19
+#ifdef PCIDATA
+
+static XF86ModuleVersionInfo pciDataVersRec = {
+	"pcidata",
+	MODULEVENDORSTRING,
+	MODINFOSTRING1,
+	MODINFOSTRING2,
+	XF86_VERSION_CURRENT,
+	1, 0, 0,
+	ABI_CLASS_VIDEODRV,
+	ABI_VIDEODRV_VERSION,
+	NULL,
+	{0, 0, 0, 0}
+};
+
+XF86ModuleData pcidataModuleData = { &pciDataVersRec, NULL, NULL };
+
+#else 
+
+d56 1
+a56 1
+	1, 0, 0,
+d65 1
+a65 1
+#endif /* PCIDATA */
+d69 4
+a72 3
+/* Initialisation/Close hooks, in case they're ever needed. */
+Bool
+ScanPciSetupPciIds(void)
+d74 3
+a76 1
+    return TRUE;
+d79 1
+d81 1
+a81 1
+ScanPciClosePciIds(void)
+d83 15
+a97 2
+    return;
+}
+d99 3
+a101 4
+/*
+ * The return value is the number of strings found, or -1 for an error.
+ * Requested strings that aren't found are set to NULL.
+ */
+d103 19
+a121 53
+int
+ScanPciFindPciNamesByDevice(unsigned short vendor, unsigned short device,
+			 unsigned short svendor, unsigned short subsys,
+			 const char **vname, const char **dname,
+			 const char **svname, const char **sname)
+{
+    int i, j, k;
+    const pciDeviceInfo **pDev;
+    const pciSubsystemInfo **pSub;
+
+    /* It's an error to not provide the Vendor */
+    if (vendor == NOVENDOR)
+	return -1;
+
+    /* Initialise returns requested/provided to NULL */
+    if (vname)
+	*vname = NULL;
+    if (device != NODEVICE && dname)
+	*dname = NULL;
+    if (svendor != NOVENDOR && svname)
+	*svname = NULL;
+    if (subsys != NOSUBSYS && sname)
+	*sname = NULL;
+
+    for (i = 0; pciVendorInfoList[i].VendorName; i++) {
+	if (vendor == pciVendorInfoList[i].VendorID) {
+	    if (vname) {
+		*vname = pciVendorInfoList[i].VendorName;
+	    }
+	    if (device == NODEVICE) {
+		return 1;
+	    }
+	    pDev = pciVendorInfoList[i].Device;
+	    if (!pDev) {
+		return 1;
+	    }
+	    for (j = 0; pDev[j]; j++) {
+		if (device == pDev[j]->DeviceID) {
+		    if (dname) {
+			*dname = pDev[j]->DeviceName;
+		    }
+		    if (svendor == NOVENDOR) {
+			return 2;
+		    }
+		    for (k = 0; pciVendorInfoList[k].VendorName; k++) {
+			if (svendor &&
+			    svendor == pciVendorInfoList[k].VendorID) {
+			    if (svname) {
+				*svname = pciVendorInfoList[k].VendorName;
+			    }
+			    if (subsys == NOSUBSYS) {
+				return 3;
+			    }
+d124 1
+d126 1
+a126 17
+		    if (!pciVendorInfoList[k].VendorName) {
+			return 2;
+		    }
+		    pSub = pDev[j]->Subsystem;
+		    if (!pSub) {
+			return 3;
+		    }
+		    for (k = 0; pSub[k]; k++) {
+			if (svendor == pSub[k]->VendorID &&
+			    subsys == pSub[k]->SubsystemID) {
+			    if (sname)
+				*sname = pSub[k]->SubsystemName;
+			    return 4;
+			}
+		    }
+		    /* No vendor/subsys match */
+		    return 3;
+d128 13
+a141 2
+	    /* No device match */
+	    return 1;
+d143 13
+a155 26
+    }
+    /* No vendor match */
+    return 0;
+}
+
+Bool
+ScanPciFindPciNamesBySubsys(unsigned short svendor, unsigned short subsys,
+			 const char **svname, const char **sname)
+{
+    int i, j;
+    const pciSubsystemInfo **pSub;
+
+    /* It's an error to not provide the Vendor */
+    if (svendor == NOVENDOR)
+	return -1;
+
+    /* Initialise returns requested/provided to NULL */
+    if (svname)
+	*svname = NULL;
+    if (subsys != NOSUBSYS && sname)
+	*sname = NULL;
+
+    for (i = 0; pciVendorSubsysInfoList[i].VendorName; i++) {
+	if (svendor == pciVendorSubsysInfoList[i].VendorID) {
+	    if (svname) {
+		*svname = pciVendorSubsysInfoList[i].VendorName;
+d157 11
+a167 2
+	    if (subsys == NOSUBSYS) {
+		return 1;
+d169 18
+a186 8
+	    pSub = pciVendorSubsysInfoList[i].Subsystem;
+	    if (!pSub) {
+		return 1;
+	    }
+	    for (j = 0; pSub[j]; j++) {
+		if (subsys == pSub[j]->SubsystemID) {
+		    if (sname) {
+			*sname = pSub[j]->SubsystemName;
+d188 1
+d190 1
+d192 15
+a206 2
+	    /* No subsys match */
+	    return 1;
+d208 16
+a224 2
+    /* No vendor match */
+    return 0;
+d228 1
+a228 1
+ScanPciFindPciClassBySubsys(unsigned short vendor, unsigned short subsys)
+d230 8
+a237 16
+    int i, j;
+    const pciSubsystemInfo **pSub;
+
+    if (vendor == NOVENDOR || subsys == NOSUBSYS)
+	return 0;
+
+    for (i = 0; pciVendorSubsysInfoList[i].VendorName; i++) {
+	if (vendor == pciVendorSubsysInfoList[i].VendorID) {
+	    pSub = pciVendorSubsysInfoList[i].Subsystem;
+	    if (!pSub) {
+		return 0;
+	    }
+	    for (j = 0; pSub[j]; j++) {
+		if (subsys == pSub[j]->SubsystemID) {
+		    return pSub[j]->class;
+		}
+d246 1
+a246 1
+ScanPciFindPciClassByDevice(unsigned short vendor, unsigned short device)
+d248 2
+a249 5
+    int i, j;
+    const pciDeviceInfo **pDev;
+
+    if (vendor == NOVENDOR || device == NODEVICE)
+	return 0;
+d251 5
+a255 10
+    for (i = 0; pciVendorInfoList[i].VendorName; i++) {
+	if (vendor == pciVendorInfoList[i].VendorID) {
+	    pDev = pciVendorInfoList[i].Device;
+	    if (!pDev) {
+		return 0;
+	    }
+	    for (j = 0; pDev[j]; j++) {
+		if (device == pDev[j]->DeviceID) {
+		    return pDev[j]->class;
+		}
+a261 87
+
+#ifndef PCIDATA
+void
+ScanPciDisplayPCICardInfo(int verbosity)
+{
+    pciConfigPtr pcrp, *pcrpp;
+    int i;
+
+    xf86EnableIO();
+    pcrpp = xf86scanpci(0);
+
+    if (pcrpp == NULL) {
+        xf86MsgVerb(X_NONE,0,"No PCI info available\n");
+	return;
+    }
+    xf86MsgVerb(X_NONE,0,"Probing for PCI devices (Bus:Device:Function)\n\n");
+    for (i = 0; (pcrp = pcrpp[i]); i++) {
+	const char *svendorname = NULL, *subsysname = NULL;
+	const char *vendorname = NULL, *devicename = NULL;
+	Bool noCard = FALSE;
+	const char *prefix1 = "", *prefix2 = "";
+
+	xf86MsgVerb(X_NONE, -verbosity, "(%d:%d:%d) ",
+		    pcrp->busnum, pcrp->devnum, pcrp->funcnum);
+
+	/*
+	 * Lookup as much as we can about the device.
+	 */
+	if (pcrp->pci_subsys_vendor || pcrp->pci_subsys_card) {
+	    ScanPciFindPciNamesByDevice(pcrp->pci_vendor, pcrp->pci_device,
+				     NOVENDOR, NOSUBSYS,
+				     &vendorname, &devicename, NULL, NULL);
+	} else {
+	    ScanPciFindPciNamesByDevice(pcrp->pci_vendor, pcrp->pci_device,
+				     pcrp->pci_subsys_vendor,
+				     pcrp->pci_subsys_card,
+				     &vendorname, &devicename,
+				     &svendorname, &subsysname);
+	}
+
+	if (svendorname)
+	    xf86MsgVerb(X_NONE, -verbosity, "%s ", svendorname);
+	if (subsysname)
+	    xf86MsgVerb(X_NONE, -verbosity, "%s ", subsysname);
+	if (svendorname && !subsysname) {
+	    if (pcrp->pci_subsys_card && pcrp->pci_subsys_card != NOSUBSYS) {
+		xf86MsgVerb(X_NONE, -verbosity, "unknown card (0x%04x) ",
+			    pcrp->pci_subsys_card);
+	    } else {
+		xf86MsgVerb(X_NONE, -verbosity, "card ");
+	    }
+	}
+	if (!svendorname && !subsysname) {
+	    /*
+	     * We didn't find a text representation of the information 
+	     * about the card.
+	     */
+	    if (pcrp->pci_subsys_vendor || pcrp->pci_subsys_card) {
+		/*
+		 * If there was information and we just couldn't interpret
+		 * it, print it out as unknown, anyway.
+		 */
+		xf86MsgVerb(X_NONE, -verbosity,
+			    "unknown card (0x%04x/0x%04x) ",
+			    pcrp->pci_subsys_vendor, pcrp->pci_subsys_card);
+	    } else
+		noCard = TRUE;
+	}
+	if (!noCard) {
+	    prefix1 = "using a ";
+	    prefix2 = "using an ";
+	}
+	if (vendorname && devicename) {
+	    xf86MsgVerb(X_NONE, -verbosity,"%s%s %s\n", prefix1, vendorname,
+			devicename);
+	} else if (vendorname) {
+	    xf86MsgVerb(X_NONE, -verbosity,
+			"%sunknown chip (DeviceId 0x%04x) from %s\n",
+			prefix2, pcrp->pci_device, vendorname);
+	} else {
+	    xf86MsgVerb(X_NONE, -verbosity,
+			"%sunknown chipset(0x%04x/0x%04x)\n",
+			prefix2, pcrp->pci_vendor, pcrp->pci_device);
+	}
+    }
+}
+#endif
+@
+
+
+1.1.1.1
+log
+@Import OpenBSD 3.3 XF4 repository from CTM 3132 the first time
+This finalizes starting an OpenBSD-mirabile (aka MirBSD) repository.
+
+### MirBSD is:
+# Copyright (c) 1982-2003 by Thorsten "mirabile" Glaser <x86@@ePost.de>
+# Copyright © 1968-2003  The authors of And contributors to UNIX®, the
+#       C Language, BSD/Berkeley Unix; 386BSD, NetBSD 1.1 and OpenBSD.
+#
+# Anyone who obtained a copy of this work is hereby permitted to freely use,
+# distribute, modify, merge, sublicence, give away or sell it as long as the
+# authors are given due credit and the following notice is retained:
+#
+# This work is provided "as is", with no explicit or implicit warranty what-
+# soever. Use it only at your own risk. In no event may an author or contri-
+# butor be held liable for any damage, directly or indirectly, that origina-
+# ted through or is caused by creation or modification of this work.
+
+MirBSD is my private tree. MirBSD does not differ very much from OpenBSD
+and intentionally tracks OpenBSD. That's why it _is_ OpenBSD, just not the
+official one. It's like with DarrenBSD.
+
+At time of this writing, no advertising for MirBSD must be done,
+because the advertising clause has not yet been sorted out.
+
+http://templeofhate.com/tglaser/MirBSD/index.php
+@
+text
+@@
+
+
+1.1.1.2
+log
+@The X-Windowing System
+
+Import XFree86 4.3 from OpenBSD by CTM, in the hope it's stable
+@
+text
+@d1 1
+a1 1
+/* $XFree86: xc/programs/Xserver/hw/xfree86/scanpci/xf86ScanPci.c,v 1.12 2002/07/15 20:46:04 dawes Exp $ */
+d6 1
+a6 1
+ * Copyright 1995-2002 by The XFree86 Project, Inc.
+a11 17
+
+/*
+ * This file is used to build both the scanpci and pcidata modules.
+ * The interfaces have changed compared with XFree86 4.2.0 and earlier.
+ * The data is no longer exported directly.  Lookup functions are provided.
+ * This means that the data format can change in the future without affecting
+ * the exported interfaces.
+ *
+ * The namespaces for pcidata and scanpci clash, so both modules can't be
+ * loaded at the same time.  The X server should only load the scanpci module
+ * when run with the '-scanpci' flag.  The main difference between the
+ * two modules is size.  pcidata only holds the subset of data that is
+ * "interesting" to the X server.  "Interesting" is determined by the
+ * PCI_VENDOR_* defines in ../common/xf86PciInfo.h.
+ */
+
+
+d28 6
+a33 8
+#ifndef PCIDATA
+#define VENDOR_INCLUDE_NONVIDEO
+#endif
+#define INIT_SUBSYS_INFO
+#define INIT_VENDOR_SUBSYS_INFO
+
+#include "xf86PciStr.h"
+#include "xf86PciIds.h"
+a49 19
+#ifdef PCIDATA
+
+static XF86ModuleVersionInfo pciDataVersRec = {
+	"pcidata",
+	MODULEVENDORSTRING,
+	MODINFOSTRING1,
+	MODINFOSTRING2,
+	XF86_VERSION_CURRENT,
+	1, 0, 0,
+	ABI_CLASS_VIDEODRV,
+	ABI_VIDEODRV_VERSION,
+	NULL,
+	{0, 0, 0, 0}
+};
+
+XF86ModuleData pcidataModuleData = { &pciDataVersRec, NULL, NULL };
+
+#else 
+
+d56 1
+a56 1
+	1, 0, 0,
+d65 1
+a65 1
+#endif /* PCIDATA */
+d69 4
+a72 3
+/* Initialisation/Close hooks, in case they're ever needed. */
+Bool
+ScanPciSetupPciIds(void)
+d74 3
+a76 1
+    return TRUE;
+d79 1
+d81 1
+a81 1
+ScanPciClosePciIds(void)
+d83 15
+a97 2
+    return;
+}
+d99 3
+a101 4
+/*
+ * The return value is the number of strings found, or -1 for an error.
+ * Requested strings that aren't found are set to NULL.
+ */
+d103 19
+a121 52
+int
+ScanPciFindPciNamesByDevice(unsigned short vendor, unsigned short device,
+			 unsigned short svendor, unsigned short subsys,
+			 const char **vname, const char **dname,
+			 const char **svname, const char **sname)
+{
+    int i, j, k;
+    const pciDeviceInfo **pDev;
+    const pciSubsystemInfo **pSub;
+
+    /* It's an error to not provide the Vendor */
+    if (vendor == NOVENDOR)
+	return -1;
+
+    /* Initialise returns requested/provided to NULL */
+    if (vname)
+	*vname = NULL;
+    if (device != NODEVICE && dname)
+	*dname = NULL;
+    if (svendor != NOVENDOR && svname)
+	*svname = NULL;
+    if (subsys != NOSUBSYS && sname)
+	*sname = NULL;
+
+    for (i = 0; pciVendorInfoList[i].VendorName; i++) {
+	if (vendor == pciVendorInfoList[i].VendorID) {
+	    if (vname) {
+		*vname = pciVendorInfoList[i].VendorName;
+	    }
+	    if (device == NODEVICE) {
+		return 1;
+	    }
+	    pDev = pciVendorInfoList[i].Device;
+	    if (!pDev) {
+		return 1;
+	    }
+	    for (j = 0; pDev[j]; j++) {
+		if (device == pDev[j]->DeviceID) {
+		    if (dname) {
+			*dname = pDev[j]->DeviceName;
+		    }
+		    if (svendor == NOVENDOR) {
+			return 2;
+		    }
+		    for (k = 0; pciVendorInfoList[k].VendorName; k++) {
+			if (svendor == pciVendorInfoList[k].VendorID) {
+			    if (svname) {
+				*svname = pciVendorInfoList[k].VendorName;
+			    }
+			    if (subsys == NOSUBSYS) {
+				return 3;
+			    }
+d124 1
+d126 1
+a126 17
+		    if (!pciVendorInfoList[k].VendorName) {
+			return 2;
+		    }
+		    pSub = pDev[j]->Subsystem;
+		    if (!pSub) {
+			return 3;
+		    }
+		    for (k = 0; pSub[k]; k++) {
+			if (svendor == pSub[k]->VendorID &&
+			    subsys == pSub[k]->SubsystemID) {
+			    if (sname)
+				*sname = pSub[k]->SubsystemName;
+			    return 4;
+			}
+		    }
+		    /* No vendor/subsys match */
+		    return 3;
+d128 13
+a141 2
+	    /* No device match */
+	    return 1;
+d143 13
+a155 26
+    }
+    /* No vendor match */
+    return 0;
+}
+
+Bool
+ScanPciFindPciNamesBySubsys(unsigned short svendor, unsigned short subsys,
+			 const char **svname, const char **sname)
+{
+    int i, j;
+    const pciSubsystemInfo **pSub;
+
+    /* It's an error to not provide the Vendor */
+    if (svendor == NOVENDOR)
+	return -1;
+
+    /* Initialise returns requested/provided to NULL */
+    if (svname)
+	*svname = NULL;
+    if (subsys != NOSUBSYS && sname)
+	*sname = NULL;
+
+    for (i = 0; pciVendorSubsysInfoList[i].VendorName; i++) {
+	if (svendor == pciVendorSubsysInfoList[i].VendorID) {
+	    if (svname) {
+		*svname = pciVendorSubsysInfoList[i].VendorName;
+d157 11
+a167 2
+	    if (subsys == NOSUBSYS) {
+		return 1;
+d169 18
+a186 8
+	    pSub = pciVendorSubsysInfoList[i].Subsystem;
+	    if (!pSub) {
+		return 1;
+	    }
+	    for (j = 0; pSub[j]; j++) {
+		if (subsys == pSub[j]->SubsystemID) {
+		    if (sname) {
+			*sname = pSub[j]->SubsystemName;
+d188 1
+d190 1
+d192 1
+a192 2
+	    /* No subsys match */
+	    return 1;
+d194 30
+a224 2
+    /* No vendor match */
+    return 0;
+d228 1
+a228 1
+ScanPciFindPciClassBySubsys(unsigned short vendor, unsigned short subsys)
+d230 8
+a237 16
+    int i, j;
+    const pciSubsystemInfo **pSub;
+
+    if (vendor == NOVENDOR || subsys == NOSUBSYS)
+	return 0;
+
+    for (i = 0; pciVendorSubsysInfoList[i].VendorName; i++) {
+	if (vendor == pciVendorSubsysInfoList[i].VendorID) {
+	    pSub = pciVendorSubsysInfoList[i].Subsystem;
+	    if (!pSub) {
+		return 0;
+	    }
+	    for (j = 0; pSub[j]; j++) {
+		if (subsys == pSub[j]->SubsystemID) {
+		    return pSub[j]->class;
+		}
+d246 1
+a246 1
+ScanPciFindPciClassByDevice(unsigned short vendor, unsigned short device)
+d248 2
+a249 2
+    int i, j;
+    const pciDeviceInfo **pDev;
+d251 5
+a255 13
+    if (vendor == NOVENDOR || device == NODEVICE)
+	return 0;
+
+    for (i = 0; pciVendorInfoList[i].VendorName; i++) {
+	if (vendor == pciVendorInfoList[i].VendorID) {
+	    pDev = pciVendorInfoList[i].Device;
+	    if (!pDev) {
+		return 0;
+	    }
+	    for (j = 0; pDev[j]; j++) {
+		if (device == pDev[j]->DeviceID) {
+		    return pDev[j]->class;
+		}
+a261 87
+
+#ifndef PCIDATA
+void
+ScanPciDisplayPCICardInfo(int verbosity)
+{
+    pciConfigPtr pcrp, *pcrpp;
+    int i;
+
+    xf86EnableIO();
+    pcrpp = xf86scanpci(0);
+
+    if (pcrpp == NULL) {
+        xf86MsgVerb(X_NONE,0,"No PCI info available\n");
+	return;
+    }
+    xf86MsgVerb(X_NONE,0,"Probing for PCI devices (Bus:Device:Function)\n\n");
+    for (i = 0; (pcrp = pcrpp[i]); i++) {
+	const char *svendorname = NULL, *subsysname = NULL;
+	const char *vendorname = NULL, *devicename = NULL;
+	Bool noCard = FALSE;
+	const char *prefix1 = "", *prefix2 = "";
+
+	xf86MsgVerb(X_NONE, -verbosity, "(%d:%d:%d) ",
+		    pcrp->busnum, pcrp->devnum, pcrp->funcnum);
+
+	/*
+	 * Lookup as much as we can about the device.
+	 */
+	if (pcrp->pci_subsys_vendor || pcrp->pci_subsys_card) {
+	    ScanPciFindPciNamesByDevice(pcrp->pci_vendor, pcrp->pci_device,
+				     NOVENDOR, NOSUBSYS,
+				     &vendorname, &devicename, NULL, NULL);
+	} else {
+	    ScanPciFindPciNamesByDevice(pcrp->pci_vendor, pcrp->pci_device,
+				     pcrp->pci_subsys_vendor,
+				     pcrp->pci_subsys_card,
+				     &vendorname, &devicename,
+				     &svendorname, &subsysname);
+	}
+
+	if (svendorname)
+	    xf86MsgVerb(X_NONE, -verbosity, "%s ", svendorname);
+	if (subsysname)
+	    xf86MsgVerb(X_NONE, -verbosity, "%s ", subsysname);
+	if (svendorname && !subsysname) {
+	    if (pcrp->pci_subsys_card && pcrp->pci_subsys_card != NOSUBSYS) {
+		xf86MsgVerb(X_NONE, -verbosity, "unknown card (0x%04x) ",
+			    pcrp->pci_subsys_card);
+	    } else {
+		xf86MsgVerb(X_NONE, -verbosity, "card ");
+	    }
+	}
+	if (!svendorname && !subsysname) {
+	    /*
+	     * We didn't find a text representation of the information 
+	     * about the card.
+	     */
+	    if (pcrp->pci_subsys_vendor || pcrp->pci_subsys_card) {
+		/*
+		 * If there was information and we just couldn't interpret
+		 * it, print it out as unknown, anyway.
+		 */
+		xf86MsgVerb(X_NONE, -verbosity,
+			    "unknown card (0x%04x/0x%04x) ",
+			    pcrp->pci_subsys_vendor, pcrp->pci_subsys_card);
+	    } else
+		noCard = TRUE;
+	}
+	if (!noCard) {
+	    prefix1 = "using a ";
+	    prefix2 = "using an ";
+	}
+	if (vendorname && devicename) {
+	    xf86MsgVerb(X_NONE, -verbosity,"%s%s %s\n", prefix1, vendorname,
+			devicename);
+	} else if (vendorname) {
+	    xf86MsgVerb(X_NONE, -verbosity,
+			"%sunknown chip (DeviceId 0x%04x) from %s\n",
+			prefix2, pcrp->pci_device, vendorname);
+	} else {
+	    xf86MsgVerb(X_NONE, -verbosity,
+			"%sunknown chipset(0x%04x/0x%04x)\n",
+			prefix2, pcrp->pci_vendor, pcrp->pci_device);
+	}
+    }
+}
+#endif
+@
+
+
+1.1.1.3
+log
+@That's what OpenBSD will, probably, ship as XF4 in 3.5
+their last sync against XFree86 4.3-current has been
+imported into our vendor branch, too
+@
+text
+@d1 1
+a1 1
+/* $XFree86: xc/programs/Xserver/hw/xfree86/scanpci/xf86ScanPci.c,v 1.14 2003/09/23 05:21:46 dawes Exp $ */
+d6 2
+d11 1
+a11 26
+/*
+ * Copyright (c) 1995-2002 by The XFree86 Project, Inc.
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a
+ * copy of this software and associated documentation files (the "Software"),
+ * to deal in the Software without restriction, including without limitation
+ * the rights to use, copy, modify, merge, publish, distribute, sublicense,
+ * and/or sell copies of the Software, and to permit persons to whom the
+ * Software is furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in
+ * all copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL
+ * THE COPYRIGHT HOLDER(S) OR AUTHOR(S) BE LIABLE FOR ANY CLAIM, DAMAGES OR
+ * OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE,
+ * ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR
+ * OTHER DEALINGS IN THE SOFTWARE.
+ *
+ * Except as contained in this notice, the name of the copyright holder(s)
+ * and author(s) shall not be used in advertising or otherwise to promote
+ * the sale, use or other dealings in this Software without prior written
+ * authorization from the copyright holder(s) and author(s).
+ */
+d170 1
+a170 2
+			if (svendor &&
+			    svendor == pciVendorInfoList[k].VendorID) {
+@
+
+

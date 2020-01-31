@@ -1,0 +1,338 @@
+head	1.2;
+branch	1.1.1;
+access;
+symbols
+	tg-mergetmp-2:1.1.1.1
+	cvs-200410241530:1.1.1.1
+	cvs-200410012000:1.1.1.1
+	cvs-200407141120:1.1.1.1
+	cvs-200406231010:1.1.1.1
+	MIRBSD_7quater:1.1.1.1
+	cvs-200405271510:1.1.1.1
+	XFree86_4_4_0:1.1.9.1
+	cvs-200403021700:1.1.1.1
+	XFREE86_20040213:1.1.9.1
+	xc:1.1.9
+	cvs-200401291925:1.1.1.1
+	MIRBSD_7_ALPHA:1.1.1.1.0.4
+	MIRBSD_7:1.1.1.1.0.2
+	MIRBSD_7ter:1.1.1.1
+	cvs-20011091815:1.1.1.1
+	cvs-200309162130:1.1.1.1
+	cvs-200308302005:1.1.1.1
+	ctmx-0387:1.1.1.1
+	ctmx-0384:1.1.1.1
+	MIRBSD_5:1.1.1.1
+	ctmx-0375:1.1.1.1
+	ctmx-0373:1.1.1.1
+	ctm-0371:1.1.1.1
+	ctm-0370:1.1.1.1
+	MIRBSD_4:1.1.1.1
+	ctm-0363:1.1.1.1
+	ctm-0359:1.1.1.1
+	ctm-0349:1.1.1.1
+	openbsd:1.1.1;
+locks; strict;
+comment	@ * @;
+
+
+1.2
+date	2003.05.16.16.27.53;	author tg;	state dead;
+branches;
+next	1.1;
+
+1.1
+date	2003.03.22.20.00.44;	author tg;	state Exp;
+branches
+	1.1.1.1
+	1.1.9.1;
+next	;
+
+1.1.1.1
+date	2003.03.22.20.00.44;	author tg;	state Stab;
+branches;
+next	;
+
+1.1.9.1
+date	2004.02.14.19.04.07;	author tg;	state Exp;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.2
+log
+@remove a bunch of files not used in MirBSD - clean tree. People who want them got cvs.
+@
+text
+@/*******************************************************************
+ *
+ *  ttextend.h                                                   2.0
+ *
+ *    Extensions Interface
+ *
+ *  Copyright 1996-1999 by
+ *  David Turner, Robert Wilhelm, and Werner Lemberg.
+ *
+ *  This file is part of the FreeType project, and may only be used
+ *  modified and distributed under the terms of the FreeType project
+ *  license, LICENSE.TXT.  By continuing to use, modify, or distribute
+ *  this file you indicate that you have read the license and
+ *  understand and accept it fully.
+ *
+ *  This is an updated version of the extension component, now
+ *  located in the main library's source directory.  It allows
+ *  the dynamic registration/use of various face object extensions
+ *  through a simple API.
+ *
+ ******************************************************************/
+
+#include "ttextend.h"
+#include "ttengine.h"
+#include "ttmemory.h"
+
+/* required by the tracing mode */
+#undef  TT_COMPONENT
+#define TT_COMPONENT      trace_extend
+
+
+  struct TExtension_Registry_
+  {
+    Int               num_extensions;
+    Long              cur_offset;
+    TExtension_Class  classes[TT_MAX_EXTENSIONS];
+  };
+
+  typedef struct TExtension_Registry_  TExtension_Registry;
+  typedef TExtension_Registry*         PExtension_Registry;
+
+
+
+  /* Initialize the extension component */
+
+  LOCAL_FUNC
+  TT_Error  TTExtend_Init( PEngine_Instance  engine )
+  {
+    TT_Error             error;
+    PExtension_Registry  exts;
+
+
+    if ( ALLOC( exts, sizeof ( TExtension_Registry ) ) )
+      return error;
+
+    exts->num_extensions        = 0;
+    exts->cur_offset            = 0;
+    engine->extension_component = (void*)exts;
+
+    return TT_Err_Ok;
+  }
+
+
+  /* Finalize the extension component */
+
+  LOCAL_FUNC
+  TT_Error  TTExtend_Done( PEngine_Instance  engine )
+  {
+    FREE( engine->extension_component );
+    return TT_Err_Ok;
+  }
+
+
+  /* Register a new extension */
+
+  EXPORT_FUNC
+  TT_Error  TT_Register_Extension( PEngine_Instance  engine,
+                                   Long              id,
+                                   Long              size,
+                                   PExt_Constructor  create,
+                                   PExt_Destructor   destroy )
+  {
+    PExtension_Registry  exts;
+    PExtension_Class     clazz;
+    Int                  p;
+
+
+    exts = (PExtension_Registry)engine->extension_component;
+    if ( !exts )
+      return TT_Err_Ok;
+
+    p = exts->num_extensions;
+
+    if ( p >= TT_MAX_EXTENSIONS )
+      return TT_Err_Too_Many_Extensions;
+
+    clazz          = exts->classes + p;
+    clazz->id      = id;
+    clazz->size    = size;
+    clazz->build   = create;
+    clazz->destroy = destroy;
+
+    clazz->offset  = exts->cur_offset;
+
+    exts->num_extensions++;
+    exts->cur_offset += ( size + ALIGNMENT-1 ) & -ALIGNMENT;
+
+    return TT_Err_Ok;
+  }
+
+
+  /* Query an extension block by extension_ID */
+
+  EXPORT_FUNC
+  TT_Error  TT_Extension_Get( PFace   face,
+                              Long    extension_id,
+                              void**  extension_block )
+  {
+    PExtension_Registry  registry;
+    PExtension_Class     clazz;
+    Int                  n;
+
+
+    if ( !face->extension )
+      return TT_Err_Extensions_Unsupported;
+
+    registry = (PExtension_Registry)face->engine->extension_component;
+
+    for ( n = 0; n < face->n_extensions; n++ )
+    {
+      clazz = registry->classes + n;
+      if ( clazz->id == extension_id )
+      {
+        *extension_block = (PByte)face->extension + clazz->offset;
+        return TT_Err_Ok;
+      }
+    }
+
+    return TT_Err_Invalid_Extension_Id;
+  }
+
+
+  /* Destroy all extensions within a face object.  Called by the */
+  /* face object destructor.                                     */
+
+  LOCAL_FUNC
+  TT_Error  Extension_Destroy( PFace  face )
+  {
+    PEngine_Instance     engine = face->engine;
+    PExtension_Registry  registry;
+    PExtension_Class     clazz;
+    Int                  n;
+    PByte                ext;
+
+
+    registry = (PExtension_Registry)engine->extension_component;
+
+    for ( n = 0; n < face->n_extensions; n++ )
+    {
+      clazz = registry->classes + n;
+      ext   = (PByte)face->extension + clazz->offset;
+
+      /* the destructor is optional */
+      if ( clazz->destroy )
+        clazz->destroy( (void*)ext, face );
+    }
+
+    /* destroy the face's extension block too */
+    FREE( face->extension );
+    face->n_extensions = 0;
+
+    return TT_Err_Ok;
+  }
+
+
+  /* Create an extension within a face object.  Called by the */
+  /* face object constructor.                                 */
+
+  LOCAL_FUNC
+  TT_Error  Extension_Create( PFace  face )
+  {
+    PEngine_Instance     engine = face->engine;
+    PExtension_Registry  registry;
+    PExtension_Class     clazz;
+    TT_Error             error;
+    Int                  n;
+    PByte                ext;
+
+
+    registry = (PExtension_Registry)engine->extension_component;
+
+    face->n_extensions = registry->num_extensions;
+    if ( ALLOC( face->extension, registry->cur_offset ) )
+      return error;
+
+    for ( n = 0; n < face->n_extensions; n++ )
+    {
+      clazz = registry->classes + n;
+      ext   = (PByte)face->extension + clazz->offset;
+      error = clazz->build( (void*)ext, face );
+      if ( error )
+        goto Fail;
+    }
+    return TT_Err_Ok;
+
+  Fail:
+    Extension_Destroy( face );
+    return error;
+  }
+
+
+/* END */
+@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@@
+
+
+1.1.9.1
+log
+@OpenBSD just has imported exactly this tree into their vendor branch,
+called the same tag, in XF4/xc
+This is, apparently, the last XFree86 snapshot before the licence change
+(ie, addition of the advertising clause)
+
+Since the developers don't see any problems with that, and we would like
+to integrate improvements done by the remaining one or two (or so) XFree86
+developers (j/k), this prepares enabling us to update X-Window in the future.
+@
+text
+@@
+
+
+1.1.1.1
+log
+@Import OpenBSD 3.3 XF4 repository from CTM 3132 the first time
+This finalizes starting an OpenBSD-mirabile (aka MirBSD) repository.
+
+### MirBSD is:
+# Copyright (c) 1982-2003 by Thorsten "mirabile" Glaser <x86@@ePost.de>
+# Copyright © 1968-2003  The authors of And contributors to UNIX®, the
+#       C Language, BSD/Berkeley Unix; 386BSD, NetBSD 1.1 and OpenBSD.
+#
+# Anyone who obtained a copy of this work is hereby permitted to freely use,
+# distribute, modify, merge, sublicence, give away or sell it as long as the
+# authors are given due credit and the following notice is retained:
+#
+# This work is provided "as is", with no explicit or implicit warranty what-
+# soever. Use it only at your own risk. In no event may an author or contri-
+# butor be held liable for any damage, directly or indirectly, that origina-
+# ted through or is caused by creation or modification of this work.
+
+MirBSD is my private tree. MirBSD does not differ very much from OpenBSD
+and intentionally tracks OpenBSD. That's why it _is_ OpenBSD, just not the
+official one. It's like with DarrenBSD.
+
+At time of this writing, no advertising for MirBSD must be done,
+because the advertising clause has not yet been sorted out.
+
+http://templeofhate.com/tglaser/MirBSD/index.php
+@
+text
+@@

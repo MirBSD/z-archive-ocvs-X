@@ -1,0 +1,220 @@
+head	1.2;
+access;
+symbols
+	ctm-0349:1.1.1.1 openbsd-xf4:1.1.1;
+locks; strict;
+comment	@ * @;
+
+
+1.2
+date	2003.04.08.19.32.32;	author tg;	state dead;
+branches;
+next	1.1;
+
+1.1
+date	2003.03.22.20.04.16;	author tg;	state Exp;
+branches
+	1.1.1.1;
+next	;
+
+1.1.1.1
+date	2003.03.22.20.04.16;	author tg;	state Exp;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.2
+log
+@merge conflicts
+@
+text
+@/**************************************************************************
+
+Copyright 2001 VA Linux Systems Inc., Fremont, California.
+
+All Rights Reserved.
+
+Permission is hereby granted, free of charge, to any person obtaining a
+copy of this software and associated documentation files (the "Software"),
+to deal in the Software without restriction, including without limitation
+on the rights to use, copy, modify, merge, publish, distribute, sub
+license, and/or sell copies of the Software, and to permit persons to whom
+the Software is furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice (including the next
+paragraph) shall be included in all copies or substantial portions of the
+Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NON-INFRINGEMENT. IN NO EVENT SHALL
+ATI, VA LINUX SYSTEMS AND/OR THEIR SUPPLIERS BE LIABLE FOR ANY CLAIM,
+DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR
+OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE
+USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+**************************************************************************/
+
+/* $XFree86: xc/lib/GL/mesa/src/drv/i830/i830_pipeline.c,v 1.1 2001/10/04 18:28:21 alanh Exp $ */
+
+/*
+ * Author:
+ *   Jeff Hartmann <jhartmann@@valinux.com>
+ *
+ * Heavily based on the I810 driver, which was written by:
+ *   Keith Whitwell <keithw@@valinux.com>
+ */
+
+#include <stdio.h>
+
+#include "types.h"
+#include "fog.h"
+
+#include "i830_drv.h"
+
+static struct gl_pipeline_stage i830_fast_stage = {
+   "i830 fast path",
+   (PIPE_OP_VERT_XFORM|PIPE_OP_RAST_SETUP_0|
+    PIPE_OP_RAST_SETUP_1|PIPE_OP_RENDER),
+   PIPE_PRECALC,
+   0, 0, 0, 0, 0, 0, 0, 0, 0,	
+   i830DDFastPath
+};
+
+
+#define ILLEGAL_ENABLES (TEXTURE0_3D|		\
+			 TEXTURE1_3D|		\
+			 ENABLE_TEXMAT0 |	\
+			 ENABLE_TEXMAT1 |	\
+			 ENABLE_TEXGEN0 |	\
+			 ENABLE_TEXGEN1 |	\
+			 ENABLE_USERCLIP |	\
+			 ENABLE_LIGHT |		\
+			 ENABLE_FOG)
+			
+
+/* The driver gets first shot at building the pipeline - make some
+ * quick tests to see if we can use the fast path.
+ */
+GLboolean i830DDBuildPrecalcPipeline( GLcontext *ctx )
+{   
+   i830ContextPtr imesa = I830_CONTEXT( ctx );
+   struct gl_pipeline *pipe = &ctx->CVA.pre;
+
+   if (imesa->renderindex == 0 && 
+       (ctx->Enabled & ILLEGAL_ENABLES) == 0 &&
+       (ctx->Array.Flags & (VERT_OBJ_234|
+			    VERT_TEX0_4|
+			    VERT_TEX1_4|
+			    VERT_ELT)) == (VERT_OBJ_23|VERT_ELT))
+   {
+      pipe->stages[0] = &i830_fast_stage;
+      pipe->stages[1] = 0;
+      pipe->new_inputs = ctx->RenderFlags & VERT_DATA;
+      pipe->ops = pipe->stages[0]->ops;
+      imesa->using_fast_path = 1;
+      return 1;
+   } 
+
+   if (imesa->using_fast_path) 
+   {
+      imesa->using_fast_path = 0;
+      ctx->CVA.VB->ClipOrMask = 0;
+      ctx->CVA.VB->ClipAndMask = CLIP_ALL_BITS;
+      ctx->Array.NewArrayState |= ctx->Array.Summary;
+      return 0;
+   }
+   
+   return 0;
+}
+
+
+
+GLuint i830DDRegisterPipelineStages( struct gl_pipeline_stage *out,
+				    const struct gl_pipeline_stage *in,
+				    GLuint nr )
+{
+   GLuint i, o;
+
+   for (i = o = 0 ; i < nr ; i++) {
+      switch (in[i].ops) {
+
+      case PIPE_OP_RAST_SETUP_0:
+	 out[o] = in[i];
+	 out[o].cva_state_change = NEW_LIGHTING|NEW_TEXTURING|NEW_RASTER_OPS;
+	 out[o].state_change = ~0;
+	 out[o].check = i830DDCheckPartialRasterSetup;
+	 out[o].run = i830DDPartialRasterSetup;
+	 o++;
+	 break;
+
+      case PIPE_OP_RAST_SETUP_0|PIPE_OP_RAST_SETUP_1:
+	 out[o] = in[i];
+	 out[o].run = i830DDDoRasterSetup;
+	 o++;
+	 break;
+
+	 /* Completely replace Mesa's fog processing to generate fog
+	  * coordinates instead of messing with colors.
+	  */
+      case PIPE_OP_FOG:
+	 out[o] = gl_fog_coord_stage;
+	 o++;
+	 break;
+
+
+      default:
+	 out[o++] = in[i];
+	 break;
+      }
+   }
+
+   return o;
+}
+
+
+@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@@
+
+
+1.1.1.1
+log
+@Import OpenBSD 3.3 XF4 repository from CTM 3132 the first time
+This finalizes starting an OpenBSD-mirabile (aka MirBSD) repository.
+
+### MirBSD is:
+# Copyright (c) 1982-2003 by Thorsten "mirabile" Glaser <x86@@ePost.de>
+# Copyright © 1968-2003  The authors of And contributors to UNIX®, the
+#       C Language, BSD/Berkeley Unix; 386BSD, NetBSD 1.1 and OpenBSD.
+#
+# Anyone who obtained a copy of this work is hereby permitted to freely use,
+# distribute, modify, merge, sublicence, give away or sell it as long as the
+# authors are given due credit and the following notice is retained:
+#
+# This work is provided "as is", with no explicit or implicit warranty what-
+# soever. Use it only at your own risk. In no event may an author or contri-
+# butor be held liable for any damage, directly or indirectly, that origina-
+# ted through or is caused by creation or modification of this work.
+
+MirBSD is my private tree. MirBSD does not differ very much from OpenBSD
+and intentionally tracks OpenBSD. That's why it _is_ OpenBSD, just not the
+official one. It's like with DarrenBSD.
+
+At time of this writing, no advertising for MirBSD must be done,
+because the advertising clause has not yet been sorted out.
+
+http://templeofhate.com/tglaser/MirBSD/index.php
+@
+text
+@@

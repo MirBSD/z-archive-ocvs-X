@@ -1,0 +1,1179 @@
+head	1.2;
+branch	1.1.1;
+access;
+symbols
+	tg-mergetmp-2:1.1.1.2
+	cvs-200410241530:1.1.1.2
+	cvs-200410012000:1.1.1.2
+	cvs-200407141120:1.1.1.2
+	cvs-200406231010:1.1.1.2
+	MIRBSD_7quater:1.1.1.1
+	cvs-200405271510:1.1.1.2
+	XFree86_4_4_0:1.1.9.1
+	cvs-200403021700:1.1.1.2
+	XFREE86_20040213:1.1.9.1
+	xc:1.1.9
+	cvs-200401291925:1.1.1.1
+	MIRBSD_7_ALPHA:1.1.1.1.0.4
+	MIRBSD_7:1.1.1.1.0.2
+	MIRBSD_7ter:1.1.1.1
+	cvs-20011091815:1.1.1.1
+	cvs-200309162130:1.1.1.1
+	cvs-200308302005:1.1.1.1
+	ctmx-0387:1.1.1.1
+	ctmx-0384:1.1.1.1
+	MIRBSD_5:1.1.1.1
+	ctmx-0375:1.1.1.1
+	ctmx-0373:1.1.1.1
+	ctm-0371:1.1.1.1
+	ctm-0370:1.1.1.1
+	MIRBSD_4:1.1.1.1
+	ctm-0363:1.1.1.1
+	ctm-0359:1.1.1.1
+	openbsd:1.1.1;
+locks; strict;
+comment	@# @;
+
+
+1.2
+date	2003.05.16.16.28.28;	author tg;	state dead;
+branches;
+next	1.1;
+
+1.1
+date	2003.04.08.18.20.10;	author tg;	state Exp;
+branches
+	1.1.1.1
+	1.1.9.1;
+next	;
+
+1.1.1.1
+date	2003.04.08.18.20.10;	author tg;	state Exp;
+branches;
+next	1.1.1.2;
+
+1.1.1.2
+date	2004.03.02.17.29.32;	author tg;	state Stab;
+branches;
+next	;
+
+1.1.9.1
+date	2004.02.14.19.04.55;	author tg;	state Exp;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.2
+log
+@remove a bunch of files not used in MirBSD - clean tree. People who want them got cvs.
+@
+text
+@
+/*
+ * Mesa 3-D graphics library
+ * Version:  3.5
+ *
+ * Copyright (C) 1999-2001  Brian Paul   All Rights Reserved.
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a
+ * copy of this software and associated documentation files (the "Software"),
+ * to deal in the Software without restriction, including without limitation
+ * the rights to use, copy, modify, merge, publish, distribute, sublicense,
+ * and/or sell copies of the Software, and to permit persons to whom the
+ * Software is furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included
+ * in all copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
+ * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL
+ * BRIAN PAUL BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN
+ * AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
+ * CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+ */
+/* $XFree86: xc/extras/Mesa/src/X86/3dnow_normal.S,v 1.3 2003/01/12 03:55:44 tsi Exp $ */
+
+/*
+ * 3Dnow assembly code by Holger Waechtler
+ */
+
+#include "matypes.h"
+#include "norm_args.h"
+
+        SEG_TEXT
+
+#define M(i)    REGOFF(i * 4, ECX)
+#define STRIDE  REGOFF(12, ESI)
+
+
+ALIGNTEXT16
+GLOBL GLNAME(_mesa_3dnow_transform_normalize_normals)
+GLNAME(_mesa_3dnow_transform_normalize_normals):
+
+#define FRAME_OFFSET 12
+
+    PUSH_L     ( EDI )
+    PUSH_L     ( ESI )
+    PUSH_L     ( EBP )
+
+    MOV_L      ( ARG_LENGTHS, EDI )
+    MOV_L      ( ARG_IN, ESI )
+    MOV_L      ( ARG_DEST, EAX )
+    MOV_L      ( REGOFF(V3F_COUNT, ESI), EBP ) /*  dest->count = in->count   */
+    MOV_L      ( EBP, REGOFF(V3F_COUNT, EAX) )
+    MOV_L      ( REGOFF(V3F_START, ESI), EDX ) /*  in->start    */
+    MOV_L      ( REGOFF(V3F_START, EAX), EAX ) /*  dest->start  */
+    MOV_L      ( ARG_MAT, ECX )
+    MOV_L      ( REGOFF(MATRIX_INV, ECX), ECX ) /*  mat->inv     */
+
+    CMP_L      ( CONST(0), EBP )        /*   count > 0 ??  */
+    JE         ( LLBL (G3TN_end) )
+
+    MOV_L      ( REGOFF (V3F_COUNT, ESI), EBP )
+    FEMMS
+
+    PUSH_L     ( EBP )
+    PUSH_L     ( EAX )
+    PUSH_L     ( EDX )                  /*  save counter & pointer for   */
+                                        /*  the normalize pass           */
+#undef  FRAME_OFFSET
+#define FRAME_OFFSET 24
+
+    MOVQ       ( M(0), MM3 )            /*  m1              | m0         */
+    MOVQ       ( M(4), MM4 )            /*  m5              | m4         */
+
+    MOVD       ( M(2), MM5 )            /*                  | m2         */
+    PUNPCKLDQ  ( M(6), MM5 )            /*  m6              | m2         */
+
+    MOVQ       ( M(8), MM6 )            /*  m9              | m8         */
+    MOVQ       ( M(10), MM7 )           /*                  | m10        */
+
+    CMP_L      ( CONST(0), EDI )        /*  lengths == 0 ?                 */
+    JNE        ( LLBL (G3TN_scale_end ) )
+
+    MOVD       ( ARG_SCALE, MM0 )       /*               | scale           */
+    PUNPCKLDQ  ( MM0, MM0 )             /* scale         | scale           */
+
+    PFMUL      ( MM0, MM3 )             /* scale * m1    | scale * m0      */
+    PFMUL      ( MM0, MM4 )             /* scale * m5    | scale * m4      */
+    PFMUL      ( MM0, MM5 )             /* scale * m6    | scale * m2      */
+    PFMUL      ( MM0, MM6 )             /* scale * m9    | scale * m8      */
+    PFMUL      ( MM0, MM7 )             /*               | scale * m10     */
+
+ALIGNTEXT32
+LLBL (G3TN_scale_end):
+LLBL (G3TN_transform):
+    MOVQ       ( REGIND (EDX), MM0 )    /*  x1              | x0         */
+    MOVD       ( REGOFF (8, EDX), MM2 ) /*                  | x2         */
+
+    MOVQ       ( MM0, MM1 )             /*  x1              | x0           */
+    PUNPCKLDQ  ( MM2, MM2 )             /*  x2              | x2           */
+
+    PFMUL      ( MM3, MM0 )             /*  x1*m1           | x0*m0        */
+    ADD_L      ( CONST(12), EAX )       /*  next r                         */
+
+    PREFETCHW  ( REGIND(EAX) )
+
+    PFMUL      ( MM4, MM1 )             /*  x1*m5           | x0*m4        */
+    PFACC      ( MM1, MM0 )             /*  x0*m4+x1*m5     | x0*m0+x1*m1  */
+
+    PFMUL      ( MM5, MM2 )             /*  x2*m6           | x2*m2        */
+    PFADD      ( MM2, MM0 )             /* x0*m4+x1*m5+x2*m6| x0*m0+...+x2**/
+
+    MOVQ       ( REGIND (EDX), MM1 )    /*  x1           | x0              */
+    MOVQ       ( MM0, REGOFF(-12, EAX) ) /* write r0, r1                   */
+
+    PFMUL      ( MM6, MM1 )             /* x1*m9         | x0*m8           */
+    MOVD       ( REGOFF (8, EDX), MM2 ) /*               | x2              */
+
+    PFMUL      ( MM7, MM2 )             /*               | x2*m10          */
+    PFACC      ( MM1, MM1 )             /*  *not used*   | x0*m8+x1*m9     */
+
+    PFADD      ( MM2, MM1 )             /*  *not used*   | x0*m8+x1*m9+x2*m*/
+    ADD_L      ( STRIDE, EDX )          /*  next normal                    */
+
+    PREFETCH   ( REGIND(EDX) )
+
+    MOVD       ( MM1, REGOFF(-4, EAX) ) /*  write r2                       */
+    DEC_L      ( EBP )                  /*  decrement normal counter       */
+    JA         ( LLBL (G3TN_transform) )
+
+
+    POP_L      ( EDX )                  /*  end of transform ---           */
+    POP_L      ( EAX )                  /*    now normalizing ...          */
+    POP_L      ( EBP )
+
+    CMP_L      ( CONST(0), EDI )        /*  lengths == 0 ?                 */
+    JE         ( LLBL (G3TN_norm ) )    /*  calculate lengths              */
+
+
+ALIGNTEXT32
+LLBL (G3TN_norm_w_lengths):
+
+    PREFETCHW  ( REGOFF(12,EAX) )
+
+    MOVQ       ( REGIND(EAX), MM0 )     /*  x1              | x0           */
+    MOVD       ( REGOFF(8, EAX), MM1 )  /*                  | x2           */
+
+    MOVD       ( REGIND (EDI), MM3 )    /*                  | length (x)   */
+    PFMUL      ( MM3, MM1 )             /*                  | x2 (normalize*/
+
+    PUNPCKLDQ  ( MM3, MM3 )             /*  length (x)      | length (x)   */
+    PFMUL      ( MM3, MM0 )             /*  x1 (normalized) | x0 (normalize*/
+
+    ADD_L      ( STRIDE, EDX )          /*  next normal                    */
+    ADD_L      ( CONST(4), EDI )        /*  next length                    */
+
+    PREFETCH   ( REGIND(EDI) )
+
+    MOVQ       ( MM0, REGIND(EAX) )     /*  write new x0, x1               */
+    MOVD       ( MM1, REGOFF(8, EAX) )  /*  write new x2                   */
+
+    ADD_L      ( CONST(12), EAX )       /*  next r                         */
+    DEC_L      ( EBP )                  /*  decrement normal counter       */
+
+    JA         ( LLBL (G3TN_norm_w_lengths) )
+    JMP        ( LLBL (G3TN_exit_3dnow) )
+
+ALIGNTEXT32
+LLBL (G3TN_norm):
+
+    PREFETCHW  ( REGIND(EAX) )
+
+    MOVQ       ( MM0, MM3 )             /*  x1              | x0           */
+    MOVQ       ( MM1, MM4 )             /*                  | x2           */
+
+    PFMUL      ( MM0, MM3 )             /*  x1*x1           | x0*x0        */
+    ADD_L      ( CONST(12), EAX )       /*  next r                         */
+
+    PFMUL      ( MM1, MM4 )             /*                  | x2*x2        */
+    PFADD      ( MM4, MM3 )             /*                  | x0*x0+x2*x2  */
+
+    PFACC      ( MM3, MM3 )             /* **not used**    | x0*x0+x1*x1+x2**/
+    PFRSQRT    ( MM3, MM5 )             /*  1/sqrt (x0*x0+x1*x1+x2*x2)     */
+
+    MOVQ       ( MM5, MM4 )
+    PUNPCKLDQ  ( MM3, MM3 )
+
+    DEC_L      ( EBP )                  /*  decrement normal counter       */
+    PFMUL      ( MM5, MM5 )
+
+    PFRSQIT1   ( MM3, MM5 )
+    PFRCPIT2   ( MM4, MM5 )
+
+    PFMUL      ( MM5, MM0 )             /*  x1 (normalized) | x0 (normalize*/
+
+    MOVQ       ( MM0, REGOFF(-12, EAX) ) /*  write new x0, x1              */
+    PFMUL      ( MM5, MM1 )             /*                 | x2 (normalize*/
+
+    MOVD       ( MM1, REGOFF(-4, EAX) ) /*  write new x2                  */
+    MOVQ       ( REGIND (EAX), MM0 )    /*  x1             | x0           */
+
+    MOVD       ( REGOFF(8, EAX), MM1 )  /*                 | x2           */
+    JA         ( LLBL (G3TN_norm) )
+
+LLBL (G3TN_exit_3dnow):
+    FEMMS
+
+LLBL (G3TN_end):
+    POP_L      ( EBP )
+    POP_L      ( ESI )
+    POP_L      ( EDI )
+    RET
+
+
+
+ALIGNTEXT16
+GLOBL GLNAME(_mesa_3dnow_transform_normalize_normals_no_rot)
+GLNAME(_mesa_3dnow_transform_normalize_normals_no_rot):
+
+#undef FRAME_OFFSET
+#define FRAME_OFFSET 12
+
+    PUSH_L     ( EDI )
+    PUSH_L     ( ESI )
+    PUSH_L     ( EBP )
+
+    MOV_L      ( ARG_LENGTHS, EDI )
+    MOV_L      ( ARG_IN, ESI )
+    MOV_L      ( ARG_DEST, EAX )
+    MOV_L      ( REGOFF(V3F_COUNT, ESI), EBP ) /*  dest->count = in->count   */
+    MOV_L      ( EBP, REGOFF(V3F_COUNT, EAX) )
+    MOV_L      ( ARG_MAT, ECX )
+    MOV_L      ( REGOFF(V3F_START, EAX), EAX ) /*  dest->start  */
+    MOV_L      ( REGOFF(MATRIX_INV, ECX), ECX ) /*  mat->inv     */
+    MOV_L      ( REGOFF(V3F_START, ESI), EDX ) /*  in->start    */
+
+    CMP_L      ( CONST(0), EBP ) /*   count > 0 ??  */
+    JE         ( LLBL (G3TNNR_end) )
+
+    FEMMS
+
+    MOVD       ( M(0), MM0 )            /*               | m0                 */
+    PUNPCKLDQ  ( M(5), MM0 )            /* m5            | m0                 */
+
+    MOVD       ( M(10), MM2 )           /*               | m10                */
+    PUNPCKLDQ  ( MM2, MM2 )             /* m10           | m10                */
+
+    CMP_L      ( CONST(0), EDI )        /*  lengths == 0 ?                    */
+    JNE        ( LLBL (G3TNNR_scale_end ) )
+
+    MOVD       ( ARG_SCALE, MM7 )       /*               | scale              */
+    PUNPCKLDQ  ( MM7, MM7 )             /* scale         | scale              */
+
+    PFMUL      ( MM7, MM0 )             /* scale * m5    | scale * m0         */
+    PFMUL      ( MM7, MM2 )             /* scale * m10   | scale * m10        */
+
+ALIGNTEXT32
+LLBL (G3TNNR_scale_end):
+    CMP_L      ( CONST(0), EDI )        /* lengths == 0 ?                     */
+    JE         ( LLBL (G3TNNR_norm) )   /* need to calculate lengths          */
+
+    MOVD       ( REGIND(EDI), MM3 )     /*                 | length (x)       */
+
+
+ALIGNTEXT32
+LLBL (G3TNNR_norm_w_lengths):           /* use precalculated lengths          */
+
+    PREFETCHW  ( REGIND(EAX) )
+
+    MOVQ       ( REGIND(EDX), MM6 )     /* x1            | x0                 */
+    MOVD       ( REGOFF(8, EDX), MM7 )  /*               | x2                 */
+
+    PFMUL      ( MM0, MM6 )             /* x1*m5         | x0*m0              */
+    ADD_L      ( STRIDE, EDX )          /* next normal                        */
+
+    PREFETCH   ( REGIND(EDX) )
+
+    PFMUL      ( MM2, MM7 )             /*               | x2*m10             */
+    ADD_L      ( CONST(12), EAX )       /* next r                             */
+
+    PFMUL      ( MM3, MM7 )             /*               | x2 (normalized)  */
+    PUNPCKLDQ  ( MM3, MM3 )             /* length (x)    | length (x)       */
+
+    ADD_L      ( CONST(4), EDI )        /* next length                        */
+    PFMUL      ( MM3, MM6 )             /* x1 (normalized) | x0 (normalized)  */
+
+    DEC_L      ( EBP )                  /* decrement normal counter           */
+    MOVQ       ( MM6, REGOFF(-12, EAX) ) /* write r0, r1                      */
+
+    MOVD       ( MM7, REGOFF(-4, EAX) ) /* write r2                           */
+    MOVD       ( REGIND(EDI), MM3 )     /*                 | length (x)       */
+
+    JA         ( LLBL (G3TNNR_norm_w_lengths) )
+    JMP        ( LLBL (G3TNNR_exit_3dnow) )
+
+ALIGNTEXT32
+LLBL (G3TNNR_norm):                     /* need to calculate lengths          */
+
+    PREFETCHW  ( REGIND(EAX) )
+
+    MOVQ       ( REGIND(EDX), MM6 )     /* x1              | x0               */
+    MOVD       ( REGOFF(8, EDX), MM7 )  /*                 | x2               */
+
+    PFMUL      ( MM0, MM6 )             /* x1*m5           | x0*m0            */
+    ADD_L      ( CONST(12), EAX )       /* next r                             */
+
+    PFMUL      ( MM2, MM7 )             /*                 | x2*m10           */
+    MOVQ       ( MM6, MM3 )             /* x1 (transformed)| x0 (transformed) */
+
+    MOVQ       ( MM7, MM4 )             /*                 | x2 (transformed) */
+    PFMUL      ( MM6, MM3 )             /* x1*x1           | x0*x0            */
+
+
+    PFMUL      ( MM7, MM4 )             /*                 | x2*x2            */
+    PFACC      ( MM3, MM3 )             /* **not used**    | x0*x0+x1*x1      */
+
+    PFADD      ( MM4, MM3 )             /*                 | x0*x0+x1*x1+x2*x2*/
+    ADD_L      ( STRIDE, EDX )          /* next normal            */
+
+    PREFETCH   ( REGIND(EDX) )
+
+    PFRSQRT    ( MM3, MM5 )             /* 1/sqrt (x0*x0+x1*x1+x2*x2)         */
+    MOVQ       ( MM5, MM4 )
+
+    PUNPCKLDQ  ( MM3, MM3 )
+    PFMUL      ( MM5, MM5 )
+
+    PFRSQIT1   ( MM3, MM5 )
+    DEC_L      ( EBP )                  /* decrement normal counter           */
+
+    PFRCPIT2   ( MM4, MM5 )
+    PFMUL      ( MM5, MM6 )             /* x1 (normalized) | x0 (normalized)  */
+
+    MOVQ       ( MM6, REGOFF(-12, EAX) ) /* write r0, r1                      */
+    PFMUL      ( MM5, MM7 )             /*                 | x2 (normalized)  */
+
+    MOVD       ( MM7, REGOFF(-4, EAX) ) /* write r2                           */
+    JA         ( LLBL (G3TNNR_norm) )
+
+
+LLBL (G3TNNR_exit_3dnow):
+    FEMMS
+
+LLBL (G3TNNR_end):
+    POP_L      ( EBP )
+    POP_L      ( ESI )
+    POP_L      ( EDI )
+    RET
+
+
+
+
+
+
+ALIGNTEXT16
+GLOBL GLNAME(_mesa_3dnow_transform_rescale_normals_no_rot)
+GLNAME(_mesa_3dnow_transform_rescale_normals_no_rot):
+
+#undef FRAME_OFFSET
+#define FRAME_OFFSET 12
+
+    PUSH_L     ( EDI )
+    PUSH_L     ( ESI )
+    PUSH_L     ( EBP )
+
+    MOV_L      ( ARG_IN, EAX )
+    MOV_L      ( ARG_DEST, EDX )
+    MOV_L      ( REGOFF(V3F_COUNT, EAX), EBP ) /*  dest->count = in->count   */
+    MOV_L      ( EBP, REGOFF(V3F_COUNT, EDX) )
+    MOV_L      ( ARG_IN, ESI )
+    MOV_L      ( ARG_MAT, ECX )
+    MOV_L      ( REGOFF(MATRIX_INV, ECX), ECX ) /*  mat->inv     */
+    MOV_L      ( REGOFF(V3F_START, EDX), EAX ) /*  dest->start  */
+    MOV_L      ( REGOFF(V3F_START, ESI), EDX ) /*  in->start    */
+
+    CMP_L      ( CONST(0), EBP )
+    JE         ( LLBL (G3TRNR_end) )
+
+    FEMMS
+
+    MOVD       ( ARG_SCALE, MM6 )       /*               | scale              */
+    PUNPCKLDQ  ( MM6, MM6 )             /* scale         | scale              */
+
+    MOVD       ( REGIND(ECX), MM0 )     /*               | m0                 */
+    PUNPCKLDQ  ( REGOFF(20, ECX), MM0 ) /* m5            | m0                 */
+
+    PFMUL      ( MM6, MM0 )             /* scale*m5      | scale*m0           */
+    MOVD       ( REGOFF(40, ECX), MM2 ) /*               | m10                */
+
+    PFMUL      ( MM6, MM2 )             /*               | scale*m10          */
+
+ALIGNTEXT32
+LLBL (G3TRNR_rescale):
+
+    PREFETCHW  ( REGIND(EAX) )
+	
+    MOVQ       ( REGIND(EDX), MM4 )     /* x1            | x0                 */
+    MOVD       ( REGOFF(8, EDX), MM5 )  /*               | x2                 */
+	
+    PFMUL      ( MM0, MM4 )             /* x1*m5         | x0*m0              */
+    ADD_L      ( STRIDE, EDX )          /* next normal                        */
+
+    PREFETCH   ( REGIND(EDX) )
+
+    PFMUL      ( MM2, MM5 )             /*               | x2*m10             */
+    ADD_L      ( CONST(12), EAX )       /* next r                             */
+
+    DEC_L      ( EBP )                  /* decrement normal counter           */
+    MOVQ       ( MM4, REGOFF(-12, EAX) ) /* write r0, r1                      */
+
+    MOVD       ( MM5, REGOFF(-4, EAX) ) /* write r2                           */
+    JA         ( LLBL (G3TRNR_rescale) ) /* cnt > 0 ? -> process next normal  */
+
+    FEMMS
+
+LLBL (G3TRNR_end):
+    POP_L      ( EBP )
+    POP_L      ( ESI )
+    POP_L      ( EDI )
+    RET
+
+
+
+
+
+ALIGNTEXT16
+GLOBL GLNAME(_mesa_3dnow_transform_rescale_normals)
+GLNAME(_mesa_3dnow_transform_rescale_normals):
+
+#undef  FRAME_OFFSET
+#define FRAME_OFFSET 8
+
+    PUSH_L     ( EDI )
+    PUSH_L     ( ESI )
+
+    MOV_L      ( ARG_IN, ESI )
+    MOV_L      ( ARG_DEST, EAX )
+    MOV_L      ( ARG_MAT, ECX )
+    MOV_L      ( REGOFF(V3F_COUNT, ESI), EDI ) /*  dest->count = in->count   */
+    MOV_L      ( EDI, REGOFF(V3F_COUNT, EAX) )
+    MOV_L      ( REGOFF(V3F_START, EAX), EAX ) /*  dest->start  */
+    MOV_L      ( REGOFF(V3F_START, ESI), EDX ) /*  in->start    */
+    MOV_L      ( REGOFF(MATRIX_INV, ECX), ECX ) /*  mat->inv     */
+
+    CMP_L      ( CONST(0), EDI )
+    JE         ( LLBL (G3TR_end) )
+
+    FEMMS
+
+    MOVQ       ( REGIND(ECX), MM3 )     /* m1            | m0                 */
+
+    MOVQ       ( REGOFF(16,ECX), MM4 )  /* m5            | m4                 */
+    MOVD       ( ARG_SCALE, MM0 )       /* scale       */
+
+    MOVD       ( REGOFF(8,ECX), MM5 )   /*               | m2                 */
+    PUNPCKLDQ  ( MM0, MM0 )             /* scale         | scale              */
+
+    PUNPCKLDQ  ( REGOFF(24, ECX), MM5 )
+    PFMUL      ( MM0, MM3 )             /* scale*m1      | scale*m0           */
+
+    MOVQ       ( REGOFF(32, ECX), MM6 ) /* m9            | m8*/
+    PFMUL      ( MM0, MM4 )             /* scale*m5      | scale*m4           */
+
+    MOVD       ( REGOFF(40, ECX), MM7 ) /*               | m10                */
+    PFMUL      ( MM0, MM5 )             /* scale*m6      | scale*m2           */
+
+    PFMUL      ( MM0, MM6 )             /* scale*m9      | scale*m8           */
+
+    PFMUL      ( MM0, MM7 )             /*               | scale*m10          */
+
+ALIGNTEXT32
+LLBL (G3TR_rescale):
+
+    PREFETCHW  ( REGIND(EAX) )
+
+    MOVQ       ( REGIND(EDX), MM0 )     /* x1            | x0                 */
+    MOVD       ( REGOFF(8, EDX), MM2 )  /*               | x2                 */
+
+    MOVQ       ( MM0, MM1 )             /* x1            | x0                 */
+    PUNPCKLDQ  ( MM2, MM2 )             /* x2            | x2                 */
+
+    PFMUL      ( MM3, MM0 )             /* x1*m1         | x0*m0              */
+    ADD_L      ( CONST(12), EAX )       /* next r                             */
+
+    PFMUL      ( MM4, MM1 )             /* x1*m5         | x0*m4              */
+    PFACC      ( MM1, MM0 )             /* x0*m4+x1*m5   | x0*m0+x1*m1        */
+
+    MOVQ       ( REGIND(EDX), MM1 )     /* x1            | x0                 */
+
+    PFMUL      ( MM5, MM2 )             /* x2*m6         | x2*m2              */
+    PFADD      ( MM2, MM0 )             /* x0*m4...+x2*m6| x0*m0+x1*m1+x2*m2  */
+
+    MOVD       ( REGOFF(8, EDX), MM2 )  /*               | x2                 */
+    ADD_L      ( STRIDE, EDX )          /* next normal                    */
+
+    PREFETCH   ( REGIND(EDX) )
+
+    MOVQ       ( MM0, REGOFF(-12, EAX) ) /* write r0, r1                      */
+    PFMUL      ( MM6, MM1 )             /* x1*m9         | x0*m8              */
+
+    PFMUL      ( MM7, MM2 )             /*               | x2*m10             */
+    PFACC      ( MM1, MM1 )             /* *not used*    | x0*m8+x1*m9        */
+
+    PFADD      ( MM2, MM1 )             /* *not used*    | x0*m8+x1*m9+x2*m10 */
+    MOVD       ( MM1, REGOFF(-4, EAX) ) /* write r2                           */
+
+    DEC_L      ( EDI )                  /* decrement normal counter           */
+    JA         ( LLBL (G3TR_rescale) )
+
+    FEMMS
+
+LLBL (G3TR_end):
+    POP_L       ( ESI )
+    POP_L       ( EDI )
+    RET
+
+
+
+
+
+
+
+ALIGNTEXT16
+GLOBL GLNAME(_mesa_3dnow_transform_normals_no_rot)
+GLNAME(_mesa_3dnow_transform_normals_no_rot):
+
+#undef  FRAME_OFFSET
+#define FRAME_OFFSET 8
+
+    PUSH_L     ( EDI )
+    PUSH_L     ( ESI )
+
+    MOV_L      ( ARG_IN, ESI )
+    MOV_L      ( ARG_DEST, EAX )
+    MOV_L      ( ARG_MAT, ECX )
+    MOV_L      ( REGOFF(V3F_COUNT, ESI), EDI ) /*  dest->count = in->count   */
+    MOV_L      ( EDI, REGOFF(V3F_COUNT, EAX) )
+    MOV_L      ( REGOFF(V3F_START, EAX), EAX ) /*  dest->start  */
+    MOV_L      ( REGOFF(V3F_START, ESI), EDX ) /*  in->start    */
+    MOV_L      ( REGOFF(MATRIX_INV, ECX), ECX ) /*  mat->inv     */
+
+    CMP_L      ( CONST(0), EDI )
+    JE         ( LLBL (G3TNR_end) )
+
+    FEMMS
+
+    MOVD       ( REGIND(ECX), MM0 )     /*               | m0                 */
+    PUNPCKLDQ  ( REGOFF(20, ECX), MM0 ) /* m5            | m0                 */
+
+    MOVD       ( REGOFF(40, ECX), MM2 ) /*               | m10                */
+    PUNPCKLDQ  ( MM2, MM2 )             /* m10           | m10                */
+
+ALIGNTEXT32
+LLBL (G3TNR_transform):
+
+    PREFETCHW  ( REGIND(EAX) )
+
+    MOVQ       ( REGIND(EDX), MM4 )     /* x1            | x0                 */
+    MOVD       ( REGOFF(8, EDX), MM5 )  /*               | x2                 */
+
+    PFMUL      ( MM0, MM4 )             /* x1*m5         | x0*m0              */
+    ADD_L      ( STRIDE, EDX)           /* next normal      */
+
+    PREFETCH   ( REGIND(EDX) )
+
+    PFMUL      ( MM2, MM5 )             /*               | x2*m10             */
+    ADD_L      ( CONST(12), EAX )       /* next r                             */
+
+    DEC_L      ( EDI )                  /* decrement normal counter           */
+    MOVQ       ( MM4, REGOFF(-12, EAX) ) /* write r0, r1                      */
+
+    MOVD       ( MM5, REGOFF(-4, EAX) ) /* write r2                           */
+    JA         ( LLBL (G3TNR_transform) )
+
+    FEMMS
+
+LLBL (G3TNR_end):
+    POP_L       ( ESI )
+    POP_L       ( EDI )
+    RET
+
+
+
+
+
+
+
+
+ALIGNTEXT16
+GLOBL GLNAME(_mesa_3dnow_transform_normals)
+GLNAME(_mesa_3dnow_transform_normals):
+
+#undef  FRAME_OFFSET
+#define FRAME_OFFSET 8
+
+    PUSH_L     ( EDI )
+    PUSH_L     ( ESI )
+
+    MOV_L      ( ARG_IN, ESI )
+    MOV_L      ( ARG_DEST, EAX )
+    MOV_L      ( ARG_MAT, ECX )
+    MOV_L      ( REGOFF(V3F_COUNT, ESI), EDI ) /*  dest->count = in->count   */
+    MOV_L      ( EDI, REGOFF(V3F_COUNT, EAX) )
+    MOV_L      ( REGOFF(V3F_START, EAX), EAX ) /*  dest->start  */
+    MOV_L      ( REGOFF(V3F_START, ESI), EDX ) /*  in->start    */
+    MOV_L      ( REGOFF(MATRIX_INV, ECX), ECX ) /*  mat->inv     */
+
+    CMP_L      ( CONST(0), EDI )        /* count > 0 ??                       */
+    JE         ( LLBL (G3T_end) )
+
+    FEMMS
+
+    MOVQ       ( REGIND(ECX), MM3 )     /* m1            | m0                 */
+    MOVQ       ( REGOFF(16, ECX), MM4 ) /* m5            | m4                 */
+
+    MOVD       ( REGOFF(8, ECX), MM5 )  /*               | m2                 */
+    PUNPCKLDQ  ( REGOFF(24, ECX), MM5 ) /* m6            | m2                 */
+
+    MOVQ       ( REGOFF(32, ECX), MM6 ) /* m9            | m8                 */
+    MOVD       ( REGOFF(40, ECX), MM7 ) /*               | m10                */
+
+ALIGNTEXT32
+LLBL (G3T_transform):
+
+    PREFETCHW  ( REGIND(EAX) )
+
+    MOVQ       ( REGIND(EDX), MM0 )     /* x1            | x0                 */
+    MOVD       ( REGOFF(8, EDX), MM2 )  /*               | x2                 */
+
+    MOVQ       ( MM0, MM1 )             /* x1            | x0                 */
+    PUNPCKLDQ  ( MM2, MM2 )             /* x2            | x2                 */
+
+    PFMUL      ( MM3, MM0 )             /* x1*m1         | x0*m0              */
+    ADD_L      ( CONST(12), EAX )       /* next r                             */
+
+    PFMUL      ( MM4, MM1 )             /* x1*m5         | x0*m4              */
+    PFACC      ( MM1, MM0 )             /* x0*m4+x1*m5   | x0*m0+x1*m1        */
+
+    PFMUL      ( MM5, MM2 )             /* x2*m6         | x2*m2              */
+    PFADD      ( MM2, MM0 )             /* x0*m4...+x2*m6| x0*m0+x1*m1+x2*m2  */
+
+    MOVQ       ( REGIND(EDX), MM1 )     /* x1            | x0                 */
+    MOVQ       ( MM0, REGOFF(-12, EAX) ) /* write r0, r1                      */
+
+    PFMUL      ( MM6, MM1 )             /* x1*m9         | x0*m8              */
+    MOVD       ( REGOFF(8, EDX), MM2 )  /*               | x2                 */
+
+    PFMUL      ( MM7, MM2 )             /*               | x2*m10             */
+    ADD_L      ( STRIDE, EDX )          /* next normal               */
+
+    PREFETCH   ( REGIND(EDX) )
+
+    PFACC      ( MM1, MM1 )             /* *not used*    | x0*m8+x1*m9        */
+    PFADD      ( MM2, MM1 )             /* *not used*    | x0*m8+x1*m9+x2*m10 */
+
+    MOVD       ( MM1, REGOFF(-4, EAX) ) /* write r2                           */
+    DEC_L      ( EDI )                  /* decrement normal counter           */
+
+    JA         ( LLBL (G3T_transform) )
+
+    FEMMS
+
+LLBL (G3T_end):
+    POP_L  ( ESI )
+    POP_L  ( EDI )
+    RET
+
+
+
+
+
+
+ALIGNTEXT16
+GLOBL GLNAME(_mesa_3dnow_normalize_normals)
+GLNAME(_mesa_3dnow_normalize_normals):
+
+#undef  FRAME_OFFSET
+#define FRAME_OFFSET 12
+
+    PUSH_L     ( EDI )
+    PUSH_L     ( ESI )
+    PUSH_L     ( EBP )
+
+    MOV_L      ( ARG_IN, ESI )
+    MOV_L      ( ARG_DEST, EAX )
+    MOV_L      ( REGOFF(V3F_COUNT, ESI), EBP ) /*  dest->count = in->count   */
+    MOV_L      ( EBP, REGOFF(V3F_COUNT, EAX) )
+    MOV_L      ( REGOFF(V3F_START, EAX), EAX ) /*  dest->start  */
+    MOV_L      ( REGOFF(V3F_START, ESI), ECX ) /*  in->start    */
+    MOV_L      ( ARG_LENGTHS, EDX )
+
+    CMP_L      ( CONST(0), EBP ) /* count > 0 ?? */
+    JE         ( LLBL (G3N_end) )
+
+    FEMMS
+
+    CMP_L      ( CONST(0), EDX )        /* lengths == 0 ?                     */
+    JE         ( LLBL (G3N_norm2) )     /* calculate lengths                  */
+
+ALIGNTEXT32
+LLBL (G3N_norm1):                       /* use precalculated lengths          */
+
+    PREFETCH   ( REGIND(EAX) )
+
+    MOVQ       ( REGIND(ECX), MM0 )     /* x1              | x0               */
+    MOVD       ( REGOFF(8, ECX), MM1 )  /*                 | x2               */
+
+    MOVD       ( REGIND(EDX), MM3 )     /*                 | length (x)       */
+    PFMUL      ( MM3, MM1 )             /*                 | x2 (normalized)  */
+
+    PUNPCKLDQ  ( MM3, MM3 )             /* length (x)      | length (x)       */
+    ADD_L      ( STRIDE, ECX )          /* next normal            */
+
+    PREFETCH   ( REGIND(ECX) )
+
+    PFMUL      ( MM3, MM0 )             /* x1 (normalized) | x0 (normalized)  */
+    MOVQ       ( MM0, REGIND(EAX) )     /* write new x0, x1                   */
+
+    MOVD       ( MM1, REGOFF(8, EAX) )  /* write new x2                       */
+    ADD_L      ( CONST(12), EAX )       /* next r                             */
+
+    ADD_L      ( CONST(4), EDX )        /* next length                        */
+    DEC_L      ( EBP )                  /* decrement normal counter           */
+
+    JA         ( LLBL (G3N_norm1) )
+
+    JMP        ( LLBL (G3N_end1) )
+
+ALIGNTEXT32
+LLBL (G3N_norm2):                       /* need to calculate lengths          */
+
+    PREFETCHW  ( REGIND(EAX) )
+
+    MOVQ       ( MM0, MM3 )             /* x1              | x0               */
+    ADD_L      ( STRIDE, ECX )          /* next normal    */
+
+    PREFETCH   ( REGIND(ECX) )
+
+    MOVQ       ( REGIND(ECX), MM0 )     /* x1              | x0               */
+    MOVD       ( REGOFF(8, ECX), MM1 )  /*                 | x2               */
+
+    PFMUL      ( MM0, MM3 )             /* x1*x1           | x0*x0            */
+    MOVQ       ( MM1, MM4 )             /*                 | x2               */
+
+    ADD_L      ( CONST(12), EAX )       /* next r                             */
+    PFMUL      ( MM1, MM4 )             /*                 | x2*x2            */
+
+    PFADD      ( MM4, MM3 )             /*                 | x0*x0+x2*x2      */
+    PFACC      ( MM3, MM3 )             /* x0*x0+...+x2*x2 | x0*x0+x1*x1+x2*x2*/
+
+    PFRSQRT    ( MM3, MM5 )             /* 1/sqrt (x0*x0+x1*x1+x2*x2)         */
+    MOVQ       ( MM5, MM4 )
+
+    PUNPCKLDQ  ( MM3, MM3 )
+    PFMUL      ( MM5, MM5 )
+
+    PFRSQIT1   ( MM3, MM5 )
+    DEC_L      ( EBP )                  /* decrement normal counter           */
+
+    PFRCPIT2   ( MM4, MM5 )
+
+    PFMUL      ( MM5, MM0 )             /* x1 (normalized) | x0 (normalized)  */
+    MOVQ       ( MM0, REGOFF(-12, EAX) ) /* write new x0, x1                  */
+
+    PFMUL      ( MM5, MM1 )             /*                 | x2 (normalized)  */
+    MOVD       ( MM1, REGOFF(-4, EAX) ) /* write new x2                       */
+
+    JA         ( LLBL (G3N_norm2) )
+
+LLBL (G3N_end1):
+    FEMMS
+
+LLBL (G3N_end):
+    POP_L      ( EBP )
+    POP_L      ( ESI )
+    POP_L      ( EDI )
+    RET
+
+
+
+
+
+
+ALIGNTEXT16
+GLOBL GLNAME(_mesa_3dnow_rescale_normals)
+GLNAME(_mesa_3dnow_rescale_normals):
+
+#undef  FRAME_OFFSET
+#define FRAME_OFFSET 8
+    PUSH_L     ( EDI )
+    PUSH_L     ( ESI )
+
+    MOV_L      ( ARG_IN, ESI )
+    MOV_L      ( ARG_DEST, EAX )
+    MOV_L      ( REGOFF(V3F_COUNT, ESI), EDX ) /*  dest->count = in->count   */
+    MOV_L      ( EDX, REGOFF(V3F_COUNT, EAX) )
+    MOV_L      ( REGOFF(V3F_START, EAX), EAX ) /*  dest->start  */
+    MOV_L      ( REGOFF(V3F_START, ESI), ECX ) /*  in->start    */
+
+    CMP_L      ( CONST(0), EDX )
+    JE         ( LLBL (G3R_end) )
+
+    FEMMS
+
+    MOVD       ( ARG_SCALE, MM0 )       /* scale                              */
+    PUNPCKLDQ  ( MM0, MM0 )
+
+ALIGNTEXT32
+LLBL (G3R_rescale):
+
+    PREFETCHW  ( REGIND(EAX) )
+
+    MOVQ       ( REGIND(ECX), MM1 )     /* x1            | x0                 */
+    MOVD       ( REGOFF(8, ECX), MM2 )  /*               | x2                 */
+
+    PFMUL      ( MM0, MM1 )             /* x1*scale      | x0*scale           */
+    ADD_L      ( STRIDE, ECX )          /* next normal                  */
+
+    PREFETCH   ( REGIND(ECX) )
+
+    PFMUL      ( MM0, MM2 )             /*               | x2*scale           */
+    ADD_L      ( CONST(12), EAX )       /* next r                             */
+
+    MOVQ       ( MM1, REGOFF(-12, EAX) ) /* write r0, r1                      */
+    MOVD       ( MM2, REGOFF(-4, EAX) ) /* write r2                           */
+
+    DEC_L      ( EDX )                  /* decrement normal counter           */
+    JA         ( LLBL (G3R_rescale) )
+
+    FEMMS
+
+LLBL (G3R_end):
+    POP_L      ( ESI )
+    POP_L      ( EDI )
+    RET
+@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@@
+
+
+1.1.9.1
+log
+@OpenBSD just has imported exactly this tree into their vendor branch,
+called the same tag, in XF4/xc
+This is, apparently, the last XFree86 snapshot before the licence change
+(ie, addition of the advertising clause)
+
+Since the developers don't see any problems with that, and we would like
+to integrate improvements done by the remaining one or two (or so) XFree86
+developers (j/k), this prepares enabling us to update X-Window in the future.
+@
+text
+@d4 1
+a4 1
+ * Version:  5.0.1
+d6 1
+a6 1
+ * Copyright (C) 1999-2003  Brian Paul   All Rights Reserved.
+d25 1
+a25 1
+/* $XFree86: xc/extras/Mesa/src/X86/3dnow_normal.S,v 1.4 2003/09/28 19:17:08 alanh Exp $ */
+d104 1
+a104 1
+    ADD_L      ( CONST(16), EAX )       /*  next r                         */
+d115 1
+a115 1
+    MOVQ       ( MM0, REGOFF(-16, EAX) ) /* write r0, r1                   */
+d128 1
+a128 1
+    MOVD       ( MM1, REGOFF(-8, EAX) ) /*  write r2                       */
+d163 1
+a163 1
+    ADD_L      ( CONST(16), EAX )       /*  next r                         */
+a173 3
+    MOVQ       ( REGIND (EAX), MM0 )    /*  x1             | x0           */
+    MOVD       ( REGOFF(8, EAX), MM1 )  /*                 | x2           */
+
+d178 1
+a178 1
+    ADD_L      ( CONST(16), EAX )       /*  next r                         */
+d197 1
+a197 1
+    MOVQ       ( MM0, REGOFF(-16, EAX) ) /*  write new x0, x1              */
+d200 4
+a203 1
+    MOVD       ( MM1, REGOFF(-8, EAX) ) /*  write new x2                  */
+d280 1
+a280 1
+    ADD_L      ( CONST(16), EAX )       /* next r                             */
+d289 1
+a289 1
+    MOVQ       ( MM6, REGOFF(-16, EAX) ) /* write r0, r1                      */
+d291 1
+a291 1
+    MOVD       ( MM7, REGOFF(-8, EAX) ) /* write r2                           */
+d306 1
+a306 1
+    ADD_L      ( CONST(16), EAX )       /* next r                             */
+d335 1
+a335 1
+    MOVQ       ( MM6, REGOFF(-16, EAX) ) /* write r0, r1                      */
+d338 1
+a338 1
+    MOVD       ( MM7, REGOFF(-8, EAX) ) /* write r2                           */
+d407 1
+a407 1
+    ADD_L      ( CONST(16), EAX )       /* next r                             */
+d410 1
+a410 1
+    MOVQ       ( MM4, REGOFF(-16, EAX) ) /* write r0, r1                      */
+d412 1
+a412 1
+    MOVD       ( MM5, REGOFF(-8, EAX) ) /* write r2                           */
+d484 1
+a484 1
+    ADD_L      ( CONST(16), EAX )       /* next r                             */
+d499 1
+a499 1
+    MOVQ       ( MM0, REGOFF(-16, EAX) ) /* write r0, r1                      */
+d506 1
+a506 1
+    MOVD       ( MM1, REGOFF(-8, EAX) ) /* write r2                           */
+d568 1
+a568 1
+    ADD_L      ( CONST(16), EAX )       /* next r                             */
+d571 1
+a571 1
+    MOVQ       ( MM4, REGOFF(-16, EAX) ) /* write r0, r1                      */
+d573 1
+a573 1
+    MOVD       ( MM5, REGOFF(-8, EAX) ) /* write r2                           */
+d635 1
+a635 1
+    ADD_L      ( CONST(16), EAX )       /* next r                             */
+d644 1
+a644 1
+    MOVQ       ( MM0, REGOFF(-16, EAX) ) /* write r0, r1                      */
+d657 1
+a657 1
+    MOVD       ( MM1, REGOFF(-8, EAX) ) /* write r2                           */
+d721 1
+a721 1
+    ADD_L      ( CONST(16), EAX )       /* next r                             */
+d735 3
+a742 3
+    MOVQ       ( MM0, MM3 )             /* x1              | x0               */
+    ADD_L      ( STRIDE, ECX )          /* next normal    */
+
+d746 1
+a746 1
+    ADD_L      ( CONST(16), EAX )       /* next r                             */
+d764 1
+a764 1
+    MOVQ       ( MM0, REGOFF(-16, EAX) ) /* write new x0, x1                  */
+d767 1
+a767 1
+    MOVD       ( MM1, REGOFF(-8, EAX) ) /* write new x2                       */
+d823 1
+a823 1
+    ADD_L      ( CONST(16), EAX )       /* next r                             */
+d825 2
+a826 2
+    MOVQ       ( MM1, REGOFF(-16, EAX) ) /* write r0, r1                      */
+    MOVD       ( MM2, REGOFF(-8, EAX) ) /* write r2                           */
+@
+
+
+1.1.1.1
+log
+@The X-Windowing System
+
+Import XFree86 4.3 from OpenBSD by CTM, in the hope it's stable
+@
+text
+@@
+
+
+1.1.1.2
+log
+@That's what OpenBSD will, probably, ship as XF4 in 3.5
+their last sync against XFree86 4.3-current has been
+imported into our vendor branch, too
+@
+text
+@d4 1
+a4 1
+ * Version:  5.0.1
+d6 1
+a6 1
+ * Copyright (C) 1999-2003  Brian Paul   All Rights Reserved.
+d25 1
+a25 1
+/* $XFree86: xc/extras/Mesa/src/X86/3dnow_normal.S,v 1.4 2003/09/28 19:17:08 alanh Exp $ */
+d104 1
+a104 1
+    ADD_L      ( CONST(16), EAX )       /*  next r                         */
+d115 1
+a115 1
+    MOVQ       ( MM0, REGOFF(-16, EAX) ) /* write r0, r1                   */
+d128 1
+a128 1
+    MOVD       ( MM1, REGOFF(-8, EAX) ) /*  write r2                       */
+d163 1
+a163 1
+    ADD_L      ( CONST(16), EAX )       /*  next r                         */
+a173 3
+    MOVQ       ( REGIND (EAX), MM0 )    /*  x1             | x0           */
+    MOVD       ( REGOFF(8, EAX), MM1 )  /*                 | x2           */
+
+d178 1
+a178 1
+    ADD_L      ( CONST(16), EAX )       /*  next r                         */
+d197 1
+a197 1
+    MOVQ       ( MM0, REGOFF(-16, EAX) ) /*  write new x0, x1              */
+d200 4
+a203 1
+    MOVD       ( MM1, REGOFF(-8, EAX) ) /*  write new x2                  */
+d280 1
+a280 1
+    ADD_L      ( CONST(16), EAX )       /* next r                             */
+d289 1
+a289 1
+    MOVQ       ( MM6, REGOFF(-16, EAX) ) /* write r0, r1                      */
+d291 1
+a291 1
+    MOVD       ( MM7, REGOFF(-8, EAX) ) /* write r2                           */
+d306 1
+a306 1
+    ADD_L      ( CONST(16), EAX )       /* next r                             */
+d335 1
+a335 1
+    MOVQ       ( MM6, REGOFF(-16, EAX) ) /* write r0, r1                      */
+d338 1
+a338 1
+    MOVD       ( MM7, REGOFF(-8, EAX) ) /* write r2                           */
+d407 1
+a407 1
+    ADD_L      ( CONST(16), EAX )       /* next r                             */
+d410 1
+a410 1
+    MOVQ       ( MM4, REGOFF(-16, EAX) ) /* write r0, r1                      */
+d412 1
+a412 1
+    MOVD       ( MM5, REGOFF(-8, EAX) ) /* write r2                           */
+d484 1
+a484 1
+    ADD_L      ( CONST(16), EAX )       /* next r                             */
+d499 1
+a499 1
+    MOVQ       ( MM0, REGOFF(-16, EAX) ) /* write r0, r1                      */
+d506 1
+a506 1
+    MOVD       ( MM1, REGOFF(-8, EAX) ) /* write r2                           */
+d568 1
+a568 1
+    ADD_L      ( CONST(16), EAX )       /* next r                             */
+d571 1
+a571 1
+    MOVQ       ( MM4, REGOFF(-16, EAX) ) /* write r0, r1                      */
+d573 1
+a573 1
+    MOVD       ( MM5, REGOFF(-8, EAX) ) /* write r2                           */
+d635 1
+a635 1
+    ADD_L      ( CONST(16), EAX )       /* next r                             */
+d644 1
+a644 1
+    MOVQ       ( MM0, REGOFF(-16, EAX) ) /* write r0, r1                      */
+d657 1
+a657 1
+    MOVD       ( MM1, REGOFF(-8, EAX) ) /* write r2                           */
+d721 1
+a721 1
+    ADD_L      ( CONST(16), EAX )       /* next r                             */
+d735 3
+a742 3
+    MOVQ       ( MM0, MM3 )             /* x1              | x0               */
+    ADD_L      ( STRIDE, ECX )          /* next normal    */
+
+d746 1
+a746 1
+    ADD_L      ( CONST(16), EAX )       /* next r                             */
+d764 1
+a764 1
+    MOVQ       ( MM0, REGOFF(-16, EAX) ) /* write new x0, x1                  */
+d767 1
+a767 1
+    MOVD       ( MM1, REGOFF(-8, EAX) ) /* write new x2                       */
+d823 1
+a823 1
+    ADD_L      ( CONST(16), EAX )       /* next r                             */
+d825 2
+a826 2
+    MOVQ       ( MM1, REGOFF(-16, EAX) ) /* write r0, r1                      */
+    MOVD       ( MM2, REGOFF(-8, EAX) ) /* write r2                           */
+@
+

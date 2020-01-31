@@ -1,0 +1,183 @@
+head	1.2;
+access;
+symbols;
+locks; strict;
+comment	@# @;
+
+
+1.2
+date	2003.09.11.15.14.26;	author tg;	state Stab;
+branches;
+next	1.1;
+
+1.1
+date	2003.06.13.18.15.31;	author tg;	state Exp;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.2
+log
+@Bring DJBDNS port up to date:
+o fix errors in the Makefile (unescaped braces)
+o regenerate patches with gdiff and manually separate them
+  (this fixes a huge amount of line numbers!)
+o update MESSAGE
+o update PLISTs for @@extra stuff
+o update PLIST6: the IPv6 flavour (no_ipv4) has /etc/dnsroots.global.v6 now
+o update all global dnsroots with latest data
+o remove a patch from the IPv4 flavour and put it to the IPv6
+  flavour, which I suspect had broken the IPv4 location code (%lo),
+  and which was not existent in the IPv6 code, where it should have been
+o bump package patchlevel
+
+Yet untested.
+@
+text
+@$MirBSD: 4_patch-tdlookup_c,v 1.1 2003/06/13 18:15:31 tg Exp $
+XXX IPv4-transport specific
+--- tdlookup.c.orig	Sun Feb 11 21:11:23 2001
++++ tdlookup.c	Fri Jun 13 17:29:02 2003
+@@@@ -8,6 +8,7 @@@@
+ #include "dns.h"
+ #include "seek.h"
+ #include "response.h"
++#include "ip6.h"
+ 
+ static int want(const char *owner,const char type[2])
+ {
+@@@@ -119,8 +120,9 @@@@ static int doit(char *q,char qtype[2])
+   char x[20];
+   uint16 u16;
+   char addr[8][4];
+-  int addrnum;
+-  uint32 addrttl;
++  char addr6[8][16];
++  int addrnum,addr6num;
++  uint32 addrttl,addr6ttl;
+   int i;
+ 
+   anpos = response_len;
+@@@@ -152,8 +154,8 @@@@ static int doit(char *q,char qtype[2])
+   wild = q;
+ 
+   for (;;) {
+-    addrnum = 0;
+-    addrttl = 0;
++    addrnum = addr6num = 0;
++    addrttl = addr6ttl = 0;
+     cdb_findstart(&c);
+     while (r = find(wild,wild != q)) {
+       if (r == -1) return 0;
+@@@@ -171,6 +173,17 @@@@ static int doit(char *q,char qtype[2])
+ 	if (addrnum < 1000000) ++addrnum;
+ 	continue;
+       }
++      if (byte_equal(type,2,DNS_T_AAAA) && (dlen - dpos == 16)) {
++	addr6ttl = ttl;
++	i = dns_random(addr6num + 1);
++	if (i < 8) {
++	  if ((i < addr6num) && (addr6num < 8))
++	    byte_copy(addr6[addr6num],16,addr6[i]);
++	  byte_copy(addr6[i],16,data + dpos);
++	}
++	if (addr6num < 1000000) ++addr6num;
++	continue;
++      }
+       if (!response_rstart(q,type,ttl)) return 0;
+       if (byte_equal(type,2,DNS_T_NS) || byte_equal(type,2,DNS_T_CNAME) || byte_equal(type,2,DNS_T_PTR)) {
+ 	if (!doname()) return 0;
+@@@@ -195,6 +208,12 @@@@ static int doit(char *q,char qtype[2])
+ 	if (!response_addbytes(addr[i],4)) return 0;
+ 	response_rfinish(RESPONSE_ANSWER);
+       }
++    for (i = 0;i < addr6num;++i)
++      if (i < 8) {
++	if (!response_rstart(q,DNS_T_AAAA,addr6ttl)) return 0;
++	if (!response_addbytes(addr6[i],16)) return 0;
++	response_rfinish(RESPONSE_ANSWER);
++      }
+ 
+     if (flagfound) break;
+     if (wild == control) break;
+@@@@ -259,6 +278,11 @@@@ static int doit(char *q,char qtype[2])
+ 	    if (!dobytes(4)) return 0;
+             response_rfinish(RESPONSE_ADDITIONAL);
+ 	  }
++	  else if (byte_equal(type,2,DNS_T_AAAA)) {
++            if (!response_rstart(d1,DNS_T_AAAA,ttl)) return 0;
++	    if (!dobytes(16)) return 0;
++            response_rfinish(RESPONSE_ADDITIONAL);
++	  }
+         }
+       }
+     }
+@
+
+
+1.1
+log
+@add new djbdns ports
+features:
+ - one instead of three ports; selection done via FLAVOR
+ - different flavours for ICANN, OpenNIC, ORSC and European-ORSN
+   domain root servers (IPv4 and default only)
+ -> the recent ICANN root name server move is integrated
+ - Full integration (IPv6 only) of Felix von Leitners IPv6 patches
+ - Partial integration (default only) of the IPv6 patches for
+   IPv4 transport DNS servers
+ -> http://www.fefe.de/dns/  patch revision: test19
+ - consistent use of scripting, Makefile features and macroes
+   leads to lean, readible port
+ - tinydns installs to /usr/local/bin by default
+ - home-grown diffs for more flexibility
+ - all binaries are prefixed with a "6" (IPv6 transport only)
+ - hand-edited diffs provide integral patch support
+@
+text
+@d1 1
+a1 1
+$MirBSD$
+a78 36
+@@@@ -278,7 +302,7 @@@@ static int doit(char *q,char qtype[2])
+   return 1;
+ }
+ 
+-int respond(char *q,char qtype[2],char ip[4])
++int respond(char *q,char qtype[2],char ip[16])
+ {
+   int fd;
+   int r;
+@@@@ -292,15 +316,17 @@@@ int respond(char *q,char qtype[2],char i
+   byte_zero(clientloc,2);
+   key[0] = 0;
+   key[1] = '%';
+-  byte_copy(key + 2,4,ip);
+-  r = cdb_find(&c,key,6);
+-  if (!r) r = cdb_find(&c,key,5);
+-  if (!r) r = cdb_find(&c,key,4);
+-  if (!r) r = cdb_find(&c,key,3);
+-  if (!r) r = cdb_find(&c,key,2);
+-  if (r == -1) return 0;
+-  if (r && (cdb_datalen(&c) == 2))
+-    if (cdb_read(&c,clientloc,2,cdb_datapos(&c)) == -1) return 0;
++  if (byte_equal(ip,12,V4mappedprefix)) {
++    byte_copy(key + 2,4,ip+12);
++    r = cdb_find(&c,key,6);
++    if (!r) r = cdb_find(&c,key,5);
++    if (!r) r = cdb_find(&c,key,4);
++    if (!r) r = cdb_find(&c,key,3);
++    if (!r) r = cdb_find(&c,key,2);
++    if (r == -1) return 0;
++    if (r && (cdb_datalen(&c) == 2))
++      if (cdb_read(&c,clientloc,2,cdb_datapos(&c)) == -1) return 0;
++  }
+ 
+   r = doit(q,qtype);
+ 
+@
+

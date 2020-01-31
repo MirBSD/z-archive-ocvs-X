@@ -1,0 +1,246 @@
+head	1.4;
+access;
+symbols;
+locks; strict;
+comment	@# @;
+
+
+1.4
+date	2003.08.18.19.01.23;	author tg;	state dead;
+branches;
+next	1.3;
+
+1.3
+date	2003.07.14.19.45.35;	author tg;	state Exp;
+branches;
+next	1.2;
+
+1.2
+date	2003.07.14.19.15.32;	author tg;	state Exp;
+branches;
+next	1.1;
+
+1.1
+date	2003.07.06.11.57.34;	author tg;	state Exp;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.4
+log
+@switch sirc port to require IPv6 module that just got imported
+mop up
+@
+text
+@--- dsirc	Mon Jul 14 19:42:47 2003
++++ d6irc	Mon Jul 14 19:42:47 2003
+@@@@ -24,6 +24,8 @@@@
+ #	-r = raw mode (no control-char filtering)
+ #	-7 = 7-bit (ISO_646.irv:1991) mode
+ #	-U = disable UTF-8 (Unicode) mode
++#
++# IPv6/Socket2 extensions: $MirBSD: dsirc-ipv6,v 1.3 2003/07/14 19:45:35 tg Exp $
+ 
+ # This program is free software; you can redistribute it and/or modify
+ # it under the terms of the GNU General Public License as published by
+@@@@ -41,7 +43,7 @@@@
+ 
+ $version='2.211';
+ $date='10 Mar 1998';
+-$add_ons='+[mirabile-p5]';
++$add_ons='+IPv6+[mirabile-p5]';
+ 
+ $libdir=$ENV{"SIRCLIB"} || "PREFIX.SED/share/sirc/";
+ push(@@INC, $libdir, $ENV{"HOME"});
+@@@@ -57,6 +59,8 @@@@ even there! Have you even bothered to ru
+ }
+ 
+ if ($] >= 5 && (eval "use Socket;", $@@ eq '')) {
++    print "used Socket\n";
++    use Socket6;
+ } elsif (-f "$libdir/sircsock.ph") {
+   do "$libdir/sircsock.ph";
+ } elsif (-f $ENV{'HOME'}."/sircsock.ph") {
+@@@@ -75,6 +79,7 @@@@ couldn't be found. Have you even bothere
+ 	"USERINFO", "", "FINGER", "", "IRCNAME", "", "EIGHT_BIT", "on",
+ 	"LOADPATH", join(":", @@loadpath), "CTRL_T", "/next", "UTF", "on");
+ 
++$use_ipv6=0;   # enabled when the given server gets resolved by gethostbyname2
+ $raw_mode=$opt_r || (!-t STDOUT);
+ $ansi=!$raw_mode && $ENV{"TERM"} =~ /^vt|^xterm|^ansi/i;
+ $server=$opt_s || $ARGV[1] || $ENV{"SIRCSERVER"} || $ENV{"IRCSERVER"} ||
+@@@@ -159,7 +164,16 @@@@ sub resolve {
+   } elsif ($_[0] =~ /^(\d+)\.(\d+)\.(\d+)\.(\d+)$/) {
+     return pack("c4", $1, $2, $3, $4);
+   } else {
+-    return (gethostbyname($_[0]))[4];
++      local $rc;
++
++      $rc = (gethostbyname2($_[0], AF_INET6))[4];
++
++      if ($rc) {
++	  $use_ipv6 = 1;
++	  return $rc;
++      } else {
++	  return (gethostbyname($_[0]))[4];
++      }
+   }
+ }
+ 
+@@@@ -173,19 +187,31 @@@@ sub connect {
+   local($fh, $host, $port)=@@_;
+   local($adr, $otherend)=&resolve($host);
+   &tell("*\cbE\cb* Hostname `$host' not found"), return 0 unless $adr;
+-  $otherend=pack("S n a4 x8", &AF_INET, $port, $adr);
+-  &print("*\cbE\cb* Out of file descriptors"), return 0
+-    unless socket($fh, &PF_INET, &SOCK_STREAM, 0);
+-  if ($set{"LOCALHOST"}) {
+-    bind($fh, pack("S n a4 x8", &AF_INET, 0, $bindaddr)) ||
+-      &tell("*\cbE\cb* Warning: can't bind to sirc host ".$set{'LOCALHOST'});
++  if ($use_ipv6) {
++      $otherend=pack_sockaddr_in6($port, $adr);
++      &print("*\cbE\cb* Out of file descriptors"), return 0
++	  unless socket($fh, &PF_INET6, &SOCK_STREAM, 0);
++  } else {
++      $otherend=pack_sockaddr_in($port, $adr);
++      &print("*\cbE\cb* Out of file descriptors"), return 0
++	  unless socket($fh, &PF_INET, &SOCK_STREAM, 0);
++  }
++  if (! $use_ipv6) {
++      if ($set{"LOCALHOST"}) {
++	  bind($fh, pack("S n a4 x8", &AF_INET, 0, $bindaddr)) ||
++	      &tell("*\cbE\cb* Warning: can't bind to sirc host ".$set{'LOCALHOST'});
++      }
+   }
+   $trysock=$fh;
+   $SIG{'QUIT'}='sigquit';
+   &print("*\cbE\cb* Can't connect to host: $!"), close $fh,
+     $SIG{'QUIT'}='IGNORE', return 0 unless connect($fh, $otherend);
+   $SIG{'QUIT'}='IGNORE';
+-  $bindaddr=(unpack("S n a4", getsockname($fh)))[2] if !$bindaddr;
++  if ($use_ipv6) {
++      $bindaddr=(unpack_sockaddr_in6(getsockname($fh)))[2] if !$bindaddr;
++  } else {
++      $bindaddr=(unpack_sockaddr_in(getsockname($fh)))[2] if !$bindaddr;
++  }
+   select($fh); $|=1; select(STDOUT);
+   return 1;
+ }
+@@@@ -194,15 +220,26 @@@@ sub listen {
+   $_[0]=&newfh;
+   local($fh, $port)=@@_;
+   local($thisend);
+-  $bindaddr=pack("x4", 0) unless $bindaddr;
+-  $thisend=pack("S n a4 x8", &AF_INET, $port+0, $bindaddr);
+-  &tell("*\cbE\cb* Out of file descriptors"), return 0
+-    unless socket($fh, &PF_INET, &SOCK_STREAM, 0);
++  if ($use_ipv6) {
++      $bindaddr=pack_sockaddr_in6(0, 0) unless $bindaddr;
++      $thisend=pack_sockaddr_in6($port+0, $bindaddr);
++      &tell("*\cbE\cb* Out of file descriptors"), return 0
++	  unless socket($fh, &PF_INET6, &SOCK_STREAM, 0);
++  } else {
++      $bindaddr=pack_sockaddr_in(0, 0) unless $bindaddr;
++      $thisend=pack_sockaddr_in($port+0, $bindaddr);
++      &tell("*\cbE\cb* Out of file descriptors"), return 0
++	  unless socket($fh, &PF_INET, &SOCK_STREAM, 0);
++  }
+   &tell("*\cbE\cb* Can't bind local socket!"), close $fh, return 0
+     unless bind($fh, $thisend);
+   &tell("*\cbE\cb* Can't listen to socket!"), close $fh, return
+     unless listen($fh, 5);
+-  return (unpack("S n", getsockname($fh)))[1];
++  if ($use_ipv6) {
++      return (unpack_sockaddr_in6(getsockname($fh)))[1];
++  } else {
++      return (unpack_sockaddr_in(getsockname($fh)))[1];
++  }
+ }
+ 
+ sub accept {
+@
+
+
+1.3
+log
+@fix /set UTF
+@
+text
+@d8 1
+a8 1
++# IPv6/Socket2 extensions: $MirBSD: dsirc-ipv6,v 1.2 2003/07/14 19:15:32 tg Exp $
+@
+
+
+1.2
+log
+@add an option to disable UTF-8 support
+UTF-8 is still enabled by default
+@
+text
+@d1 2
+a2 2
+--- dsirc	Mon Jul 14 19:13:15 2003
++++ d6irc	Mon Jul 14 19:13:15 2003
+d8 1
+a8 1
++# IPv6/Socket2 extensions: $MirBSD: dsirc-ipv6,v 1.1 2003/07/06 11:57:34 tg Exp $
+d30 4
+a33 4
+@@@@ -101,6 +105,7 @@@@ $restrict=$opt_R;
+ $set{"LOCALHOST"}=$opt_H || $ENV{"SIRCHOST"} || $ENV{"IRCHOST"} ||
+ 		$ENV{"LOCALHOST"} || "";
+ $opt_U && ($set{"UTF8"}="off");
+d35 3
+a37 3
+ 
+ if ($set{"LOCALHOST"}) {
+   $bindaddr=&resolve($set{"LOCALHOST"});
+@
+
+
+1.1
+log
+@move the dsirc/IPv6/Socket2 patch apart from the mirabile diff
+@
+text
+@d1 3
+a3 4
+--- dsirc	Sun Jul  6 11:54:05 2003
++++ d6irc	Sun Jul  6 11:54:05 2003
+@@@@ -23,6 +23,8 @@@@
+ #	-R = run in restricted (secure) mode
+d6 1
+d8 1
+a8 1
++# IPv6/Socket2 extensions: $MirBSD$
+d12 1
+a12 1
+@@@@ -40,7 +42,7 @@@@
+d16 2
+a17 2
+-$add_ons='+[mirabile-p5]-utf8';
++$add_ons='+[mirabile-p5]-utf8-IPv6';
+d21 1
+a21 1
+@@@@ -56,6 +58,8 @@@@ even there! Have you even bothered to ru
+d30 1
+a30 2
+@@@@ -100,6 +104,7 @@@@ $opt_7 && ($set{"EIGHT_BIT"}="off");
+ $restrict=$opt_R;
+d33 1
+d38 1
+a38 1
+@@@@ -153,7 +158,16 @@@@ sub resolve {
+d56 1
+a56 1
+@@@@ -167,19 +181,31 @@@@ sub connect {
+d95 1
+a95 1
+@@@@ -188,15 +214,26 @@@@ sub listen {
+@
+

@@ -1,0 +1,1300 @@
+head	1.1;
+branch	1.1.1;
+access;
+symbols
+	tg-mergetmp-2:1.1.1.3
+	cvs-200410241530:1.1.1.3
+	cvs-200410012000:1.1.1.3
+	cvs-200407221130:1.1.1.3
+	cvs-200407141120:1.1.1.3
+	cvs-200406231010:1.1.1.3
+	MIRBSD_7quater:1.1.1.2
+	cvs-200405271510:1.1.1.3
+	XFree86_4_4_0:1.1.9.1
+	cvs-200403021700:1.1.1.3
+	XFREE86_20040213:1.1.9.1
+	xc:1.1.9
+	cvs-200401291925:1.1.1.2
+	MIRBSD_7_ALPHA:1.1.1.2.0.4
+	MIRBSD_7:1.1.1.2.0.2
+	MIRBSD_7ter:1.1.1.2
+	cvs-20011091815:1.1.1.2
+	cvs-200309162130:1.1.1.2
+	cvs-200308302005:1.1.1.2
+	ctmx-0387:1.1.1.2
+	ctmx-0384:1.1.1.2
+	MIRBSD_5:1.1.1.2
+	ctmx-0375:1.1.1.2
+	ctmx-0373:1.1.1.2
+	ctm-0371:1.1.1.2
+	ctm-0370:1.1.1.2
+	MIRBSD_4:1.1.1.2
+	ctm-0363:1.1.1.2
+	ctm-0359:1.1.1.2
+	ctm-0349:1.1.1.1
+	openbsd:1.1.1;
+locks; strict;
+comment	@ * @;
+
+
+1.1
+date	2003.03.22.20.06.57;	author tg;	state Exp;
+branches
+	1.1.1.1
+	1.1.9.1;
+next	;
+
+1.1.1.1
+date	2003.03.22.20.06.57;	author tg;	state Exp;
+branches;
+next	1.1.1.2;
+
+1.1.1.2
+date	2003.04.08.18.36.02;	author tg;	state Exp;
+branches;
+next	1.1.1.3;
+
+1.1.1.3
+date	2004.03.02.18.16.15;	author tg;	state Stab;
+branches;
+next	;
+
+1.1.9.1
+date	2004.02.14.19.22.52;	author tg;	state Exp;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@/* $XFree86: xc/programs/Xserver/hw/xfree86/drivers/ati/atiprint.c,v 1.23 2002/01/16 16:22:27 tsi Exp $ */
+/*
+ * Copyright 1997 through 2002 by Marc Aurele La France (TSI @@ UQV), tsi@@xfree86.org
+ *
+ * Permission to use, copy, modify, distribute, and sell this software and its
+ * documentation for any purpose is hereby granted without fee, provided that
+ * the above copyright notice appear in all copies and that both that copyright
+ * notice and this permission notice appear in supporting documentation, and
+ * that the name of Marc Aurele La France not be used in advertising or
+ * publicity pertaining to distribution of the software without specific,
+ * written prior permission.  Marc Aurele La France makes no representations
+ * about the suitability of this software for any purpose.  It is provided
+ * "as-is" without express or implied warranty.
+ *
+ * MARC AURELE LA FRANCE DISCLAIMS ALL WARRANTIES WITH REGARD TO THIS SOFTWARE,
+ * INCLUDING ALL IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS.  IN NO
+ * EVENT SHALL MARC AURELE LA FRANCE BE LIABLE FOR ANY SPECIAL, INDIRECT OR
+ * CONSEQUENTIAL DAMAGES OR ANY DAMAGES WHATSOEVER RESULTING FROM LOSS OF USE,
+ * DATA OR PROFITS, WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER
+ * TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR
+ * PERFORMANCE OF THIS SOFTWARE.
+ */
+
+#include "ati.h"
+#include "atiadapter.h"
+#include "atichip.h"
+#include "atidac.h"
+#include "atimach64io.h"
+#include "atiprint.h"
+#include "atiwonderio.h"
+
+/*
+ * ATIPrintBIOS --
+ *
+ * Display various parts of the BIOS when the server is invoked with -verbose.
+ */
+void
+ATIPrintBIOS
+(
+    const CARD8        *BIOS,
+    const unsigned int Length   /* A multiple of 512 */
+)
+{
+    unsigned char *Char = NULL;
+    unsigned int  Index;
+    unsigned char Printable[17];
+
+    if (xf86GetVerbosity() <= 4)
+        return;
+
+    (void)memset(Printable, 0, SizeOf(Printable));
+
+    xf86ErrorFVerb(5, "\n BIOS image:");
+
+    for (Index = 0;  Index < Length;  Index++)
+    {
+        if (!(Index & (4U - 1U)))
+        {
+            if (!(Index & (16U - 1U)))
+            {
+                if (Printable[0])
+                    xf86ErrorFVerb(5, "  |%s|", Printable);
+                Char = Printable;
+                xf86ErrorFVerb(5, "\n 0x%08X: ", Index);
+            }
+            xf86ErrorFVerb(5, " ");
+        }
+        xf86ErrorFVerb(5, "%02X", BIOS[Index]);
+        if (isprint(BIOS[Index]))
+            *Char++ = BIOS[Index];
+        else
+            *Char++ = '.';
+    }
+
+    xf86ErrorFVerb(5, "  |%s|\n", Printable);
+}
+
+#ifndef AVOID_CPIO
+
+/*
+ * ATIPrintIndexedRegisters --
+ *
+ * Display a set of indexed byte-size registers when the server is invoked with
+ * -verbose.
+ */
+static void
+ATIPrintIndexedRegisters
+(
+    const IOADDRESS Port,
+    const CARD8     StartIndex,
+    const CARD8     EndIndex,
+    const char      *Name,
+    const IOADDRESS GenS1
+)
+{
+    int Index;
+
+    xf86ErrorFVerb(4, "\n %s register values:", Name);
+    for (Index = StartIndex;  Index < EndIndex;  Index++)
+    {
+        if (!(Index & (4U - 1U)))
+        {
+            if (!(Index & (16U - 1U)))
+                xf86ErrorFVerb(4, "\n 0x%02X: ", Index);
+            xf86ErrorFVerb(4, " ");
+        }
+        if (Port == ATTRX)
+            (void)inb(GenS1);           /* Reset flip-flop */
+        xf86ErrorFVerb(4, "%02X", GetReg(Port, Index));
+    }
+
+    if (Port == ATTRX)
+    {
+        (void)inb(GenS1);               /* Reset flip-flop */
+        outb(ATTRX, 0x20U);             /* Turn on PAS bit */
+    }
+
+    xf86ErrorFVerb(4, "\n");
+}
+
+#endif /* AVOID_CPIO */
+
+/*
+ * ATIPrintMach64Registers --
+ *
+ * Display a Mach64's main register bank when the server is invoked with
+ * -verbose.
+ */
+static void
+ATIPrintMach64Registers
+(
+    ATIPtr     pATI,
+    CARD8      *crtc,
+    const char *Description
+)
+{
+    CARD32 IOValue;
+    CARD8 dac_read, dac_mask, dac_data, dac_write;
+    int Index, Limit;
+
+#ifndef AVOID_CPIO
+
+    int Step;
+
+#endif /* AVOID_CPIO */
+
+    xf86ErrorFVerb(4, "\n Mach64 %s register values:", Description);
+
+#ifdef AVOID_CPIO
+
+    if (pATI->pBlock[1])
+        Limit = DWORD_SELECT;
+    else
+        Limit = MM_IO_SELECT;
+
+    for (Index = 0;  Index <= Limit;  Index += UnitOf(MM_IO_SELECT))
+    {
+        if (!(Index & SetBits(3, MM_IO_SELECT)))
+            xf86ErrorFVerb(4, "\n 0x%04X: ", Index);
+        if (Index == (DAC_REGS & DWORD_SELECT))
+        {
+            dac_read = in8(DAC_REGS + 3);
+            DACDelay;
+            dac_mask = in8(DAC_REGS + 2);
+            DACDelay;
+            dac_data = in8(DAC_REGS + 1);
+            DACDelay;
+            dac_write = in8(DAC_REGS + 0);
+            DACDelay;
+
+            xf86ErrorFVerb(4, " %02X%02X%02X%02X",
+                dac_read, dac_mask, dac_data, dac_write);
+
+            out8(DAC_REGS + 2, dac_mask);
+            DACDelay;
+            out8(DAC_REGS + 3, dac_read);
+            DACDelay;
+        }
+        else
+        {
+            IOValue = inm(Index);
+
+            if ((Index == (CRTC_GEN_CNTL & DWORD_SELECT)) &&
+                (IOValue & CRTC_EXT_DISP_EN))
+                *crtc = ATI_CRTC_MACH64;
+
+            xf86ErrorFVerb(4, " %08X", IOValue);
+        }
+    }
+
+#else /* AVOID_CPIO */
+
+    Limit = ATIIOPort(IOPortTag(0x1FU, 0x3FU));
+    Step = ATIIOPort(IOPortTag(0x01U, 0x01U)) - pATI->CPIOBase;
+    for (Index = pATI->CPIOBase;  Index <= Limit;  Index += Step)
+    {
+        if (!(((Index - pATI->CPIOBase) / Step) & 0x03U))
+            xf86ErrorFVerb(4, "\n 0x%04X: ", Index);
+        if (Index == (int)ATIIOPort(DAC_REGS))
+        {
+            dac_read = in8(DAC_REGS + 3);
+            DACDelay;
+            dac_mask = in8(DAC_REGS + 2);
+            DACDelay;
+            dac_data = in8(DAC_REGS + 1);
+            DACDelay;
+            dac_write = in8(DAC_REGS + 0);
+            DACDelay;
+
+            xf86ErrorFVerb(4, " %02X%02X%02X%02X",
+                dac_read, dac_mask, dac_data, dac_write);
+
+            out8(DAC_REGS + 2, dac_mask);
+            DACDelay;
+            out8(DAC_REGS + 3, dac_read);
+            DACDelay;
+        }
+        else
+        {
+            IOValue = inl(Index);
+
+            if ((Index == (int)ATIIOPort(CRTC_GEN_CNTL)) &&
+                (IOValue & CRTC_EXT_DISP_EN))
+                *crtc = ATI_CRTC_MACH64;
+
+            xf86ErrorFVerb(4, " %08X", IOValue);
+        }
+    }
+
+#endif /* AVOID_CPIO */
+
+    xf86ErrorFVerb(4, "\n");
+}
+
+/*
+ * ATIPrintMach64PLLRegisters --
+ *
+ * Display an integrated Mach64's PLL registers when the server is invoked with
+ * -verbose.
+ */
+static void
+ATIPrintMach64PLLRegisters
+(
+    ATIPtr pATI
+)
+{
+    int Index, Limit;
+    CARD8 PLLReg[MaxBits(PLL_ADDR) + 1];
+
+    for (Limit = 0;  Limit < SizeOf(PLLReg);  Limit++)
+        PLLReg[Limit] = ATIGetMach64PLLReg(Limit);
+
+    /* Determine how many PLL registers there really are */
+    while ((Limit = Limit >> 1))
+        for (Index = 0;  Index < Limit;  Index++)
+            if (PLLReg[Index] != PLLReg[Index + Limit])
+                goto FoundLimit;
+FoundLimit:
+    Limit <<= 1;
+
+    xf86ErrorFVerb(4, "\n Mach64 PLL register values:");
+    for (Index = 0;  Index < Limit;  Index++)
+    {
+        if (!(Index & 3))
+        {
+            if (!(Index & 15))
+                xf86ErrorFVerb(4, "\n 0x%02X: ", Index);
+            xf86ErrorFVerb(4, " ");
+        }
+        xf86ErrorFVerb(4, "%02X", PLLReg[Index]);
+    }
+
+    xf86ErrorFVerb(4, "\n");
+}
+
+/*
+ * ATIPrintRGB514Registers --
+ *
+ * Display IBM RGB 514 registers when the server is invoked with -verbose.
+ */
+static void
+ATIPrintRGB514Registers
+(
+    ATIPtr pATI
+)
+{
+    CARD32 crtc_gen_cntl, dac_cntl;
+    CARD8  index_lo, index_hi, index_ctl;
+    int    Index;
+
+    /* Temporarily switch to Mach64 CRTC */
+    crtc_gen_cntl = inr(CRTC_GEN_CNTL);
+    if (!(crtc_gen_cntl & CRTC_EXT_DISP_EN))
+        outr(CRTC_GEN_CNTL, crtc_gen_cntl | CRTC_EXT_DISP_EN);
+
+    /* Temporarily switch to IBM RGB 514 registers */
+    dac_cntl = inr(DAC_CNTL);
+    outr(DAC_CNTL, (dac_cntl & ~DAC_EXT_SEL_RS3) | DAC_EXT_SEL_RS2);
+
+    index_lo = in8(M64_DAC_WRITE);
+    index_hi = in8(M64_DAC_DATA);
+    index_ctl = in8(M64_DAC_READ);
+
+    out8(M64_DAC_WRITE, 0x00U);
+    out8(M64_DAC_DATA, 0x00U);
+    out8(M64_DAC_READ, 0x01U);  /* Auto-increment */
+
+    xf86ErrorFVerb(4, "\n IBM RGB 514 registers:");
+    for (Index = 0;  Index < 0x0800;  Index++)
+    {
+        if (!(Index & 3))
+        {
+            if (!(Index & 15))
+            {
+                xf86ErrorFVerb(4, "\n 0x%04X: ", Index);
+
+                /* Need to rewrite index every so often... */
+                if ((Index == 0x0100) || (Index == 0x0500))
+                {
+                    out8(M64_DAC_WRITE, 0x00U);
+                    out8(M64_DAC_DATA, Index >> 8);
+                }
+            }
+
+            xf86ErrorFVerb(4, " ");
+        }
+
+        xf86ErrorFVerb(4, "%02X", in8(M64_DAC_MASK));
+    }
+
+    /* Restore registers */
+    out8(M64_DAC_WRITE, index_lo);
+    out8(M64_DAC_DATA, index_hi);
+    out8(M64_DAC_READ, index_ctl);
+    outr(DAC_CNTL, dac_cntl);
+    if (!(crtc_gen_cntl & CRTC_EXT_DISP_EN))
+        outr(CRTC_GEN_CNTL, crtc_gen_cntl);
+
+    xf86ErrorFVerb(4, "\n");
+}
+
+/*
+ * ATIPrintRegisters --
+ *
+ * Display various registers when the server is invoked with -verbose.
+ */
+void
+ATIPrintRegisters
+(
+    ATIPtr pATI
+)
+{
+    pciVideoPtr  pVideo;
+    pciConfigPtr pPCI;
+    int          Index;
+    CARD32       lcd_index, tv_out_index, lcd_gen_ctrl;
+    CARD8        dac_read, dac_mask, dac_write;
+    CARD8        crtc;
+
+#ifndef AVOID_CPIO
+
+    CARD8 genmo, seq1 = 0;
+
+    crtc = ATI_CRTC_VGA;
+
+    if (pATI->VGAAdapter != ATI_ADAPTER_NONE)
+    {
+        xf86ErrorFVerb(4, "\n Miscellaneous output register value:  0x%02X.\n",
+            genmo = inb(R_GENMO));
+
+        if (genmo & 0x01U)
+        {
+            if (pATI->Chip == ATI_CHIP_264LT)
+            {
+                lcd_gen_ctrl = inr(LCD_GEN_CTRL);
+
+                outr(LCD_GEN_CTRL, lcd_gen_ctrl & ~(SHADOW_EN | SHADOW_RW_EN));
+                ATIPrintIndexedRegisters(CRTX(ColourIOBase), 0, 64,
+                    "Non-shadow colour CRT controller", 0);
+
+                outr(LCD_GEN_CTRL, lcd_gen_ctrl | (SHADOW_EN | SHADOW_RW_EN));
+                ATIPrintIndexedRegisters(CRTX(ColourIOBase), 0, 64,
+                    "Shadow colour CRT controller", 0);
+
+                outr(LCD_GEN_CTRL, lcd_gen_ctrl);
+            }
+            else if ((pATI->Chip == ATI_CHIP_264LTPRO) ||
+                     (pATI->Chip == ATI_CHIP_264XL) ||
+                     (pATI->Chip == ATI_CHIP_MOBILITY))
+            {
+                lcd_index = inr(LCD_INDEX);
+                lcd_gen_ctrl = ATIGetMach64LCDReg(LCD_GEN_CNTL);
+
+                ATIPutMach64LCDReg(LCD_GEN_CNTL,
+                    lcd_gen_ctrl & ~(SHADOW_EN | SHADOW_RW_EN));
+                ATIPrintIndexedRegisters(CRTX(ColourIOBase), 0, 64,
+                    "Non-shadow colour CRT controller", 0);
+
+                ATIPutMach64LCDReg(LCD_GEN_CNTL,
+                    lcd_gen_ctrl | (SHADOW_EN | SHADOW_RW_EN));
+                ATIPrintIndexedRegisters(CRTX(ColourIOBase), 0, 64,
+                    "Shadow colour CRT controller", 0);
+
+                ATIPutMach64LCDReg(LCD_GEN_CNTL, lcd_gen_ctrl);
+                outr(LCD_INDEX, lcd_index);
+            }
+            else
+            {
+                ATIPrintIndexedRegisters(CRTX(ColourIOBase), 0, 64,
+                    "Colour CRT controller", 0);
+            }
+
+            ATIPrintIndexedRegisters(ATTRX, 0, 32, "Attribute controller",
+                GENS1(ColourIOBase));
+        }
+        else
+        {
+            if (pATI->Chip == ATI_CHIP_264LT)
+            {
+                lcd_gen_ctrl = inr(LCD_GEN_CTRL);
+
+                outr(LCD_GEN_CTRL, lcd_gen_ctrl & ~(SHADOW_EN | SHADOW_RW_EN));
+                ATIPrintIndexedRegisters(CRTX(MonochromeIOBase), 0, 64,
+                    "Non-shadow monochrome CRT controller", 0);
+
+                outr(LCD_GEN_CTRL, lcd_gen_ctrl | (SHADOW_EN | SHADOW_RW_EN));
+                ATIPrintIndexedRegisters(CRTX(MonochromeIOBase), 0, 64,
+                    "Shadow monochrome CRT controller", 0);
+
+                outr(LCD_GEN_CTRL, lcd_gen_ctrl);
+            }
+            else if ((pATI->Chip == ATI_CHIP_264LTPRO) ||
+                     (pATI->Chip == ATI_CHIP_264XL) ||
+                     (pATI->Chip == ATI_CHIP_MOBILITY))
+            {
+                lcd_index = inr(LCD_INDEX);
+                lcd_gen_ctrl = ATIGetMach64LCDReg(LCD_GEN_CNTL);
+
+                ATIPutMach64LCDReg(LCD_GEN_CNTL,
+                    lcd_gen_ctrl & ~(SHADOW_EN | SHADOW_RW_EN));
+                ATIPrintIndexedRegisters(CRTX(MonochromeIOBase), 0, 64,
+                    "Non-shadow monochrome CRT controller", 0);
+
+                ATIPutMach64LCDReg(LCD_GEN_CNTL,
+                    lcd_gen_ctrl | (SHADOW_EN | SHADOW_RW_EN));
+                ATIPrintIndexedRegisters(CRTX(MonochromeIOBase), 0, 64,
+                    "Shadow monochrome CRT controller", 0);
+
+                ATIPutMach64LCDReg(LCD_GEN_CNTL, lcd_gen_ctrl);
+                outr(LCD_INDEX, lcd_index);
+            }
+            else
+            {
+                ATIPrintIndexedRegisters(CRTX(MonochromeIOBase), 0, 64,
+                    "Monochrome CRT controller", 0);
+            }
+
+            ATIPrintIndexedRegisters(ATTRX, 0, 32, "Attribute controller",
+                GENS1(MonochromeIOBase));
+        }
+
+        ATIPrintIndexedRegisters(GRAX, 0, 16, "Graphics controller", 0);
+        ATIPrintIndexedRegisters(SEQX, 0, 8, "Sequencer", 0);
+
+        if (pATI->CPIO_VGAWonder)
+            ATIPrintIndexedRegisters(pATI->CPIO_VGAWonder,
+                xf86ServerIsOnlyProbing() ? 0x80U : pATI->VGAOffset, 0xC0U,
+                "ATI extended VGA", 0);
+    }
+
+    if (pATI->ChipHasSUBSYS_CNTL)
+    {
+        xf86ErrorFVerb(4, "\n 8514/A register values:");
+        for (Index = 0x02E8U;  Index <= 0x0FEE8;  Index += 0x0400U)
+        {
+            if (!((Index - 0x02E8U) & 0x0C00U))
+                xf86ErrorFVerb(4, "\n 0x%04X: ", Index);
+            xf86ErrorFVerb(4, " %04X", inw(Index));
+        }
+
+        if (pATI->Adapter >= ATI_ADAPTER_MACH8)
+        {
+            xf86ErrorFVerb(4, "\n\n Mach8/Mach32 register values:");
+            for (Index = 0x02EEU;  Index <= 0x0FEEE;  Index += 0x0400U)
+            {
+                if (!((Index - 0x02EEU) & 0x0C00U))
+                    xf86ErrorFVerb(4, "\n 0x%04X: ", Index);
+                xf86ErrorFVerb(4, " %04X", inw(Index));
+            }
+        }
+
+        xf86ErrorFVerb(4, "\n");
+    }
+    else
+
+#endif /* AVOID_CPIO */
+
+    if (pATI->Chip == ATI_CHIP_264LT)
+    {
+        lcd_gen_ctrl = inr(LCD_GEN_CTRL);
+
+        outr(LCD_GEN_CTRL, lcd_gen_ctrl &
+            ~(CRTC_RW_SELECT | SHADOW_EN | SHADOW_RW_EN));
+        ATIPrintMach64Registers(pATI, &crtc, "non-shadow");
+
+        outr(LCD_GEN_CTRL, (lcd_gen_ctrl & ~CRTC_RW_SELECT) |
+            (SHADOW_EN | SHADOW_RW_EN));
+        ATIPrintMach64Registers(pATI, &crtc, "shadow");
+
+        outr(LCD_GEN_CTRL, lcd_gen_ctrl);
+
+        ATIPrintMach64PLLRegisters(pATI);
+    }
+    else if ((pATI->Chip == ATI_CHIP_264LTPRO) ||
+             (pATI->Chip == ATI_CHIP_264XL) ||
+             (pATI->Chip == ATI_CHIP_MOBILITY))
+    {
+        lcd_index = inr(LCD_INDEX);
+        lcd_gen_ctrl = ATIGetMach64LCDReg(LCD_GEN_CNTL);
+
+        ATIPutMach64LCDReg(LCD_GEN_CNTL,
+            lcd_gen_ctrl & ~(CRTC_RW_SELECT | SHADOW_EN | SHADOW_RW_EN));
+        ATIPrintMach64Registers(pATI, &crtc, "non-shadow");
+
+        ATIPutMach64LCDReg(LCD_GEN_CNTL,
+            (lcd_gen_ctrl & ~CRTC_RW_SELECT) | (SHADOW_EN | SHADOW_RW_EN));
+        ATIPrintMach64Registers(pATI, &crtc, "shadow");
+
+        if (pATI->Chip != ATI_CHIP_264XL)
+        {
+            ATIPutMach64LCDReg(LCD_GEN_CNTL, lcd_gen_ctrl | CRTC_RW_SELECT);
+            ATIPrintMach64Registers(pATI, &crtc, "secondary");
+        }
+
+        ATIPutMach64LCDReg(LCD_GEN_CNTL, lcd_gen_ctrl);
+
+        ATIPrintMach64PLLRegisters(pATI);
+
+        xf86ErrorFVerb(4, "\n LCD register values:");
+        for (Index = 0;  Index < 64;  Index++)
+        {
+            if (!(Index & 3))
+                xf86ErrorFVerb(4, "\n 0x%02X: ", Index);
+            xf86ErrorFVerb(4, " %08X", ATIGetMach64LCDReg(Index));
+        }
+
+        outr(LCD_INDEX, lcd_index);
+
+        tv_out_index = inr(TV_OUT_INDEX);
+
+        xf86ErrorFVerb(4, "\n\n TV_OUT register values:");
+        for (Index = 0;  Index < 256;  Index++)
+        {
+            if (!(Index & 3))
+                xf86ErrorFVerb(4, "\n 0x%02X: ", Index);
+            xf86ErrorFVerb(4, " %08X", ATIGetMach64TVReg(Index));
+        }
+
+        outr(TV_OUT_INDEX, tv_out_index);
+
+        xf86ErrorFVerb(4, "\n");
+    }
+    else
+
+#ifndef AVOID_CPIO
+
+    if (pATI->Chip >= ATI_CHIP_88800GXC)
+
+#endif /* AVOID_CPIO */
+
+    {
+
+#ifdef AVOID_CPIO
+
+        ATIPrintMach64Registers(pATI, &crtc, "MMIO");
+
+#else /* AVOID_CPIO */
+
+        ATIPrintMach64Registers(pATI, &crtc,
+            (pATI->CPIODecoding == SPARSE_IO) ? "sparse" : "block");
+
+#endif /* AVOID_CPIO */
+
+        if (pATI->Chip >= ATI_CHIP_264CT)
+            ATIPrintMach64PLLRegisters(pATI);
+
+        if (pATI->DAC == ATI_DAC_IBMRGB514)
+            ATIPrintRGB514Registers(pATI);
+    }
+
+#ifdef AVOID_CPIO
+
+    dac_read = in8(M64_DAC_READ);
+    DACDelay;
+    dac_write = in8(M64_DAC_WRITE);
+    DACDelay;
+    dac_mask = in8(M64_DAC_MASK);
+    DACDelay;
+
+    xf86ErrorFVerb(4, "\n"
+               " DAC read index:   0x%02X\n"
+               " DAC write index:  0x%02X\n"
+               " DAC mask:         0x%02X\n\n"
+               " DAC colour lookup table:",
+        dac_read, dac_write, dac_mask);
+
+    out8(M64_DAC_MASK, 0xFFU);
+    DACDelay;
+    out8(M64_DAC_READ, 0x00U);
+    DACDelay;
+
+    for (Index = 0;  Index < 256;  Index++)
+    {
+        if (!(Index & 3))
+            xf86ErrorFVerb(4, "\n 0x%02X:", Index);
+        xf86ErrorFVerb(4, "  %02X", in8(M64_DAC_DATA));
+        DACDelay;
+        xf86ErrorFVerb(4, " %02X", in8(M64_DAC_DATA));
+        DACDelay;
+        xf86ErrorFVerb(4, " %02X", in8(M64_DAC_DATA));
+        DACDelay;
+    }
+
+    out8(M64_DAC_MASK, dac_mask);
+    DACDelay;
+    out8(M64_DAC_READ, dac_read);
+    DACDelay;
+
+#else /* AVOID_CPIO */
+
+    ATISetDACIOPorts(pATI, crtc);
+
+    /* Temporarily turn off CLKDIV2 while reading DAC's LUT */
+    if (pATI->Adapter == ATI_ADAPTER_NONISA)
+    {
+        seq1 = GetReg(SEQX, 0x01U);
+        if (seq1 & 0x08U)
+            PutReg(SEQX, 0x01U, seq1 & ~0x08U);
+    }
+
+    dac_read = inb(pATI->CPIO_DAC_READ);
+    DACDelay;
+    dac_write = inb(pATI->CPIO_DAC_WRITE);
+    DACDelay;
+    dac_mask = inb(pATI->CPIO_DAC_MASK);
+    DACDelay;
+
+    xf86ErrorFVerb(4, "\n"
+               " DAC read index:   0x%02X\n"
+               " DAC write index:  0x%02X\n"
+               " DAC mask:         0x%02X\n\n"
+               " DAC colour lookup table:",
+        dac_read, dac_write, dac_mask);
+
+    outb(pATI->CPIO_DAC_MASK, 0xFFU);
+    DACDelay;
+    outb(pATI->CPIO_DAC_READ, 0x00U);
+    DACDelay;
+
+    for (Index = 0;  Index < 256;  Index++)
+    {
+        if (!(Index & 3))
+            xf86ErrorFVerb(4, "\n 0x%02X:", Index);
+        xf86ErrorFVerb(4, "  %02X", inb(pATI->CPIO_DAC_DATA));
+        DACDelay;
+        xf86ErrorFVerb(4, " %02X", inb(pATI->CPIO_DAC_DATA));
+        DACDelay;
+        xf86ErrorFVerb(4, " %02X", inb(pATI->CPIO_DAC_DATA));
+        DACDelay;
+    }
+
+    outb(pATI->CPIO_DAC_MASK, dac_mask);
+    DACDelay;
+    outb(pATI->CPIO_DAC_READ, dac_read);
+    DACDelay;
+
+    if ((pATI->Adapter == ATI_ADAPTER_NONISA) && (seq1 & 0x08U))
+        PutReg(SEQX, 0x01U, seq1);
+
+#endif /* AVOID_CPIO */
+
+    if ((pVideo = pATI->PCIInfo))
+    {
+        pPCI = pVideo->thisCard;
+        xf86ErrorFVerb(4, "\n\n PCI configuration register values:");
+        for (Index = 0;  Index < 256;  Index+= 4)
+        {
+            if (!(Index & 15))
+                xf86ErrorFVerb(4, "\n 0x%02X: ", Index);
+            xf86ErrorFVerb(4, " 0x%08X", pciReadLong(pPCI->tag, Index));
+        }
+    }
+
+    xf86ErrorFVerb(4, "\n");
+
+#ifndef AVOID_CPIO
+
+    if (pATI->pBank)
+        xf86ErrorFVerb(4, "\n Banked aperture at 0x%0lX.",
+            pATI->pBank);
+    else
+        xf86ErrorFVerb(4, "\n No banked aperture.");
+
+    if (pATI->pMemory == pATI->pBank)
+        xf86ErrorFVerb(4, "\n No linear aperture.\n");
+    else
+
+#else /* AVOID_CPIO */
+
+    if (pATI->pMemory)
+
+#endif /* AVOID_CPIO */
+
+    {
+        xf86ErrorFVerb(4, "\n Linear aperture at 0x%0lX.\n", pATI->pMemory);
+    }
+
+    if (pATI->pBlock[0])
+    {
+        xf86ErrorFVerb(4, " Block 0 aperture at 0x%0lX.\n", pATI->pBlock[0]);
+        if (inr(CONFIG_CHIP_ID) == pATI->config_chip_id)
+            xf86ErrorFVerb(4, " MMIO registers are correctly mapped.\n");
+        else
+            xf86ErrorFVerb(4, " MMIO mapping is in error!\n");
+        if (pATI->pBlock[1])
+            xf86ErrorFVerb(4, " Block 1 aperture at 0x%0lX.\n",
+                pATI->pBlock[1]);
+    }
+    else
+        xf86ErrorFVerb(4, " No MMIO aperture.\n");
+
+    if (pATI->pCursorImage)
+        xf86ErrorFVerb(4, " Hardware cursor image aperture at 0x%0lX.\n",
+            pATI->pCursorImage);
+    else
+        xf86ErrorFVerb(4, " No hardware cursor image aperture.\n");
+
+    xf86ErrorFVerb(4, "\n");
+}
+
+/*
+ * A table to associate mode attributes with character strings.
+ */
+static const SymTabRec ModeAttributeNames[] =
+{
+    {V_PHSYNC,    "+hsync"},
+    {V_NHSYNC,    "-hsync"},
+    {V_PVSYNC,    "+vsync"},
+    {V_NVSYNC,    "-vsync"},
+    {V_PCSYNC,    "+csync"},
+    {V_NCSYNC,    "-csync"},
+    {V_INTERLACE, "interlace"},
+    {V_DBLSCAN,   "doublescan"},
+    {V_CSYNC,     "composite"},
+    {V_DBLCLK,    "dblclk"},
+    {V_CLKDIV2,   "clkdiv2"},
+    {0,           NULL}
+};
+
+/*
+ * ATIPrintMode --
+ *
+ * This function displays a mode's timing information.
+ */
+void
+ATIPrintMode
+(
+    DisplayModePtr pMode
+)
+{
+    const SymTabRec *pSymbol  = ModeAttributeNames;
+    int             flags     = pMode->Flags;
+    double          mClock, hSync, vRefresh;
+
+    mClock = (double)pMode->SynthClock;
+    if (pMode->HSync > 0.0)
+        hSync = pMode->HSync;
+    else
+        hSync = mClock / pMode->HTotal;
+    if (pMode->VRefresh > 0.0)
+        vRefresh = pMode->VRefresh;
+    else
+    {
+        vRefresh = (hSync * 1000.0) / pMode->VTotal;
+        if (flags & V_INTERLACE)
+            vRefresh *= 2.0;
+        if (flags & V_DBLSCAN)
+            vRefresh /= 2.0;
+        if (pMode->VScan > 1)
+            vRefresh /= pMode->VScan;
+    }
+
+    xf86ErrorFVerb(4, " Dot clock:           %7.3f MHz\n", mClock / 1000.0);
+    xf86ErrorFVerb(4, " Horizontal sync:     %7.3f kHz\n", hSync);
+    xf86ErrorFVerb(4, " Vertical refresh:    %7.3f Hz (%s)\n", vRefresh,
+        (flags & V_INTERLACE) ? "I" : "NI");
+    if ((pMode->ClockIndex >= 0) && (pMode->ClockIndex < MAXCLOCKS))
+        xf86ErrorFVerb(4, " Clock index:         %d\n", pMode->ClockIndex);
+    xf86ErrorFVerb(4, " Horizontal timings:  %4d %4d %4d %4d\n"
+                      " Vertical timings:    %4d %4d %4d %4d\n",
+        pMode->HDisplay, pMode->HSyncStart, pMode->HSyncEnd, pMode->HTotal,
+        pMode->VDisplay, pMode->VSyncStart, pMode->VSyncEnd, pMode->VTotal);
+
+    if (flags & V_HSKEW)
+    {
+        flags &= ~V_HSKEW;
+        xf86ErrorFVerb(4, " Horizontal skew:     %4d\n", pMode->HSkew);
+    }
+
+    if (pMode->VScan >= 1)
+        xf86ErrorFVerb(4, " Vertical scan:       %4d\n", pMode->VScan);
+
+    xf86ErrorFVerb(4, " Flags:              ");
+    for (;  pSymbol->token;  pSymbol++)
+    {
+        if (flags & pSymbol->token)
+        {
+            xf86ErrorFVerb(4, " %s", pSymbol->name);
+            if (!(flags &= ~pSymbol->token))
+                break;
+        }
+    }
+
+    xf86ErrorFVerb(4, "\n");
+}
+@
+
+
+1.1.9.1
+log
+@OpenBSD just has imported exactly this tree into their vendor branch,
+called the same tag, in XF4/xc
+This is, apparently, the last XFree86 snapshot before the licence change
+(ie, addition of the advertising clause)
+
+Since the developers don't see any problems with that, and we would like
+to integrate improvements done by the remaining one or two (or so) XFree86
+developers (j/k), this prepares enabling us to update X-Window in the future.
+@
+text
+@d1 1
+a1 1
+/* $XFree86: xc/programs/Xserver/hw/xfree86/drivers/ati/atiprint.c,v 1.29 2004/01/05 16:42:04 tsi Exp $ */
+d3 1
+a3 1
+ * Copyright 1997 through 2004 by Marc Aurele La France (TSI @@ UQV), tsi@@xfree86.org
+d124 1
+a124 1
+ * ATIMach64PrintRegisters --
+d130 1
+a130 1
+ATIMach64PrintRegisters
+d187 1
+a187 1
+            xf86ErrorFVerb(4, " %08lX", (unsigned long)IOValue);
+d226 1
+a226 1
+            xf86ErrorFVerb(4, " %08lX", (unsigned long)IOValue);
+d236 1
+a236 1
+ * ATIMach64PrintPLLRegisters --
+d242 1
+a242 1
+ATIMach64PrintPLLRegisters
+d251 1
+a251 1
+        PLLReg[Limit] = ATIMach64GetPLLReg(Limit);
+d277 1
+a277 1
+ * ATIRGB514PrintRegisters --
+d282 1
+a282 1
+ATIRGB514PrintRegisters
+d377 1
+a377 1
+                outr(LCD_GEN_CTRL, lcd_gen_ctrl & ~SHADOW_RW_EN);
+d381 1
+a381 1
+                outr(LCD_GEN_CTRL, lcd_gen_ctrl | SHADOW_RW_EN);
+d392 1
+a392 1
+                lcd_gen_ctrl = ATIMach64GetLCDReg(LCD_GEN_CNTL);
+d394 2
+a395 2
+                ATIMach64PutLCDReg(LCD_GEN_CNTL,
+                    lcd_gen_ctrl & ~(CRTC_RW_SELECT | SHADOW_RW_EN));
+d399 2
+a400 2
+                ATIMach64PutLCDReg(LCD_GEN_CNTL,
+                    (lcd_gen_ctrl & ~CRTC_RW_SELECT) | SHADOW_RW_EN);
+d404 1
+a404 1
+                ATIMach64PutLCDReg(LCD_GEN_CNTL, lcd_gen_ctrl);
+d422 1
+a422 1
+                outr(LCD_GEN_CTRL, lcd_gen_ctrl & ~SHADOW_RW_EN);
+d426 1
+a426 1
+                outr(LCD_GEN_CTRL, lcd_gen_ctrl | SHADOW_RW_EN);
+d437 1
+a437 1
+                lcd_gen_ctrl = ATIMach64GetLCDReg(LCD_GEN_CNTL);
+d439 2
+a440 2
+                ATIMach64PutLCDReg(LCD_GEN_CNTL,
+                    lcd_gen_ctrl & ~(CRTC_RW_SELECT | SHADOW_RW_EN));
+d444 2
+a445 2
+                ATIMach64PutLCDReg(LCD_GEN_CNTL,
+                    (lcd_gen_ctrl & ~CRTC_RW_SELECT) | SHADOW_RW_EN);
+d449 1
+a449 1
+                ATIMach64PutLCDReg(LCD_GEN_CNTL, lcd_gen_ctrl);
+d502 7
+a508 5
+        outr(LCD_GEN_CTRL, lcd_gen_ctrl & ~SHADOW_RW_EN);
+        ATIMach64PrintRegisters(pATI, &crtc, "non-shadow");
+
+        outr(LCD_GEN_CTRL, lcd_gen_ctrl | SHADOW_RW_EN);
+        ATIMach64PrintRegisters(pATI, &crtc, "shadow");
+d512 1
+a512 1
+        ATIMach64PrintPLLRegisters(pATI);
+d519 1
+a519 1
+        lcd_gen_ctrl = ATIMach64GetLCDReg(LCD_GEN_CNTL);
+d521 7
+a527 7
+        ATIMach64PutLCDReg(LCD_GEN_CNTL,
+            lcd_gen_ctrl & ~(CRTC_RW_SELECT | SHADOW_RW_EN));
+        ATIMach64PrintRegisters(pATI, &crtc, "non-shadow");
+
+        ATIMach64PutLCDReg(LCD_GEN_CNTL,
+            (lcd_gen_ctrl & ~CRTC_RW_SELECT) | SHADOW_RW_EN);
+        ATIMach64PrintRegisters(pATI, &crtc, "shadow");
+d531 2
+a532 2
+            ATIMach64PutLCDReg(LCD_GEN_CNTL, lcd_gen_ctrl | CRTC_RW_SELECT);
+            ATIMach64PrintRegisters(pATI, &crtc, "secondary");
+d535 1
+a535 1
+        ATIMach64PutLCDReg(LCD_GEN_CNTL, lcd_gen_ctrl);
+d537 1
+a537 1
+        ATIMach64PrintPLLRegisters(pATI);
+d544 1
+a544 1
+            xf86ErrorFVerb(4, " %08X", ATIMach64GetLCDReg(Index));
+d556 1
+a556 1
+            xf86ErrorFVerb(4, " %08X", ATIMach64GetTVReg(Index));
+d575 1
+a575 1
+        ATIMach64PrintRegisters(pATI, &crtc, "MMIO");
+d579 1
+a579 1
+        ATIMach64PrintRegisters(pATI, &crtc,
+d585 1
+a585 1
+            ATIMach64PrintPLLRegisters(pATI);
+d588 1
+a588 1
+            ATIRGB514PrintRegisters(pATI);
+d690 1
+a690 2
+            xf86ErrorFVerb(4, " 0x%08lX",
+			   (unsigned long)pciReadLong(pPCI->tag, Index));
+d700 1
+a700 1
+            (unsigned long)pATI->pBank);
+a704 1
+    {
+a705 1
+    }
+d715 1
+a715 1
+        xf86ErrorFVerb(4, "\n Linear aperture at %p.\n", pATI->pMemory);
+d720 1
+a720 1
+        xf86ErrorFVerb(4, " Block 0 aperture at %p.\n", pATI->pBlock[0]);
+d726 1
+a726 1
+            xf86ErrorFVerb(4, " Block 1 aperture at %p.\n",
+a729 1
+    {
+a730 1
+    }
+d733 1
+a733 1
+        xf86ErrorFVerb(4, " Hardware cursor image aperture at %p.\n",
+a780 1
+    {
+a781 1
+    }
+d819 1
+a819 2
+            flags &= ~pSymbol->token;
+            if (!flags)
+@
+
+
+1.1.1.1
+log
+@Import OpenBSD 3.3 XF4 repository from CTM 3132 the first time
+This finalizes starting an OpenBSD-mirabile (aka MirBSD) repository.
+
+### MirBSD is:
+# Copyright (c) 1982-2003 by Thorsten "mirabile" Glaser <x86@@ePost.de>
+# Copyright © 1968-2003  The authors of And contributors to UNIX®, the
+#       C Language, BSD/Berkeley Unix; 386BSD, NetBSD 1.1 and OpenBSD.
+#
+# Anyone who obtained a copy of this work is hereby permitted to freely use,
+# distribute, modify, merge, sublicence, give away or sell it as long as the
+# authors are given due credit and the following notice is retained:
+#
+# This work is provided "as is", with no explicit or implicit warranty what-
+# soever. Use it only at your own risk. In no event may an author or contri-
+# butor be held liable for any damage, directly or indirectly, that origina-
+# ted through or is caused by creation or modification of this work.
+
+MirBSD is my private tree. MirBSD does not differ very much from OpenBSD
+and intentionally tracks OpenBSD. That's why it _is_ OpenBSD, just not the
+official one. It's like with DarrenBSD.
+
+At time of this writing, no advertising for MirBSD must be done,
+because the advertising clause has not yet been sorted out.
+
+http://templeofhate.com/tglaser/MirBSD/index.php
+@
+text
+@@
+
+
+1.1.1.2
+log
+@The X-Windowing System
+
+Import XFree86 4.3 from OpenBSD by CTM, in the hope it's stable
+@
+text
+@d1 1
+a1 1
+/* $XFree86: xc/programs/Xserver/hw/xfree86/drivers/ati/atiprint.c,v 1.25 2003/01/01 19:16:33 tsi Exp $ */
+d3 1
+a3 1
+ * Copyright 1997 through 2003 by Marc Aurele La France (TSI @@ UQV), tsi@@xfree86.org
+d502 2
+a503 1
+        outr(LCD_GEN_CTRL, lcd_gen_ctrl & ~(SHADOW_EN | SHADOW_RW_EN));
+d506 2
+a507 1
+        outr(LCD_GEN_CTRL, lcd_gen_ctrl | (SHADOW_EN | SHADOW_RW_EN));
+@
+
+
+1.1.1.3
+log
+@That's what OpenBSD will, probably, ship as XF4 in 3.5
+their last sync against XFree86 4.3-current has been
+imported into our vendor branch, too
+@
+text
+@d1 1
+a1 1
+/* $XFree86: xc/programs/Xserver/hw/xfree86/drivers/ati/atiprint.c,v 1.29 2004/01/05 16:42:04 tsi Exp $ */
+d3 1
+a3 1
+ * Copyright 1997 through 2004 by Marc Aurele La France (TSI @@ UQV), tsi@@xfree86.org
+d124 1
+a124 1
+ * ATIMach64PrintRegisters --
+d130 1
+a130 1
+ATIMach64PrintRegisters
+d187 1
+a187 1
+            xf86ErrorFVerb(4, " %08lX", (unsigned long)IOValue);
+d226 1
+a226 1
+            xf86ErrorFVerb(4, " %08lX", (unsigned long)IOValue);
+d236 1
+a236 1
+ * ATIMach64PrintPLLRegisters --
+d242 1
+a242 1
+ATIMach64PrintPLLRegisters
+d251 1
+a251 1
+        PLLReg[Limit] = ATIMach64GetPLLReg(Limit);
+d277 1
+a277 1
+ * ATIRGB514PrintRegisters --
+d282 1
+a282 1
+ATIRGB514PrintRegisters
+d377 1
+a377 1
+                outr(LCD_GEN_CTRL, lcd_gen_ctrl & ~SHADOW_RW_EN);
+d381 1
+a381 1
+                outr(LCD_GEN_CTRL, lcd_gen_ctrl | SHADOW_RW_EN);
+d392 1
+a392 1
+                lcd_gen_ctrl = ATIMach64GetLCDReg(LCD_GEN_CNTL);
+d394 2
+a395 2
+                ATIMach64PutLCDReg(LCD_GEN_CNTL,
+                    lcd_gen_ctrl & ~(CRTC_RW_SELECT | SHADOW_RW_EN));
+d399 2
+a400 2
+                ATIMach64PutLCDReg(LCD_GEN_CNTL,
+                    (lcd_gen_ctrl & ~CRTC_RW_SELECT) | SHADOW_RW_EN);
+d404 1
+a404 1
+                ATIMach64PutLCDReg(LCD_GEN_CNTL, lcd_gen_ctrl);
+d422 1
+a422 1
+                outr(LCD_GEN_CTRL, lcd_gen_ctrl & ~SHADOW_RW_EN);
+d426 1
+a426 1
+                outr(LCD_GEN_CTRL, lcd_gen_ctrl | SHADOW_RW_EN);
+d437 1
+a437 1
+                lcd_gen_ctrl = ATIMach64GetLCDReg(LCD_GEN_CNTL);
+d439 2
+a440 2
+                ATIMach64PutLCDReg(LCD_GEN_CNTL,
+                    lcd_gen_ctrl & ~(CRTC_RW_SELECT | SHADOW_RW_EN));
+d444 2
+a445 2
+                ATIMach64PutLCDReg(LCD_GEN_CNTL,
+                    (lcd_gen_ctrl & ~CRTC_RW_SELECT) | SHADOW_RW_EN);
+d449 1
+a449 1
+                ATIMach64PutLCDReg(LCD_GEN_CNTL, lcd_gen_ctrl);
+d502 2
+a503 2
+        outr(LCD_GEN_CTRL, lcd_gen_ctrl & ~SHADOW_RW_EN);
+        ATIMach64PrintRegisters(pATI, &crtc, "non-shadow");
+d505 2
+a506 2
+        outr(LCD_GEN_CTRL, lcd_gen_ctrl | SHADOW_RW_EN);
+        ATIMach64PrintRegisters(pATI, &crtc, "shadow");
+d510 1
+a510 1
+        ATIMach64PrintPLLRegisters(pATI);
+d517 1
+a517 1
+        lcd_gen_ctrl = ATIMach64GetLCDReg(LCD_GEN_CNTL);
+d519 7
+a525 7
+        ATIMach64PutLCDReg(LCD_GEN_CNTL,
+            lcd_gen_ctrl & ~(CRTC_RW_SELECT | SHADOW_RW_EN));
+        ATIMach64PrintRegisters(pATI, &crtc, "non-shadow");
+
+        ATIMach64PutLCDReg(LCD_GEN_CNTL,
+            (lcd_gen_ctrl & ~CRTC_RW_SELECT) | SHADOW_RW_EN);
+        ATIMach64PrintRegisters(pATI, &crtc, "shadow");
+d529 2
+a530 2
+            ATIMach64PutLCDReg(LCD_GEN_CNTL, lcd_gen_ctrl | CRTC_RW_SELECT);
+            ATIMach64PrintRegisters(pATI, &crtc, "secondary");
+d533 1
+a533 1
+        ATIMach64PutLCDReg(LCD_GEN_CNTL, lcd_gen_ctrl);
+d535 1
+a535 1
+        ATIMach64PrintPLLRegisters(pATI);
+d542 1
+a542 1
+            xf86ErrorFVerb(4, " %08X", ATIMach64GetLCDReg(Index));
+d554 1
+a554 1
+            xf86ErrorFVerb(4, " %08X", ATIMach64GetTVReg(Index));
+d573 1
+a573 1
+        ATIMach64PrintRegisters(pATI, &crtc, "MMIO");
+d577 1
+a577 1
+        ATIMach64PrintRegisters(pATI, &crtc,
+d583 1
+a583 1
+            ATIMach64PrintPLLRegisters(pATI);
+d586 1
+a586 1
+            ATIRGB514PrintRegisters(pATI);
+d688 1
+a688 2
+            xf86ErrorFVerb(4, " 0x%08lX",
+			   (unsigned long)pciReadLong(pPCI->tag, Index));
+d698 1
+a698 1
+            (unsigned long)pATI->pBank);
+a702 1
+    {
+a703 1
+    }
+d713 1
+a713 1
+        xf86ErrorFVerb(4, "\n Linear aperture at %p.\n", pATI->pMemory);
+d718 1
+a718 1
+        xf86ErrorFVerb(4, " Block 0 aperture at %p.\n", pATI->pBlock[0]);
+d724 1
+a724 1
+            xf86ErrorFVerb(4, " Block 1 aperture at %p.\n",
+a727 1
+    {
+a728 1
+    }
+d731 1
+a731 1
+        xf86ErrorFVerb(4, " Hardware cursor image aperture at %p.\n",
+a778 1
+    {
+a779 1
+    }
+d817 1
+a817 2
+            flags &= ~pSymbol->token;
+            if (!flags)
+@
+
+

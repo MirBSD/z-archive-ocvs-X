@@ -1,0 +1,899 @@
+head	1.1;
+branch	1.1.1;
+access;
+symbols
+	tg-mergetmp-2:1.1.1.2
+	cvs-200410241530:1.1.1.2
+	cvs-200410012000:1.1.1.2
+	cvs-200407190955:1.1.1.2
+	cvs-200407141120:1.1.1.2
+	cvs-200406231010:1.1.1.2
+	MIRBSD_7quater:1.1.1.2
+	cvs-200405271510:1.1.1.2
+	XFree86_4_4_0:1.1.9.1
+	cvs-200403021700:1.1.1.2
+	XFREE86_20040213:1.1.9.1
+	xc:1.1.9
+	cvs-200401291925:1.1.1.2
+	MIRBSD_7_ALPHA:1.1.1.2.0.4
+	MIRBSD_7:1.1.1.2.0.2
+	MIRBSD_7ter:1.1.1.2
+	cvs-20011091815:1.1.1.2
+	cvs-200309162130:1.1.1.2
+	cvs-200308302005:1.1.1.2
+	ctmx-0387:1.1.1.2
+	ctmx-0384:1.1.1.2
+	MIRBSD_5:1.1.1.2
+	ctmx-0375:1.1.1.2
+	ctmx-0373:1.1.1.2
+	ctm-0371:1.1.1.2
+	ctm-0370:1.1.1.2
+	MIRBSD_4:1.1.1.2
+	ctm-0363:1.1.1.2
+	ctm-0359:1.1.1.2
+	ctm-0349:1.1.1.1
+	openbsd:1.1.1;
+locks; strict;
+comment	@ * @;
+
+
+1.1
+date	2003.03.22.20.11.11;	author tg;	state Exp;
+branches
+	1.1.1.1
+	1.1.9.1;
+next	;
+
+1.1.1.1
+date	2003.03.22.20.11.11;	author tg;	state Exp;
+branches;
+next	1.1.1.2;
+
+1.1.1.2
+date	2003.04.08.18.41.18;	author tg;	state Stab;
+branches;
+next	;
+
+1.1.9.1
+date	2004.02.14.19.29.51;	author tg;	state Exp;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@/* $XFree86: xc/programs/xterm/xutf8.c,v 1.1 2001/06/18 19:09:28 dickey Exp $ */
+/*
+Copyright (c) 2001 by Juliusz Chroboczek
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
+*/
+
+#include <xterm.h>
+
+#include <X11/Xlib.h>
+#include <X11/Xatom.h>
+#include <X11/Xutil.h>
+#include <X11/Xmu/Xmu.h>
+
+#include <xutf8.h>
+
+#define KEYSYM2UCS_INCLUDED
+#include "keysym2ucs.c"
+
+#ifndef X_HAVE_UTF8_STRING
+#undef XA_UTF8_STRING
+Atom _xa_utf8_string(Display *dpy)
+{
+    static AtomPtr p = NULL;
+
+    if(p == NULL)
+	p = XmuMakeAtom("UTF8_STRING");
+
+    return XmuInternAtom(dpy, p);
+}
+#define XA_UTF8_STRING(dpy) _xa_utf8_string(dpy)
+
+static int
+utf8countBytes(int c)
+{
+    if(c < 0)
+	return 0;
+
+    if(c <= 0x7F) {
+	return 1;
+    } else if(c <= 0x7FF) {
+	return 2;
+    } else if(c <= 0xFFFF) {
+	return 3;
+    } else
+	return 4;
+}
+
+static void
+utf8insert(char *dest, int c, int *len_return)
+{
+    if(c < 0)
+	return;
+
+    if(c <= 0x7F) {
+	 dest[0] = c;
+	 *len_return = 1;
+    } else if(c <= 0x7FF) {
+	dest[0] = 0xC0 | ((c >> 6) & 0x1F);
+	dest[1] = 0x80 | (c & 0x3F);
+	 *len_return = 2;
+    } else if(c <= 0xFFFF) {
+	dest[0] = 0xE0 | ((c >> 12) & 0x0F);
+	dest[1] = 0x80 | ((c >> 6) & 0x3F);
+	dest[2] = 0x80 | (c & 0x3F);
+	*len_return = 3;
+    } else {
+	dest[0] = 0xF0 | ((c >> 18) & 0x07);
+	dest[1] = 0x80 | ((c >> 12) & 0x3f);
+	dest[2] = 0x80 | ((c >> 6) & 0x3f);
+	dest[3] = 0x80 | (c & 0x3f);
+	*len_return = 4;
+    }
+}
+
+static int
+l1countUtf8Bytes(char *s, int len)
+{
+    int l = 0;
+    while(len > 0) {
+	if((*s & 0x80) == 0)
+	    l++;
+	else
+	    l += 2;
+	s++;
+	len--;
+    }
+    return l;
+}
+
+static void
+l1utf8copy (char *d, char *s, int len)
+{
+    int l;
+    while(len > 0) {
+	utf8insert(d, (*s) & 0xFF, &l);
+	d += l;
+	s++;
+	len--;
+    }
+}
+
+static void
+utf8l1strcpy (char *d, char *s)
+{
+#define SKIP do { s++; } while(((*s & 0x80) != 0) && (*s & 0xC0) != 0xC0)
+    while(*s) {
+	if((*s & 0x80) == 0)
+	    *d++ = *s++;
+	else if((*s & 0x7C) == 0x40) {
+	    if((s[1] & 0x80) == 0) {
+		 s++;            /* incorrect UTF-8 */
+		 continue;
+	    } else if((*s & 0x7C) == 0x40) {
+		 *d++ = ((*s & 0x03) << 6) | (s[1] & 0x3F);
+		 s += 2;
+	    } else {
+		 *d++ = '?';
+		 SKIP;
+	    }
+	} else {
+	    *d++ = '?';
+	    SKIP;
+	}
+    }
+    *d = 0;
+#undef SKIP
+}
+
+/* Keep this in sync with utf8l1strcpy! */
+static int
+utf8l1strlen(char *s)
+{
+#define SKIP do { s++; } while(((*s & 0x80) != 0) && (*s & 0xC0) != 0xC0)
+    int len = 0;
+    while(*s) {
+	if((*s & 0x80) == 0) {
+	    s++;
+	    len++;
+	} else if((*s & 0x7C) == 0x40) {
+	    if((s[1] & 0x80) == 0) {
+		 s++;
+		 continue;
+	    } else if((*s & 0x7C) == 0x40) {
+		 len++;
+		 s += 2;
+	    } else {
+		 len++;
+		 SKIP;
+	    }
+	} else {
+	    len++;
+	    SKIP;
+	}
+    }
+#undef SKIP
+    return len;
+}
+
+int
+Xutf8TextPropertyToTextList(
+    Display *dpy,
+    const XTextProperty *tp,
+    char ***list_return,
+    int *count_return)
+{
+    int utf8;
+    char **list;
+    int nelements;
+    register char *cp;
+    char *start;
+    int i, j;
+    int datalen = (int) tp->nitems;
+    int len;
+
+    if(tp->format != 8)
+	return XConverterNotFound;
+
+    if(tp->encoding == XA_STRING)
+	utf8 = 0;
+    else if(tp->encoding == XA_UTF8_STRING(dpy))
+	utf8 = 1;
+    else
+	return XConverterNotFound;
+
+    if (datalen == 0) {
+	*list_return = NULL;
+	*count_return = 0;
+	return 0;
+    }
+
+    nelements = 1;
+    for (cp = (char *) tp->value, i = datalen; i > 0; cp++, i--) {
+	if (*cp == '\0') nelements++;
+    }
+
+    list = (char **) malloc (nelements * sizeof (char *));
+    if (!list) return XNoMemory;
+
+    if(utf8)
+	len = datalen;
+    else
+	len = l1countUtf8Bytes((char*)tp->value, datalen);
+
+    start = (char *) malloc ((len + 1) * sizeof (char));
+    if (!start) {
+	free ((char *) list);
+	return XNoMemory;
+    }
+
+    if(utf8)
+	memcpy(start, (char*)tp->value, datalen);
+    else
+	l1utf8copy(start, (char*)tp->value, datalen);
+    start[len] = '\0';
+
+    for (cp = start, i = len + 1, j = 0; i > 0; cp++, i--) {
+	if (*cp == '\0') {
+	    list[j] = start;
+	    start = (cp + 1);
+	    j++;
+	}
+    }
+
+    list[j] = NULL;
+    *list_return = list;
+    *count_return = nelements;
+    return 0;
+}
+
+int
+Xutf8TextListToTextProperty(
+    Display *dpy,
+    char **list,
+    int count,
+    XICCEncodingStyle style,
+    XTextProperty *text_prop)
+{
+    XTextProperty proto;
+    unsigned int nbytes;
+    int i;
+
+    if(style != XStringStyle &&
+       style != XCompoundTextStyle &&
+       style != XStdICCTextStyle &&
+       style != XUTF8StringStyle)
+	return XConverterNotFound;
+
+    if(style == XUTF8StringStyle) {
+	for (i = 0, nbytes = 0; i < count; i++) {
+	    nbytes += (unsigned) ((list[i] ? strlen (list[i]) : 0) + 1);
+	}
+    } else {
+	for (i = 0, nbytes = 0; i < count; i++) {
+	    nbytes += (unsigned) ((list[i] ? utf8l1strlen(list[i]) : 0) + 1);
+	}
+    }
+
+    if(style == XCompoundTextStyle)
+	proto.encoding = XA_COMPOUND_TEXT(dpy);
+    else if(style == XUTF8StringStyle)
+	proto.encoding = XA_UTF8_STRING(dpy);
+    else
+	proto.encoding = XA_STRING;
+    proto.format = 8;
+    if (nbytes)
+	proto.nitems = nbytes - 1;
+    else
+	proto.nitems = 0;
+    proto.value = NULL;
+
+    if (nbytes > 0) {
+	register char *buf = malloc (nbytes);
+	if (!buf) return XNoMemory;
+
+	proto.value = (unsigned char *) buf;
+	for (i = 0; i < count; i++) {
+	    char *arg = list[i];
+
+	    if (arg) {
+		 if(style == XUTF8StringStyle) {
+		     strcpy(buf, arg);
+		 } else {
+		     utf8l1strcpy(buf, arg);
+		 }
+		 buf += (strlen(buf) + 1);
+	    } else {
+		*buf++ = '\0';
+	    }
+	}
+    } else {
+	proto.value = (unsigned char *) malloc (1);	/* easier for client */
+	if (!proto.value) return XNoMemory;
+
+	proto.value[0] = '\0';
+    }
+
+    *text_prop = proto;
+    return 0;
+}
+
+int
+Xutf8LookupString(
+    XIC ic GCC_UNUSED,
+    register XKeyEvent *ev,
+    char *buffer,
+    int nbytes,
+    KeySym *keysym_return,
+    Status *status_return)
+{
+    int rc;
+    KeySym keysym;
+    int codepoint;
+    int len;
+
+    rc = XLookupString(ev, buffer, nbytes, &keysym, NULL);
+
+    if(rc > 0) {
+	codepoint = buffer[0] & 0xFF;
+    } else {
+	codepoint = keysym2ucs(keysym);
+    }
+
+    if(codepoint < 0) {
+	if(keysym == None) {
+	    *status_return = XLookupNone;
+	} else {
+	    *status_return = XLookupKeySym;
+	    *keysym_return = keysym;
+	}
+	return 0;
+    }
+
+    if(nbytes < utf8countBytes(codepoint)) {
+	*status_return = XBufferOverflow;
+	return utf8countBytes(codepoint);
+    }
+
+    utf8insert(buffer, codepoint, &len);
+
+    if(keysym != None) {
+	*keysym_return = keysym;
+	*status_return = XLookupBoth;
+    } else {
+	*status_return = XLookupChars;
+    }
+    return len;
+}
+#else /* X_HAVE_UTF8_STRING */
+/* Silence the compiler */
+void xutf8_dummy(void)
+{
+    return;
+}
+#endif
+@
+
+
+1.1.9.1
+log
+@OpenBSD just has imported exactly this tree into their vendor branch,
+called the same tag, in XF4/xc
+This is, apparently, the last XFree86 snapshot before the licence change
+(ie, addition of the advertising clause)
+
+Since the developers don't see any problems with that, and we would like
+to integrate improvements done by the remaining one or two (or so) XFree86
+developers (j/k), this prepares enabling us to update X-Window in the future.
+@
+text
+@d1 1
+a1 1
+/* $XFree86: xc/programs/xterm/xutf8.c,v 1.3 2002/10/09 16:38:20 tsi Exp $ */
+a32 3
+#ifndef X_HAVE_UTF8_STRING
+
+#undef XA_UTF8_STRING
+a33 1
+
+d36 3
+a38 2
+Atom
+_xa_utf8_string(Display * dpy)
+d42 1
+a42 1
+    if (p == NULL)
+d52 1
+a52 1
+    if (c < 0)
+d55 1
+a55 1
+    if (c <= 0x7F) {
+d57 1
+a57 1
+    } else if (c <= 0x7FF) {
+d59 1
+a59 1
+    } else if (c <= 0xFFFF) {
+d68 1
+a68 1
+    if (c < 0)
+d71 4
+a74 4
+    if (c <= 0x7F) {
+	dest[0] = c;
+	*len_return = 1;
+    } else if (c <= 0x7FF) {
+d77 2
+a78 2
+	*len_return = 2;
+    } else if (c <= 0xFFFF) {
+d96 2
+a97 2
+    while (len > 0) {
+	if ((*s & 0x80) == 0)
+d108 1
+a108 1
+l1utf8copy(char *d, char *s, int len)
+d111 1
+a111 1
+    while (len > 0) {
+d120 1
+a120 1
+utf8l1strcpy(char *d, char *s)
+d123 2
+a124 2
+    while (*s) {
+	if ((*s & 0x80) == 0)
+d126 7
+a132 7
+	else if ((*s & 0x7C) == 0x40) {
+	    if ((s[1] & 0x80) == 0) {
+		s++;		/* incorrect UTF-8 */
+		continue;
+	    } else if ((*s & 0x7C) == 0x40) {
+		*d++ = ((*s & 0x03) << 6) | (s[1] & 0x3F);
+		s += 2;
+d134 2
+a135 2
+		*d++ = '?';
+		SKIP;
+d152 2
+a153 2
+    while (*s) {
+	if ((*s & 0x80) == 0) {
+d156 7
+a162 7
+	} else if ((*s & 0x7C) == 0x40) {
+	    if ((s[1] & 0x80) == 0) {
+		s++;
+		continue;
+	    } else if ((*s & 0x7C) == 0x40) {
+		len++;
+		s += 2;
+d164 2
+a165 2
+		len++;
+		SKIP;
+d177 5
+a181 4
+Xutf8TextPropertyToTextList(Display * dpy,
+			    const XTextProperty * tp,
+			    char ***list_return,
+			    int *count_return)
+d192 1
+a192 1
+    if (tp->format != 8)
+d195 1
+a195 1
+    if (tp->encoding == XA_STRING)
+d197 1
+a197 1
+    else if (tp->encoding == XA_UTF8_STRING(dpy))
+d210 1
+a210 2
+	if (*cp == '\0')
+	    nelements++;
+d213 2
+a214 3
+    list = (char **) malloc(nelements * sizeof(char *));
+    if (!list)
+	return XNoMemory;
+d216 1
+a216 1
+    if (utf8)
+d219 1
+a219 1
+	len = l1countUtf8Bytes((char *) tp->value, datalen);
+d221 1
+a221 1
+    start = (char *) malloc((len + 1) * sizeof(char));
+d223 1
+a223 1
+	free((char *) list);
+d227 2
+a228 2
+    if (utf8)
+	memcpy(start, (char *) tp->value, datalen);
+d230 1
+a230 1
+	l1utf8copy(start, (char *) tp->value, datalen);
+d248 6
+a253 5
+Xutf8TextListToTextProperty(Display * dpy,
+			    char **list,
+			    int count,
+			    XICCEncodingStyle style,
+			    XTextProperty * text_prop)
+d259 4
+a262 4
+    if (style != XStringStyle &&
+	style != XCompoundTextStyle &&
+	style != XStdICCTextStyle &&
+	style != XUTF8StringStyle)
+d265 1
+a265 1
+    if (style == XUTF8StringStyle) {
+d267 1
+a267 1
+	    nbytes += (unsigned) ((list[i] ? strlen(list[i]) : 0) + 1);
+d275 1
+a275 1
+    if (style == XCompoundTextStyle)
+d277 1
+a277 1
+    else if (style == XUTF8StringStyle)
+d289 2
+a290 3
+	register char *buf = malloc(nbytes);
+	if (!buf)
+	    return XNoMemory;
+d297 6
+a302 6
+		if (style == XUTF8StringStyle) {
+		    strcpy(buf, arg);
+		} else {
+		    utf8l1strcpy(buf, arg);
+		}
+		buf += (strlen(buf) + 1);
+d308 2
+a309 3
+	proto.value = (unsigned char *) malloc(1);	/* easier for client */
+	if (!proto.value)
+	    return XNoMemory;
+d319 7
+a325 6
+Xutf8LookupString(XIC ic GCC_UNUSED,
+		  register XKeyEvent * ev,
+		  char *buffer,
+		  int nbytes,
+		  KeySym * keysym_return,
+		  Status * status_return)
+d334 1
+a334 1
+    if (rc > 0) {
+d340 2
+a341 2
+    if (codepoint < 0) {
+	if (keysym == None) {
+d350 1
+a350 1
+    if (nbytes < utf8countBytes(codepoint)) {
+d357 1
+a357 1
+    if (keysym != None) {
+d367 1
+a367 2
+void
+xutf8_dummy(void)
+@
+
+
+1.1.1.1
+log
+@Import OpenBSD 3.3 XF4 repository from CTM 3132 the first time
+This finalizes starting an OpenBSD-mirabile (aka MirBSD) repository.
+
+### MirBSD is:
+# Copyright (c) 1982-2003 by Thorsten "mirabile" Glaser <x86@@ePost.de>
+# Copyright © 1968-2003  The authors of And contributors to UNIX®, the
+#       C Language, BSD/Berkeley Unix; 386BSD, NetBSD 1.1 and OpenBSD.
+#
+# Anyone who obtained a copy of this work is hereby permitted to freely use,
+# distribute, modify, merge, sublicence, give away or sell it as long as the
+# authors are given due credit and the following notice is retained:
+#
+# This work is provided "as is", with no explicit or implicit warranty what-
+# soever. Use it only at your own risk. In no event may an author or contri-
+# butor be held liable for any damage, directly or indirectly, that origina-
+# ted through or is caused by creation or modification of this work.
+
+MirBSD is my private tree. MirBSD does not differ very much from OpenBSD
+and intentionally tracks OpenBSD. That's why it _is_ OpenBSD, just not the
+official one. It's like with DarrenBSD.
+
+At time of this writing, no advertising for MirBSD must be done,
+because the advertising clause has not yet been sorted out.
+
+http://templeofhate.com/tglaser/MirBSD/index.php
+@
+text
+@@
+
+
+1.1.1.2
+log
+@The X-Windowing System
+
+Import XFree86 4.3 from OpenBSD by CTM, in the hope it's stable
+@
+text
+@d1 1
+a1 1
+/* $XFree86: xc/programs/xterm/xutf8.c,v 1.3 2002/10/09 16:38:20 tsi Exp $ */
+a32 3
+#ifndef X_HAVE_UTF8_STRING
+
+#undef XA_UTF8_STRING
+a33 1
+
+d36 3
+a38 2
+Atom
+_xa_utf8_string(Display * dpy)
+d42 1
+a42 1
+    if (p == NULL)
+d52 1
+a52 1
+    if (c < 0)
+d55 1
+a55 1
+    if (c <= 0x7F) {
+d57 1
+a57 1
+    } else if (c <= 0x7FF) {
+d59 1
+a59 1
+    } else if (c <= 0xFFFF) {
+d68 1
+a68 1
+    if (c < 0)
+d71 4
+a74 4
+    if (c <= 0x7F) {
+	dest[0] = c;
+	*len_return = 1;
+    } else if (c <= 0x7FF) {
+d77 2
+a78 2
+	*len_return = 2;
+    } else if (c <= 0xFFFF) {
+d96 2
+a97 2
+    while (len > 0) {
+	if ((*s & 0x80) == 0)
+d108 1
+a108 1
+l1utf8copy(char *d, char *s, int len)
+d111 1
+a111 1
+    while (len > 0) {
+d120 1
+a120 1
+utf8l1strcpy(char *d, char *s)
+d123 2
+a124 2
+    while (*s) {
+	if ((*s & 0x80) == 0)
+d126 7
+a132 7
+	else if ((*s & 0x7C) == 0x40) {
+	    if ((s[1] & 0x80) == 0) {
+		s++;		/* incorrect UTF-8 */
+		continue;
+	    } else if ((*s & 0x7C) == 0x40) {
+		*d++ = ((*s & 0x03) << 6) | (s[1] & 0x3F);
+		s += 2;
+d134 2
+a135 2
+		*d++ = '?';
+		SKIP;
+d152 2
+a153 2
+    while (*s) {
+	if ((*s & 0x80) == 0) {
+d156 7
+a162 7
+	} else if ((*s & 0x7C) == 0x40) {
+	    if ((s[1] & 0x80) == 0) {
+		s++;
+		continue;
+	    } else if ((*s & 0x7C) == 0x40) {
+		len++;
+		s += 2;
+d164 2
+a165 2
+		len++;
+		SKIP;
+d177 5
+a181 4
+Xutf8TextPropertyToTextList(Display * dpy,
+			    const XTextProperty * tp,
+			    char ***list_return,
+			    int *count_return)
+d192 1
+a192 1
+    if (tp->format != 8)
+d195 1
+a195 1
+    if (tp->encoding == XA_STRING)
+d197 1
+a197 1
+    else if (tp->encoding == XA_UTF8_STRING(dpy))
+d210 1
+a210 2
+	if (*cp == '\0')
+	    nelements++;
+d213 2
+a214 3
+    list = (char **) malloc(nelements * sizeof(char *));
+    if (!list)
+	return XNoMemory;
+d216 1
+a216 1
+    if (utf8)
+d219 1
+a219 1
+	len = l1countUtf8Bytes((char *) tp->value, datalen);
+d221 1
+a221 1
+    start = (char *) malloc((len + 1) * sizeof(char));
+d223 1
+a223 1
+	free((char *) list);
+d227 2
+a228 2
+    if (utf8)
+	memcpy(start, (char *) tp->value, datalen);
+d230 1
+a230 1
+	l1utf8copy(start, (char *) tp->value, datalen);
+d248 6
+a253 5
+Xutf8TextListToTextProperty(Display * dpy,
+			    char **list,
+			    int count,
+			    XICCEncodingStyle style,
+			    XTextProperty * text_prop)
+d259 4
+a262 4
+    if (style != XStringStyle &&
+	style != XCompoundTextStyle &&
+	style != XStdICCTextStyle &&
+	style != XUTF8StringStyle)
+d265 1
+a265 1
+    if (style == XUTF8StringStyle) {
+d267 1
+a267 1
+	    nbytes += (unsigned) ((list[i] ? strlen(list[i]) : 0) + 1);
+d275 1
+a275 1
+    if (style == XCompoundTextStyle)
+d277 1
+a277 1
+    else if (style == XUTF8StringStyle)
+d289 2
+a290 3
+	register char *buf = malloc(nbytes);
+	if (!buf)
+	    return XNoMemory;
+d297 6
+a302 6
+		if (style == XUTF8StringStyle) {
+		    strcpy(buf, arg);
+		} else {
+		    utf8l1strcpy(buf, arg);
+		}
+		buf += (strlen(buf) + 1);
+d308 2
+a309 3
+	proto.value = (unsigned char *) malloc(1);	/* easier for client */
+	if (!proto.value)
+	    return XNoMemory;
+d319 7
+a325 6
+Xutf8LookupString(XIC ic GCC_UNUSED,
+		  register XKeyEvent * ev,
+		  char *buffer,
+		  int nbytes,
+		  KeySym * keysym_return,
+		  Status * status_return)
+d334 1
+a334 1
+    if (rc > 0) {
+d340 2
+a341 2
+    if (codepoint < 0) {
+	if (keysym == None) {
+d350 1
+a350 1
+    if (nbytes < utf8countBytes(codepoint)) {
+d357 1
+a357 1
+    if (keysym != None) {
+d367 1
+a367 2
+void
+xutf8_dummy(void)
+@
+

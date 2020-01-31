@@ -1,0 +1,709 @@
+head	1.2;
+branch	1.1.1;
+access;
+symbols
+	tg-mergetmp-2:1.1.1.3
+	cvs-200410241530:1.1.1.3
+	cvs-200410012000:1.1.1.3
+	cvs-200407141120:1.1.1.3
+	cvs-200406231010:1.1.1.3
+	MIRBSD_7quater:1.1.1.2
+	cvs-200405271510:1.1.1.3
+	XFree86_4_4_0:1.1.9.1
+	cvs-200403021700:1.1.1.3
+	XFREE86_20040213:1.1.9.1
+	xc:1.1.9
+	cvs-200401291925:1.1.1.2
+	MIRBSD_7_ALPHA:1.1.1.2.0.4
+	MIRBSD_7:1.1.1.2.0.2
+	MIRBSD_7ter:1.1.1.2
+	cvs-20011091815:1.1.1.2
+	cvs-200309162130:1.1.1.2
+	cvs-200308302005:1.1.1.2
+	ctmx-0387:1.1.1.2
+	ctmx-0384:1.1.1.2
+	MIRBSD_5:1.1.1.2
+	ctmx-0375:1.1.1.2
+	ctmx-0373:1.1.1.2
+	ctm-0371:1.1.1.2
+	ctm-0370:1.1.1.2
+	MIRBSD_4:1.1.1.2
+	ctm-0363:1.1.1.2
+	ctm-0359:1.1.1.2
+	ctm-0349:1.1.1.1
+	openbsd:1.1.1;
+locks; strict;
+comment	@ * @;
+
+
+1.2
+date	2003.05.16.16.28.28;	author tg;	state dead;
+branches;
+next	1.1;
+
+1.1
+date	2003.03.22.20.01.06;	author tg;	state Exp;
+branches
+	1.1.1.1
+	1.1.9.1;
+next	;
+
+1.1.1.1
+date	2003.03.22.20.01.06;	author tg;	state Exp;
+branches;
+next	1.1.1.2;
+
+1.1.1.2
+date	2003.04.08.18.20.10;	author tg;	state Exp;
+branches;
+next	1.1.1.3;
+
+1.1.1.3
+date	2004.03.02.17.29.34;	author tg;	state Stab;
+branches;
+next	;
+
+1.1.9.1
+date	2004.02.14.19.04.56;	author tg;	state Exp;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.2
+log
+@remove a bunch of files not used in MirBSD - clean tree. People who want them got cvs.
+@
+text
+@
+/*
+ * Mesa 3-D graphics library
+ * Version:  3.4
+ *
+ * Copyright (C) 1999-2000  Brian Paul   All Rights Reserved.
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a
+ * copy of this software and associated documentation files (the "Software"),
+ * to deal in the Software without restriction, including without limitation
+ * the rights to use, copy, modify, merge, publish, distribute, sublicense,
+ * and/or sell copies of the Software, and to permit persons to whom the
+ * Software is furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included
+ * in all copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
+ * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL
+ * BRIAN PAUL BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN
+ * AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
+ * CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+ */
+
+
+/*
+ * Check CPU capabilities & initialize optimized funtions for this particular
+ * processor.
+ *
+ * Written by Holger Waechtler <holger@@akaflieg.extern.tu-berlin.de>
+ * Changed by Andre Werthmann <wertmann@@cs.uni-potsdam.de> for using the
+ * new Katmai functions.
+ */
+
+#include <stdlib.h>
+#include <stdio.h>
+#if defined(USE_KATMAI_ASM) && defined(__linux__)
+#include <signal.h>
+#endif
+
+#include "context.h"
+#include "common_x86_asm.h"
+
+
+int gl_x86_cpu_features = 0;
+
+/* No reason for this to be public.
+ */
+extern int gl_identify_x86_cpu_features( void );
+
+
+static void message( const char *msg )
+{
+   GLboolean debug;
+#ifdef DEBUG
+   debug = GL_TRUE;
+#else
+   if ( getenv( "MESA_DEBUG" ) ) {
+      debug = GL_TRUE;
+   } else {
+      debug = GL_FALSE;
+   }
+#endif
+   if ( debug ) {
+      fprintf( stderr, "%s", msg );
+   }
+}
+
+#if defined(USE_KATMAI_ASM)
+/*
+ * We must verify that the Streaming SIMD Extensions are truly supported
+ * on this processor before we go ahead and hook out the optimized code.
+ * Unfortunately, the CPUID bit isn't enough, as the OS must set the
+ * OSFXSR bit in CR4 if it supports the extended FPU save and restore
+ * required to use SSE.  Unfortunately, we can't just go ahead and read
+ * this register, as only the kernel can do that.  Similarly, we must
+ * verify that the OSXMMEXCPT bit in CR4 has been set by the OS,
+ * signifying that it supports unmasked SIMD FPU exceptions.  If we take
+ * an unmasked exception and the OS doesn't correctly support them, the
+ * best we'll get is a SIGILL and the worst we'll get is an infinite
+ * loop in the signal delivery from the kernel as we can't interact with
+ * the SIMD FPU state to clear the exception bits.  Either way, this is
+ * not good.
+ */
+
+extern void gl_test_os_katmai_support( void );
+extern void gl_test_os_katmai_exception_support( void );
+
+#if defined(__linux__) && defined(_POSIX_SOURCE) && defined(X86_FXSR_MAGIC)
+static void sigill_handler( int signal, struct sigcontext sc )
+{
+   message( "SIGILL, " );
+
+   /* Both the "xorps %%xmm0,%%xmm0" and "divps %xmm0,%%xmm1"
+    * instructions are 3 bytes long.  We must increment the instruction
+    * pointer manually to avoid repeated execution of the offending
+    * instruction.
+    *
+    * If the SIGILL is caused by a divide-by-zero when unmasked
+    * exceptions aren't supported, the SIMD FPU status and control
+    * word will be restored at the end of the test, so we don't need
+    * to worry about doing it here.  Besides, we may not be able to...
+    */
+   sc.eip += 3;
+
+   gl_x86_cpu_features &= ~(X86_FEATURE_XMM);
+}
+
+static void sigfpe_handler( int signal, struct sigcontext sc )
+{
+   message( "SIGFPE, " );
+
+   if ( sc.fpstate->magic != 0xffff ) {
+      /* Our signal context has the extended FPU state, so reset the
+       * divide-by-zero exception mask and clear the divide-by-zero
+       * exception bit.
+       */
+      sc.fpstate->mxcsr |= 0x00000200;
+      sc.fpstate->mxcsr &= 0xfffffffb;
+   } else {
+      /* If we ever get here, we're completely hosed.
+       */
+      message( "\n\n" );
+      gl_problem( NULL, "SSE enabling test failed badly!" );
+   }
+}
+#endif /* __linux__ && _POSIX_SOURCE && X86_FXSR_MAGIC */
+
+/* If we're running on a processor that can do SSE, let's see if we
+ * are allowed to or not.  This will catch 2.4.0 or later kernels that
+ * haven't been configured for a Pentium III but are running on one,
+ * and RedHat patched 2.2 kernels that have broken exception handling
+ * support for user space apps that do SSE.
+ *
+ * GH: Isn't this just awful?
+ */
+static void check_os_katmai_support( void )
+{
+#if defined(__linux__)
+#if defined(_POSIX_SOURCE) && defined(X86_FXSR_MAGIC)
+   struct sigaction saved_sigill;
+   struct sigaction saved_sigfpe;
+
+   /* Save the original signal handlers.
+    */
+   sigaction( SIGILL, NULL, &saved_sigill );
+   sigaction( SIGFPE, NULL, &saved_sigfpe );
+
+   signal( SIGILL, (void (*)(int))sigill_handler );
+   signal( SIGFPE, (void (*)(int))sigfpe_handler );
+
+   /* Emulate test for OSFXSR in CR4.  The OS will set this bit if it
+    * supports the extended FPU save and restore required for SSE.  If
+    * we execute an SSE instruction on a PIII and get a SIGILL, the OS
+    * doesn't support Streaming SIMD Exceptions, even if the processor
+    * does.
+    */
+   if ( cpu_has_xmm ) {
+      message( "Testing OS support for SSE... " );
+
+      gl_test_os_katmai_support();
+
+      if ( cpu_has_xmm ) {
+	 message( "yes.\n" );
+      } else {
+	 message( "no!\n" );
+      }
+   }
+
+   /* Emulate test for OSXMMEXCPT in CR4.  The OS will set this bit if
+    * it supports unmasked SIMD FPU exceptions.  If we unmask the
+    * exceptions, do a SIMD divide-by-zero and get a SIGILL, the OS
+    * doesn't support unmasked SIMD FPU exceptions.  If we get a SIGFPE
+    * as expected, we're okay but we need to clean up after it.
+    *
+    * Are we being too stringent in our requirement that the OS support
+    * unmasked exceptions?  Certain RedHat 2.2 kernels enable SSE by
+    * setting CR4.OSFXSR but don't support unmasked exceptions.  Win98
+    * doesn't even support them.  We at least know the user-space SSE
+    * support is good in kernels that do support unmasked exceptions,
+    * and therefore to be safe I'm going to leave this test in here.
+    */
+   if ( cpu_has_xmm ) {
+      message( "Testing OS support for SSE unmasked exceptions... " );
+
+      gl_test_os_katmai_exception_support();
+
+      if ( cpu_has_xmm ) {
+	 message( "yes.\n" );
+      } else {
+	 message( "no!\n" );
+      }
+   }
+
+   /* Restore the original signal handlers.
+    */
+   sigaction( SIGILL, &saved_sigill, NULL );
+   sigaction( SIGFPE, &saved_sigfpe, NULL );
+
+   /* If we've gotten to here and the XMM CPUID bit is still set, we're
+    * safe to go ahead and hook out the SSE code throughout Mesa.
+    */
+   if ( cpu_has_xmm ) {
+      message( "Tests of OS support for SSE passed.\n" );
+   } else {
+      message( "Tests of OS support for SSE failed!\n" );
+   }
+#else
+   /* We can't use POSIX signal handling to test the availability of
+    * SSE, so we disable it by default.
+    */
+   message( "Cannot test OS support for SSE, disabling to be safe.\n" );
+   gl_x86_cpu_features &= ~(X86_FEATURE_XMM);
+#endif /* _POSIX_SOURCE && X86_FXSR_MAGIC */
+#else
+   /* Do nothing on non-Linux platforms for now.
+    */
+   message( "Not testing OS support for SSE, leaving enabled.\n" );
+#endif /* __linux__ */
+}
+
+#endif /* USE_KATMAI_ASM */
+
+
+void gl_init_all_x86_transform_asm( void )
+{
+#ifdef USE_X86_ASM
+   gl_x86_cpu_features = gl_identify_x86_cpu_features();
+
+   if ( getenv( "MESA_NO_ASM" ) ) {
+      gl_x86_cpu_features = 0;
+   }
+
+   if ( gl_x86_cpu_features ) {
+      gl_init_x86_transform_asm();
+   }
+
+#ifdef USE_MMX_ASM
+   if ( cpu_has_mmx ) {
+      if ( getenv( "MESA_NO_MMX" ) == 0 ) {
+         message( "MMX cpu detected.\n" );
+      } else {
+         gl_x86_cpu_features &= ~(X86_FEATURE_MMX);
+      }
+   }
+#endif
+
+#ifdef USE_3DNOW_ASM
+   if ( cpu_has_3dnow ) {
+      if ( getenv( "MESA_NO_3DNOW" ) == 0 ) {
+         message( "3DNow! cpu detected.\n" );
+         gl_init_3dnow_transform_asm();
+      } else {
+         gl_x86_cpu_features &= ~(X86_FEATURE_3DNOW);
+      }
+   }
+#endif
+
+#ifdef USE_KATMAI_ASM
+   if ( cpu_has_xmm && getenv( "MESA_FORCE_KATMAI" ) == 0 ) {
+      check_os_katmai_support();
+   }
+   if ( cpu_has_xmm ) {
+      if ( getenv( "MESA_NO_KATMAI" ) == 0 ) {
+         message( "Katmai cpu detected.\n" );
+         gl_init_katmai_transform_asm();
+      } else {
+         gl_x86_cpu_features &= ~(X86_FEATURE_XMM);
+      }
+   }
+#endif
+#endif
+}
+
+/* Note: the above function must be called before this one, so that
+ * gl_x86_cpu_features gets correctly initialized.
+ */
+void gl_init_all_x86_shade_asm( void )
+{
+#ifdef USE_X86_ASM
+   if ( gl_x86_cpu_features ) {
+      /* Nothing here yet... */
+   }
+
+#ifdef USE_3DNOW_ASM
+   if ( cpu_has_3dnow && getenv( "MESA_NO_3DNOW" ) == 0 ) {
+      gl_init_3dnow_shade_asm();
+   }
+#endif
+#endif
+}
+
+void gl_init_all_x86_vertex_asm( void )
+{
+#ifdef USE_X86_ASM
+   if ( gl_x86_cpu_features ) {
+      gl_init_x86_vertex_asm();
+   }
+
+#ifdef USE_3DNOW_ASM
+   if ( cpu_has_3dnow && getenv( "MESA_NO_3DNOW" ) == 0 ) {
+      gl_init_3dnow_vertex_asm();
+   }
+#endif
+
+#ifdef USE_KATMAI_ASM
+   if ( cpu_has_xmm && getenv( "MESA_NO_KATMAI" ) == 0 ) {
+      gl_init_katmai_vertex_asm();
+   }
+#endif
+#endif
+}
+@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@@
+
+
+1.1.9.1
+log
+@OpenBSD just has imported exactly this tree into their vendor branch,
+called the same tag, in XF4/xc
+This is, apparently, the last XFree86 snapshot before the licence change
+(ie, addition of the advertising clause)
+
+Since the developers don't see any problems with that, and we would like
+to integrate improvements done by the remaining one or two (or so) XFree86
+developers (j/k), this prepares enabling us to update X-Window in the future.
+@
+text
+@d1 1
+a1 1
+/* $XFree86: xc/extras/Mesa/src/X86/common_x86.c,v 1.14 2003/10/22 15:44:42 tsi Exp $ */
+d4 1
+a4 1
+ * Version:  5.0
+d6 1
+a6 1
+ * Copyright (C) 1999-2002  Brian Paul   All Rights Reserved.
+d26 1
+d33 1
+a33 1
+ * new SSE functions.
+d38 1
+a38 1
+#if defined(USE_SSE_ASM) && defined(__linux__)
+a40 4
+#if defined(USE_SSE_ASM) && defined(__FreeBSD__)
+#include <sys/types.h>
+#include <sys/sysctl.h>
+#endif
+a43 1
+#include "imports.h"
+d46 1
+a46 1
+int _mesa_x86_cpu_features = 0;
+d50 1
+a50 1
+extern int _mesa_identify_x86_cpu_features( void );
+d70 1
+a70 1
+#if defined(USE_SSE_ASM)
+d87 2
+a88 2
+extern void _mesa_test_os_sse_support( void );
+extern void _mesa_test_os_sse_exception_support( void );
+d107 1
+a107 1
+   _mesa_x86_cpu_features &= ~(X86_FEATURE_XMM);
+d125 1
+a125 1
+      _mesa_problem( NULL, "SSE enabling test failed badly!" );
+d138 1
+a138 1
+static void check_os_sse_support( void )
+d162 1
+a162 1
+      _mesa_test_os_sse_support();
+d187 1
+a187 1
+      _mesa_test_os_sse_exception_support();
+d214 1
+a214 1
+   _mesa_x86_cpu_features &= ~(X86_FEATURE_XMM);
+a215 8
+#elif defined(__FreeBSD__)
+   {
+      int ret, len, enabled;
+      len = sizeof(enabled);
+      ret = sysctlbyname("hw.instruction_sse", &enabled, &len, NULL, 0);
+      if (ret || !enabled)
+         _mesa_x86_cpu_features &= ~(X86_FEATURE_XMM);
+   }
+d217 1
+a217 1
+   /* Do nothing on other platforms for now.
+d223 1
+a223 1
+#endif /* USE_SSE_ASM */
+d226 1
+a226 1
+void _mesa_init_all_x86_transform_asm( void )
+a227 1
+   (void) message; /* silence warning */
+d229 1
+a229 1
+   _mesa_x86_cpu_features = _mesa_identify_x86_cpu_features();
+d232 1
+a232 1
+      _mesa_x86_cpu_features = 0;
+d235 2
+a236 2
+   if ( _mesa_x86_cpu_features ) {
+      _mesa_init_x86_transform_asm();
+d244 1
+a244 1
+         _mesa_x86_cpu_features &= ~(X86_FEATURE_MMX);
+d253 1
+a253 1
+         _mesa_init_3dnow_transform_asm();
+d255 1
+a255 1
+         _mesa_x86_cpu_features &= ~(X86_FEATURE_3DNOW);
+d260 3
+a262 3
+#ifdef USE_SSE_ASM
+   if ( cpu_has_xmm && getenv( "MESA_FORCE_SSE" ) == 0 ) {
+      check_os_sse_support();
+d265 3
+a267 3
+      if ( getenv( "MESA_NO_SSE" ) == 0 ) {
+         message( "SSE cpu detected.\n" );
+         _mesa_init_sse_transform_asm();
+d269 1
+a269 1
+         _mesa_x86_cpu_features &= ~(X86_FEATURE_XMM);
+d276 38
+@
+
+
+1.1.1.1
+log
+@Import OpenBSD 3.3 XF4 repository from CTM 3132 the first time
+This finalizes starting an OpenBSD-mirabile (aka MirBSD) repository.
+
+### MirBSD is:
+# Copyright (c) 1982-2003 by Thorsten "mirabile" Glaser <x86@@ePost.de>
+# Copyright © 1968-2003  The authors of And contributors to UNIX®, the
+#       C Language, BSD/Berkeley Unix; 386BSD, NetBSD 1.1 and OpenBSD.
+#
+# Anyone who obtained a copy of this work is hereby permitted to freely use,
+# distribute, modify, merge, sublicence, give away or sell it as long as the
+# authors are given due credit and the following notice is retained:
+#
+# This work is provided "as is", with no explicit or implicit warranty what-
+# soever. Use it only at your own risk. In no event may an author or contri-
+# butor be held liable for any damage, directly or indirectly, that origina-
+# ted through or is caused by creation or modification of this work.
+
+MirBSD is my private tree. MirBSD does not differ very much from OpenBSD
+and intentionally tracks OpenBSD. That's why it _is_ OpenBSD, just not the
+official one. It's like with DarrenBSD.
+
+At time of this writing, no advertising for MirBSD must be done,
+because the advertising clause has not yet been sorted out.
+
+http://templeofhate.com/tglaser/MirBSD/index.php
+@
+text
+@@
+
+
+1.1.1.2
+log
+@The X-Windowing System
+
+Import XFree86 4.3 from OpenBSD by CTM, in the hope it's stable
+@
+text
+@d4 1
+a4 1
+ * Version:  3.5
+d6 1
+a6 1
+ * Copyright (C) 1999-2001  Brian Paul   All Rights Reserved.
+d26 1
+d33 1
+a33 1
+ * new SSE functions.
+d38 1
+a38 1
+#if defined(USE_SSE_ASM) && defined(__linux__)
+a40 4
+#if defined(USE_SSE_ASM) && defined(__FreeBSD__)
+#include <sys/types.h>
+#include <sys/sysctl.h>
+#endif
+d46 1
+a46 1
+int _mesa_x86_cpu_features = 0;
+d50 1
+a50 1
+extern int _mesa_identify_x86_cpu_features( void );
+d70 1
+a70 1
+#if defined(USE_SSE_ASM)
+d87 2
+a88 2
+extern void _mesa_test_os_sse_support( void );
+extern void _mesa_test_os_sse_exception_support( void );
+d107 1
+a107 1
+   _mesa_x86_cpu_features &= ~(X86_FEATURE_XMM);
+d125 1
+a125 1
+      _mesa_problem( NULL, "SSE enabling test failed badly!" );
+d138 1
+a138 1
+static void check_os_sse_support( void )
+d162 1
+a162 1
+      _mesa_test_os_sse_support();
+d187 1
+a187 1
+      _mesa_test_os_sse_exception_support();
+d214 1
+a214 1
+   _mesa_x86_cpu_features &= ~(X86_FEATURE_XMM);
+a215 8
+#elif defined(__FreeBSD__)
+   {
+      int ret, len, enabled;
+      len = sizeof(enabled);
+      ret = sysctlbyname("hw.instruction_sse", &enabled, &len, NULL, 0);
+      if (ret || !enabled)
+         _mesa_x86_cpu_features &= ~(X86_FEATURE_XMM);
+   }
+d217 1
+a217 1
+   /* Do nothing on other platforms for now.
+d223 1
+a223 1
+#endif /* USE_SSE_ASM */
+d226 1
+a226 1
+void _mesa_init_all_x86_transform_asm( void )
+d229 1
+a229 1
+   _mesa_x86_cpu_features = _mesa_identify_x86_cpu_features();
+d232 1
+a232 1
+      _mesa_x86_cpu_features = 0;
+d235 2
+a236 2
+   if ( _mesa_x86_cpu_features ) {
+      _mesa_init_x86_transform_asm();
+d244 1
+a244 1
+         _mesa_x86_cpu_features &= ~(X86_FEATURE_MMX);
+d253 1
+a253 1
+         _mesa_init_3dnow_transform_asm();
+d255 1
+a255 1
+         _mesa_x86_cpu_features &= ~(X86_FEATURE_3DNOW);
+d260 3
+a262 3
+#ifdef USE_SSE_ASM
+   if ( cpu_has_xmm && getenv( "MESA_FORCE_SSE" ) == 0 ) {
+      check_os_sse_support();
+d265 3
+a267 3
+      if ( getenv( "MESA_NO_SSE" ) == 0 ) {
+         message( "SSE cpu detected.\n" );
+         _mesa_init_sse_transform_asm();
+d269 1
+a269 1
+         _mesa_x86_cpu_features &= ~(X86_FEATURE_XMM);
+d277 1
+a277 1
+ * _mesa_x86_cpu_features gets correctly initialized.
+d279 16
+a294 1
+void _mesa_init_all_x86_vertex_asm( void )
+d297 2
+a298 2
+   if ( _mesa_x86_cpu_features ) {
+      _mesa_init_x86_vertex_asm();
+d303 1
+a303 1
+      _mesa_init_3dnow_vertex_asm();
+d307 3
+a309 3
+#ifdef USE_SSE_ASM
+   if ( cpu_has_xmm && getenv( "MESA_NO_SSE" ) == 0 ) {
+      _mesa_init_sse_vertex_asm();
+@
+
+
+1.1.1.3
+log
+@That's what OpenBSD will, probably, ship as XF4 in 3.5
+their last sync against XFree86 4.3-current has been
+imported into our vendor branch, too
+@
+text
+@d1 1
+a1 1
+/* $XFree86: xc/extras/Mesa/src/X86/common_x86.c,v 1.14 2003/10/22 15:44:42 tsi Exp $ */
+d4 1
+a4 1
+ * Version:  5.0
+d6 1
+a6 1
+ * Copyright (C) 1999-2002  Brian Paul   All Rights Reserved.
+a46 1
+#include "imports.h"
+a238 1
+   (void) message; /* silence warning */
+d287 23
+@
+
+

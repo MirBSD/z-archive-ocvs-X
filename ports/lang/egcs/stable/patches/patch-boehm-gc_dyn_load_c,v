@@ -1,0 +1,207 @@
+head	1.1;
+branch	1.1.1;
+access;
+symbols
+	cvs-200401261625:1.1.1.1
+	cvs-200401162142:1.1.1.1
+	cvs-200301141450:1.1.1.1
+	cvs-200312021610:1.1.1.1
+	cvs-200311151930:1.1.1.1
+	cvs-200310311830:1.1.1.1
+	cvs-200310021000:1.1.1.1
+	cvs-200309281111:1.1.1.1
+	cvs-200309171515:1.1.1.1
+	cvs-200308302005:1.1.1.1
+	cvs-200308221505:1.1.1.1
+	cvs-200308171200:1.1.1.1
+	ctm-3449:1.1.1.1
+	cvs-200307191610:1.1.1.1
+	ctm-3416:1.1.1.1
+	cvs-200307091500:1.1.1.1
+	ctm-3389:1.1.1.1
+	cvs-200306291800:1.1.1.1
+	ctm-3369:1.1.1.1
+	ctm-3341:1.1.1.1
+	MIRBSD_5:1.1.1.1
+	cvs-200306082100:1.1.1.1
+	ctm-3316:1.1.1.1
+	ctm-3272:1.1.1.1
+	ctm-3264:1.1.1.1
+	ctm-3258:1.1.1.1
+	MIRBSD_4:1.1.1.1
+	ctm-3200:1.1.1.1
+	ctm-3188:1.1.1.1
+	ctm-3155:1.1.1.1
+	ctm-3132:1.1.1.1
+	openbsd:1.1.1;
+locks; strict;
+comment	@# @;
+
+
+1.1
+date	2003.03.22.19.51.36;	author tg;	state Exp;
+branches
+	1.1.1.1;
+next	;
+
+1.1.1.1
+date	2003.03.22.19.51.36;	author tg;	state Stab;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@$OpenBSD: patch-boehm-gc_dyn_load_c,v 1.1 2002/06/09 00:35:38 espie Exp $
+--- boehm-gc/dyn_load.c.orig	Mon Jun  3 21:27:26 2002
++++ boehm-gc/dyn_load.c	Mon Jun  3 21:37:23 2002
+@@@@ -57,7 +57,9 @@@@
+     !defined(HPUX) && !(defined(LINUX) && defined(__ELF__)) && \
+     !defined(RS6000) && !defined(SCO_ELF) && \
+     !(defined(FREEBSD) && defined(__ELF__)) && \
+-    !(defined(NETBSD) && defined(__ELF__)) && !defined(HURD)
++    !(defined(NETBSD) && defined(__ELF__)) && \
++    !(defined(OPENBSD)) && \
++    !defined(HURD)
+  --> We only know how to find data segments of dynamic libraries for the
+  --> above.  Additional SVR4 variants might not be too
+  --> hard to add.
+@@@@ -81,7 +83,9 @@@@
+ 
+ #if defined(LINUX) && defined(__ELF__) || defined(SCO_ELF) || \
+     (defined(FREEBSD) && defined(__ELF__)) || \
+-    (defined(NETBSD) && defined(__ELF__)) || defined(HURD)
++    (defined(NETBSD) && defined(__ELF__)) || \
++    (defined(OPENBSD) && defined(__ELF__) || \
++    defined(HURD)
+ #   include <stddef.h>
+ #   include <elf.h>
+ #   include <link.h>
+@@@@ -263,9 +267,86 @@@@ void GC_register_dynamic_libraries()
+ # endif /* !USE_PROC ... */
+ # endif /* SUNOS */
+ 
++#if defined(OPENBSD) && !defined(__ELF__)
++
++#include <link.h>
++
++#ifdef LINT
++    struct _dynamic _DYNAMIC;
++#endif
++
++static struct so_map *
++GC_FirstDLOpenedLinkMap()
++{
++    extern struct _dynamic _DYNAMIC;
++
++    if( &_DYNAMIC == 0) {
++        return(0);
++    }
++    return(_DYNAMIC.d_un.d_dst->sdt_loaded);
++}
++
++
++#if 0
++/* Return the address of the ld.so allocated common symbol	*/
++/* with the least address, or 0 if none.			*/
++static ptr_t GC_first_common()
++{
++    ptr_t result = 0;
++    extern struct _dynamic _DYNAMIC;
++    struct rtc_symb * curr_symbol;
++    
++    if( &_DYNAMIC == 0) {
++        return(0);
++    }
++    curr_symbol = _DYNAMIC.ldd -> ldd_cp;
++    for (; curr_symbol != 0; curr_symbol = curr_symbol -> rtc_next) {
++        if (result == 0
++            || (ptr_t)(curr_symbol -> rtc_sp -> n_value) < result) {
++            result = (ptr_t)(curr_symbol -> rtc_sp -> n_value);
++        }
++    }
++    return(result);
++}
++#endif
++
++void GC_register_dynamic_libraries()
++{
++  struct so_map *lm = GC_FirstDLOpenedLinkMap();
++  
++
++  for (lm = GC_FirstDLOpenedLinkMap();
++       lm != (struct so_map *) 0;  lm = lm->som_next)
++    {
++	struct exec *e;
++	 
++        e = (struct exec *) lm->som_addr;
++        GC_add_roots_inner(
++      		    ((char *) (N_DATOFF(*e) + lm->som_addr)),
++		    ((char *) (N_BSSADDR(*e) + e->a_bss + lm->lm_addr)),
++		    TRUE);
++    }
++#if 0
++      {
++      	static ptr_t common_start = 0;
++      	ptr_t common_end;
++      	extern ptr_t GC_find_limit();
++      	
++      	if (common_start == 0) common_start = GC_first_common();
++      	if (common_start != 0) {
++      	    common_end = GC_find_limit(common_start, TRUE);
++      	    GC_add_roots_inner((char *)common_start, (char *)common_end, TRUE);
++      	}
++      }
++#endif
++}
++#endif
++
+ #if defined(LINUX) && defined(__ELF__) || defined(SCO_ELF) || \
+     (defined(FREEBSD) && defined(__ELF__)) || \
+-    (defined(NETBSD) && defined(__ELF__)) || defined(HURD)
++    (defined(NETBSD) && defined(__ELF__)) || \
++    (defined(OPENBSD) && defined(__ELF__)) || \
++    defined(HURD)
+ 
+ 
+ #ifdef USE_PROC_FOR_LIBRARIES
+@
+
+
+1.1.1.1
+log
+@Import OpenBSD 3.3 ports repository from CTM 3132 the first time
+This continues opening an OpenBSD-mirabile (aka MirBSD) repository.
+
+### MirBSD is:
+# Copyright (c) 1982-2003 by Thorsten "mirabile" Glaser <x86@@ePost.de>
+# Copyright © 1968-2003  The authors of And contributors to UNIX®, the
+#       C Language, BSD/Berkeley Unix; 386BSD, NetBSD 1.1 and OpenBSD.
+#
+# Anyone who obtained a copy of this work is hereby permitted to freely use,
+# distribute, modify, merge, sublicence, give away or sell it as long as the
+# authors are given due credit and the following notice is retained:
+#
+# This work is provided "as is", with no explicit or implicit warranty what-
+# soever. Use it only at your own risk. In no event may an author or contri-
+# butor be held liable for any damage, directly or indirectly, that origina-
+# ted through or is caused by creation or modification of this work.
+
+MirBSD is my private tree. MirBSD does not differ very much from OpenBSD
+and intentionally tracks OpenBSD. That's why it _is_ OpenBSD, just not the
+official one. It's like with DarrenBSD.
+
+At time of this writing, no advertising for MirBSD must be done,
+because the advertising clause has not yet been sorted out.
+
+http://templeofhate.com/tglaser/MirBSD/index.php
+@
+text
+@@

@@ -1,0 +1,849 @@
+head	1.1;
+branch	1.1.1;
+access;
+symbols
+	tg-mergetmp-2:1.1.1.3
+	cvs-200410241530:1.1.1.3
+	cvs-200410012000:1.1.1.3
+	cvs-200407221130:1.1.1.3
+	cvs-200407141120:1.1.1.3
+	cvs-200406231010:1.1.1.3
+	MIRBSD_7quater:1.1.1.2
+	cvs-200405271510:1.1.1.3
+	XFree86_4_4_0:1.1.9.1
+	cvs-200403021700:1.1.1.3
+	XFREE86_20040213:1.1.9.1
+	xc:1.1.9
+	cvs-200401291925:1.1.1.2
+	MIRBSD_7_ALPHA:1.1.1.2.0.4
+	MIRBSD_7:1.1.1.2.0.2
+	cvs-200311162121:1.1.1.2
+	MIRBSD_7ter:1.1.1.2
+	cvs-20011091815:1.1.1.2
+	cvs-200309162130:1.1.1.2
+	cvs-200308302005:1.1.1.2
+	ctmx-0387:1.1.1.2
+	ctmx-0384:1.1.1.2
+	MIRBSD_5:1.1.1.2
+	ctmx-0375:1.1.1.2
+	ctmx-0373:1.1.1.2
+	ctm-0371:1.1.1.2
+	ctm-0370:1.1.1.2
+	MIRBSD_4:1.1.1.2
+	ctm-0363:1.1.1.2
+	ctm-0359:1.1.1.2
+	ctm-0349:1.1.1.1
+	openbsd:1.1.1;
+locks; strict;
+comment	@ * @;
+
+
+1.1
+date	2003.03.22.20.07.20;	author tg;	state Exp;
+branches
+	1.1.1.1
+	1.1.9.1;
+next	;
+
+1.1.1.1
+date	2003.03.22.20.07.20;	author tg;	state Exp;
+branches;
+next	1.1.1.2;
+
+1.1.1.2
+date	2003.04.08.18.36.30;	author tg;	state Exp;
+branches;
+next	1.1.1.3;
+
+1.1.1.3
+date	2004.03.02.18.18.32;	author tg;	state Stab;
+branches;
+next	;
+
+1.1.9.1
+date	2004.02.14.19.23.34;	author tg;	state Exp;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@/* $XConsortium: nv_driver.c /main/3 1996/10/28 05:13:37 kaleb $ */
+/*
+ * Copyright 1996-1997  David J. McKay
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a
+ * copy of this software and associated documentation files (the "Software"),
+ * to deal in the Software without restriction, including without limitation
+ * the rights to use, copy, modify, merge, publish, distribute, sublicense,
+ * and/or sell copies of the Software, and to permit persons to whom the
+ * Software is furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in
+ * all copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL
+ * DAVID J. MCKAY BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY,
+ * WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF
+ * OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+ * SOFTWARE.
+ */
+
+/* Rewritten with reference from mga driver and 3.3.4 NVIDIA driver by
+   Jarno Paananen <jpaana@@s2.org> */
+
+/* $XFree86: xc/programs/Xserver/hw/xfree86/drivers/nv/nv_cursor.c,v 1.5 2001/12/17 22:17:55 mvojkovi Exp $ */
+
+#include "nv_include.h"
+
+#include "nvreg.h"
+#include "nvvga.h"
+
+/****************************************************************************\
+*                                                                            *
+*                        XAA HW Cursor Entrypoints                           *
+*                                                                            *
+\****************************************************************************/
+/*
+ * RIVA supports full colour cursors as X1R5G5B5.  Upper bit is the XOR
+ * bit.  All 0's equals transparency.
+ */
+#define TRANSPARENT_PIXEL   0
+#define ConvertToRGB555(c) \
+(((c & 0xf80000) >> 9 ) | ((c & 0xf800) >> 6 ) | ((c & 0xf8) >> 3 ) | 0x8000)
+
+static void ConvertCursor(NVPtr pNv, unsigned int* src, unsigned short *dst)
+{
+    int i, j, b, m;
+    
+    for ( i = 0; i < MAX_CURS; i++ )
+    {
+        b = *src++;
+        m = *src++;
+        for ( j = 0; j < MAX_CURS; j++ )
+        {
+#if X_BYTE_ORDER == X_BIG_ENDIAN
+            if ( m & 0x80000000)
+                *dst = ( b & 0x80000000) ? pNv->curFg : pNv->curBg;
+            else
+                *dst = TRANSPARENT_PIXEL;
+            b <<= 1;
+            m <<= 1;
+#else
+            if ( m & 1 )
+                *dst = ( b & 1) ? pNv->curFg : pNv->curBg;
+            else
+                *dst = TRANSPARENT_PIXEL;
+            b >>= 1;
+            m >>= 1;
+#endif
+            dst++;
+        }
+    }
+}
+
+static void
+LoadCursor(ScrnInfoPtr pScrn, unsigned short *tmp)
+{
+    int         *image, i, numInts;
+    NVPtr pNv = NVPTR(pScrn);
+    
+    numInts = (MAX_CURS*MAX_CURS*2) / sizeof(int);
+    image   = (int *)tmp;
+    for (i = 0; i < numInts; i++)
+        pNv->riva.CURSOR[i] = image[i];
+}
+
+static void
+NVLoadCursorImage( ScrnInfoPtr pScrn, unsigned char *src )
+{
+    NVPtr pNv = NVPTR(pScrn);
+    unsigned short      tmp[MAX_CURS*MAX_CURS];
+
+    /* Copy image for color changes */
+    memcpy(pNv->curImage, src, MAX_CURS*2*4);
+
+    ConvertCursor(pNv, (unsigned int*)src, tmp);
+    LoadCursor(pScrn, tmp);
+}
+
+
+/*
+ * This function should display a new cursor at a new position.
+ */
+static void
+NVSetCursorPosition(ScrnInfoPtr pScrn, int x, int y)
+{
+    NVPtr pNv = NVPTR(pScrn);
+
+    pNv->riva.ShowHideCursor(&pNv->riva, 0);
+    *(pNv->riva.CURSORPOS) = (x & 0xFFFF) | (y << 16);
+    pNv->riva.ShowHideCursor(&pNv->riva, 1);
+}
+
+static void
+NVSetCursorColors(ScrnInfoPtr pScrn, int bg, int fg)
+{
+    NVPtr pNv = NVPTR(pScrn);
+    unsigned short fore, back;
+
+    fore = ConvertToRGB555(fg);
+    back = ConvertToRGB555(bg);
+
+#if X_BYTE_ORDER == X_BIG_ENDIAN
+    fore = (fore << 8) | (fore >> 8);
+    back = (back << 8) | (back >> 8);
+#endif
+
+    if (pNv->curFg != fore || pNv->curBg != back) {
+        unsigned short      tmp[MAX_CURS*MAX_CURS];
+        
+        pNv->curFg = fore;
+        pNv->curBg = back;
+            
+        ConvertCursor(pNv, pNv->curImage, tmp);
+        LoadCursor(pScrn, tmp);
+    }
+}
+
+
+static void 
+NVShowCursor(ScrnInfoPtr pScrn)
+{
+    NVPtr pNv = NVPTR(pScrn);
+    /* Enable cursor - X-Windows mode */
+    pNv->riva.ShowHideCursor(&pNv->riva, 1);
+}
+
+static void
+NVHideCursor(ScrnInfoPtr pScrn)
+{
+    NVPtr pNv = NVPTR(pScrn);
+    /* Disable cursor */
+    pNv->riva.ShowHideCursor(&pNv->riva, 0);
+}
+
+static Bool 
+NVUseHWCursor(ScreenPtr pScreen, CursorPtr pCurs)
+{
+    return TRUE;
+}
+
+Bool 
+NVCursorInit(ScreenPtr pScreen)
+{
+    ScrnInfoPtr pScrn = xf86Screens[pScreen->myNum];
+    NVPtr pNv = NVPTR(pScrn);
+    xf86CursorInfoPtr infoPtr;
+
+    DEBUG(xf86DrvMsg(pScrn->scrnIndex, X_INFO, "NVCursorInit\n"));
+
+    infoPtr = xf86CreateCursorInfoRec();
+    if(!infoPtr) return FALSE;
+    
+    pNv->CursorInfoRec = infoPtr;
+
+    infoPtr->MaxWidth = MAX_CURS;
+    infoPtr->MaxHeight = MAX_CURS;
+    infoPtr->Flags = HARDWARE_CURSOR_TRUECOLOR_AT_8BPP |
+                     HARDWARE_CURSOR_SOURCE_MASK_INTERLEAVE_32; 
+    infoPtr->SetCursorColors = NVSetCursorColors;
+    infoPtr->SetCursorPosition = NVSetCursorPosition;
+    infoPtr->LoadCursorImage = NVLoadCursorImage;
+    infoPtr->HideCursor = NVHideCursor;
+    infoPtr->ShowCursor = NVShowCursor;
+    infoPtr->UseHWCursor = NVUseHWCursor;
+
+    return(xf86InitCursor(pScreen, infoPtr));
+}
+@
+
+
+1.1.9.1
+log
+@OpenBSD just has imported exactly this tree into their vendor branch,
+called the same tag, in XF4/xc
+This is, apparently, the last XFree86 snapshot before the licence change
+(ie, addition of the advertising clause)
+
+Since the developers don't see any problems with that, and we would like
+to integrate improvements done by the remaining one or two (or so) XFree86
+developers (j/k), this prepares enabling us to update X-Window in the future.
+@
+text
+@d1 22
+a22 38
+ /***************************************************************************\
+|*                                                                           *|
+|*       Copyright 2003 NVIDIA, Corporation.  All rights reserved.           *|
+|*                                                                           *|
+|*     NOTICE TO USER:   The source code  is copyrighted under  U.S. and     *|
+|*     international laws.  Users and possessors of this source code are     *|
+|*     hereby granted a nonexclusive,  royalty-free copyright license to     *|
+|*     use this code in individual and commercial software.                  *|
+|*                                                                           *|
+|*     Any use of this source code must include,  in the user documenta-     *|
+|*     tion and  internal comments to the code,  notices to the end user     *|
+|*     as follows:                                                           *|
+|*                                                                           *|
+|*       Copyright 2003 NVIDIA, Corporation.  All rights reserved.           *|
+|*                                                                           *|
+|*     NVIDIA, CORPORATION MAKES NO REPRESENTATION ABOUT THE SUITABILITY     *|
+|*     OF  THIS SOURCE  CODE  FOR ANY PURPOSE.  IT IS  PROVIDED  "AS IS"     *|
+|*     WITHOUT EXPRESS OR IMPLIED WARRANTY OF ANY KIND.  NVIDIA, CORPOR-     *|
+|*     ATION DISCLAIMS ALL WARRANTIES  WITH REGARD  TO THIS SOURCE CODE,     *|
+|*     INCLUDING ALL IMPLIED WARRANTIES OF MERCHANTABILITY, NONINFRINGE-     *|
+|*     MENT,  AND FITNESS  FOR A PARTICULAR PURPOSE.   IN NO EVENT SHALL     *|
+|*     NVIDIA, CORPORATION  BE LIABLE FOR ANY SPECIAL,  INDIRECT,  INCI-     *|
+|*     DENTAL, OR CONSEQUENTIAL DAMAGES,  OR ANY DAMAGES  WHATSOEVER RE-     *|
+|*     SULTING FROM LOSS OF USE,  DATA OR PROFITS,  WHETHER IN AN ACTION     *|
+|*     OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION,  ARISING OUT OF     *|
+|*     OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOURCE CODE.     *|
+|*                                                                           *|
+|*     U.S. Government  End  Users.   This source code  is a "commercial     *|
+|*     item,"  as that  term is  defined at  48 C.F.R. 2.101 (OCT 1995),     *|
+|*     consisting  of "commercial  computer  software"  and  "commercial     *|
+|*     computer  software  documentation,"  as such  terms  are  used in     *|
+|*     48 C.F.R. 12.212 (SEPT 1995)  and is provided to the U.S. Govern-     *|
+|*     ment only as  a commercial end item.   Consistent with  48 C.F.R.     *|
+|*     12.212 and  48 C.F.R. 227.7202-1 through  227.7202-4 (JUNE 1995),     *|
+|*     all U.S. Government End Users  acquire the source code  with only     *|
+|*     those rights set forth herein.                                        *|
+|*                                                                           *|
+ \***************************************************************************/
+d24 4
+a27 1
+/* $XFree86: xc/programs/Xserver/hw/xfree86/drivers/nv/nv_cursor.c,v 1.12 2003/07/31 20:24:29 mvojkovi Exp $ */
+d31 2
+a32 1
+#include "cursorstr.h"
+d36 1
+a36 1
+*                          HW Cursor Entrypoints                             *
+d39 4
+a42 1
+
+a43 1
+
+d47 1
+a47 10
+#define ConvertToRGB888(c) (c | 0xff000000)
+
+#define BYTE_SWAP_32(c)  ((c & 0xff000000) >> 24) |  \
+                         ((c & 0xff0000) >> 8) |     \
+                         ((c & 0xff00) << 8) |       \
+                         ((c & 0xff) << 24)
+
+
+static void 
+ConvertCursor1555(NVPtr pNv, CARD32 *src, CARD16 *dst)
+d49 1
+a49 2
+    CARD32 b, m;
+    int i, j;
+d51 2
+a52 1
+    for ( i = 0; i < 32; i++ ) {
+d55 2
+a56 1
+        for ( j = 0; j < 32; j++ ) {
+a76 1
+
+d78 1
+a78 1
+ConvertCursor8888(NVPtr pNv, CARD32 *src, CARD32 *dst)
+d80 7
+a86 49
+    CARD32 b, m;
+    int i, j;
+   
+    for ( i = 0; i < 128; i++ ) {
+        b = *src++;
+        m = *src++;
+        for ( j = 0; j < 32; j++ ) {
+#if X_BYTE_ORDER == X_BIG_ENDIAN
+            if ( m & 0x80000000)
+                *dst = ( b & 0x80000000) ? pNv->curFg : pNv->curBg;
+            else
+                *dst = TRANSPARENT_PIXEL;
+            b <<= 1;
+            m <<= 1;
+#else
+            if ( m & 1 )
+                *dst = ( b & 1) ? pNv->curFg : pNv->curBg;
+            else
+                *dst = TRANSPARENT_PIXEL;
+            b >>= 1;
+            m >>= 1;
+#endif
+            dst++;
+        }
+    }
+}
+
+
+static void
+TransformCursor (NVPtr pNv)
+{
+    CARD32 *tmp;
+    int i, dwords;
+
+    /* convert to color cursor */
+    if(pNv->alphaCursor) {
+       dwords = 64 * 64;
+       if(!(tmp = ALLOCATE_LOCAL(dwords * 4))) return;
+       ConvertCursor8888(pNv, pNv->curImage, tmp);
+    } else {
+       dwords = (32 * 32) >> 1;
+       if(!(tmp = ALLOCATE_LOCAL(dwords * 4))) return;
+       ConvertCursor1555(pNv, pNv->curImage, (CARD16*)tmp);
+    }
+
+    for(i = 0; i < dwords; i++)
+        pNv->CURSOR[i] = tmp[i];
+
+    DEALLOCATE_LOCAL(tmp);
+d93 1
+d95 2
+a96 2
+    /* save copy of image for color changes */
+    memcpy(pNv->curImage, src, (pNv->alphaCursor) ? 1024 : 256);
+d98 2
+a99 1
+    TransformCursor(pNv);
+d102 4
+d111 3
+a113 1
+    pNv->PRAMDAC[0x0000300/4] = (x & 0xFFFF) | (y << 16);
+d120 4
+a123 1
+    CARD32 fore, back;
+a124 12
+    if(pNv->alphaCursor) {
+        fore = ConvertToRGB888(fg);
+        back = ConvertToRGB888(bg);
+#if X_BYTE_ORDER == X_BIG_ENDIAN
+        if((pNv->Chipset & 0x0ff0) == 0x0110) {
+           fore = BYTE_SWAP_32(fore);
+           back = BYTE_SWAP_32(back);
+        }
+#endif
+    } else {
+        fore = ConvertToRGB555(fg);
+        back = ConvertToRGB555(bg);
+d126 2
+a127 4
+        if((pNv->Chipset & 0x0ff0) == 0x0110) {
+           fore = ((fore & 0xff) << 8) | (fore >> 8);
+           back = ((back & 0xff) << 8) | (back >> 8);
+        }
+a128 1
+   }
+d130 3
+a132 1
+    if ((pNv->curFg != fore) || (pNv->curBg != back)) {
+d136 2
+a137 1
+        TransformCursor(pNv);
+d147 1
+a147 1
+    NVShowHideCursor(pNv, 1);
+d155 1
+a155 1
+    NVShowHideCursor(pNv, 0);
+a163 49
+#ifdef ARGB_CURSOR
+static Bool 
+NVUseHWCursorARGB(ScreenPtr pScreen, CursorPtr pCurs)
+{
+    if((pCurs->bits->width <= 64) && (pCurs->bits->height <= 64))
+        return TRUE;
+
+    return FALSE;
+}
+
+static void
+NVLoadCursorARGB(ScrnInfoPtr pScrn, CursorPtr pCurs)
+{
+    NVPtr pNv = NVPTR(pScrn);
+    CARD32 *image = pCurs->bits->argb;
+    CARD32 *dst = (CARD32*)pNv->CURSOR;
+    int x, y, w, h;
+
+    w = pCurs->bits->width;
+    h = pCurs->bits->height;
+
+#if X_BYTE_ORDER == X_BIG_ENDIAN
+    if((pNv->Chipset & 0x0ff0) == 0x0110) {
+       CARD32 tmp;
+
+       for(y = 0; y < h; y++) {
+          for(x = 0; x < w; x++) {
+              tmp = *image++;
+              *dst++ = BYTE_SWAP_32(tmp);
+          }
+          for(; x < 64; x++)
+              *dst++ = 0;
+       }
+    } else 
+#endif
+    {
+       for(y = 0; y < h; y++) {
+          for(x = 0; x < w; x++) 
+              *dst++ = *image++;
+          for(; x < 64; x++)
+              *dst++ = 0;
+       }
+    }
+
+    if(y < 64)
+      memset(dst, 0, 64 * (64 - y) * 4);
+}
+#endif
+
+d171 2
+d178 2
+a179 5
+    if(pNv->alphaCursor)
+       infoPtr->MaxWidth = infoPtr->MaxHeight = 64;
+    else
+       infoPtr->MaxWidth = infoPtr->MaxHeight = 32;
+
+a187 9
+
+#ifdef ARGB_CURSOR
+    if(pNv->alphaCursor &&
+       (((pNv->Chipset & 0x0ff0) != 0x0110) || !pNv->FPDither))
+    {
+       infoPtr->UseHWCursorARGB = NVUseHWCursorARGB;
+       infoPtr->LoadCursorARGB = NVLoadCursorARGB;
+    }
+#endif
+@
+
+
+1.1.1.1
+log
+@Import OpenBSD 3.3 XF4 repository from CTM 3132 the first time
+This finalizes starting an OpenBSD-mirabile (aka MirBSD) repository.
+
+### MirBSD is:
+# Copyright (c) 1982-2003 by Thorsten "mirabile" Glaser <x86@@ePost.de>
+# Copyright © 1968-2003  The authors of And contributors to UNIX®, the
+#       C Language, BSD/Berkeley Unix; 386BSD, NetBSD 1.1 and OpenBSD.
+#
+# Anyone who obtained a copy of this work is hereby permitted to freely use,
+# distribute, modify, merge, sublicence, give away or sell it as long as the
+# authors are given due credit and the following notice is retained:
+#
+# This work is provided "as is", with no explicit or implicit warranty what-
+# soever. Use it only at your own risk. In no event may an author or contri-
+# butor be held liable for any damage, directly or indirectly, that origina-
+# ted through or is caused by creation or modification of this work.
+
+MirBSD is my private tree. MirBSD does not differ very much from OpenBSD
+and intentionally tracks OpenBSD. That's why it _is_ OpenBSD, just not the
+official one. It's like with DarrenBSD.
+
+At time of this writing, no advertising for MirBSD must be done,
+because the advertising clause has not yet been sorted out.
+
+http://templeofhate.com/tglaser/MirBSD/index.php
+@
+text
+@@
+
+
+1.1.1.2
+log
+@The X-Windowing System
+
+Import XFree86 4.3 from OpenBSD by CTM, in the hope it's stable
+@
+text
+@d27 1
+a27 1
+/* $XFree86: xc/programs/Xserver/hw/xfree86/drivers/nv/nv_cursor.c,v 1.11 2002/11/26 23:41:58 mvojkovi Exp $ */
+d31 2
+a32 1
+#include "cursorstr.h"
+d36 1
+a36 1
+*                          HW Cursor Entrypoints                             *
+d39 4
+a42 1
+
+a43 1
+
+d47 1
+a47 10
+#define ConvertToRGB888(c) (c | 0xff000000)
+
+#define BYTE_SWAP_32(c)  ((c & 0xff000000) >> 24) |  \
+                         ((c & 0xff0000) >> 8) |     \
+                         ((c & 0xff00) << 8) |       \
+                         ((c & 0xff) << 24)
+
+
+static void 
+ConvertCursor1555(NVPtr pNv, CARD32 *src, CARD16 *dst)
+d49 1
+a49 2
+    CARD32 b, m;
+    int i, j;
+d51 2
+a52 1
+    for ( i = 0; i < 32; i++ ) {
+d55 2
+a56 1
+        for ( j = 0; j < 32; j++ ) {
+a76 1
+
+d78 1
+a78 1
+ConvertCursor8888(NVPtr pNv, CARD32 *src, CARD32 *dst)
+d80 7
+a86 49
+    CARD32 b, m;
+    int i, j;
+   
+    for ( i = 0; i < 128; i++ ) {
+        b = *src++;
+        m = *src++;
+        for ( j = 0; j < 32; j++ ) {
+#if X_BYTE_ORDER == X_BIG_ENDIAN
+            if ( m & 0x80000000)
+                *dst = ( b & 0x80000000) ? pNv->curFg : pNv->curBg;
+            else
+                *dst = TRANSPARENT_PIXEL;
+            b <<= 1;
+            m <<= 1;
+#else
+            if ( m & 1 )
+                *dst = ( b & 1) ? pNv->curFg : pNv->curBg;
+            else
+                *dst = TRANSPARENT_PIXEL;
+            b >>= 1;
+            m >>= 1;
+#endif
+            dst++;
+        }
+    }
+}
+
+
+static void
+TransformCursor (NVPtr pNv)
+{
+    CARD32 *tmp;
+    int i, dwords;
+
+    /* convert to color cursor */
+    if(pNv->alphaCursor) {
+       dwords = 64 * 64;
+       if(!(tmp = ALLOCATE_LOCAL(dwords * 4))) return;
+       ConvertCursor8888(pNv, pNv->curImage, tmp);
+    } else {
+       dwords = (32 * 32) >> 1;
+       if(!(tmp = ALLOCATE_LOCAL(dwords * 4))) return;
+       ConvertCursor1555(pNv, pNv->curImage, (CARD16*)tmp);
+    }
+
+    for(i = 0; i < dwords; i++)
+        pNv->riva.CURSOR[i] = tmp[i];
+
+    DEALLOCATE_LOCAL(tmp);
+d93 1
+d95 2
+a96 2
+    /* save copy of image for color changes */
+    memcpy(pNv->curImage, src, (pNv->alphaCursor) ? 1024 : 256);
+d98 2
+a99 1
+    TransformCursor(pNv);
+d102 4
+d111 3
+a113 1
+    pNv->riva.PRAMDAC[0x0000300/4] = (x & 0xFFFF) | (y << 16);
+d120 4
+a123 1
+    CARD32 fore, back;
+a124 12
+    if(pNv->alphaCursor) {
+        fore = ConvertToRGB888(fg);
+        back = ConvertToRGB888(bg);
+#if X_BYTE_ORDER == X_BIG_ENDIAN
+        if((pNv->Chipset & 0x0ff0) == 0x0110) {
+           fore = BYTE_SWAP_32(fore);
+           back = BYTE_SWAP_32(back);
+        }
+#endif
+    } else {
+        fore = ConvertToRGB555(fg);
+        back = ConvertToRGB555(bg);
+d126 2
+a127 4
+        if((pNv->Chipset & 0x0ff0) == 0x0110) {
+           fore = ((fore & 0xff) << 8) | (fore >> 8);
+           back = ((back & 0xff) << 8) | (back >> 8);
+        }
+a128 1
+   }
+d130 3
+a132 1
+    if ((pNv->curFg != fore) || (pNv->curBg != back)) {
+d136 2
+a137 1
+        TransformCursor(pNv);
+a163 49
+#ifdef ARGB_CURSOR
+static Bool 
+NVUseHWCursorARGB(ScreenPtr pScreen, CursorPtr pCurs)
+{
+    if((pCurs->bits->width <= 64) && (pCurs->bits->height <= 64))
+        return TRUE;
+
+    return FALSE;
+}
+
+static void
+NVLoadCursorARGB(ScrnInfoPtr pScrn, CursorPtr pCurs)
+{
+    NVPtr pNv = NVPTR(pScrn);
+    CARD32 *image = pCurs->bits->argb;
+    CARD32 *dst = (CARD32*)pNv->riva.CURSOR;
+    int x, y, w, h;
+
+    w = pCurs->bits->width;
+    h = pCurs->bits->height;
+
+#if X_BYTE_ORDER == X_BIG_ENDIAN
+    if((pNv->Chipset & 0x0ff0) == 0x0110) {
+       CARD32 tmp;
+
+       for(y = 0; y < h; y++) {
+          for(x = 0; x < w; x++) {
+              tmp = *image++;
+              *dst++ = BYTE_SWAP_32(tmp);
+          }
+          for(; x < 64; x++)
+              *dst++ = 0;
+       }
+    } else 
+#endif
+    {
+       for(y = 0; y < h; y++) {
+          for(x = 0; x < w; x++) 
+              *dst++ = *image++;
+          for(; x < 64; x++)
+              *dst++ = 0;
+       }
+    }
+
+    if(y < 64)
+      memset(dst, 0, 64 * (64 - y) * 4);
+}
+#endif
+
+d178 2
+a179 5
+    if(pNv->alphaCursor)
+       infoPtr->MaxWidth = infoPtr->MaxHeight = 64;
+    else
+       infoPtr->MaxWidth = infoPtr->MaxHeight = 32;
+
+a187 10
+
+#ifdef ARGB_CURSOR
+    if(pNv->alphaCursor &&
+       (((pNv->Chipset & 0x0ff0) != 0x0110) ||
+        !(pNv->riva.flatPanel & FP_DITHER)))
+    {
+       infoPtr->UseHWCursorARGB = NVUseHWCursorARGB;
+       infoPtr->LoadCursorARGB = NVLoadCursorARGB;
+    }
+#endif
+@
+
+
+1.1.1.3
+log
+@That's what OpenBSD will, probably, ship as XF4 in 3.5
+their last sync against XFree86 4.3-current has been
+imported into our vendor branch, too
+@
+text
+@d1 22
+a22 38
+ /***************************************************************************\
+|*                                                                           *|
+|*       Copyright 2003 NVIDIA, Corporation.  All rights reserved.           *|
+|*                                                                           *|
+|*     NOTICE TO USER:   The source code  is copyrighted under  U.S. and     *|
+|*     international laws.  Users and possessors of this source code are     *|
+|*     hereby granted a nonexclusive,  royalty-free copyright license to     *|
+|*     use this code in individual and commercial software.                  *|
+|*                                                                           *|
+|*     Any use of this source code must include,  in the user documenta-     *|
+|*     tion and  internal comments to the code,  notices to the end user     *|
+|*     as follows:                                                           *|
+|*                                                                           *|
+|*       Copyright 2003 NVIDIA, Corporation.  All rights reserved.           *|
+|*                                                                           *|
+|*     NVIDIA, CORPORATION MAKES NO REPRESENTATION ABOUT THE SUITABILITY     *|
+|*     OF  THIS SOURCE  CODE  FOR ANY PURPOSE.  IT IS  PROVIDED  "AS IS"     *|
+|*     WITHOUT EXPRESS OR IMPLIED WARRANTY OF ANY KIND.  NVIDIA, CORPOR-     *|
+|*     ATION DISCLAIMS ALL WARRANTIES  WITH REGARD  TO THIS SOURCE CODE,     *|
+|*     INCLUDING ALL IMPLIED WARRANTIES OF MERCHANTABILITY, NONINFRINGE-     *|
+|*     MENT,  AND FITNESS  FOR A PARTICULAR PURPOSE.   IN NO EVENT SHALL     *|
+|*     NVIDIA, CORPORATION  BE LIABLE FOR ANY SPECIAL,  INDIRECT,  INCI-     *|
+|*     DENTAL, OR CONSEQUENTIAL DAMAGES,  OR ANY DAMAGES  WHATSOEVER RE-     *|
+|*     SULTING FROM LOSS OF USE,  DATA OR PROFITS,  WHETHER IN AN ACTION     *|
+|*     OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION,  ARISING OUT OF     *|
+|*     OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOURCE CODE.     *|
+|*                                                                           *|
+|*     U.S. Government  End  Users.   This source code  is a "commercial     *|
+|*     item,"  as that  term is  defined at  48 C.F.R. 2.101 (OCT 1995),     *|
+|*     consisting  of "commercial  computer  software"  and  "commercial     *|
+|*     computer  software  documentation,"  as such  terms  are  used in     *|
+|*     48 C.F.R. 12.212 (SEPT 1995)  and is provided to the U.S. Govern-     *|
+|*     ment only as  a commercial end item.   Consistent with  48 C.F.R.     *|
+|*     12.212 and  48 C.F.R. 227.7202-1 through  227.7202-4 (JUNE 1995),     *|
+|*     all U.S. Government End Users  acquire the source code  with only     *|
+|*     those rights set forth herein.                                        *|
+|*                                                                           *|
+ \***************************************************************************/
+d24 4
+a27 1
+/* $XFree86: xc/programs/Xserver/hw/xfree86/drivers/nv/nv_cursor.c,v 1.12 2003/07/31 20:24:29 mvojkovi Exp $ */
+d132 1
+a132 1
+        pNv->CURSOR[i] = tmp[i];
+d153 1
+a153 1
+    pNv->PRAMDAC[0x0000300/4] = (x & 0xFFFF) | (y << 16);
+d196 1
+a196 1
+    NVShowHideCursor(pNv, 1);
+d204 1
+a204 1
+    NVShowHideCursor(pNv, 0);
+d228 1
+a228 1
+    CARD32 *dst = (CARD32*)pNv->CURSOR;
+d269 2
+d292 2
+a293 1
+       (((pNv->Chipset & 0x0ff0) != 0x0110) || !pNv->FPDither))
+@
+
+

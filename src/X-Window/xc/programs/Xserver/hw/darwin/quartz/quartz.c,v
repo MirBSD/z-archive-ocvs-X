@@ -1,0 +1,729 @@
+head	1.1;
+branch	1.1.1;
+access;
+symbols
+	tg-mergetmp-2:1.1.1.2
+	cvs-200410241530:1.1.1.2
+	cvs-200410012000:1.1.1.2
+	cvs-200407141120:1.1.1.2
+	cvs-200406231010:1.1.1.2
+	MIRBSD_7quater:1.1.1.1
+	cvs-200405271510:1.1.1.2
+	XFree86_4_4_0:1.1.9.1
+	cvs-200403021700:1.1.1.2
+	XFREE86_20040213:1.1.9.1
+	xc:1.1.9
+	cvs-200401291925:1.1.1.1
+	MIRBSD_7_ALPHA:1.1.1.1.0.4
+	MIRBSD_7:1.1.1.1.0.2
+	MIRBSD_7ter:1.1.1.1
+	cvs-20011091815:1.1.1.1
+	cvs-200309162130:1.1.1.1
+	cvs-200308302005:1.1.1.1
+	ctmx-0387:1.1.1.1
+	ctmx-0384:1.1.1.1
+	MIRBSD_5:1.1.1.1
+	ctmx-0375:1.1.1.1
+	ctmx-0373:1.1.1.1
+	ctm-0371:1.1.1.1
+	ctm-0370:1.1.1.1
+	MIRBSD_4:1.1.1.1
+	ctm-0363:1.1.1.1
+	ctm-0359:1.1.1.1
+	openbsd:1.1.1;
+locks; strict;
+comment	@ * @;
+
+
+1.1
+date	2003.04.08.18.35.11;	author tg;	state Exp;
+branches
+	1.1.1.1
+	1.1.9.1;
+next	;
+
+1.1.1.1
+date	2003.04.08.18.35.11;	author tg;	state Exp;
+branches;
+next	1.1.1.2;
+
+1.1.1.2
+date	2004.03.02.18.13.09;	author tg;	state Stab;
+branches;
+next	;
+
+1.1.9.1
+date	2004.02.14.19.22.02;	author tg;	state Exp;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@/**************************************************************
+ *
+ * Quartz-specific support for the Darwin X Server
+ *
+ **************************************************************/
+/*
+ * Copyright (c) 2001-2003 Greg Parker and Torrey T. Lyons.
+ *                 All Rights Reserved.
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a
+ * copy of this software and associated documentation files (the "Software"),
+ * to deal in the Software without restriction, including without limitation
+ * the rights to use, copy, modify, merge, publish, distribute, sublicense,
+ * and/or sell copies of the Software, and to permit persons to whom the
+ * Software is furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in
+ * all copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
+ * THE ABOVE LISTED COPYRIGHT HOLDER(S) BE LIABLE FOR ANY CLAIM, DAMAGES OR
+ * OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE,
+ * ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+ * DEALINGS IN THE SOFTWARE.
+ *
+ * Except as contained in this notice, the name(s) of the above copyright
+ * holders shall not be used in advertising or otherwise to promote the sale,
+ * use or other dealings in this Software without prior written authorization.
+ */
+/* $XFree86: xc/programs/Xserver/hw/darwin/quartz/quartz.c,v 1.7 2003/01/23 00:34:26 torrey Exp $ */
+
+#include "quartzCommon.h"
+#include "quartz.h"
+#include "darwin.h"
+#include "quartzAudio.h"
+#include "quartzCursor.h"
+#include "fullscreen.h"
+#include "rootlessAqua.h"
+#include "pseudoramiX.h"
+
+// X headers
+#include "scrnintstr.h"
+#include "colormapst.h"
+
+// System headers
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <fcntl.h>
+#include <IOKit/pwr_mgt/IOPMLib.h>
+
+// Shared global variables for Quartz modes
+int                     quartzEventWriteFD = -1;
+int                     quartzStartClients = 1;
+int                     quartzRootless = -1;
+int                     quartzUseSysBeep = 0;
+int                     quartzUseAGL = 1;
+int                     quartzServerVisible = TRUE;
+int                     quartzServerQuitting = FALSE;
+int                     quartzScreenIndex = 0;
+int                     aquaMenuBarHeight = 0;
+int                     noPseudoramiXExtension = TRUE;
+int                     aquaNumScreens = 0;
+
+
+/*
+===========================================================================
+
+ Screen functions
+
+===========================================================================
+*/
+
+/*
+ * QuartzAddScreen
+ *  Do mode dependent initialization of each screen for Quartz.
+ */
+Bool QuartzAddScreen(
+    int index,
+    ScreenPtr pScreen)
+{
+    // allocate space for private per screen Quartz specific storage
+    QuartzScreenPtr displayInfo = xcalloc(sizeof(QuartzScreenRec), 1);
+    QUARTZ_PRIV(pScreen) = displayInfo;
+
+    // do full screen or rootless specific initialization
+    if (quartzRootless) {
+        return AquaAddScreen(index, pScreen);
+    } else {
+        return QuartzFSAddScreen(index, pScreen);
+    }
+}
+
+
+/*
+ * QuartzSetupScreen
+ *  Finalize mode specific setup of each screen.
+ */
+Bool QuartzSetupScreen(
+    int index,
+    ScreenPtr pScreen)
+{
+    // do full screen or rootless specific setup
+    if (quartzRootless) {
+        if (! AquaSetupScreen(index, pScreen))
+            return FALSE;
+    } else {
+        if (! QuartzFSSetupScreen(index, pScreen))
+            return FALSE;
+    }
+
+    // setup cursor support
+    if (! QuartzInitCursor(pScreen))
+        return FALSE;
+
+    return TRUE;
+}
+
+
+/*
+ * QuartzInitOutput
+ *  Quartz display initialization.
+ */
+void QuartzInitOutput(
+    int argc,
+    char **argv )
+{
+    static unsigned long generation = 0;
+
+    // Allocate private storage for each screen's Quartz specific info
+    if (generation != serverGeneration) {
+        quartzScreenIndex = AllocateScreenPrivateIndex();
+        generation = serverGeneration;
+    }
+
+    if (serverGeneration == 0) {
+        QuartzAudioInit();
+    }
+
+    if (!RegisterBlockAndWakeupHandlers(QuartzBlockHandler,
+                                        QuartzWakeupHandler,
+                                        NULL))
+    {
+        FatalError("Could not register block and wakeup handlers.");
+    }
+
+    if (quartzRootless) {
+        ErrorF("Display mode: Rootless Quartz\n");
+        AquaDisplayInit();
+    } else {
+        ErrorF("Display mode: Full screen Quartz\n");
+        QuartzFSDisplayInit();
+    }
+
+    // Init PseudoramiX implementation of Xinerama.
+    // This should be in InitExtensions, but that causes link errors
+    // for servers that don't link in pseudoramiX.c.
+    if (!noPseudoramiXExtension) {
+        PseudoramiXExtensionInit(argc, argv);
+    }
+}
+
+
+/*
+ * QuartzInitInput
+ *  Inform the main thread the X server is ready to handle events.
+ */
+void QuartzInitInput(
+    int argc,
+    char **argv )
+{
+    QuartzMessageMainThread(kQuartzServerStarted, NULL, 0);
+}
+
+
+/*
+ * QuartzShow
+ *  Show the X server on screen. Does nothing if already shown.
+ *  Restore the X clip regions and the X server cursor state.
+ */
+static void QuartzShow(
+    int x,	// cursor location
+    int y )
+{
+    int i;
+
+    if (!quartzServerVisible) {
+        quartzServerVisible = TRUE;
+        for (i = 0; i < screenInfo.numScreens; i++) {
+            if (screenInfo.screens[i]) {
+                QuartzResumeXCursor(screenInfo.screens[i], x, y);
+                if (!quartzRootless)
+                    xf86SetRootClip(screenInfo.screens[i], TRUE);
+            }
+        }
+    }
+}
+
+
+/*
+ * QuartzHide
+ *  Remove the X server display from the screen. Does nothing if already
+ *  hidden. Set X clip regions to prevent drawing, and restore the Aqua
+ *  cursor.
+ */
+static void QuartzHide(void)
+{
+    int i;
+
+    if (quartzServerVisible) {
+        for (i = 0; i < screenInfo.numScreens; i++) {
+            if (screenInfo.screens[i]) {
+                QuartzSuspendXCursor(screenInfo.screens[i]);
+                if (!quartzRootless)
+                    xf86SetRootClip(screenInfo.screens[i], FALSE);
+            }
+        }
+    }
+    quartzServerVisible = FALSE;
+    QuartzMessageMainThread(kQuartzServerHidden, NULL, 0);
+}
+
+
+/*
+ * QuartzSetRootClip
+ *  Enable or disable rendering to the X screen.
+ */
+static void QuartzSetRootClip(
+    BOOL enable)
+{
+    int i;
+
+    if (!quartzServerVisible)
+        return;
+
+    for (i = 0; i < screenInfo.numScreens; i++) {
+        if (screenInfo.screens[i]) {
+            xf86SetRootClip(screenInfo.screens[i], enable);
+        }
+    }
+}
+
+
+/*
+ * QuartzProcessEvent
+ *  Process Quartz specific events.
+ */
+void QuartzProcessEvent(
+    xEvent *xe)
+{
+    switch (xe->u.u.type) {
+
+        case kXDarwinShow:
+            QuartzShow(xe->u.keyButtonPointer.rootX,
+                       xe->u.keyButtonPointer.rootY);
+            break;
+
+        case kXDarwinHide:
+            QuartzHide();
+            break;
+
+        case kXDarwinSetRootClip:
+            QuartzSetRootClip((BOOL)xe->u.clientMessage.u.l.longs0);
+            break;
+
+        case kXDarwinQuit:
+            GiveUp(0);
+            break;
+
+        case kXDarwinReadPasteboard:
+            QuartzReadPasteboard();
+            break;
+
+        case kXDarwinWritePasteboard:
+            QuartzWritePasteboard();
+            break;
+
+        default:
+            ErrorF("Unknown application defined event.\n");
+    }
+}
+
+
+/*
+ * QuartzGiveUp
+ *  Cleanup before X server shutdown
+ *  Release the screen and restore the Aqua cursor.
+ */
+void QuartzGiveUp(void)
+{
+#if 0
+// Trying to switch cursors when quitting causes deadlock
+    int i;
+
+    for (i = 0; i < screenInfo.numScreens; i++) {
+        if (screenInfo.screens[i]) {
+            QuartzSuspendXCursor(screenInfo.screens[i]);
+        }
+    }
+#endif
+
+    if (!quartzRootless)
+        QuartzFSRelease();
+}
+@
+
+
+1.1.9.1
+log
+@OpenBSD just has imported exactly this tree into their vendor branch,
+called the same tag, in XF4/xc
+This is, apparently, the last XFree86 snapshot before the licence change
+(ie, addition of the advertising clause)
+
+Since the developers don't see any problems with that, and we would like
+to integrate improvements done by the remaining one or two (or so) XFree86
+developers (j/k), this prepares enabling us to update X-Window in the future.
+@
+text
+@d32 1
+a32 1
+/* $XFree86: xc/programs/Xserver/hw/darwin/quartz/quartz.c,v 1.14 2003/11/24 05:39:02 torrey Exp $ */
+d38 3
+a41 3
+#define _APPLEWM_SERVER_
+#include "applewm.h"
+#include "applewmExt.h"
+d64 2
+a65 2
+QuartzModeProcsPtr      quartzProcs = NULL;
+const char             *quartzOpenGLBundle = NULL;
+d76 1
+a76 1
+ * DarwinModeAddScreen
+d79 1
+a79 1
+Bool DarwinModeAddScreen(
+d87 6
+a92 2
+    // do Quartz mode specific initialization
+    return quartzProcs->AddScreen(index, pScreen);
+d97 1
+a97 1
+ * DarwinModeSetupScreen
+d100 1
+a100 1
+Bool DarwinModeSetupScreen(
+d104 8
+a111 3
+    // do Quartz mode specific setup
+    if (! quartzProcs->SetupScreen(index, pScreen))
+        return FALSE;
+d114 1
+a114 1
+    if (! quartzProcs->InitCursor(pScreen))
+d122 1
+a122 1
+ * DarwinModeInitOutput
+d125 1
+a125 1
+void DarwinModeInitOutput(
+d148 7
+a154 2
+    // Do display mode specific initialization
+    quartzProcs->DisplayInit();
+d166 1
+a166 1
+ * DarwinModeInitInput
+d169 1
+a169 1
+void DarwinModeInitInput(
+a173 4
+
+    // Do final display mode specific initialization before handling events
+    if (quartzProcs->InitInput)
+        quartzProcs->InitInput(argc, argv);
+d180 1
+a180 2
+ *  Calls mode specific screen resume to restore the X clip regions
+ *  (if needed) and the X server cursor state.
+d192 3
+a194 1
+                quartzProcs->ResumeScreen(screenInfo.screens[i], x, y);
+d204 2
+a205 2
+ *  hidden. Calls mode specific screen suspend to set X clip regions to
+ *  prevent drawing (if needed) and restore the Aqua cursor.
+d214 3
+a216 1
+                quartzProcs->SuspendScreen(screenInfo.screens[i]);
+d246 1
+a246 33
+ * QuartzMessageServerThread
+ *  Send the X server thread a message by placing it on the event queue.
+ */
+void
+QuartzMessageServerThread(
+    int type,
+    int argc, ...)
+{
+    xEvent xe;
+    INT32 *argv;
+    int i, max_args;
+    va_list args;
+
+    memset(&xe, 0, sizeof(xe));
+    xe.u.u.type = type;
+    xe.u.clientMessage.u.l.type = type;
+
+    argv = &xe.u.clientMessage.u.l.longs0;
+    max_args = 4;
+
+    if (argc > 0 && argc <= max_args) {
+	va_start (args, argc);
+	for (i = 0; i < argc; i++)
+	    argv[i] = (int) va_arg (args, int);
+	va_end (args);
+    }
+
+    DarwinEQEnqueue(&xe);
+}
+
+
+/*
+ * DarwinModeProcessEvent
+d249 1
+a249 1
+void DarwinModeProcessEvent(
+d254 1
+a254 1
+        case kXDarwinActivate:
+a256 3
+            AppleWMSendEvent(AppleWMActivationNotify,
+                             AppleWMActivationNotifyMask,
+                             AppleWMIsActive, 0);
+d259 1
+a259 4
+        case kXDarwinDeactivate:
+            AppleWMSendEvent(AppleWMActivationNotify,
+                             AppleWMActivationNotifyMask,
+                             AppleWMIsInactive, 0);
+a278 23
+        /*
+         * AppleWM events
+         */
+        case kXDarwinControllerNotify:
+            AppleWMSendEvent(AppleWMControllerNotify,
+                             AppleWMControllerNotifyMask,
+			     xe->u.clientMessage.u.l.longs0,
+			     xe->u.clientMessage.u.l.longs1);
+            break;
+
+        case kXDarwinPasteboardNotify:
+            AppleWMSendEvent(AppleWMPasteboardNotify,
+                             AppleWMPasteboardNotifyMask,
+                             xe->u.clientMessage.u.l.longs0,
+                             xe->u.clientMessage.u.l.longs1);
+            break;
+
+        case kXDarwinDisplayChanged:
+        case kXDarwinWindowState:
+        case kXDarwinWindowMoved:
+            // FIXME: Not implemented yet
+            break;
+
+d280 1
+a280 2
+            ErrorF("Unknown application defined event type %d.\n",
+                   xe->u.u.type);
+d286 1
+a286 1
+ * DarwinModeGiveUp
+d290 1
+a290 1
+void DarwinModeGiveUp(void)
+d304 1
+a304 1
+        quartzProcs->ReleaseScreens();
+@
+
+
+1.1.1.1
+log
+@The X-Windowing System
+
+Import XFree86 4.3 from OpenBSD by CTM, in the hope it's stable
+@
+text
+@@
+
+
+1.1.1.2
+log
+@That's what OpenBSD will, probably, ship as XF4 in 3.5
+their last sync against XFree86 4.3-current has been
+imported into our vendor branch, too
+@
+text
+@d32 1
+a32 1
+/* $XFree86: xc/programs/Xserver/hw/darwin/quartz/quartz.c,v 1.14 2003/11/24 05:39:02 torrey Exp $ */
+d38 3
+a41 3
+#define _APPLEWM_SERVER_
+#include "applewm.h"
+#include "applewmExt.h"
+d64 2
+a65 2
+QuartzModeProcsPtr      quartzProcs = NULL;
+const char             *quartzOpenGLBundle = NULL;
+d76 1
+a76 1
+ * DarwinModeAddScreen
+d79 1
+a79 1
+Bool DarwinModeAddScreen(
+d87 6
+a92 2
+    // do Quartz mode specific initialization
+    return quartzProcs->AddScreen(index, pScreen);
+d97 1
+a97 1
+ * DarwinModeSetupScreen
+d100 1
+a100 1
+Bool DarwinModeSetupScreen(
+d104 8
+a111 3
+    // do Quartz mode specific setup
+    if (! quartzProcs->SetupScreen(index, pScreen))
+        return FALSE;
+d114 1
+a114 1
+    if (! quartzProcs->InitCursor(pScreen))
+d122 1
+a122 1
+ * DarwinModeInitOutput
+d125 1
+a125 1
+void DarwinModeInitOutput(
+d148 7
+a154 2
+    // Do display mode specific initialization
+    quartzProcs->DisplayInit();
+d166 1
+a166 1
+ * DarwinModeInitInput
+d169 1
+a169 1
+void DarwinModeInitInput(
+a173 4
+
+    // Do final display mode specific initialization before handling events
+    if (quartzProcs->InitInput)
+        quartzProcs->InitInput(argc, argv);
+d180 1
+a180 2
+ *  Calls mode specific screen resume to restore the X clip regions
+ *  (if needed) and the X server cursor state.
+d192 3
+a194 1
+                quartzProcs->ResumeScreen(screenInfo.screens[i], x, y);
+d204 2
+a205 2
+ *  hidden. Calls mode specific screen suspend to set X clip regions to
+ *  prevent drawing (if needed) and restore the Aqua cursor.
+d214 3
+a216 1
+                quartzProcs->SuspendScreen(screenInfo.screens[i]);
+d246 1
+a246 33
+ * QuartzMessageServerThread
+ *  Send the X server thread a message by placing it on the event queue.
+ */
+void
+QuartzMessageServerThread(
+    int type,
+    int argc, ...)
+{
+    xEvent xe;
+    INT32 *argv;
+    int i, max_args;
+    va_list args;
+
+    memset(&xe, 0, sizeof(xe));
+    xe.u.u.type = type;
+    xe.u.clientMessage.u.l.type = type;
+
+    argv = &xe.u.clientMessage.u.l.longs0;
+    max_args = 4;
+
+    if (argc > 0 && argc <= max_args) {
+	va_start (args, argc);
+	for (i = 0; i < argc; i++)
+	    argv[i] = (int) va_arg (args, int);
+	va_end (args);
+    }
+
+    DarwinEQEnqueue(&xe);
+}
+
+
+/*
+ * DarwinModeProcessEvent
+d249 1
+a249 1
+void DarwinModeProcessEvent(
+d254 1
+a254 1
+        case kXDarwinActivate:
+a256 3
+            AppleWMSendEvent(AppleWMActivationNotify,
+                             AppleWMActivationNotifyMask,
+                             AppleWMIsActive, 0);
+d259 1
+a259 4
+        case kXDarwinDeactivate:
+            AppleWMSendEvent(AppleWMActivationNotify,
+                             AppleWMActivationNotifyMask,
+                             AppleWMIsInactive, 0);
+a278 23
+        /*
+         * AppleWM events
+         */
+        case kXDarwinControllerNotify:
+            AppleWMSendEvent(AppleWMControllerNotify,
+                             AppleWMControllerNotifyMask,
+			     xe->u.clientMessage.u.l.longs0,
+			     xe->u.clientMessage.u.l.longs1);
+            break;
+
+        case kXDarwinPasteboardNotify:
+            AppleWMSendEvent(AppleWMPasteboardNotify,
+                             AppleWMPasteboardNotifyMask,
+                             xe->u.clientMessage.u.l.longs0,
+                             xe->u.clientMessage.u.l.longs1);
+            break;
+
+        case kXDarwinDisplayChanged:
+        case kXDarwinWindowState:
+        case kXDarwinWindowMoved:
+            // FIXME: Not implemented yet
+            break;
+
+d280 1
+a280 2
+            ErrorF("Unknown application defined event type %d.\n",
+                   xe->u.u.type);
+d286 1
+a286 1
+ * DarwinModeGiveUp
+d290 1
+a290 1
+void DarwinModeGiveUp(void)
+d304 1
+a304 1
+        quartzProcs->ReleaseScreens();
+@
+

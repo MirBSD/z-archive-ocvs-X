@@ -1,0 +1,398 @@
+head	1.10;
+access;
+symbols
+	MIRBSD_5:1.2
+	MIRBSD_4:1.1;
+locks; strict;
+comment	@# @;
+
+
+1.10
+date	2004.10.07.17.51.48;	author tg;	state dead;
+branches;
+next	1.9;
+
+1.9
+date	2004.08.05.19.20.18;	author tg;	state Stab;
+branches;
+next	1.8;
+
+1.8
+date	2004.07.25.09.37.46;	author tg;	state Exp;
+branches;
+next	1.7;
+
+1.7
+date	2004.05.11.18.28.03;	author tg;	state Exp;
+branches;
+next	1.6;
+
+1.6
+date	2004.02.18.14.14.56;	author tg;	state Exp;
+branches;
+next	1.5;
+
+1.5
+date	2003.09.01.18.26.08;	author tg;	state Exp;
+branches;
+next	1.4;
+
+1.4
+date	2003.08.10.11.56.50;	author tg;	state Exp;
+branches;
+next	1.3;
+
+1.3
+date	2003.07.06.20.17.50;	author tg;	state Exp;
+branches;
+next	1.2;
+
+1.2
+date	2003.05.06.18.12.17;	author tg;	state Exp;
+branches;
+next	1.1;
+
+1.1
+date	2003.03.23.15.21.45;	author tg;	state Exp;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.10
+log
+@move ports/mail/* and ports/news/* to ports/mailnews/*
+@
+text
+@#!/bin/ksh
+# $MirBSD: ports/mail/pine/files/pine.smime,v 1.9 2004/08/05 19:20:18 tg Stab $
+#-
+# Copyright (c) 2003, 2004
+#	Thorsten "mirabile" Glaser <tg@@66h.42h.de>
+#
+# Licensee is hereby permitted to deal in this work without restric-
+# tion, including unlimited rights to use, publically perform, modi-
+# fy, merge, distribute, sell, give away or sublicence, provided the
+# above copyright notices, these terms and the disclaimer are retai-
+# ned in all redistributions, or reproduced in accompanying documen-
+# tation or other materials provided with binary redistributions.
+#
+# Licensor hereby provides this work "AS IS" and WITHOUT WARRANTY of
+# any kind, expressed or implied, to the maximum extent permitted by
+# applicable law, but with the warranty of being written without ma-
+# licious intent or gross negligence; in no event shall licensor, an
+# author or contributor be held liable for any damage, direct, indi-
+# rect or other, however caused, arising in any way out of the usage
+# of covered work, even if advised of the possibility of such damage.
+#-
+# S/MIME support for pine, main module
+#
+# Documentation:
+# Set pine up so it uses this script as its mail submission agent
+# (use sendmail-path=/usr/local/bin/pine.smime option in .pinerc)
+# You can pass additional args to sendmail by setenv SMIMEARGS.
+# Start pine via the pine.smime.init script, it will ask you
+# for your password you protected your S/MIME key with.
+# The key and cert have to reside in ~/.etc/ssh/mime.{key,cer}
+# If you want to add e.g. your CA Certificate(s) to the signed
+# messages, as other mailers usually do, use ~/.etc/ssh/mime.ca
+# Add "X-SMIME: NO" to your pine user-defined headers to ease later use.
+#
+# To send a signed mail, press ^R (Rich Headers) in Composer and change
+# "X-SMIME: No" to a value not containing "NO" or "OPAQ" (case-insensitive).
+# If you choose OPAQ, the clear-signing will be deactivated, i.e.
+# the message will only be visible to S/MIME capable clients.
+#
+# If you receive a S/MIME mail, do the following manually, because
+# there is no way to automate it in pine:
+# press | (PIPE), set to RAW if not yet set (press ^W), set
+# the command to the following and execute:
+#  openssl smime -verify
+# To decrypt an incoming message, you may use
+#  openssl smime -decrypt -certfile ~/.etc/ssh/mime.cer -inkey ~/.etc/ssh/mime.key
+# Note: "Verification Successful\n" can be anywhere in the viewer body
+#  because it is put to stderr and pine is, err, slightly buggy.
+#  So you should use the unverified part of the message, or, for opaquely
+#  signed messages, s/Verification Successful\n// after saving.
+#
+# Support for encrypting outgoing messages is not planned until there is
+# some way to retrieve information from within this script.
+# Probably it could be done by a header.
+#
+# If something goes wrong, you'll find a file called ~/smime.log
+
+
+R=$(mktemp /tmp/pine.smime.XXXXXXXXXX) || exit 1
+S=$(mktemp /tmp/pine.smime.XXXXXXXXXX) || { rm -f $R; exit 1; }
+T=$(mktemp /tmp/pine.smime.XXXXXXXXXX) || { rm -f $R $S; exit 1; }
+trap 'rm -f $R $S $T ; exit 0' 0
+trap 'rm -f $R $S $T ; exit 1' 1 2 3 13 15
+
+MACH="$(uname -mslrM)" || MACH="$(uname -mslr)" || MACH="$(uname -msr)"
+
+echo "Received: by S/MIME Plugin for ${MACH}; $(date)" >$R
+cat >$S
+ed -s $S <<-EOF
+	1,/^$/-1W $R
+	1,/^$/d
+	wq
+EOF
+
+grep -Ei '(^Content-)|(^MIME)' $R >$T || \
+	echo 'Content-Type: text/plain; charset=iso-8859-1' >$T
+
+echo "" >>$T
+cat $S >>$T
+Q=NO
+QP=""
+grep -i '^X-SMIME:' $R >$S && Q=OK
+grep -i OPAQ $S >/dev/null && QP="-nodetach"
+grep -i NO $S >/dev/null && Q=NO
+grep -Eiv '(^Content-)|(^MIME)|(^X-SMIME:)' $R >$S
+
+cat $T >$R
+[[ -n $SMIMEPWD ]] && QP="$QP -passin file:$SMIMEPWD"
+if [[ $Q = OK && -e ~/.etc/ssh/mime.key ]]; then
+	openssl smime -sign -rc2-128 -signer ~/.etc/ssh/mime.cer -in $T \
+	  -certfile ~/.etc/ssh/mime.ca -inkey ~/.etc/ssh/mime.key $QP -out $R \
+	  2>~/smime.log || Q=FAILED
+	[[ $Q = FAILED ]] || rm -f ~/smime.log
+	echo "X-Autoconverted: to S/MIME-signed  status $Q" >>$S
+fi
+unset QP
+cat $S $R >$T
+
+tr -d '' <$T | sed -e 's,$,,' | sendmail ${SMIMEARGS} -oem -oi -t
+@
+
+
+1.9
+log
+@add CR to line ends
+
+found while testing and showing wbx@@ how S/MIME works
+live code from netzladen ;)
+@
+text
+@d2 1
+a2 1
+# $MirBSD: ports/mail/pine/files/pine.smime,v 1.8 2004/07/25 09:37:46 tg Exp $
+@
+
+
+1.8
+log
+@* update to pine 4.61, imapd 2004.352, pico 4.8,
+  ipop2d 2004.68, ipop3d 2004.88
+* basic support for adhering to MirOS standards
+  (.etc/ support, no flawed text by default)
+@
+text
+@d2 1
+a2 1
+# $MirBSD: ports/mail/pine/files/pine.smime,v 1.7 2004/05/11 18:28:03 tg Exp $
+d99 1
+a99 1
+sendmail ${SMIMEARGS} -oem -oi -t <$T
+@
+
+
+1.7
+log
+@* fix scripts; properly use mktemp
+* update to 4.60
+* mark as local version, as asked by the licence
+* disable flawed format by default
+* fix whitespace stripper to not strip trailing
+  whitespaces from lines starting with a space
+  or minus (for patches)
+* mix imap-uw port including mailutil into pine port
+  (pine port has a newer version, imapd-2004.*)
+* enable IPv6 support
+* dissolve imapd ./. mailutil conflict
+* improved messages containing correct amount of whitespace
+* tell user in message about PGP and S/MIME
+* tell about which PGP versions work
+@
+text
+@d2 1
+a2 1
+# $MirBSD: ports/mail/pine/files/pine.smime,v 1.6 2004/02/18 14:14:56 tg Exp $
+d5 1
+a5 1
+#	Thorsten "mirabile" Glaser <x86@@ePost.de>
+d14 7
+a20 7
+# Licensor hereby provides this work "as is" and without any warran-
+# ties whatsoever, express or implied, to the maximum extent permit-
+# ted by applicable law, except that the work is not written or pub-
+# lished with malice intent; in no event may authors or contributors
+# be held liable for any damage, however caused, direct or indirect,
+# arising in any way out of the usage of covered work, even if advi-
+# sed of the possibility of such damage.
+@
+
+
+1.6
+log
+@* fix S/MIME
+* fix content-* header transfer
+* fix DESCR
+* while here, style up a bit
+* while here, add S/MIME descr
+* while here, licence template update
+@
+text
+@d2 1
+a2 1
+# $MirBSD: licence.template,v 1.8 2003/12/17 14:35:00 tg Exp $
+d7 13
+a19 11
+# Subject to these terms, everybody who obtained a copy of this work
+# is hereby permitted to deal in the work without restriction inclu-
+# ding without limitation the rights to use, distribute, sell, modi-
+# fy, publically perform, give away, merge or sublicence it provided
+# this notice is kept and the authors and contributors are given due
+# credit in derivates or accompanying documents.
+#
+# This work is provided "as is" with no explicit or implicit warran-
+# ties whatsoever to the maximum extent permitted by applicable law;
+# in no event may an author or contributor be held liable for damage
+# that is, directly or indirectly, caused by the work, even if advi-
+d88 1
+a88 1
+[ -n "$SMIMEPWD" ] && QP="$QP -passin file:$SMIMEPWD"
+@
+
+
+1.5
+log
+@.ssh -> .etc/ssh
+no .etc/pinerc yet... volunteers?
+@
+text
+@d2 1
+a2 1
+# $MirBSD: pine.smime,v 1.4 2003/08/10 11:56:50 tg Exp $
+d4 2
+a5 1
+# Copyright (c) 2003 Thorsten Glaser <x86@@ePost.de>
+d10 1
+a10 1
+# fy, publically perform, give away, merge or sublicense it provided
+d13 1
+d15 1
+a15 1
+# ties whatsoever to the maximum extend permitted by applicable law;
+d57 3
+a59 3
+R=$(mktemp) || exit 1
+S=$(mktemp) || { rm -f $R; exit 1; }
+T=$(mktemp) || { rm -f $R $S; exit 1; }
+d63 1
+a63 1
+MACH="$(uname -mslrM)" || MACH="$(uname -msr)"
+d65 1
+a65 1
+echo "Received: by S/MIME Plugin on machine (${MACH}) time $(date)" >$R
+d73 1
+a73 1
+grep -i '\(^Content-\)\|\(^MIME\)' $R >$T || \
+d83 1
+a83 1
+grep -iv '\(^Content-\)\|\(^MIME\)\|\(^X-SMIME:\)' $R >$S
+@
+
+
+1.4
+log
+@o fix possible security breach/password leaking
+o fix /tmp clobbering
+
+don't use exec PROGRAMME when there's an exit trap running!
+
+o bump pkgname
+o update licence template
+@
+text
+@d2 1
+a2 1
+# $MirBSD: licence.template,v 1.5 2003/07/26 12:33:13 tg Exp $
+d26 1
+a26 1
+# The key and cert have to reside in ~/.ssh/mime.{key,cer}
+d28 1
+a28 1
+# messages, as other mailers usually do, use ~/.ssh/mime.ca
+d42 1
+a42 1
+#  openssl smime -decrypt -certfile ~/.ssh/mime.cer -inkey ~/.ssh/mime.key
+d85 3
+a87 3
+if [[ $Q = OK && -e ~/.ssh/mime.key ]]; then
+	openssl smime -sign -rc2-128 -signer ~/.ssh/mime.cer -in $T \
+	  -certfile ~/.ssh/mime.ca -inkey ~/.ssh/mime.key $QP -out $R \
+@
+
+
+1.3
+log
+@mop up
+@
+text
+@d2 1
+a2 1
+# $MirBSD: pine.smime,v 1.2 2003/05/06 18:12:17 tg Exp $
+d9 3
+a11 3
+# fy, give away, merge or sublicense it provided this notice is kept
+# and the authors and contributors are given due credit in derivates
+# or accompanying documents.
+d61 1
+a61 1
+MACH="$(uname -mslr)" || MACH="$(uname -msr)"
+a72 1
+# Should be converted to utf-8 ASAP, but unix vendors don't help much.
+@
+
+
+1.2
+log
+@regen, update to 4.55, merge conflicts, fix scripts
+@
+text
+@d2 16
+a17 1
+# $MirBSD: pine.smime,v 1.1 2003/03/23 15:21:45 tg Exp $
+a18 6
+
+# Copyright (c) 1982-2003 by Thorsten "mirabile" Glaser <x86@@ePost.de>
+#
+# Anyone who obtained a copy of this work is hereby permitted to freely use,
+# distribute, modify, merge, sublicence, give away or sell it as long as the
+# authors are given due credit and the following notice is retained:
+a19 5
+# This work is provided "as is", with no explicit or implicit warranty what-
+# soever. Use it only at your own risk. In no event may an author or contri-
+# butor be held liable for any damage, directly or indirectly, that origina-
+# ted through or is caused by creation or modification of this work.
+
+@
+
+
+1.1
+log
+@import S/MIME for pine from MirBSD-old
+@
+text
+@d2 1
+a2 1
+# $MirBSD: obsd.ports,v 1.62 2003/03/22 22:33:27 tg Exp $
+d81 1
+a81 1
+[[ -n $SMIMEPWD ]] && QP="$QP -passin file:$SMIMEPWD"
+@
+

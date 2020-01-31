@@ -1,0 +1,243 @@
+head	1.2;
+branch	1.1.1;
+access;
+symbols
+	tg-mergetmp-2:1.1.1.1
+	cvs-200410241530:1.1.1.1
+	cvs-200410012000:1.1.1.1
+	cvs-200407141120:1.1.1.1
+	cvs-200406231010:1.1.1.1
+	MIRBSD_7quater:1.1.1.1
+	cvs-200405271510:1.1.1.1
+	XFree86_4_4_0:1.1.9.1
+	cvs-200403021700:1.1.1.1
+	XFREE86_20040213:1.1.9.1
+	xc:1.1.9
+	cvs-200401291925:1.1.1.1
+	MIRBSD_7_ALPHA:1.1.1.1.0.4
+	MIRBSD_7:1.1.1.1.0.2
+	MIRBSD_7ter:1.1.1.1
+	cvs-20011091815:1.1.1.1
+	cvs-200309162130:1.1.1.1
+	cvs-200308302005:1.1.1.1
+	ctmx-0387:1.1.1.1
+	ctmx-0384:1.1.1.1
+	MIRBSD_5:1.1.1.1
+	ctmx-0375:1.1.1.1
+	ctmx-0373:1.1.1.1
+	ctm-0371:1.1.1.1
+	ctm-0370:1.1.1.1
+	MIRBSD_4:1.1.1.1
+	ctm-0363:1.1.1.1
+	ctm-0359:1.1.1.1
+	ctm-0349:1.1.1.1
+	openbsd:1.1.1;
+locks; strict;
+comment	@# @;
+
+
+1.2
+date	2003.05.16.16.27.49;	author tg;	state dead;
+branches;
+next	1.1;
+
+1.1
+date	2003.03.22.20.00.44;	author tg;	state Exp;
+branches
+	1.1.1.1
+	1.1.9.1;
+next	;
+
+1.1.1.1
+date	2003.03.22.20.00.44;	author tg;	state Stab;
+branches;
+next	;
+
+1.1.9.1
+date	2004.02.14.19.04.04;	author tg;	state Exp;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.2
+log
+@remove a bunch of files not used in MirBSD - clean tree. People who want them got cvs.
+@
+text
+@Threads with FreeType
+=====================
+
+
+The  FreeType  engine  can  now  be compiled  in  thread-safe  mode.
+Because  we want  to  keep the  engine  small and  fast, the  thread
+protection is simple.   This file gives an overview  of what you can
+do, and what you should strictly never do.
+
+
+How to enable thread-safe support?
+
+A. You must  have a valid  replacement for the  file `lib/ttmutex.c'
+   which  calls  your system's  API  to  create,  lock, and  release
+   mutexes or semaphores.  The current implementation is a dummy and
+   doesn't do anything.
+
+B. You      must     re-define      the      configuration     macro
+   TT_CONFIG_OPTION_THREAD_SAFE   located  in   `ttconfig.h'.   Then
+   recompile.
+
+
+IMPORTANT NOTE:
+
+  If two threads create and  use their own TT_Engine structure, they
+  can freely call the library  concurrently on each of them (as well
+  as  all their related  objects), even  in the  non-threaded build.
+  The following remarks only  apply to concurrent requests performed
+  on a single TT_Engine shared by multiple threads.
+
+
+--------------------------------------------------------------------
+
+- What you can do:
+
+  With the exceptions listed below (in `What you can't do'), you can
+  call all  API functions  concurrently with two  different threads.
+  This includes:
+
+    Creating two or more faces from the same engine (i.e. concurrent
+    calls to TT_Open_Face()/TT_Open_Collection()).
+
+    Creating  two  or  more  instances  from the  same  face  object
+    (i.e. concurrent calls to TT_New_Instance()).
+
+    Creating two or more glyph  containers from the same face object
+    (i.e. concurrent calls to TT_New_Glyph()).
+
+    The same holds for destruction of objects.
+
+    Load  two or  more  glyphs  concurrently for  the  same face  or
+    instance (i.e. concurrent TT_Load_Glyph() calls).
+
+    Render two or  more glyphs at the same time,  in the same engine
+    (i.e.   calling  TT_Get_Glyph_Bitmap()/TT_Get_Glyph_Pixmap()  or
+    TT_Get_Outline_Bitmap()/TT_GetOutline_Pixmap() concurrently).
+
+    NOTE: The  scan-line converter  can only render  one glyph  at a
+          time,  for  a   given  TT_Engine.   Concurrent  calls  are
+          synchronized through a mutex, though.
+
+          If  you  really, _really_,  need  to  generate bitmaps  or
+          pixmaps concurrently, create  an additional engine and use
+          it   with  TT_Get_Outline_Bitmap()/TT_Get_Outline_Pixmap()
+          (you don't  need to create  any object in it,  the outline
+          can come from any source too).
+
+          This is, however, not recommended (it works perfectly, but
+          this  could change  in  the future  for various  technical
+          reasons).
+
+
+---------------------------------------------------------------------------
+
+- What you cannot do:
+
+  - You shouldn't try to delete  an object while still using it with
+    another thread.  The engine  doesn't protect you from stupidity!
+    For example, these concurrent calls:
+
+      TT_Close_Face( face );
+      TT_Get_Glyph_Bitmap( glyph, &bitmap );
+
+    will act unexpectedly if the glyph is a child of the face (i.e.,
+    was created with TT_New_Glyph( face, &glyph ))
+                                   ^^^^
+                                 same face
+
+    Here are some other examples:
+
+      TT_Get_Glyph_Outline( glyph1, ... );
+      TT_Load_Glyph( instance, glyph1, ... );
+
+    or
+
+      TT_Get_Outline_BBox( outline, &bbox );
+      TT_Transform_Outline( outline );
+
+    etc.
+
+    You get the  idea: Only the face and  instances are protected --
+    glyph containers and outlines should be thread-specific.
+
+
+  - You  shouldn't initialize extensions  in an  engine concurrently
+    (which is what every mere mortal will do anyway :-).
+
+
+
+That's about it. Now enjoy the lib ;-)
+
+
+PS: See the  `MT-Note' and  `MT-Safe'  remarks  in ttapi.c  for more
+    detailed information on each specific function.
+
+
+--- end of threads.txt ---
+@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@@
+
+
+1.1.9.1
+log
+@OpenBSD just has imported exactly this tree into their vendor branch,
+called the same tag, in XF4/xc
+This is, apparently, the last XFree86 snapshot before the licence change
+(ie, addition of the advertising clause)
+
+Since the developers don't see any problems with that, and we would like
+to integrate improvements done by the remaining one or two (or so) XFree86
+developers (j/k), this prepares enabling us to update X-Window in the future.
+@
+text
+@@
+
+
+1.1.1.1
+log
+@Import OpenBSD 3.3 XF4 repository from CTM 3132 the first time
+This finalizes starting an OpenBSD-mirabile (aka MirBSD) repository.
+
+### MirBSD is:
+# Copyright (c) 1982-2003 by Thorsten "mirabile" Glaser <x86@@ePost.de>
+# Copyright © 1968-2003  The authors of And contributors to UNIX®, the
+#       C Language, BSD/Berkeley Unix; 386BSD, NetBSD 1.1 and OpenBSD.
+#
+# Anyone who obtained a copy of this work is hereby permitted to freely use,
+# distribute, modify, merge, sublicence, give away or sell it as long as the
+# authors are given due credit and the following notice is retained:
+#
+# This work is provided "as is", with no explicit or implicit warranty what-
+# soever. Use it only at your own risk. In no event may an author or contri-
+# butor be held liable for any damage, directly or indirectly, that origina-
+# ted through or is caused by creation or modification of this work.
+
+MirBSD is my private tree. MirBSD does not differ very much from OpenBSD
+and intentionally tracks OpenBSD. That's why it _is_ OpenBSD, just not the
+official one. It's like with DarrenBSD.
+
+At time of this writing, no advertising for MirBSD must be done,
+because the advertising clause has not yet been sorted out.
+
+http://templeofhate.com/tglaser/MirBSD/index.php
+@
+text
+@@

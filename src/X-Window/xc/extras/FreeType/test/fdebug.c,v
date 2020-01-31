@@ -1,0 +1,411 @@
+head	1.2;
+branch	1.1.1;
+access;
+symbols
+	tg-mergetmp-2:1.1.1.1
+	cvs-200410241530:1.1.1.1
+	cvs-200410012000:1.1.1.1
+	cvs-200407141120:1.1.1.1
+	cvs-200406231010:1.1.1.1
+	MIRBSD_7quater:1.1.1.1
+	cvs-200405271510:1.1.1.1
+	XFree86_4_4_0:1.1.9.1
+	cvs-200403021700:1.1.1.1
+	XFREE86_20040213:1.1.9.1
+	xc:1.1.9
+	cvs-200401291925:1.1.1.1
+	MIRBSD_7_ALPHA:1.1.1.1.0.4
+	MIRBSD_7:1.1.1.1.0.2
+	MIRBSD_7ter:1.1.1.1
+	cvs-20011091815:1.1.1.1
+	cvs-200309162130:1.1.1.1
+	cvs-200308302005:1.1.1.1
+	ctmx-0387:1.1.1.1
+	ctmx-0384:1.1.1.1
+	MIRBSD_5:1.1.1.1
+	ctmx-0375:1.1.1.1
+	ctmx-0373:1.1.1.1
+	ctm-0371:1.1.1.1
+	ctm-0370:1.1.1.1
+	MIRBSD_4:1.1.1.1
+	ctm-0363:1.1.1.1
+	ctm-0359:1.1.1.1
+	ctm-0349:1.1.1.1
+	openbsd:1.1.1;
+locks; strict;
+comment	@ * @;
+
+
+1.2
+date	2003.05.16.16.28.05;	author tg;	state dead;
+branches;
+next	1.1;
+
+1.1
+date	2003.03.22.20.00.54;	author tg;	state Exp;
+branches
+	1.1.1.1
+	1.1.9.1;
+next	;
+
+1.1.1.1
+date	2003.03.22.20.00.54;	author tg;	state Stab;
+branches;
+next	;
+
+1.1.9.1
+date	2004.02.14.19.04.24;	author tg;	state Exp;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.2
+log
+@remove a bunch of files not used in MirBSD - clean tree. People who want them got cvs.
+@
+text
+@/****************************************************************************}
+{*                                                                          *}
+{*  The FreeType project - a Free and Portable Quality TrueType Renderer.   *}
+{*                                                                          *}
+{*  Copyright 1996-1999 by                                                  *}
+{*  D. Turner, R.Wilhelm, and W. Lemberg                                    *}
+{*                                                                          *}
+{*  fdebug : A very simple TrueType bytecode debugger.                      *}
+{*                                                                          *}
+{*  NOTE : You must compile the interpreter with the DEBUG_INTERPRETER      *}
+{*         macro defined in order to link this program!                     *}
+{*                                                                          *}
+{****************************************************************************/
+
+#include <math.h>    /* libc ANSI */
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+#include "freetype.h"
+#include "tttypes.h"
+#include "ttdebug.h"
+#include "ttobjs.h"
+
+
+#ifdef UNIX
+#ifndef HAVE_POSIX_TERMIOS
+#include <sys/ioctl.h>
+#include <termio.h>
+#else
+#ifndef HAVE_TCGETATTR
+#define HAVE_TCGETATTR
+#endif /* HAVE_TCGETATTR */
+#ifndef HAVE_TCSETATTR
+#define HAVE_TCSETATTR
+#endif /* HAVE_TCSETATTR */
+#include <termios.h>
+#endif /* HAVE_POSIX_TERMIOS */
+#endif
+
+  /* MAGIC: This variable is only defined in ttinterp.c if the      */
+  /*         macro DEBUG_INTERPRETER is set.  It specifies the code */
+  /*         range to debug.  By default, it is TT_CodeRange_Glyph. */
+  /*                                                                */
+  extern
+  int  debug_coderange;
+
+
+#define  Font_Buff_Size  256000        /* this buffer holds all     */
+                                       /* font specific data.       */
+
+  TT_Engine    engine;
+  TT_Face      face;
+  TT_Instance  instance;
+  TT_Glyph     glyph;
+  TT_Error     error;
+
+  TT_Face_Properties  properties;
+
+  int    num_glyphs;
+  int    ptsize;
+
+  Int           Fail;
+  Int           Num;
+  int           mode = 2;
+  unsigned char autorun;
+
+/*********************************************************************
+ *
+ * Usage : print usage message
+ *
+ *********************************************************************/
+
+  static
+  void Usage( const char* execname )
+  {
+    TT_Message( "fdebug: a simple TrueType bytecode debugger - part of the FreeType project\n" );
+    TT_Message( "--------------------------------------------------------------------------\n\n");
+    TT_Message( "Usage: %s glyphnum ppem fontname[.ttf]\n", execname );
+    TT_Message( "    or %s --cvt ppem fontname[.ttf]\n", execname );
+    TT_Message( "    or %s --font fontname[.ttf]\n\n", execname );
+    exit( EXIT_FAILURE );
+  }
+
+
+/*********************************************************************
+ *
+ * Init_Keyboard : set the input file descriptor to char-by-char
+ *                 mode on Unix..
+ *
+ *********************************************************************/
+
+#ifdef UNIX
+
+ struct termios  old_termio;
+ 
+ static
+ void Init_Keyboard( void )
+ {
+   struct termios  termio;
+
+
+#ifndef HAVE_TCGETATTR
+   ioctl( 0, TCGETS, &old_termio ); 
+#else
+   tcgetattr( 0, &old_termio );
+#endif
+
+   termio = old_termio;
+   
+   termio.c_lflag &= ~(ICANON+ECHO+ECHOE+ECHOK+ECHONL+ECHOKE);
+
+#ifndef HAVE_TCSETATTR
+   ioctl( 0, TCSETS, &termio );
+#else
+   tcsetattr( 0, TCSANOW, &termio );
+#endif
+ }
+
+ static
+ void Reset_Keyboard( voi )
+ {
+#ifndef HAVE_TCSETATTR
+   ioctl( 0, TCSETS, &old_termio );
+#else
+   tcsetattr( 0, TCSANOW, &old_termio );
+#endif
+
+ }
+
+#else
+
+ static
+ void Init_Keyboard( void )
+ {
+ }
+
+ static
+ void Reset_Keyboard( voi )
+ {
+ }
+
+#endif
+
+  static
+  void  Print_Banner( void )
+  {
+    TT_Message( "fdebug    - a simple TrueType bytecode debugger for FreeType\n" );
+    TT_Message( "------------------------------------------------------------\n" );
+    TT_Message( "type '?' for help - copyright 1996-1999 the FreeType Project\n\n" );
+  }
+
+
+  static
+  void  Error( const char* message,
+               const char* filename )
+  {
+    static char tempstr[256];
+
+    sprintf( tempstr, "ERROR (%s): %s\n", filename, message );
+    TT_Message( tempstr );
+
+    sprintf( tempstr, "  code = 0x%04lx\n", error );
+    TT_Message( tempstr );
+
+    Reset_Keyboard();
+    exit( EXIT_FAILURE );
+  }
+
+
+  static
+  void  Init_Face( const char*  filename )
+  {
+    error = TT_Init_FreeType(&engine);
+    if (error) Error( "could not initialise FreeType", filename );
+
+    /* open face object */
+    error = TT_Open_Face( engine, filename, &face );
+    if (error) Error( "could not find or open file", filename );
+
+    /* get properties */
+    TT_Get_Face_Properties( face, &properties );
+    num_glyphs = properties.num_Glyphs;
+
+    /* create instance */
+    error = TT_New_Instance( face, &instance );
+    if (error) Error( "could not create instance", filename );
+
+    error = TT_New_Glyph( face, &glyph );
+    if (error) Error( "could not create glyph container", filename );
+
+    TT_Set_Instance_Resolutions( instance, 96, 96 );
+
+    error = TT_Set_Instance_CharSize( instance, ptsize << 6 );
+    if (error) Error( "could not set text size", filename );
+  }
+
+
+  int  main( int  argc, char**  argv )
+  {
+    int     i;
+    char    filename[128+4];
+    char*   execname;
+
+
+    execname = argv[0];
+    if ( argc < 2 )
+      Usage( execname );
+
+    if ( strcmp( argv[1], "--font" ) == 0 )
+    {
+      debug_coderange = TT_CodeRange_Font;
+      mode = 0;
+      argc--;
+      argv++;
+    }
+    else if ( strcmp( argv[1], "--cvt" ) == 0 )
+    {
+      debug_coderange = TT_CodeRange_Cvt;
+      argv++;
+      argc--;
+      mode = 1;
+    }
+    else if ( sscanf( argv[1], "%d", &Num ) == 1 )
+    {
+      mode = 2;
+      argv++;
+      argc--;
+    }
+    else
+      Usage( execname );
+
+    /* read the point size for cvt and glyph modes */
+    if (mode > 0)
+    {
+      if ( sscanf( argv[1], "%d", &ptsize ) != 1 )
+        Usage( execname );
+      argc--;
+      argv++;
+    }
+
+    if ( argc != 2 )
+      Usage(execname);
+
+    i = strlen( argv[1] );
+    while ( i > 0 && argv[1][i] != '\\' )
+    {
+      if ( argv[1][i] == '.' )
+        i = 0;
+      i--;
+    }
+
+    filename[128] = 0;
+
+    strncpy( filename, argv[1], 128 );
+    if ( i >= 0 )
+      strncpy( filename + strlen(filename), ".ttf", 4 );
+
+    Init_Keyboard();
+
+    if (mode == 2)
+    {
+      Init_Face( filename );
+      Print_Banner();
+
+      error = TT_Load_Glyph( instance, glyph, Num, TTLOAD_DEFAULT );
+      if (error) Error( "Error during bytecode execution", filename );
+    }
+    else
+    {
+      Print_Banner();
+      Init_Face( filename );
+    }
+
+    TT_Done_FreeType(engine);
+
+    Reset_Keyboard();
+    
+    exit( EXIT_SUCCESS );      /* for safety reasons */
+
+    return 0;       /* never reached */
+  }
+
+
+/* End */
+@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@@
+
+
+1.1.9.1
+log
+@OpenBSD just has imported exactly this tree into their vendor branch,
+called the same tag, in XF4/xc
+This is, apparently, the last XFree86 snapshot before the licence change
+(ie, addition of the advertising clause)
+
+Since the developers don't see any problems with that, and we would like
+to integrate improvements done by the remaining one or two (or so) XFree86
+developers (j/k), this prepares enabling us to update X-Window in the future.
+@
+text
+@@
+
+
+1.1.1.1
+log
+@Import OpenBSD 3.3 XF4 repository from CTM 3132 the first time
+This finalizes starting an OpenBSD-mirabile (aka MirBSD) repository.
+
+### MirBSD is:
+# Copyright (c) 1982-2003 by Thorsten "mirabile" Glaser <x86@@ePost.de>
+# Copyright © 1968-2003  The authors of And contributors to UNIX®, the
+#       C Language, BSD/Berkeley Unix; 386BSD, NetBSD 1.1 and OpenBSD.
+#
+# Anyone who obtained a copy of this work is hereby permitted to freely use,
+# distribute, modify, merge, sublicence, give away or sell it as long as the
+# authors are given due credit and the following notice is retained:
+#
+# This work is provided "as is", with no explicit or implicit warranty what-
+# soever. Use it only at your own risk. In no event may an author or contri-
+# butor be held liable for any damage, directly or indirectly, that origina-
+# ted through or is caused by creation or modification of this work.
+
+MirBSD is my private tree. MirBSD does not differ very much from OpenBSD
+and intentionally tracks OpenBSD. That's why it _is_ OpenBSD, just not the
+official one. It's like with DarrenBSD.
+
+At time of this writing, no advertising for MirBSD must be done,
+because the advertising clause has not yet been sorted out.
+
+http://templeofhate.com/tglaser/MirBSD/index.php
+@
+text
+@@

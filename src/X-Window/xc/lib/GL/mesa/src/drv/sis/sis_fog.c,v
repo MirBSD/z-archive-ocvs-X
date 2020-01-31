@@ -1,0 +1,704 @@
+head	1.1;
+branch	1.1.1;
+access;
+symbols
+	tg-mergetmp-2:1.1.1.2
+	cvs-200410241530:1.1.1.2
+	cvs-200410012000:1.1.1.2
+	cvs-200407141120:1.1.1.2
+	cvs-200406231010:1.1.1.2
+	MIRBSD_7quater:1.1.1.1
+	cvs-200405271510:1.1.1.2
+	XFree86_4_4_0:1.1.9.1
+	cvs-200403021700:1.1.1.2
+	XFREE86_20040213:1.1.9.1
+	xc:1.1.9
+	cvs-200401291925:1.1.1.1
+	MIRBSD_7_ALPHA:1.1.1.1.0.4
+	MIRBSD_7:1.1.1.1.0.2
+	MIRBSD_7ter:1.1.1.1
+	cvs-20011091815:1.1.1.1
+	cvs-200309162130:1.1.1.1
+	cvs-200308302005:1.1.1.1
+	ctmx-0387:1.1.1.1
+	ctmx-0384:1.1.1.1
+	MIRBSD_5:1.1.1.1
+	ctmx-0375:1.1.1.1
+	ctmx-0373:1.1.1.1
+	ctm-0371:1.1.1.1
+	ctm-0370:1.1.1.1
+	MIRBSD_4:1.1.1.1
+	ctm-0363:1.1.1.1
+	ctm-0359:1.1.1.1
+	ctm-0349:1.1.1.1
+	openbsd:1.1.1;
+locks; strict;
+comment	@ * @;
+
+
+1.1
+date	2003.03.22.20.04.20;	author tg;	state Exp;
+branches
+	1.1.1.1
+	1.1.9.1;
+next	;
+
+1.1.1.1
+date	2003.03.22.20.04.20;	author tg;	state Exp;
+branches;
+next	1.1.1.2;
+
+1.1.1.2
+date	2004.03.02.17.59.31;	author tg;	state Stab;
+branches;
+next	;
+
+1.1.9.1
+date	2004.02.14.19.18.12;	author tg;	state Exp;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@/**************************************************************************
+
+Copyright 2000 Silicon Integrated Systems Corp, Inc., HsinChu, Taiwan.
+All Rights Reserved.
+
+Permission is hereby granted, free of charge, to any person obtaining a
+copy of this software and associated documentation files (the
+"Software"), to deal in the Software without restriction, including
+without limitation the rights to use, copy, modify, merge, publish,
+distribute, sub license, and/or sell copies of the Software, and to
+permit persons to whom the Software is furnished to do so, subject to
+the following conditions:
+
+The above copyright notice and this permission notice (including the
+next paragraph) shall be included in all copies or substantial portions
+of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
+OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NON-INFRINGEMENT.
+IN NO EVENT SHALL PRECISION INSIGHT AND/OR ITS SUPPLIERS BE LIABLE FOR
+ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,
+TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
+SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+**************************************************************************/
+/* $XFree86: xc/lib/GL/mesa/src/drv/sis/sis_fog.c,v 1.3 2000/09/26 15:56:48 tsi Exp $ */
+
+/*
+ * Authors:
+ *    Sung-Ching Lin <sclin@@sis.com.tw>
+ *
+ */
+
+#include "sis_ctx.h"
+#include "sis_mesa.h"
+
+static DWORD convertFtToFogFt (DWORD dwInValue);
+
+void
+sis_Fogfv (GLcontext * ctx, GLenum pname, const GLfloat * params)
+{
+  XMesaContext xmesa = (XMesaContext) ctx->DriverCtx;
+  __GLSiScontext *hwcx = (__GLSiScontext *) xmesa->private;
+  __GLSiSHardware *current = &hwcx->current;
+
+  GLubyte dwFogColor[4];
+  DWORD dwArg;
+  float fArg;
+
+  switch (pname)
+    {
+    case GL_FOG_MODE:
+      current->hwFog &= ~(FOGMODE_LINEAR | FOGMODE_EXP | FOGMODE_EXP2);
+      switch (ctx->Fog.Mode)
+	{
+	case GL_LINEAR:
+	  current->hwFog |= FOGMODE_LINEAR;
+	  break;
+	case GL_EXP:
+	  current->hwFog |= FOGMODE_EXP;
+	  break;
+	case GL_EXP2:
+	  current->hwFog |= FOGMODE_EXP2;
+	  break;
+	}
+      break;
+    case GL_FOG_DENSITY:
+      dwArg = *(DWORD *) (&(ctx->Fog.Density));
+      current->hwFogDensity = 0;
+      current->hwFogDensity |= convertFtToFogFt (dwArg);
+      break;
+    case GL_FOG_START:
+    case GL_FOG_END:
+      fArg = 1.0 / (ctx->Fog.End - ctx->Fog.Start);
+      current->hwFogInverse = doFPtoFixedNoRound (*(DWORD *) (&fArg), 10);
+      if (pname == GL_FOG_END)
+	{
+	  dwArg = *(DWORD *) (&(ctx->Fog.End));
+	  if (hwcx->Chipset == PCI_CHIP_SIS300)
+	    {
+	      current->hwFogFar = doFPtoFixedNoRound (dwArg, 10);
+	    }
+	  else
+	    {
+	      current->hwFogFar = doFPtoFixedNoRound (dwArg, 6);
+	    }
+	}
+      break;
+    case GL_FOG_INDEX:
+      /* TODO */
+      break;
+    case GL_FOG_COLOR:
+      *((DWORD *) dwFogColor) = 0;
+      dwFogColor[2] =  (GLubyte)((ctx->Fog.Color[0]) * 255.0);
+      dwFogColor[1] =  (GLubyte)((ctx->Fog.Color[1]) * 255.0);
+      dwFogColor[0] =  (GLubyte)((ctx->Fog.Color[2]) * 255.0);
+      current->hwFog &= 0xff000000;
+      current->hwFog |= *((DWORD *) dwFogColor);
+      break;
+    }
+}
+
+DWORD
+doFPtoFixedNoRound (DWORD dwInValue, int nFraction)
+{
+  DWORD dwMantissa;
+  int nTemp;
+
+  if (dwInValue == 0)
+    return 0;
+  nTemp = (int) (dwInValue & 0x7F800000) >> 23;
+  nTemp = nTemp - 127 + nFraction - 23;
+  dwMantissa = (dwInValue & 0x007FFFFF) | 0x00800000;
+
+  if (nTemp < -25)
+    return 0;
+  if (nTemp > 0)
+    {
+      dwMantissa <<= nTemp;
+    }
+  else
+    {
+      nTemp = -nTemp;
+      dwMantissa >>= nTemp;
+    }
+  if (dwInValue & 0x80000000)
+    {
+      dwMantissa = ~dwMantissa + 1;
+    }
+  return (dwMantissa);
+}
+
+/* s[8].23->s[7].10 */
+static DWORD
+convertFtToFogFt (DWORD dwInValue)
+{
+  DWORD dwMantissa, dwExp;
+  DWORD dwRet;
+
+  if (dwInValue == 0)
+    return 0;
+
+  /* ----- Standard float Format: s[8].23                          -----
+   * -----     = (-1)^S * 2^(E      - 127) * (1 + M        / 2^23) -----
+   * -----     = (-1)^S * 2^((E-63) -  64) * (1 + (M/2^13) / 2^10) -----
+   * ----- Density float Format:  s[7].10                          -----
+   * -----     New Exponential = E - 63                            -----
+   * -----     New Mantissa    = M / 2^13                          -----
+   * -----                                                         -----
+   */
+
+  dwExp = (dwInValue & 0x7F800000) >> 23;
+  dwExp -= 63;
+
+  if ((LONG) dwExp < 0)
+    return 0;
+
+  if (dwExp <= 0x7F)
+    {
+      dwMantissa = (dwInValue & 0x007FFFFF) >> (23 - 10);
+    }
+  else
+    {
+      /* ----- To Return +Max(or -Max) ----- */
+      dwExp = 0x7F;
+      dwMantissa = 0x3FF;
+    }
+
+  dwRet = (dwInValue & 0x80000000) >> (31 - 17);  /* Shift Sign Bit */
+
+  dwRet |= (dwExp << 10) | dwMantissa;
+
+  return (dwRet);
+}
+@
+
+
+1.1.9.1
+log
+@OpenBSD just has imported exactly this tree into their vendor branch,
+called the same tag, in XF4/xc
+This is, apparently, the last XFree86 snapshot before the licence change
+(ie, addition of the advertising clause)
+
+Since the developers don't see any problems with that, and we would like
+to integrate improvements done by the remaining one or two (or so) XFree86
+developers (j/k), this prepares enabling us to update X-Window in the future.
+@
+text
+@a3 1
+Copyright 2003 Eric Anholt
+d7 18
+a24 17
+copy of this software and associated documentation files (the "Software"),
+to deal in the Software without restriction, including without limitation
+on the rights to use, copy, modify, merge, publish, distribute, sub
+license, and/or sell copies of the Software, and to permit persons to whom
+the Software is furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice (including the next
+paragraph) shall be included in all copies or substantial portions of the
+Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NON-INFRINGEMENT. IN NO EVENT SHALL
+ERIC ANHOLT OR SILICON INTEGRATED SYSTEMS CORP BE LIABLE FOR ANY CLAIM,
+DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR
+OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE
+USE OR OTHER DEALINGS IN THE SOFTWARE.
+d27 1
+a27 1
+/* $XFree86: xc/lib/GL/mesa/src/drv/sis/sis_fog.c,v 1.5 2003/12/09 00:15:22 alanh Exp $ */
+d31 2
+a32 2
+ *   Sung-Ching Lin <sclin@@sis.com.tw>
+ *   Eric Anholt <anholt@@FreeBSD.org>
+d35 2
+a36 3
+#include "sis_context.h"
+#include "sis_state.h"
+#include "swrast/swrast.h"
+d38 1
+a38 3
+#include "mmath.h"
+
+static GLint convertFtToFogFt( GLfloat dwInValue );
+d41 1
+a41 1
+sisDDFogfv( GLcontext *ctx, GLenum pname, const GLfloat *params )
+d43 12
+a54 11
+   sisContextPtr smesa = SIS_CONTEXT(ctx);
+   __GLSiSHardware *prev = &smesa->prev;
+   __GLSiSHardware *current = &smesa->current;
+
+   float fArg;
+   GLint fogColor;
+
+   switch (pname)
+   {
+   case GL_FOG_MODE:
+      current->hwFog &= ~MASK_FogMode;
+d56 11
+a66 15
+      {
+      case GL_LINEAR:
+         current->hwFog |= FOGMODE_LINEAR;
+         break;
+      case GL_EXP:
+         current->hwFog |= FOGMODE_EXP;
+         break;
+      case GL_EXP2:
+         current->hwFog |= FOGMODE_EXP2;
+         break;
+      }
+      if (current->hwFog != prev->hwFog) {
+         prev->hwFog = current->hwFog;
+         smesa->GlobalFlag |= GFLAG_FOGSETTING;
+      }
+d68 4
+a71 6
+   case GL_FOG_DENSITY:
+      current->hwFogDensity = convertFtToFogFt( ctx->Fog.Density );
+      if (current->hwFogDensity != prev->hwFogDensity) {
+         prev->hwFogDensity = current->hwFogDensity;
+         smesa->GlobalFlag |= GFLAG_FOGSETTING;
+      }
+d73 2
+a74 2
+   case GL_FOG_START:
+   case GL_FOG_END:
+d76 1
+a76 1
+      current->hwFogInverse = doFPtoFixedNoRound( fArg, 10 );
+d78 11
+a88 13
+      {
+         if (smesa->Chipset == PCI_CHIP_SIS300)
+            current->hwFogFar = doFPtoFixedNoRound( ctx->Fog.End, 10 );
+         else
+            current->hwFogFar = doFPtoFixedNoRound( ctx->Fog.End, 6 );
+      }
+      if (current->hwFogFar != prev->hwFogFar ||
+          current->hwFogInverse != prev->hwFogInverse)
+      {
+         prev->hwFogFar = current->hwFogFar;
+         prev->hwFogInverse = current->hwFogInverse;
+         smesa->GlobalFlag |= GFLAG_FOGSETTING;
+      }
+d90 1
+a90 1
+   case GL_FOG_INDEX:
+d93 5
+a97 4
+   case GL_FOG_COLOR:
+      fogColor  = FLOAT_TO_UBYTE( ctx->Fog.Color[0] ) << 16;
+      fogColor |= FLOAT_TO_UBYTE( ctx->Fog.Color[1] ) << 8;
+      fogColor |= FLOAT_TO_UBYTE( ctx->Fog.Color[2] );
+d99 1
+a99 5
+      current->hwFog |= fogColor;
+      if (current->hwFog != prev->hwFog) {
+          prev->hwFog = current->hwFog;
+         smesa->GlobalFlag |= GFLAG_FOGSETTING;
+      }
+d101 1
+a101 1
+   }
+d104 2
+a105 2
+GLint
+doFPtoFixedNoRound( GLfloat dwInValue, int nFraction )
+d107 13
+a119 17
+   GLint dwMantissa;
+   int nTemp;
+   union { int i; float f; } u;
+   GLint val;
+
+   u.f = dwInValue;
+   val = u.i;
+
+   if (val == 0)
+      return 0;
+   nTemp = (int) (val & 0x7F800000) >> 23;
+   nTemp = nTemp - 127 + nFraction - 23;
+   dwMantissa = (val & 0x007FFFFF) | 0x00800000;
+
+   if (nTemp < -25)
+       return 0;
+   if (nTemp > 0)
+d121 3
+a123 1
+   else {
+d126 3
+a128 2
+   }
+   if (val & 0x80000000)
+d130 2
+a131 1
+   return dwMantissa;
+d135 2
+a136 2
+static GLint
+convertFtToFogFt( GLfloat dwInValue )
+d138 27
+a164 29
+   GLint dwMantissa, dwExp;
+   GLint dwRet;
+   union { int i; float f; } u;
+   GLint val;
+
+   u.f = dwInValue;
+   val = u.i;
+
+   if (val == 0)
+      return 0;
+
+   /* ----- Standard float Format: s[8].23                          -----
+    * -----     = (-1)^S * 2^(E      - 127) * (1 + M        / 2^23) -----
+    * -----     = (-1)^S * 2^((E-63) -  64) * (1 + (M/2^13) / 2^10) -----
+    * ----- Density float Format:  s[7].10                          -----
+    * -----     New Exponential = E - 63                            -----
+    * -----     New Mantissa    = M / 2^13                          -----
+    * -----                                                         -----
+    */
+
+   dwExp = (val & 0x7F800000) >> 23;
+   dwExp -= 63;
+
+   if (dwExp < 0)
+      return 0;
+
+   if (dwExp <= 0x7F)
+      dwMantissa = (val & 0x007FFFFF) >> (23 - 10);
+   else {
+d168 1
+a168 1
+   }
+d170 1
+a170 1
+   dwRet = (val & 0x80000000) >> (31 - 17);  /* Shift Sign Bit */
+d172 1
+a172 1
+   dwRet |= (dwExp << 10) | dwMantissa;
+d174 1
+a174 1
+   return dwRet;
+@
+
+
+1.1.1.1
+log
+@Import OpenBSD 3.3 XF4 repository from CTM 3132 the first time
+This finalizes starting an OpenBSD-mirabile (aka MirBSD) repository.
+
+### MirBSD is:
+# Copyright (c) 1982-2003 by Thorsten "mirabile" Glaser <x86@@ePost.de>
+# Copyright © 1968-2003  The authors of And contributors to UNIX®, the
+#       C Language, BSD/Berkeley Unix; 386BSD, NetBSD 1.1 and OpenBSD.
+#
+# Anyone who obtained a copy of this work is hereby permitted to freely use,
+# distribute, modify, merge, sublicence, give away or sell it as long as the
+# authors are given due credit and the following notice is retained:
+#
+# This work is provided "as is", with no explicit or implicit warranty what-
+# soever. Use it only at your own risk. In no event may an author or contri-
+# butor be held liable for any damage, directly or indirectly, that origina-
+# ted through or is caused by creation or modification of this work.
+
+MirBSD is my private tree. MirBSD does not differ very much from OpenBSD
+and intentionally tracks OpenBSD. That's why it _is_ OpenBSD, just not the
+official one. It's like with DarrenBSD.
+
+At time of this writing, no advertising for MirBSD must be done,
+because the advertising clause has not yet been sorted out.
+
+http://templeofhate.com/tglaser/MirBSD/index.php
+@
+text
+@@
+
+
+1.1.1.2
+log
+@That's what OpenBSD will, probably, ship as XF4 in 3.5
+their last sync against XFree86 4.3-current has been
+imported into our vendor branch, too
+@
+text
+@a3 1
+Copyright 2003 Eric Anholt
+d7 18
+a24 17
+copy of this software and associated documentation files (the "Software"),
+to deal in the Software without restriction, including without limitation
+on the rights to use, copy, modify, merge, publish, distribute, sub
+license, and/or sell copies of the Software, and to permit persons to whom
+the Software is furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice (including the next
+paragraph) shall be included in all copies or substantial portions of the
+Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NON-INFRINGEMENT. IN NO EVENT SHALL
+ERIC ANHOLT OR SILICON INTEGRATED SYSTEMS CORP BE LIABLE FOR ANY CLAIM,
+DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR
+OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE
+USE OR OTHER DEALINGS IN THE SOFTWARE.
+d27 1
+a27 1
+/* $XFree86: xc/lib/GL/mesa/src/drv/sis/sis_fog.c,v 1.5 2003/12/09 00:15:22 alanh Exp $ */
+d31 2
+a32 2
+ *   Sung-Ching Lin <sclin@@sis.com.tw>
+ *   Eric Anholt <anholt@@FreeBSD.org>
+d35 2
+a36 3
+#include "sis_context.h"
+#include "sis_state.h"
+#include "swrast/swrast.h"
+d38 1
+a38 3
+#include "mmath.h"
+
+static GLint convertFtToFogFt( GLfloat dwInValue );
+d41 1
+a41 1
+sisDDFogfv( GLcontext *ctx, GLenum pname, const GLfloat *params )
+d43 12
+a54 11
+   sisContextPtr smesa = SIS_CONTEXT(ctx);
+   __GLSiSHardware *prev = &smesa->prev;
+   __GLSiSHardware *current = &smesa->current;
+
+   float fArg;
+   GLint fogColor;
+
+   switch (pname)
+   {
+   case GL_FOG_MODE:
+      current->hwFog &= ~MASK_FogMode;
+d56 11
+a66 15
+      {
+      case GL_LINEAR:
+         current->hwFog |= FOGMODE_LINEAR;
+         break;
+      case GL_EXP:
+         current->hwFog |= FOGMODE_EXP;
+         break;
+      case GL_EXP2:
+         current->hwFog |= FOGMODE_EXP2;
+         break;
+      }
+      if (current->hwFog != prev->hwFog) {
+         prev->hwFog = current->hwFog;
+         smesa->GlobalFlag |= GFLAG_FOGSETTING;
+      }
+d68 4
+a71 6
+   case GL_FOG_DENSITY:
+      current->hwFogDensity = convertFtToFogFt( ctx->Fog.Density );
+      if (current->hwFogDensity != prev->hwFogDensity) {
+         prev->hwFogDensity = current->hwFogDensity;
+         smesa->GlobalFlag |= GFLAG_FOGSETTING;
+      }
+d73 2
+a74 2
+   case GL_FOG_START:
+   case GL_FOG_END:
+d76 1
+a76 1
+      current->hwFogInverse = doFPtoFixedNoRound( fArg, 10 );
+d78 11
+a88 13
+      {
+         if (smesa->Chipset == PCI_CHIP_SIS300)
+            current->hwFogFar = doFPtoFixedNoRound( ctx->Fog.End, 10 );
+         else
+            current->hwFogFar = doFPtoFixedNoRound( ctx->Fog.End, 6 );
+      }
+      if (current->hwFogFar != prev->hwFogFar ||
+          current->hwFogInverse != prev->hwFogInverse)
+      {
+         prev->hwFogFar = current->hwFogFar;
+         prev->hwFogInverse = current->hwFogInverse;
+         smesa->GlobalFlag |= GFLAG_FOGSETTING;
+      }
+d90 1
+a90 1
+   case GL_FOG_INDEX:
+d93 5
+a97 4
+   case GL_FOG_COLOR:
+      fogColor  = FLOAT_TO_UBYTE( ctx->Fog.Color[0] ) << 16;
+      fogColor |= FLOAT_TO_UBYTE( ctx->Fog.Color[1] ) << 8;
+      fogColor |= FLOAT_TO_UBYTE( ctx->Fog.Color[2] );
+d99 1
+a99 5
+      current->hwFog |= fogColor;
+      if (current->hwFog != prev->hwFog) {
+          prev->hwFog = current->hwFog;
+         smesa->GlobalFlag |= GFLAG_FOGSETTING;
+      }
+d101 1
+a101 1
+   }
+d104 2
+a105 2
+GLint
+doFPtoFixedNoRound( GLfloat dwInValue, int nFraction )
+d107 13
+a119 17
+   GLint dwMantissa;
+   int nTemp;
+   union { int i; float f; } u;
+   GLint val;
+
+   u.f = dwInValue;
+   val = u.i;
+
+   if (val == 0)
+      return 0;
+   nTemp = (int) (val & 0x7F800000) >> 23;
+   nTemp = nTemp - 127 + nFraction - 23;
+   dwMantissa = (val & 0x007FFFFF) | 0x00800000;
+
+   if (nTemp < -25)
+       return 0;
+   if (nTemp > 0)
+d121 3
+a123 1
+   else {
+d126 3
+a128 2
+   }
+   if (val & 0x80000000)
+d130 2
+a131 1
+   return dwMantissa;
+d135 2
+a136 2
+static GLint
+convertFtToFogFt( GLfloat dwInValue )
+d138 27
+a164 29
+   GLint dwMantissa, dwExp;
+   GLint dwRet;
+   union { int i; float f; } u;
+   GLint val;
+
+   u.f = dwInValue;
+   val = u.i;
+
+   if (val == 0)
+      return 0;
+
+   /* ----- Standard float Format: s[8].23                          -----
+    * -----     = (-1)^S * 2^(E      - 127) * (1 + M        / 2^23) -----
+    * -----     = (-1)^S * 2^((E-63) -  64) * (1 + (M/2^13) / 2^10) -----
+    * ----- Density float Format:  s[7].10                          -----
+    * -----     New Exponential = E - 63                            -----
+    * -----     New Mantissa    = M / 2^13                          -----
+    * -----                                                         -----
+    */
+
+   dwExp = (val & 0x7F800000) >> 23;
+   dwExp -= 63;
+
+   if (dwExp < 0)
+      return 0;
+
+   if (dwExp <= 0x7F)
+      dwMantissa = (val & 0x007FFFFF) >> (23 - 10);
+   else {
+d168 1
+a168 1
+   }
+d170 1
+a170 1
+   dwRet = (val & 0x80000000) >> (31 - 17);  /* Shift Sign Bit */
+d172 1
+a172 1
+   dwRet |= (dwExp << 10) | dwMantissa;
+d174 1
+a174 1
+   return dwRet;
+@
+

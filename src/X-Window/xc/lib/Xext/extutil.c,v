@@ -1,0 +1,481 @@
+head	1.1;
+branch	1.1.1;
+access;
+symbols
+	tg-mergetmp-2:1.1.1.3
+	cvs-200410241530:1.1.1.3
+	cvs-200410012000:1.1.1.3
+	cvs-200407141120:1.1.1.3
+	cvs-200406231010:1.1.1.3
+	MIRBSD_7quater:1.1.1.2
+	cvs-200405271510:1.1.1.3
+	XFree86_4_4_0:1.1.9.1
+	cvs-200403021700:1.1.1.3
+	XFREE86_20040213:1.1.9.1
+	xc:1.1.9
+	cvs-200401291925:1.1.1.2
+	MIRBSD_7_ALPHA:1.1.1.2.0.4
+	MIRBSD_7:1.1.1.2.0.2
+	MIRBSD_7ter:1.1.1.2
+	cvs-20011091815:1.1.1.2
+	cvs-200309162130:1.1.1.2
+	cvs-200308302005:1.1.1.2
+	ctmx-0387:1.1.1.2
+	ctmx-0384:1.1.1.2
+	MIRBSD_5:1.1.1.2
+	ctmx-0375:1.1.1.2
+	ctmx-0373:1.1.1.2
+	ctm-0371:1.1.1.2
+	ctm-0370:1.1.1.2
+	MIRBSD_4:1.1.1.2
+	ctm-0363:1.1.1.2
+	ctm-0359:1.1.1.2
+	ctm-0349:1.1.1.1
+	openbsd:1.1.1;
+locks; strict;
+comment	@ * @;
+
+
+1.1
+date	2003.03.22.20.04.53;	author tg;	state Exp;
+branches
+	1.1.1.1
+	1.1.9.1;
+next	;
+
+1.1.1.1
+date	2003.03.22.20.04.53;	author tg;	state Exp;
+branches;
+next	1.1.1.2;
+
+1.1.1.2
+date	2003.04.08.18.32.31;	author tg;	state Exp;
+branches;
+next	1.1.1.3;
+
+1.1.1.3
+date	2004.03.02.18.03.59;	author tg;	state Stab;
+branches;
+next	;
+
+1.1.9.1
+date	2004.02.14.19.19.19;	author tg;	state Exp;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@/*
+ * $Xorg: extutil.c,v 1.4 2001/02/09 02:03:49 xorgcvs Exp $
+ *
+Copyright 1989, 1998  The Open Group
+
+Permission to use, copy, modify, distribute, and sell this software and its
+documentation for any purpose is hereby granted without fee, provided that
+the above copyright notice appear in all copies and that both that
+copyright notice and this permission notice appear in supporting
+documentation.
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
+OPEN GROUP BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN
+AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
+CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+Except as contained in this notice, the name of The Open Group shall not be
+used in advertising or otherwise to promote the sale, use or other dealings
+in this Software without prior written authorization from The Open Group.
+ *
+ * Author:  Jim Fulton, MIT X Consortium
+ *
+ * 
+ * 		       Xlib Extension-Writing Utilities
+ * 
+ * This package contains utilities for writing the client API for various
+ * protocol extensions.  THESE INTERFACES ARE NOT PART OF THE X STANDARD AND
+ * ARE SUBJECT TO CHANGE!
+ * 
+ *  Routines include:
+ * 
+ *         XextCreateExtension		called once per extension
+ *         XextDestroyExtension		if no longer using extension
+ *         XextAddDisplay		add another display
+ *         XextRemoveDisplay		remove a display
+ *         XextFindDisplay		is a display open
+ * 
+ * In addition, the following Xlib-style interfaces are provided:
+ * 
+ *         XSetExtensionErrorHandler	establish an extension error handler
+ *         XMissingExtension		raise an error about missing ext
+ */
+/* $XFree86: xc/lib/Xext/extutil.c,v 1.4 2001/12/14 19:55:02 dawes Exp $ */
+
+#include <stdio.h>
+#include "Xlibint.h"
+#include "Xext.h"
+#include "extutil.h"
+
+
+/*
+ * XextCreateExtension - return an extension descriptor containing context
+ * information for this extension.  This object is passed to all Xext 
+ * routines.
+ */
+XExtensionInfo *XextCreateExtension ()
+{
+    register XExtensionInfo *info =
+      (XExtensionInfo *) Xmalloc (sizeof (XExtensionInfo));
+
+    if (info) {
+	info->head = NULL;
+	info->cur = NULL;
+	info->ndisplays = 0;
+    }
+    return info;
+}
+
+
+/*
+ * XextDestroyExtension - free memory the given extension descriptor
+ */
+void XextDestroyExtension (info)
+    XExtensionInfo *info;
+{
+    info->head = NULL;			/* to catch refs after this */
+    info->cur = NULL;
+    info->ndisplays = 0;
+    XFree ((char *) info);
+}
+
+
+
+/*
+ * XextAddDisplay - add a display to this extension
+ */
+XExtDisplayInfo *XextAddDisplay (extinfo, dpy, ext_name, hooks, nevents, data)
+    XExtensionInfo *extinfo;
+    Display *dpy;
+    char *ext_name;
+    XExtensionHooks *hooks;
+    int nevents;
+    XPointer data;
+{
+    XExtDisplayInfo *dpyinfo;
+
+    dpyinfo = (XExtDisplayInfo *) Xmalloc (sizeof (XExtDisplayInfo));
+    if (!dpyinfo) return NULL;
+    dpyinfo->display = dpy;
+    dpyinfo->data = data;
+    dpyinfo->codes = XInitExtension (dpy, ext_name);
+
+    /*
+     * if the server has the extension, then we can initialize the 
+     * appropriate function vectors
+     */
+    if (dpyinfo->codes) {
+	int i, j;
+
+	for (i = 0, j = dpyinfo->codes->first_event; i < nevents; i++, j++) {
+	    XESetWireToEvent (dpy, j, hooks->wire_to_event);
+	    XESetEventToWire (dpy, j, hooks->event_to_wire);
+	}
+	if (hooks->create_gc)
+	  XESetCreateGC (dpy, dpyinfo->codes->extension, hooks->create_gc);
+	if (hooks->copy_gc)
+	  XESetCopyGC (dpy, dpyinfo->codes->extension, hooks->copy_gc);
+	if (hooks->flush_gc)
+	  XESetFlushGC (dpy, dpyinfo->codes->extension, hooks->flush_gc);
+	if (hooks->free_gc)
+	  XESetFreeGC (dpy, dpyinfo->codes->extension, hooks->free_gc);
+	if (hooks->create_font)
+	  XESetCreateFont (dpy, dpyinfo->codes->extension, hooks->create_font);
+	if (hooks->free_font)
+	  XESetFreeFont (dpy, dpyinfo->codes->extension, hooks->free_font);
+	if (hooks->close_display)
+	  XESetCloseDisplay (dpy, dpyinfo->codes->extension, 
+			     hooks->close_display);
+	if (hooks->error)
+	  XESetError (dpy, dpyinfo->codes->extension, hooks->error);
+	if (hooks->error_string)
+	  XESetErrorString (dpy, dpyinfo->codes->extension,
+			    hooks->error_string);
+    } else if (hooks->close_display) {
+	/* The server doesn't have this extension.
+	 * Use a private Xlib-internal extension to hang the close_display
+	 * hook on so that the "cache" (extinfo->cur) is properly cleaned.
+	 * (XBUG 7955)
+	 */
+	XExtCodes *codes = XAddExtension(dpy);
+	if (!codes) {
+	    XFree(dpyinfo);
+	    return NULL;
+	}
+	XESetCloseDisplay (dpy, codes->extension, hooks->close_display);
+    }
+
+    /*
+     * now, chain it onto the list
+     */
+    _XLockMutex(_Xglobal_lock);
+    dpyinfo->next = extinfo->head;
+    extinfo->head = dpyinfo;
+    extinfo->cur = dpyinfo;
+    extinfo->ndisplays++;
+    _XUnlockMutex(_Xglobal_lock);
+    return dpyinfo;
+}
+
+
+/*
+ * XextRemoveDisplay - remove the indicated display from the extension object
+ */
+int XextRemoveDisplay (extinfo, dpy)
+    XExtensionInfo *extinfo;
+    Display *dpy;
+{
+    XExtDisplayInfo *dpyinfo, *prev;
+
+    /*
+     * locate this display and its back link so that it can be removed
+     */
+    _XLockMutex(_Xglobal_lock);
+    prev = NULL;
+    for (dpyinfo = extinfo->head; dpyinfo; dpyinfo = dpyinfo->next) {
+	if (dpyinfo->display == dpy) break;
+	prev = dpyinfo;
+    }
+    if (!dpyinfo) {
+	_XUnlockMutex(_Xglobal_lock);
+	return 0;		/* hmm, actually an error */
+    }
+
+    /*
+     * remove the display from the list; handles going to zero
+     */
+    if (prev)
+	prev->next = dpyinfo->next;
+    else
+	extinfo->head = dpyinfo->next;
+
+    extinfo->ndisplays--;
+    if (dpyinfo == extinfo->cur) extinfo->cur = NULL;  /* flush cache */
+    _XUnlockMutex(_Xglobal_lock);
+
+    Xfree ((char *) dpyinfo);
+    return 1;
+}
+
+
+/*
+ * XextFindDisplay - look for a display in this extension; keeps a cache
+ * of the most-recently used for efficiency.
+ */
+XExtDisplayInfo *XextFindDisplay (extinfo, dpy)
+    XExtensionInfo *extinfo;
+    Display *dpy;
+{
+    register XExtDisplayInfo *dpyinfo;
+
+    /*
+     * see if this was the most recently accessed display
+     */
+    if ((dpyinfo = extinfo->cur)&& dpyinfo->display == dpy) return dpyinfo;
+
+
+    /*
+     * look for display in list
+     */
+    _XLockMutex(_Xglobal_lock);
+    for (dpyinfo = extinfo->head; dpyinfo; dpyinfo = dpyinfo->next) {
+	if (dpyinfo->display == dpy) {
+	    extinfo->cur = dpyinfo;	/* cache most recently used */
+	    _XUnlockMutex(_Xglobal_lock);
+	    return dpyinfo;
+	}
+    }
+    _XUnlockMutex(_Xglobal_lock);
+
+    return NULL;
+}
+
+
+
+static int _default_exterror (
+    Display *dpy,
+    char *ext_name,
+    char *reason)
+{
+    fprintf (stderr, "Xlib:  extension \"%s\" %s on display \"%s\".\n",
+	     ext_name, reason, DisplayString(dpy));
+    return 0;
+}
+
+
+/*
+ * XSetExtensionErrorHandler - sets the handler that gets called when a 
+ * requested extension is referenced.  This should eventually move into Xlib.
+ */
+
+extern int (*_XExtensionErrorFunction)();
+
+#if NeedFunctionPrototypes
+int (*XSetExtensionErrorHandler(
+    int (*handler)(
+#if NeedNestedPrototypes
+		   Display*,
+		   char *,
+		   char *
+#endif
+		   )
+))()
+#else
+int (*XSetExtensionErrorHandler(handler))()
+    int (*handler)();
+#endif
+{
+    int (*oldhandler)() = _XExtensionErrorFunction;
+
+    _XExtensionErrorFunction = (handler ? handler :
+				_default_exterror);
+    return oldhandler;
+}
+
+
+/*
+ * XMissingExtension - call the extension error handler
+ */
+#if NeedFunctionPrototypes
+int XMissingExtension (
+    Display *dpy,
+    _Xconst char *ext_name)
+#else
+int XMissingExtension (dpy, ext_name)
+    Display *dpy;
+    char *ext_name;
+#endif
+{
+    int (*func)() = (_XExtensionErrorFunction ?
+		     _XExtensionErrorFunction : _default_exterror);
+
+    if (!ext_name) ext_name = X_EXTENSION_UNKNOWN;
+    return (*func) (dpy, ext_name, X_EXTENSION_MISSING);
+}
+@
+
+
+1.1.9.1
+log
+@OpenBSD just has imported exactly this tree into their vendor branch,
+called the same tag, in XF4/xc
+This is, apparently, the last XFree86 snapshot before the licence change
+(ie, addition of the advertising clause)
+
+Since the developers don't see any problems with that, and we would like
+to integrate improvements done by the remaining one or two (or so) XFree86
+developers (j/k), this prepares enabling us to update X-Window in the future.
+@
+text
+@d48 1
+a48 1
+/* $XFree86: xc/lib/Xext/extutil.c,v 1.6 2003/11/17 22:20:21 dawes Exp $ */
+d51 3
+a53 3
+#include <X11/Xlibint.h>
+#include <X11/extensions/Xext.h>
+#include <X11/extensions/extutil.h>
+d258 1
+d261 1
+d265 1
+d268 4
+d284 2
+a285 2
+int
+XMissingExtension (
+d288 5
+@
+
+
+1.1.1.1
+log
+@Import OpenBSD 3.3 XF4 repository from CTM 3132 the first time
+This finalizes starting an OpenBSD-mirabile (aka MirBSD) repository.
+
+### MirBSD is:
+# Copyright (c) 1982-2003 by Thorsten "mirabile" Glaser <x86@@ePost.de>
+# Copyright © 1968-2003  The authors of And contributors to UNIX®, the
+#       C Language, BSD/Berkeley Unix; 386BSD, NetBSD 1.1 and OpenBSD.
+#
+# Anyone who obtained a copy of this work is hereby permitted to freely use,
+# distribute, modify, merge, sublicence, give away or sell it as long as the
+# authors are given due credit and the following notice is retained:
+#
+# This work is provided "as is", with no explicit or implicit warranty what-
+# soever. Use it only at your own risk. In no event may an author or contri-
+# butor be held liable for any damage, directly or indirectly, that origina-
+# ted through or is caused by creation or modification of this work.
+
+MirBSD is my private tree. MirBSD does not differ very much from OpenBSD
+and intentionally tracks OpenBSD. That's why it _is_ OpenBSD, just not the
+official one. It's like with DarrenBSD.
+
+At time of this writing, no advertising for MirBSD must be done,
+because the advertising clause has not yet been sorted out.
+
+http://templeofhate.com/tglaser/MirBSD/index.php
+@
+text
+@@
+
+
+1.1.1.2
+log
+@The X-Windowing System
+
+Import XFree86 4.3 from OpenBSD by CTM, in the hope it's stable
+@
+text
+@d48 1
+a48 1
+/* $XFree86: xc/lib/Xext/extutil.c,v 1.5 2002/10/16 00:37:27 dawes Exp $ */
+d51 3
+a53 3
+#include <X11/Xlibint.h>
+#include <X11/extensions/Xext.h>
+#include <X11/extensions/extutil.h>
+@
+
+
+1.1.1.3
+log
+@That's what OpenBSD will, probably, ship as XF4 in 3.5
+their last sync against XFree86 4.3-current has been
+imported into our vendor branch, too
+@
+text
+@d48 1
+a48 1
+/* $XFree86: xc/lib/Xext/extutil.c,v 1.6 2003/11/17 22:20:21 dawes Exp $ */
+d258 1
+d261 1
+d265 1
+d268 4
+d284 2
+a285 2
+int
+XMissingExtension (
+d288 5
+@
+
+

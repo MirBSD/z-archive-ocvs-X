@@ -1,0 +1,679 @@
+head	1.2;
+access;
+symbols
+	cvs-200405281530:1.1.1.6
+	cvs-200402211630:1.1.1.5
+	cvs-200401261625:1.1.1.5
+	cvs-200401162142:1.1.1.5
+	cvs-200301141450:1.1.1.5
+	cvs-200312021610:1.1.1.4
+	cvs-200311151930:1.1.1.3
+	cvs-200310311830:1.1.1.3
+	cvs-200310021000:1.1.1.2
+	cvs-200309281111:1.1.1.2
+	cvs-200309171515:1.1.1.2
+	cvs-200308302005:1.1.1.2
+	cvs-200308221505:1.1.1.2
+	cvs-200308171200:1.1.1.2
+	ctm-3449:1.1.1.2
+	cvs-200307191610:1.1.1.2
+	ctm-3416:1.1.1.2
+	cvs-200307091500:1.1.1.2
+	ctm-3389:1.1.1.2
+	cvs-200306291800:1.1.1.2
+	ctm-3369:1.1.1.2
+	ctm-3341:1.1.1.2
+	MIRBSD_5:1.1.1.2
+	cvs-200306082100:1.1.1.2
+	ctm-3316:1.1.1.2
+	ctm-3272:1.1.1.1
+	ctm-3264:1.1.1.1
+	ctm-3258:1.1.1.1
+	MIRBSD_4:1.1.1.1
+	ctm-3200:1.1.1.1
+	ctm-3188:1.1.1.1
+	ctm-3155:1.1.1.1
+	ctm-3132:1.1.1.1
+	openbsd:1.1.1;
+locks; strict;
+comment	@# @;
+
+
+1.2
+date	2005.02.10.19.04.53;	author tg;	state dead;
+branches;
+next	1.1;
+
+1.1
+date	2003.03.22.19.49.48;	author tg;	state Exp;
+branches
+	1.1.1.1;
+next	;
+
+1.1.1.1
+date	2003.03.22.19.49.48;	author tg;	state Exp;
+branches;
+next	1.1.1.2;
+
+1.1.1.2
+date	2003.06.05.16.39.02;	author tg;	state Exp;
+branches;
+next	1.1.1.3;
+
+1.1.1.3
+date	2003.10.31.19.14.43;	author tg;	state Exp;
+branches;
+next	1.1.1.4;
+
+1.1.1.4
+date	2003.12.02.18.44.27;	author tg;	state Exp;
+branches;
+next	1.1.1.5;
+
+1.1.1.5
+date	2004.01.14.15.31.21;	author tg;	state Exp;
+branches;
+next	1.1.1.6;
+
+1.1.1.6
+date	2004.05.28.16.22.31;	author bsiegert;	state Stab;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.2
+log
+@nuke gdb, binutils (too old and not ported anyway)
+<benz> dann wirf weg
+ok bsiegert@@
+
+remove dupe in Makefile, and overt whitespace
+@
+text
+@$OpenBSD: patch-ld_emultempl_elf32_em,v 1.2 2002/04/26 00:44:40 pvalchev Exp $
+--- ld/emultempl/elf32.em.orig	Thu Apr 25 15:41:38 2002
++++ ld/emultempl/elf32.em	Thu Apr 25 18:28:55 2002
+@@@@ -71,6 +71,155 @@@@ static boolean gld${EMULATION_NAME}_plac
+ static char *gld${EMULATION_NAME}_get_script PARAMS ((int *isfile));
+ 
+ EOF
++case ${target} in
++  *-*-openbsd*)
++    cat >>e${EMULATION_NAME}.c <<EOF
++#include <sys/types.h>
++#include <dirent.h>
++
++/* Search a directory for a .so file.  */
++
++static char *
++gld${EMULATION_NAME}_search_dir (dirname, filename)
++     const char *dirname;
++     const char *filename;
++{
++  int force_maj, force_min;
++  const char *dot;
++  unsigned int len;
++  char *alc;
++  char *found;
++  int max_maj, max_min;
++  DIR *dir;
++  struct dirent *entry;
++  unsigned int dirnamelen;
++  char *full_path;
++  int statval;
++  struct stat st;
++
++  force_maj = -1;
++  force_min = -1;
++  dot = strchr (filename, '.');
++  if (dot == NULL)
++    {
++      len = strlen (filename);
++      alc = NULL;
++    }
++  else
++    {
++      force_maj = atoi (dot + 1);
++
++      len = dot - filename;
++      alc = (char *) xmalloc (len + 1);
++      strncpy (alc, filename, len);
++      alc[len] = '\0';
++      filename = alc;
++
++      dot = strchr (dot + 1, '.');
++      if (dot != NULL)
++	force_min = atoi (dot + 1);
++    }
++
++  found = NULL;
++  max_maj = max_min = 0;
++
++  dir = opendir (dirname);
++  if (dir == NULL)
++    return NULL;
++  dirnamelen = strlen (dirname);
++  
++  while ((entry = readdir (dir)) != NULL)
++    {
++      const char *s;
++      char *eptr, *eptr1;
++      int found_maj, found_min;
++
++      if (strncmp (entry->d_name, "lib", 3) != 0
++	  || strncmp (entry->d_name + 3, filename, len) != 0)
++	continue;
++
++      /* We accept libfoo.so without a version number, even though the
++         native linker does not.  This is more convenient for packages
++         which just generate .so files for shared libraries, as on ELF
++         systems.  */
++      if (strncmp (entry->d_name + 3 + len, ".so", 3) != 0)
++	continue;
++
++      if (entry->d_name[6 + len] == '\0')
++	;
++      else if (entry->d_name[6 + len] == '.'
++	       && isdigit ((unsigned char) entry->d_name[7 + len]))
++	;
++      else
++	continue;
++
++      for (s = entry->d_name + 6 + len; *s != '\0'; s++)
++	if (*s != '.' && ! isdigit ((unsigned char) *s))
++	  break;
++      if (*s != '\0')
++	continue;
++
++      /* We've found a .so file.  Work out the major and minor
++	 version numbers.  */
++      found_maj = -1;
++      found_min = -1;
++
++      /* do allow libN.so */
++      if (entry->d_name[6 + len] == '.') {
++	found_maj = strtoul (entry->d_name + 7 + len, &eptr, 10);
++
++	/* do not support libN.so. or libN.so.X */
++	if (*eptr != '.' || ((entry->d_name + 3 + len) == eptr)) 
++	  continue;
++
++	found_min = strtoul (eptr+1, &eptr1, 10);
++
++	/* do not support libN.so.X. or libN.so.X.Y.[anything] */
++	if (*eptr1 != '\0' || (eptr+1 == eptr1)) 
++	  continue;
++      }
++
++      if ((force_maj != -1 && force_maj != found_maj)
++	  || (force_min != -1 && force_min != found_min))
++	continue;
++
++      /* Make sure the file really exists (ignore broken symlinks).  */
++      full_path = xmalloc (dirnamelen + 1 + strlen (entry->d_name) + 1);
++      sprintf (full_path, "%s/%s", dirname, entry->d_name);
++      statval = stat (full_path, &st);
++      free (full_path);
++      if (statval != 0)
++	continue;
++
++      /* We've found a match for the name we are searching for.  See
++	 if this is the version we should use.  */
++      if (found == NULL
++	  || (found_maj > max_maj)
++	  || (found_maj == max_maj
++	      && (found_min > max_min)))
++	{
++	  if (found != NULL)
++	    free (found);
++	  found = (char *) xmalloc (dirnamelen + strlen (entry->d_name) + 2);
++	  sprintf (found, "%s/%s", dirname, entry->d_name);
++	  max_maj = found_maj;
++	  max_min = found_min;
++	}
++    }
++
++  closedir (dir);
++
++  if (alc != NULL)
++    free (alc);
++
++  return found;
++}
++
++EOF
++    ;;
++esac
++cat >>e${EMULATION_NAME}.c <<EOF
++EOF
+ 
+ # Import any needed special functions and/or overrides.
+ #
+@@@@ -605,7 +754,7 @@@@ gld${EMULATION_NAME}_after_open ()
+ 	 rpath_link, rpath, then the environment variable
+ 	 LD_LIBRARY_PATH (native only), then the DT_RPATH/DT_RUNPATH
+ 	 entries (native only), then the linker script LIB_SEARCH_DIRS.
+-	 We do not search using the -L arguments.
++	 We look at the -L arguments to build search path.
+ 
+ 	 We search twice.  The first time, we skip objects which may
+ 	 introduce version mismatches.  The second time, we force
+@@@@ -619,7 +768,7 @@@@ if [ "x${host}" = "x${target}" ] ; then
+   case " ${EMULATION_LIBPATH} " in
+   *" ${EMULATION_NAME} "*)
+ cat >>e${EMULATION_NAME}.c <<EOF
+-	  const char *lib_path;
++	  char *lib_path;
+ 	  struct bfd_link_needed_list *rp;
+ 	  int found;
+ EOF
+@@@@ -639,15 +788,38 @@@@ cat >>e${EMULATION_NAME}.c <<EOF
+ 	  if (gld${EMULATION_NAME}_search_needed (command_line.rpath,
+ 						  l->name, force))
+ 	    break;
+-	  if (command_line.rpath_link == NULL
++	  if (getenv("LD_RUN_PATH") != NULL
++	      && command_line.rpath_link == NULL
+ 	      && command_line.rpath == NULL)
+ 	    {
+-	      lib_path = (const char *) getenv ("LD_RUN_PATH");
++	      lib_path = getenv ("LD_RUN_PATH");
+ 	      if (gld${EMULATION_NAME}_search_needed (lib_path, l->name,
+ 						      force))
+ 		break;
+ 	    }
+-	  lib_path = (const char *) getenv ("LD_LIBRARY_PATH");
++
++	  len = strlen(search_head->name);
++	  lib_path = xstrdup(search_head->name);
++	  for (search = search_head->next; search != NULL;
++	       search = search->next)
++	    {
++	      size_t nlen;
++
++	      nlen = strlen(search->name);
++	      lib_path = xrealloc(lib_path, len + nlen + 2);
++	      lib_path[len] = ':';
++	      strcpy(lib_path + len + 1, search->name);
++	      len += nlen + 1;
++	    }
++
++	  if (gld${EMULATION_NAME}_search_needed (lib_path, l->name, force))
++	    {
++	      free(lib_path);
++	      break;
++	    }
++	  free(lib_path);
++
++	  lib_path = getenv ("LD_LIBRARY_PATH");
+ 	  if (gld${EMULATION_NAME}_search_needed (lib_path, l->name, force))
+ 	    break;
+ 
+@@@@ -888,7 +1060,15 @@@@ gld${EMULATION_NAME}_open_dynamic_archiv
+     return false;
+ 
+   filename = entry->filename;
+-
++EOF
++case ${target} in
++  *-*-openbsd*)
++    cat >>e${EMULATION_NAME}.c <<EOF
++  string = gld${EMULATION_NAME}_search_dir(search->name, filename);
++EOF
++   ;;
++  *)
++    cat >>e${EMULATION_NAME}.c <<EOF
+   /* This allocates a few bytes too many when EXTRA_SHLIB_EXTENSION
+      is defined, but it does not seem worth the headache to optimize
+      away those two bytes of space.  */
+@@@@ -902,6 +1082,10 @@@@ gld${EMULATION_NAME}_open_dynamic_archiv
+ 
+   sprintf (string, "%s/lib%s%s.so", search->name, filename, arch);
+ 
++EOF
++    ;;
++esac
++cat >>e${EMULATION_NAME}.c <<EOF
+ #ifdef EXTRA_SHLIB_EXTENSION
+   /* Try the .so extension first.  If that fails build a new filename
+      using EXTRA_SHLIB_EXTENSION.  */
+@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@@
+
+
+1.1.1.1
+log
+@Import OpenBSD 3.3 ports repository from CTM 3132 the first time
+This continues opening an OpenBSD-mirabile (aka MirBSD) repository.
+
+### MirBSD is:
+# Copyright (c) 1982-2003 by Thorsten "mirabile" Glaser <x86@@ePost.de>
+# Copyright © 1968-2003  The authors of And contributors to UNIX®, the
+#       C Language, BSD/Berkeley Unix; 386BSD, NetBSD 1.1 and OpenBSD.
+#
+# Anyone who obtained a copy of this work is hereby permitted to freely use,
+# distribute, modify, merge, sublicence, give away or sell it as long as the
+# authors are given due credit and the following notice is retained:
+#
+# This work is provided "as is", with no explicit or implicit warranty what-
+# soever. Use it only at your own risk. In no event may an author or contri-
+# butor be held liable for any damage, directly or indirectly, that origina-
+# ted through or is caused by creation or modification of this work.
+
+MirBSD is my private tree. MirBSD does not differ very much from OpenBSD
+and intentionally tracks OpenBSD. That's why it _is_ OpenBSD, just not the
+official one. It's like with DarrenBSD.
+
+At time of this writing, no advertising for MirBSD must be done,
+because the advertising clause has not yet been sorted out.
+
+http://templeofhate.com/tglaser/MirBSD/index.php
+@
+text
+@@
+
+
+1.1.1.2
+log
+@Import latest OpenBSD CVS tree by CTM in order
+to sync the base system and ports tree with Them.
+@
+text
+@d1 5
+a5 5
+$OpenBSD: patch-ld_emultempl_elf32_em,v 1.3 2003/06/05 04:03:55 brad Exp $
+--- ld/emultempl/elf32.em.orig	Sun Dec 15 14:41:07 2002
++++ ld/emultempl/elf32.em	Sun Mar 16 23:34:34 2003
+@@@@ -86,6 +86,159 @@@@ static char *gld${EMULATION_NAME}_get_sc
+   PARAMS ((int *isfile));
+a36 1
++#ifdef DO_FORCE_VERS
+a38 1
++#endif /* DO_FORCE_VERS */
+a40 1
++#ifdef DO_FORCE_VERS
+a55 1
++#endif /* DO_FORCE_VERS */
+d160 1
+a160 27
+@@@@ -265,7 +418,7 @@@@ gld${EMULATION_NAME}_try_needed (name, f
+      int force;
+ {
+   bfd *abfd;
+-  const char *soname;
++  char *soname;
+ 
+   abfd = bfd_openr (name, bfd_get_target (output_bfd));
+   if (abfd == NULL)
+@@@@ -358,7 +511,7 @@@@ cat >>e${EMULATION_NAME}.c <<EOF
+     einfo ("%F%P:%B: bfd_stat failed: %E\n", abfd);
+ 
+   /* First strip off everything before the last '/'.  */
+-  soname = lbasename (abfd->filename);
++  soname = xstrdup (lbasename (abfd->filename));
+ 
+   if (trace_file_tries)
+     info_msg (_("found %s at %s\n"), soname, name);
+@@@@ -369,6 +522,7 @@@@ cat >>e${EMULATION_NAME}.c <<EOF
+     {
+       /* Return true to indicate that we found the file, even though
+          we aren't going to do anything with it.  */
++      free (soname);
+       return true;
+     }
+ 
+@@@@ -634,7 +788,7 @@@@ gld${EMULATION_NAME}_after_open ()
+d169 1
+a169 1
+@@@@ -648,7 +802,7 @@@@ if [ "x${host}" = "x${target}" ] ; then
+d178 1
+a178 1
+@@@@ -668,15 +822,38 @@@@ cat >>e${EMULATION_NAME}.c <<EOF
+d220 1
+a220 1
+@@@@ -929,7 +1106,15 @@@@ gld${EMULATION_NAME}_open_dynamic_archiv
+d237 1
+a237 1
+@@@@ -943,6 +1128,10 @@@@ gld${EMULATION_NAME}_open_dynamic_archiv
+@
+
+
+1.1.1.3
+log
+@Import OpenBSD ports tree into MirPorts Framework
+@
+text
+@d1 4
+a4 4
+$OpenBSD: patch-ld_emultempl_elf32_em,v 1.4 2003/10/11 00:52:22 brad Exp $
+--- ld/emultempl/elf32.em.orig	2003-02-28 17:55:11.000000000 -0500
++++ ld/emultempl/elf32.em	2003-09-04 02:03:38.000000000 -0400
+@@@@ -87,6 +87,159 @@@@ static char *gld${EMULATION_NAME}_get_sc
+d164 1
+a164 1
+@@@@ -266,7 +419,7 @@@@ gld${EMULATION_NAME}_try_needed (name, f
+d173 1
+a173 1
+@@@@ -359,7 +512,7 @@@@ cat >>e${EMULATION_NAME}.c <<EOF
+d182 9
+a190 1
+@@@@ -684,7 +837,7 @@@@ gld${EMULATION_NAME}_after_open ()
+d199 3
+a201 3
+@@@@ -696,7 +849,7 @@@@ gld${EMULATION_NAME}_after_open ()
+ EOF
+ if [ "x${USE_LIBPATH}" = xyes ] ; then
+d208 44
+a251 2
+@@@@ -976,7 +1129,15 @@@@ gld${EMULATION_NAME}_open_dynamic_archiv
+     return FALSE;
+d267 1
+a267 1
+@@@@ -990,6 +1151,10 @@@@ gld${EMULATION_NAME}_open_dynamic_archiv
+@
+
+
+1.1.1.4
+log
+@By request of bsiegert@@, import OpenBSD ports tree again.
+@
+text
+@d1 1
+a1 1
+$OpenBSD: patch-ld_emultempl_elf32_em,v 1.5 2003/11/23 22:06:25 brad Exp $
+d3 1
+a3 1
++++ ld/emultempl/elf32.em	2003-11-23 16:54:10.000000000 -0500
+d200 1
+a200 1
+@@@@ -976,7 +1129,17 @@@@ gld${EMULATION_NAME}_open_dynamic_archiv
+a209 2
++  if (string == NULL)
++    return FALSE;
+d217 1
+a217 1
+@@@@ -990,6 +1153,10 @@@@ gld${EMULATION_NAME}_open_dynamic_archiv
+@
+
+
+1.1.1.5
+log
+@Now we can update MirPorts from OpenBSD ports tree again,
+that we have fixed pkg_install tools accordingly in both
+stable and current, and that these tools are compatible.
+
+Consider MirPorts locked until next commit of ports/INDEX,v
+@
+text
+@d1 1
+a1 1
+$OpenBSD: patch-ld_emultempl_elf32_em,v 1.6 2004/01/12 06:26:22 brad Exp $
+d3 1
+a3 1
++++ ld/emultempl/elf32.em	2004-01-11 19:03:23.000000000 -0500
+d89 1
+a89 1
++	       && ISDIGIT ((unsigned char) entry->d_name[7 + len]))
+d95 1
+a95 1
++	if (*s != '.' && ! ISDIGIT ((unsigned char) *s))
+d182 1
+a182 9
+@@@@ -370,6 +523,7 @@@@ cat >>e${EMULATION_NAME}.c <<EOF
+     {
+       /* Return TRUE to indicate that we found the file, even though
+          we aren't going to do anything with it.  */
++      free(soname);
+       return TRUE;
+     }
+ 
+@@@@ -684,7 +838,7 @@@@ gld${EMULATION_NAME}_after_open ()
+d191 1
+a191 1
+@@@@ -696,7 +850,7 @@@@ gld${EMULATION_NAME}_after_open ()
+d200 1
+a200 43
+@@@@ -716,15 +870,38 @@@@ EOF
+ fi
+ if [ "x${NATIVE}" = xyes ] ; then
+ cat >>e${EMULATION_NAME}.c <<EOF
+-	  if (command_line.rpath_link == NULL
++	  if (getenv("LD_RUN_PATH") != NULL
++	      && command_line.rpath_link == NULL
+ 	      && command_line.rpath == NULL)
+ 	    {
+-	      lib_path = (const char *) getenv ("LD_RUN_PATH");
++	      lib_path = getenv ("LD_RUN_PATH");
+ 	      if (gld${EMULATION_NAME}_search_needed (lib_path, l->name,
+ 						      force))
+ 		break;
+ 	    }
+-	  lib_path = (const char *) getenv ("LD_LIBRARY_PATH");
++
++	  len = strlen(search_head->name);
++	  lib_path = xstrdup(search_head->name);
++	  for (search = search_head->next; search != NULL;
++	       search = search->next)
++	    {
++	      size_t nlen;
++
++	      nlen = strlen(search->name);
++	      lib_path = xrealloc(lib_path, len + nlen + 2);
++	      lib_path[len] = ':';
++	      strcpy(lib_path + len + 1, search->name);
++	      len += nlen + 1;
++	    }
++
++	  if (gld${EMULATION_NAME}_search_needed (lib_path, l->name, force))
++	    {
++	      free(lib_path);
++	      break;
++	    }
++	  free(lib_path);
++
++	  lib_path = getenv ("LD_LIBRARY_PATH");
+ 	  if (gld${EMULATION_NAME}_search_needed (lib_path, l->name, force))
+ 	    break;
+ EOF
+@@@@ -976,7 +1153,17 @@@@ gld${EMULATION_NAME}_open_dynamic_archiv
+d219 1
+a219 1
+@@@@ -990,6 +1177,10 @@@@ gld${EMULATION_NAME}_open_dynamic_archiv
+a229 18
+@@@@ -1486,6 +1677,8 @@@@ if test -n "$GENERATE_COMBRELOC_SCRIPT" 
+ echo '  ; else if (link_info.combreloc) return'        >> e${EMULATION_NAME}.c
+ sed $sc ldscripts/${EMULATION_NAME}.xc                 >> e${EMULATION_NAME}.c
+ fi
++echo '  ; else if (config.data_bss_contig == TRUE) return' >> e${EMULATION_NAME}.c
++sed $sc ldscripts/${EMULATION_NAME}.xz                 >> e${EMULATION_NAME}.c
+ echo '  ; else return'                                 >> e${EMULATION_NAME}.c
+ sed $sc ldscripts/${EMULATION_NAME}.x                  >> e${EMULATION_NAME}.c
+ echo '; }'                                             >> e${EMULATION_NAME}.c
+@@@@ -1530,6 +1723,8 @@@@ cat >>e${EMULATION_NAME}.c <<EOF
+ EOF
+ fi
+ cat >>e${EMULATION_NAME}.c <<EOF
++  else if (config.data_bss_contig == TRUE)
++    return "ldscripts/${EMULATION_NAME}.xz";
+   else
+     return "ldscripts/${EMULATION_NAME}.x";
+ }
+@
+
+
+1.1.1.6
+log
+@Import OpenBSD ports tree checked out from anoncvs.ca.openbsd.org at
+2004-05-28 15:30 UTC.
+
+Lots of SECURITY fixes, at least:
+
+ * databases/mysql: tmpfile issue
+ * www/squid: acl bypass
+ * games/xonix: privilege escalation
+ * archivers/lha: buffer overflow
+ * mail/exim: buffer overflows
+ * net/rsync: path checking issue
+ * net/icecast: buffer overflow
+ * www/opera
+@
+text
+@d1 1
+a1 1
+$OpenBSD: patch-ld_emultempl_elf32_em,v 1.8 2004/05/19 05:24:39 brad Exp $
+d3 2
+a4 2
++++ ld/emultempl/elf32.em	2004-05-18 23:59:31.000000000 -0400
+@@@@ -87,6 +87,125 @@@@ static char *gld${EMULATION_NAME}_get_sc
+d21 1
+d24 1
+d34 2
+d37 24
+a60 1
++  len = strlen (filename);
+d120 4
+d150 3
+d164 1
+a164 1
+@@@@ -266,7 +385,7 @@@@ gld${EMULATION_NAME}_try_needed (name, f
+d173 1
+a173 1
+@@@@ -359,7 +478,7 @@@@ cat >>e${EMULATION_NAME}.c <<EOF
+d182 1
+a182 1
+@@@@ -370,6 +489,7 @@@@ cat >>e${EMULATION_NAME}.c <<EOF
+d190 1
+a190 1
+@@@@ -684,7 +804,7 @@@@ gld${EMULATION_NAME}_after_open ()
+d199 1
+a199 1
+@@@@ -696,7 +816,7 @@@@ gld${EMULATION_NAME}_after_open ()
+d208 1
+a208 1
+@@@@ -716,15 +836,38 @@@@ EOF
+d250 1
+a250 1
+@@@@ -976,7 +1119,17 @@@@ gld${EMULATION_NAME}_open_dynamic_archiv
+d269 1
+a269 1
+@@@@ -990,6 +1143,10 @@@@ gld${EMULATION_NAME}_open_dynamic_archiv
+d280 1
+a280 1
+@@@@ -1486,6 +1643,8 @@@@ if test -n "$GENERATE_COMBRELOC_SCRIPT" 
+d289 1
+a289 1
+@@@@ -1530,6 +1689,8 @@@@ cat >>e${EMULATION_NAME}.c <<EOF
+@
+
+

@@ -1,0 +1,327 @@
+head	1.2;
+access;
+symbols
+	MIRBSD_7quater:1.1.1.1
+	cvs-200401291925:1.1.1.1
+	MIRBSD_7_ALPHA:1.1.1.1.0.4
+	MIRBSD_7:1.1.1.1.0.2
+	MIRBSD_7ter:1.1.1.1
+	cvs-20011091815:1.1.1.1
+	cvs-200309162130:1.1.1.1
+	cvs-200308302005:1.1.1.1
+	ctmx-0387:1.1.1.1
+	ctmx-0384:1.1.1.1
+	MIRBSD_5:1.1.1.1
+	ctmx-0375:1.1.1.1
+	ctmx-0373:1.1.1.1
+	ctm-0371:1.1.1.1
+	ctm-0370:1.1.1.1
+	MIRBSD_4:1.1.1.1
+	ctm-0363:1.1.1.1
+	ctm-0359:1.1.1.1
+	ctm-0349:1.1.1.1
+	openbsd:1.1.1;
+locks; strict;
+comment	@ * @;
+
+
+1.2
+date	2004.02.08.18.54.45;	author tg;	state dead;
+branches;
+next	1.1;
+
+1.1
+date	2003.03.22.20.05.22;	author tg;	state Exp;
+branches
+	1.1.1.1;
+next	;
+
+1.1.1.1
+date	2003.03.22.20.05.22;	author tg;	state Exp;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.2
+log
+@* bump to 0x079D (a bit late for tiff, but hey)
+* sync lists
+* regenerate configure files
+* remove MirLibtool, go back to gcc3 libtool :-(
+* fix for $stuff
+* remove dupes (libz, etc.) and unused (libintl, getopt)
+* update lynx
+* update texinfo.tex
+etc.
+@
+text
+@/* $Xorg: zutil.c,v 1.3 2000/08/17 19:46:48 cpqbld Exp $ */
+
+/* zutil.c -- target dependent utility functions for the compression library
+ * Copyright (C) 1995-1998 Jean-loup Gailly.
+ * For conditions of distribution and use, see copyright notice in zlib.h 
+ */
+
+#include "zutil.h"
+
+struct internal_state      {int dummy;}; /* for buggy compilers */
+
+#ifndef STDC
+extern void exit OF((int));
+#endif
+
+const char *z_errmsg[10] = {
+"need dictionary",     /* Z_NEED_DICT       2  */
+"stream end",          /* Z_STREAM_END      1  */
+"",                    /* Z_OK              0  */
+"file error",          /* Z_ERRNO         (-1) */
+"stream error",        /* Z_STREAM_ERROR  (-2) */
+"data error",          /* Z_DATA_ERROR    (-3) */
+"insufficient memory", /* Z_MEM_ERROR     (-4) */
+"buffer error",        /* Z_BUF_ERROR     (-5) */
+"incompatible version",/* Z_VERSION_ERROR (-6) */
+""};
+
+
+const char * EXPORT zlibVersion()
+{
+    return ZLIB_VERSION;
+}
+
+#ifdef DEBUG
+
+#  ifndef verbose
+#    define verbose 0
+#  endif
+int z_verbose = verbose;
+
+void z_error (m)
+    char *m;
+{
+    fprintf(stderr, "%s\n", m);
+    exit(1);
+}
+#endif
+
+/* exported to allow conversion of error code to string for compress() and
+ * uncompress()
+ */
+const char * EXPORT zError(err)
+    int err;
+{
+    return ERR_MSG(err);
+}
+
+
+#ifndef HAVE_MEMCPY
+
+void zmemcpy(dest, source, len)
+    Bytef* dest;
+    Bytef* source;
+    uInt  len;
+{
+    if (len == 0) return;
+    do {
+        *dest++ = *source++; /* ??? to be unrolled */
+    } while (--len != 0);
+}
+
+int zmemcmp(s1, s2, len)
+    Bytef* s1;
+    Bytef* s2;
+    uInt  len;
+{
+    uInt j;
+
+    for (j = 0; j < len; j++) {
+        if (s1[j] != s2[j]) return 2*(s1[j] > s2[j])-1;
+    }
+    return 0;
+}
+
+void zmemzero(dest, len)
+    Bytef* dest;
+    uInt  len;
+{
+    if (len == 0) return;
+    do {
+        *dest++ = 0;  /* ??? to be unrolled */
+    } while (--len != 0);
+}
+#endif
+
+#ifdef __TURBOC__
+#if (defined( __BORLANDC__) || !defined(SMALL_MEDIUM)) && !defined(__32BIT__)
+/* Small and medium model in Turbo C are for now limited to near allocation
+ * with reduced MAX_WBITS and MAX_MEM_LEVEL
+ */
+#  define MY_ZCALLOC
+
+/* Turbo C malloc() does not allow dynamic allocation of 64K bytes
+ * and farmalloc(64K) returns a pointer with an offset of 8, so we
+ * must fix the pointer. Warning: the pointer must be put back to its
+ * original form in order to free it, use zcfree().
+ */
+
+#define MAX_PTR 10
+/* 10*64K = 640K */
+
+local int next_ptr = 0;
+
+typedef struct ptr_table_s {
+    voidpf org_ptr;
+    voidpf new_ptr;
+} ptr_table;
+
+local ptr_table table[MAX_PTR];
+/* This table is used to remember the original form of pointers
+ * to large buffers (64K). Such pointers are normalized with a zero offset.
+ * Since MSDOS is not a preemptive multitasking OS, this table is not
+ * protected from concurrent access. This hack doesn't work anyway on
+ * a protected system like OS/2. Use Microsoft C instead.
+ */
+
+voidpf zcalloc (voidpf opaque, unsigned items, unsigned size)
+{
+    voidpf buf = opaque; /* just to make some compilers happy */
+    ulg bsize = (ulg)items*size;
+
+    /* If we allocate less than 65520 bytes, we assume that farmalloc
+     * will return a usable pointer which doesn't have to be normalized.
+     */
+    if (bsize < 65520L) {
+        buf = farmalloc(bsize);
+        if (*(ush*)&buf != 0) return buf;
+    } else {
+        buf = farmalloc(bsize + 16L);
+    }
+    if (buf == NULL || next_ptr >= MAX_PTR) return NULL;
+    table[next_ptr].org_ptr = buf;
+
+    /* Normalize the pointer to seg:0 */
+    *((ush*)&buf+1) += ((ush)((uch*)buf-0) + 15) >> 4;
+    *(ush*)&buf = 0;
+    table[next_ptr++].new_ptr = buf;
+    return buf;
+}
+
+void  zcfree (voidpf opaque, voidpf ptr)
+{
+    int n;
+    if (*(ush*)&ptr != 0) { /* object < 64K */
+        farfree(ptr);
+        return;
+    }
+    /* Find the original pointer */
+    for (n = 0; n < next_ptr; n++) {
+        if (ptr != table[n].new_ptr) continue;
+
+        farfree(table[n].org_ptr);
+        while (++n < next_ptr) {
+            table[n-1] = table[n];
+        }
+        next_ptr--;
+        return;
+    }
+    ptr = opaque; /* just to make some compilers happy */
+    Assert(0, "zcfree: ptr not found");
+}
+#endif
+#endif /* __TURBOC__ */
+
+
+#if defined(M_I86) && !defined(__32BIT__)
+/* Microsoft C in 16-bit mode */
+
+#  define MY_ZCALLOC
+
+#if (!defined(_MSC_VER) || (_MSC_VER < 600))
+#  define _halloc  halloc
+#  define _hfree   hfree
+#endif
+
+voidpf zcalloc (voidpf opaque, unsigned items, unsigned size)
+{
+    if (opaque) opaque = 0; /* to make compiler happy */
+    return _halloc((long)items, size);
+}
+
+void  zcfree (voidpf opaque, voidpf ptr)
+{
+    if (opaque) opaque = 0; /* to make compiler happy */
+    _hfree(ptr);
+}
+
+#endif /* MSC */
+
+
+#ifndef MY_ZCALLOC /* Any system without a special alloc function */
+
+#ifndef STDC
+extern voidp  calloc OF((uInt items, uInt size));
+extern void   free   OF((voidpf ptr));
+#endif
+
+voidpf zcalloc (opaque, items, size)
+    voidpf opaque;
+    unsigned items;
+    unsigned size;
+{
+    if (opaque) items += size - size; /* make compiler happy */
+    return (voidpf)calloc(items, size);
+}
+
+void  zcfree (opaque, ptr)
+    voidpf opaque;
+    voidpf ptr;
+{
+    free(ptr);
+    if (opaque) return; /* make compiler happy */
+}
+
+#endif /* MY_ZCALLOC */
+@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@@
+
+
+1.1.1.1
+log
+@Import OpenBSD 3.3 XF4 repository from CTM 3132 the first time
+This finalizes starting an OpenBSD-mirabile (aka MirBSD) repository.
+
+### MirBSD is:
+# Copyright (c) 1982-2003 by Thorsten "mirabile" Glaser <x86@@ePost.de>
+# Copyright © 1968-2003  The authors of And contributors to UNIX®, the
+#       C Language, BSD/Berkeley Unix; 386BSD, NetBSD 1.1 and OpenBSD.
+#
+# Anyone who obtained a copy of this work is hereby permitted to freely use,
+# distribute, modify, merge, sublicence, give away or sell it as long as the
+# authors are given due credit and the following notice is retained:
+#
+# This work is provided "as is", with no explicit or implicit warranty what-
+# soever. Use it only at your own risk. In no event may an author or contri-
+# butor be held liable for any damage, directly or indirectly, that origina-
+# ted through or is caused by creation or modification of this work.
+
+MirBSD is my private tree. MirBSD does not differ very much from OpenBSD
+and intentionally tracks OpenBSD. That's why it _is_ OpenBSD, just not the
+official one. It's like with DarrenBSD.
+
+At time of this writing, no advertising for MirBSD must be done,
+because the advertising clause has not yet been sorted out.
+
+http://templeofhate.com/tglaser/MirBSD/index.php
+@
+text
+@@

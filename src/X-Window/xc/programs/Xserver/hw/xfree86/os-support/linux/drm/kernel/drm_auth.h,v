@@ -1,0 +1,478 @@
+head	1.1;
+branch	1.1.1;
+access;
+symbols
+	tg-mergetmp-2:1.1.1.3
+	cvs-200410241530:1.1.1.3
+	cvs-200410012000:1.1.1.3
+	cvs-200407221130:1.1.1.3
+	cvs-200407141120:1.1.1.3
+	cvs-200406231010:1.1.1.3
+	MIRBSD_7quater:1.1.1.2
+	cvs-200405271510:1.1.1.3
+	XFree86_4_4_0:1.1.9.1
+	cvs-200403021700:1.1.1.3
+	XFREE86_20040213:1.1.9.1
+	xc:1.1.9
+	cvs-200401291925:1.1.1.2
+	MIRBSD_7_ALPHA:1.1.1.2.0.4
+	MIRBSD_7:1.1.1.2.0.2
+	MIRBSD_7ter:1.1.1.2
+	cvs-20011091815:1.1.1.2
+	cvs-200309162130:1.1.1.2
+	cvs-200308302005:1.1.1.2
+	ctmx-0387:1.1.1.2
+	ctmx-0384:1.1.1.2
+	MIRBSD_5:1.1.1.2
+	ctmx-0375:1.1.1.2
+	ctmx-0373:1.1.1.2
+	ctm-0371:1.1.1.2
+	ctm-0370:1.1.1.2
+	MIRBSD_4:1.1.1.2
+	ctm-0363:1.1.1.2
+	ctm-0359:1.1.1.2
+	ctm-0349:1.1.1.1
+	openbsd:1.1.1;
+locks; strict;
+comment	@ * @;
+
+
+1.1
+date	2003.03.22.20.08.43;	author tg;	state Exp;
+branches
+	1.1.1.1
+	1.1.9.1;
+next	;
+
+1.1.1.1
+date	2003.03.22.20.08.43;	author tg;	state Exp;
+branches;
+next	1.1.1.2;
+
+1.1.1.2
+date	2003.04.08.18.37.34;	author tg;	state Exp;
+branches;
+next	1.1.1.3;
+
+1.1.1.3
+date	2004.03.02.18.25.12;	author tg;	state Stab;
+branches;
+next	;
+
+1.1.9.1
+date	2004.02.14.19.25.13;	author tg;	state Exp;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@/* drm_auth.h -- IOCTLs for authentication -*- linux-c -*-
+ * Created: Tue Feb  2 08:37:54 1999 by faith@@valinux.com
+ *
+ * Copyright 1999 Precision Insight, Inc., Cedar Park, Texas.
+ * Copyright 2000 VA Linux Systems, Inc., Sunnyvale, California.
+ * All Rights Reserved.
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a
+ * copy of this software and associated documentation files (the "Software"),
+ * to deal in the Software without restriction, including without limitation
+ * the rights to use, copy, modify, merge, publish, distribute, sublicense,
+ * and/or sell copies of the Software, and to permit persons to whom the
+ * Software is furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice (including the next
+ * paragraph) shall be included in all copies or substantial portions of the
+ * Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL
+ * VA LINUX SYSTEMS AND/OR ITS SUPPLIERS BE LIABLE FOR ANY CLAIM, DAMAGES OR
+ * OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE,
+ * ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR
+ * OTHER DEALINGS IN THE SOFTWARE.
+ *
+ * Authors:
+ *    Rickard E. (Rik) Faith <faith@@valinux.com>
+ *    Gareth Hughes <gareth@@valinux.com>
+ */
+
+#define __NO_VERSION__
+#include "drmP.h"
+
+static int DRM(hash_magic)(drm_magic_t magic)
+{
+	return magic & (DRM_HASH_SIZE-1);
+}
+
+static drm_file_t *DRM(find_file)(drm_device_t *dev, drm_magic_t magic)
+{
+	drm_file_t	  *retval = NULL;
+	drm_magic_entry_t *pt;
+	int		  hash	  = DRM(hash_magic)(magic);
+
+	down(&dev->struct_sem);
+	for (pt = dev->magiclist[hash].head; pt; pt = pt->next) {
+		if (pt->magic == magic) {
+			retval = pt->priv;
+			break;
+		}
+	}
+	up(&dev->struct_sem);
+	return retval;
+}
+
+int DRM(add_magic)(drm_device_t *dev, drm_file_t *priv, drm_magic_t magic)
+{
+	int		  hash;
+	drm_magic_entry_t *entry;
+
+	DRM_DEBUG("%d\n", magic);
+
+	hash	     = DRM(hash_magic)(magic);
+	entry	     = DRM(alloc)(sizeof(*entry), DRM_MEM_MAGIC);
+	if (!entry) return -ENOMEM;
+	entry->magic = magic;
+	entry->priv  = priv;
+	entry->next  = NULL;
+
+	down(&dev->struct_sem);
+	if (dev->magiclist[hash].tail) {
+		dev->magiclist[hash].tail->next = entry;
+		dev->magiclist[hash].tail	= entry;
+	} else {
+		dev->magiclist[hash].head	= entry;
+		dev->magiclist[hash].tail	= entry;
+	}
+	up(&dev->struct_sem);
+
+	return 0;
+}
+
+int DRM(remove_magic)(drm_device_t *dev, drm_magic_t magic)
+{
+	drm_magic_entry_t *prev = NULL;
+	drm_magic_entry_t *pt;
+	int		  hash;
+
+	DRM_DEBUG("%d\n", magic);
+	hash = DRM(hash_magic)(magic);
+
+	down(&dev->struct_sem);
+	for (pt = dev->magiclist[hash].head; pt; prev = pt, pt = pt->next) {
+		if (pt->magic == magic) {
+			if (dev->magiclist[hash].head == pt) {
+				dev->magiclist[hash].head = pt->next;
+			}
+			if (dev->magiclist[hash].tail == pt) {
+				dev->magiclist[hash].tail = prev;
+			}
+			if (prev) {
+				prev->next = pt->next;
+			}
+			up(&dev->struct_sem);
+			return 0;
+		}
+	}
+	up(&dev->struct_sem);
+
+	DRM(free)(pt, sizeof(*pt), DRM_MEM_MAGIC);
+
+	return -EINVAL;
+}
+
+int DRM(getmagic)(struct inode *inode, struct file *filp,
+		  unsigned int cmd, unsigned long arg)
+{
+	static drm_magic_t sequence = 0;
+	static spinlock_t  lock	    = SPIN_LOCK_UNLOCKED;
+	drm_file_t	   *priv    = filp->private_data;
+	drm_device_t	   *dev	    = priv->dev;
+	drm_auth_t	   auth;
+
+				/* Find unique magic */
+	if (priv->magic) {
+		auth.magic = priv->magic;
+	} else {
+		do {
+			spin_lock(&lock);
+			if (!sequence) ++sequence; /* reserve 0 */
+			auth.magic = sequence++;
+			spin_unlock(&lock);
+		} while (DRM(find_file)(dev, auth.magic));
+		priv->magic = auth.magic;
+		DRM(add_magic)(dev, priv, auth.magic);
+	}
+
+	DRM_DEBUG("%u\n", auth.magic);
+	if (copy_to_user((drm_auth_t *)arg, &auth, sizeof(auth)))
+		return -EFAULT;
+	return 0;
+}
+
+int DRM(authmagic)(struct inode *inode, struct file *filp,
+		   unsigned int cmd, unsigned long arg)
+{
+	drm_file_t	   *priv    = filp->private_data;
+	drm_device_t	   *dev	    = priv->dev;
+	drm_auth_t	   auth;
+	drm_file_t	   *file;
+
+	if (copy_from_user(&auth, (drm_auth_t *)arg, sizeof(auth)))
+		return -EFAULT;
+	DRM_DEBUG("%u\n", auth.magic);
+	if ((file = DRM(find_file)(dev, auth.magic))) {
+		file->authenticated = 1;
+		DRM(remove_magic)(dev, auth.magic);
+		return 0;
+	}
+	return -EINVAL;
+}
+@
+
+
+1.1.9.1
+log
+@OpenBSD just has imported exactly this tree into their vendor branch,
+called the same tag, in XF4/xc
+This is, apparently, the last XFree86 snapshot before the licence change
+(ie, addition of the advertising clause)
+
+Since the developers don't see any problems with that, and we would like
+to integrate improvements done by the remaining one or two (or so) XFree86
+developers (j/k), this prepares enabling us to update X-Window in the future.
+@
+text
+@d1 1
+a1 9
+/**
+ * \file drm_auth.h 
+ * IOCTLs for authentication
+ *
+ * \author Rickard E. (Rik) Faith <faith@@valinux.com>
+ * \author Gareth Hughes <gareth@@valinux.com>
+ */
+
+/*
+d26 4
+a34 9
+/**
+ * Generate a hash key from a magic.
+ *
+ * \param magic magic.
+ * \return hash key.
+ *
+ * The key is the modulus of the hash table size, #DRM_HASH_SIZE, which must be
+ * a power of 2.
+ */
+a39 10
+/**
+ * Find the file with the given magic number.
+ *
+ * \param dev DRM device.
+ * \param magic magic number.
+ *
+ * Searches in drm_device::magiclist within all files with the same hash key
+ * the one with matching magic number, while holding the drm_device::struct_sem
+ * lock.
+ */
+a56 11
+/**
+ * Adds a magic number.
+ * 
+ * \param dev DRM device.
+ * \param priv file private data.
+ * \param magic magic number.
+ *
+ * Creates a drm_magic_entry structure and appends to the linked list
+ * associated the magic number hash key in drm_device::magiclist, while holding
+ * the drm_device::struct_sem lock.
+ */
+a66 1
+	memset(entry, 0, sizeof(*entry));
+a83 9
+/**
+ * Remove a magic number.
+ * 
+ * \param dev DRM device.
+ * \param magic magic number.
+ *
+ * Searches and unlinks the entry in drm_device::magiclist with the magic
+ * number hash key, while holding the drm_device::struct_sem lock.
+ */
+a89 1
+
+a115 13
+/**
+ * Get a unique magic number (ioctl).
+ *
+ * \param inode device inode.
+ * \param filp file pointer.
+ * \param cmd command.
+ * \param arg pointer to a resulting drm_auth structure.
+ * \return zero on success, or a negative number on failure.
+ *
+ * If there is a magic number in drm_file::magic then use it, otherwise
+ * searches an unique non-zero magic number and add it associating it with \p
+ * filp.
+ */
+a144 11
+/**
+ * Authenticate with a magic.
+ *
+ * \param inode device inode.
+ * \param filp file pointer.
+ * \param cmd command.
+ * \param arg pointer to a drm_auth structure.
+ * \return zero if authentication successed, or a negative number otherwise.
+ *
+ * Checks if \p filp is associated with the magic number passed in \arg.
+ */
+@
+
+
+1.1.1.1
+log
+@Import OpenBSD 3.3 XF4 repository from CTM 3132 the first time
+This finalizes starting an OpenBSD-mirabile (aka MirBSD) repository.
+
+### MirBSD is:
+# Copyright (c) 1982-2003 by Thorsten "mirabile" Glaser <x86@@ePost.de>
+# Copyright © 1968-2003  The authors of And contributors to UNIX®, the
+#       C Language, BSD/Berkeley Unix; 386BSD, NetBSD 1.1 and OpenBSD.
+#
+# Anyone who obtained a copy of this work is hereby permitted to freely use,
+# distribute, modify, merge, sublicence, give away or sell it as long as the
+# authors are given due credit and the following notice is retained:
+#
+# This work is provided "as is", with no explicit or implicit warranty what-
+# soever. Use it only at your own risk. In no event may an author or contri-
+# butor be held liable for any damage, directly or indirectly, that origina-
+# ted through or is caused by creation or modification of this work.
+
+MirBSD is my private tree. MirBSD does not differ very much from OpenBSD
+and intentionally tracks OpenBSD. That's why it _is_ OpenBSD, just not the
+official one. It's like with DarrenBSD.
+
+At time of this writing, no advertising for MirBSD must be done,
+because the advertising clause has not yet been sorted out.
+
+http://templeofhate.com/tglaser/MirBSD/index.php
+@
+text
+@@
+
+
+1.1.1.2
+log
+@The X-Windowing System
+
+Import XFree86 4.3 from OpenBSD by CTM, in the hope it's stable
+@
+text
+@a66 1
+	memset(entry, 0, sizeof(*entry));
+@
+
+
+1.1.1.3
+log
+@That's what OpenBSD will, probably, ship as XF4 in 3.5
+their last sync against XFree86 4.3-current has been
+imported into our vendor branch, too
+@
+text
+@d1 1
+a1 9
+/**
+ * \file drm_auth.h 
+ * IOCTLs for authentication
+ *
+ * \author Rickard E. (Rik) Faith <faith@@valinux.com>
+ * \author Gareth Hughes <gareth@@valinux.com>
+ */
+
+/*
+d26 4
+a34 9
+/**
+ * Generate a hash key from a magic.
+ *
+ * \param magic magic.
+ * \return hash key.
+ *
+ * The key is the modulus of the hash table size, #DRM_HASH_SIZE, which must be
+ * a power of 2.
+ */
+a39 10
+/**
+ * Find the file with the given magic number.
+ *
+ * \param dev DRM device.
+ * \param magic magic number.
+ *
+ * Searches in drm_device::magiclist within all files with the same hash key
+ * the one with matching magic number, while holding the drm_device::struct_sem
+ * lock.
+ */
+a56 11
+/**
+ * Adds a magic number.
+ * 
+ * \param dev DRM device.
+ * \param priv file private data.
+ * \param magic magic number.
+ *
+ * Creates a drm_magic_entry structure and appends to the linked list
+ * associated the magic number hash key in drm_device::magiclist, while holding
+ * the drm_device::struct_sem lock.
+ */
+a84 9
+/**
+ * Remove a magic number.
+ * 
+ * \param dev DRM device.
+ * \param magic magic number.
+ *
+ * Searches and unlinks the entry in drm_device::magiclist with the magic
+ * number hash key, while holding the drm_device::struct_sem lock.
+ */
+a90 1
+
+a116 13
+/**
+ * Get a unique magic number (ioctl).
+ *
+ * \param inode device inode.
+ * \param filp file pointer.
+ * \param cmd command.
+ * \param arg pointer to a resulting drm_auth structure.
+ * \return zero on success, or a negative number on failure.
+ *
+ * If there is a magic number in drm_file::magic then use it, otherwise
+ * searches an unique non-zero magic number and add it associating it with \p
+ * filp.
+ */
+a145 11
+/**
+ * Authenticate with a magic.
+ *
+ * \param inode device inode.
+ * \param filp file pointer.
+ * \param cmd command.
+ * \param arg pointer to a drm_auth structure.
+ * \return zero if authentication successed, or a negative number otherwise.
+ *
+ * Checks if \p filp is associated with the magic number passed in \arg.
+ */
+@
+
+

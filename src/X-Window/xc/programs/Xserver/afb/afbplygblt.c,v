@@ -1,0 +1,616 @@
+head	1.1;
+branch	1.1.1;
+access;
+symbols
+	tg-mergetmp-2:1.1.1.2
+	cvs-200410241530:1.1.1.2
+	cvs-200410012000:1.1.1.2
+	cvs-200407141120:1.1.1.2
+	cvs-200406231010:1.1.1.2
+	MIRBSD_7quater:1.1.1.1
+	cvs-200405271510:1.1.1.2
+	XFree86_4_4_0:1.1.9.1
+	cvs-200403021700:1.1.1.2
+	XFREE86_20040213:1.1.9.1
+	xc:1.1.9
+	cvs-200401291925:1.1.1.1
+	MIRBSD_7_ALPHA:1.1.1.1.0.4
+	MIRBSD_7:1.1.1.1.0.2
+	MIRBSD_7ter:1.1.1.1
+	cvs-20011091815:1.1.1.1
+	cvs-200309162130:1.1.1.1
+	cvs-200308302005:1.1.1.1
+	ctmx-0387:1.1.1.1
+	ctmx-0384:1.1.1.1
+	MIRBSD_5:1.1.1.1
+	ctmx-0375:1.1.1.1
+	ctmx-0373:1.1.1.1
+	ctm-0371:1.1.1.1
+	ctm-0370:1.1.1.1
+	MIRBSD_4:1.1.1.1
+	ctm-0363:1.1.1.1
+	ctm-0359:1.1.1.1
+	ctm-0349:1.1.1.1
+	openbsd:1.1.1;
+locks; strict;
+comment	@ * @;
+
+
+1.1
+date	2003.03.22.20.06.14;	author tg;	state Exp;
+branches
+	1.1.1.1
+	1.1.9.1;
+next	;
+
+1.1.1.1
+date	2003.03.22.20.06.14;	author tg;	state Exp;
+branches;
+next	1.1.1.2;
+
+1.1.1.2
+date	2004.03.02.18.11.48;	author tg;	state Stab;
+branches;
+next	;
+
+1.1.9.1
+date	2004.02.14.19.21.40;	author tg;	state Exp;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@/* $XFree86: xc/programs/Xserver/afb/afbplygblt.c,v 3.2 2001/10/28 03:32:58 tsi Exp $ */
+/* Combined Purdue/PurduePlus patches, level 2.0, 1/17/89 */
+/***********************************************************
+
+Copyright (c) 1987  X Consortium
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
+X CONSORTIUM BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN
+AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
+CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+Except as contained in this notice, the name of the X Consortium shall not be
+used in advertising or otherwise to promote the sale, use or other dealings
+in this Software without prior written authorization from the X Consortium.
+
+
+Copyright 1987 by Digital Equipment Corporation, Maynard, Massachusetts.
+
+                        All Rights Reserved
+
+Permission to use, copy, modify, and distribute this software and its
+documentation for any purpose and without fee is hereby granted,
+provided that the above copyright notice appear in all copies and that
+both that copyright notice and this permission notice appear in
+supporting documentation, and that the name of Digital not be
+used in advertising or publicity pertaining to distribution of the
+software without specific, written prior permission.
+
+DIGITAL DISCLAIMS ALL WARRANTIES WITH REGARD TO THIS SOFTWARE, INCLUDING
+ALL IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS, IN NO EVENT SHALL
+DIGITAL BE LIABLE FOR ANY SPECIAL, INDIRECT OR CONSEQUENTIAL DAMAGES OR
+ANY DAMAGES WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS,
+WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION,
+ARISING OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS
+SOFTWARE.
+
+******************************************************************/
+/* $XConsortium: afbimggblt.c,v 5.17 94/04/17 20:28:25 dpw Exp $ */
+
+#include		"X.h"
+#include		"Xmd.h"
+#include		"Xproto.h"
+#include		"afb.h"
+#include		"fontstruct.h"
+#include		"dixfontstr.h"
+#include		"gcstruct.h"
+#include		"windowstr.h"
+#include		"scrnintstr.h"
+#include		"pixmapstr.h"
+#include		"regionstr.h"
+#include		"maskbits.h"
+
+/*
+	this works for fonts with glyphs <= 32 bits wide.
+
+	the clipping calculations are done for worst-case fonts.
+we make no assumptions about the heights, widths, or bearings
+of the glyphs.  if we knew that the glyphs are all the same height,
+we could clip the tops and bottoms per clipping box, rather
+than per character per clipping box.  if we knew that the glyphs'
+left and right bearings were wlle-behaved, we could clip a single
+character at the start, output until the last unclipped
+character, and then clip the last one.  this is all straightforward
+to determine based on max-bounds and min-bounds from the font.
+	there is some inefficiency introduced in the per-character
+clipping to make what's going on clearer.
+
+	(it is possible, for example, for a font to be defined in which the
+next-to-last character in a font would be clipped out, but the last
+one wouldn't.  the code below deals with this.)
+
+*/
+
+void
+afbPolyGlyphBlt (pDrawable, pGC, x, y, nglyph, ppci, pglyphBase)
+	DrawablePtr pDrawable;
+	GC 				*pGC;
+	int 		x, y;
+	unsigned int nglyph;
+	CharInfoPtr *ppci;			/* array of character info */
+	pointer		pglyphBase;		/* start of array of glyphs */
+{
+	ExtentInfoRec info;			/* used by QueryGlyphExtents() */
+	BoxRec bbox;					/* string's bounding box */
+
+	CharInfoPtr pci;
+	int xorg, yorg;				/* origin of drawable in bitmap */
+	int widthDst;					/* width of dst in longwords */
+
+										/* these keep track of the character origin */
+	PixelType *pdstBase;
+										/* points to longword with character origin */
+	int xchar;						/* xorigin of char (mod 32) */
+
+										/* these are used for placing the glyph */
+	register int xoff;			/* x offset of left edge of glyph (mod 32) */
+	register PixelType *pdst;	/* pointer to current longword in dst */
+
+	register int d;
+	int depthDst;
+	int sizeDst;
+	int hSave;
+	int w;							/* width of glyph in bits */
+	int h;							/* height of glyph */
+	int widthGlyph;				/* width of glyph, in bytes */
+	unsigned char *rrops;
+	register unsigned char *pglyph;
+										/* pointer to current row of glyph */
+	unsigned char *pglyphSave;
+
+										/* used for putting down glyph */
+	register PixelType tmpSrc;
+										/* for getting bits from glyph */
+	register PixelType startmask;
+	register PixelType endmask;
+
+	register int nFirst;			/* bits of glyph in current longword */
+	PixelType *pdstSave;
+
+	xorg = pDrawable->x;
+	yorg = pDrawable->y;
+	afbGetPixelWidthSizeDepthAndPointer(pDrawable, widthDst, sizeDst, depthDst,
+													 pdstBase);
+
+	QueryGlyphExtents(pGC->font, ppci, (unsigned long)nglyph, &info);
+
+	x += xorg;
+	y += yorg;
+
+	bbox.x1 = x + info.overallLeft;
+	bbox.x2 = x + info.overallRight;
+	bbox.y1 = y - info.overallAscent;
+	bbox.y2 = y + info.overallDescent;
+
+	rrops = ((afbPrivGCPtr) pGC->devPrivates[afbGCPrivateIndex].ptr)->rrops;
+
+	switch (RECT_IN_REGION(pGC->pScreen, pGC->pCompositeClip, &bbox)) {
+		case rgnOUT:
+			break;
+		case rgnIN:
+			pdstBase = afbScanlineNoBankSwitch(pdstBase, x, y, widthDst);
+			xchar = x & PIM;
+
+			while(nglyph--) {
+				pci = *ppci;
+				pglyphSave = FONTGLYPHBITS(pglyphBase, pci);
+				w = pci->metrics.rightSideBearing - pci->metrics.leftSideBearing;
+				hSave = pci->metrics.ascent + pci->metrics.descent;
+				widthGlyph = GLYPHWIDTHBYTESPADDED(pci);
+				/* start at top scanline of glyph */
+				pdstSave = afbScanlineDelta(pdstBase, -pci->metrics.ascent,
+											widthDst);
+
+				/* find correct word in scanline and x offset within it
+				   for left edge of glyph
+				*/
+				xoff = xchar + pci->metrics.leftSideBearing;
+				if (xoff > PLST) {
+					pdstSave++;
+					xoff &= PIM;
+				} else if (xoff < 0) {
+					xoff += PPW;
+					pdstSave--;
+				}
+
+				for (d = 0; d < depthDst; d++) {
+					h = hSave;
+					pdst = pdstSave;
+					pdstSave += sizeDst;	/* @@@@@@ NEXT PLANE @@@@@@ */
+					pglyph = pglyphSave;
+
+					if ((xoff + w) <= PPW) {
+						/* glyph all in one longword */
+						maskpartialbits(xoff, w, startmask);
+						switch (rrops[d]) {
+							case RROP_WHITE:
+								while (h--) {
+									getleftbits(pglyph, w, tmpSrc);
+									*pdst |= (SCRRIGHT(tmpSrc, xoff) & startmask);
+									pglyph += widthGlyph;
+									afbScanlineInc(pdst, widthDst);
+								}
+								break;
+							case RROP_BLACK:
+								while (h--) {
+									getleftbits(pglyph, w, tmpSrc);
+									*pdst &= ~(SCRRIGHT(tmpSrc, xoff) & startmask);
+									pglyph += widthGlyph;
+									afbScanlineInc(pdst, widthDst);
+								}
+								break;
+							case RROP_INVERT:
+								while (h--) {
+									getleftbits(pglyph, w, tmpSrc);
+									*pdst ^= (SCRRIGHT(tmpSrc, xoff) & startmask);
+									pglyph += widthGlyph;
+									afbScanlineInc(pdst, widthDst);
+								}
+								break;
+						}
+					} else {
+						/* glyph crosses longword boundary */
+						maskPPWbits(xoff, w, startmask, endmask);
+						nFirst = PPW - xoff;
+						switch (rrops[d]) {
+							case RROP_WHITE:
+								while (h--) {
+									getleftbits(pglyph, w, tmpSrc);
+									*pdst |= (SCRRIGHT(tmpSrc, xoff) & startmask);
+									*(pdst+1) |= (SCRLEFT(tmpSrc, nFirst) & endmask);
+									pglyph += widthGlyph;
+									afbScanlineInc(pdst, widthDst);
+								}
+								break;
+							case RROP_BLACK:
+								while (h--) {
+									getleftbits(pglyph, w, tmpSrc);
+									*pdst &= ~(SCRRIGHT(tmpSrc, xoff) & startmask);
+									*(pdst+1) &= ~(SCRLEFT(tmpSrc, nFirst) & endmask);
+									pglyph += widthGlyph;
+									afbScanlineInc(pdst, widthDst);
+								}
+								break;
+							case RROP_INVERT:
+								while (h--) {
+									getleftbits(pglyph, w, tmpSrc);
+									*pdst ^= (SCRRIGHT(tmpSrc, xoff) & startmask);
+									*(pdst+1) ^= (SCRLEFT(tmpSrc, nFirst) & endmask);
+									pglyph += widthGlyph;
+									afbScanlineInc(pdst, widthDst);
+								}
+								break;
+						}
+					} /* glyph crosses longwords boundary */
+				} /* depth loop */
+				/* update character origin */
+				x += pci->metrics.characterWidth;
+				xchar += pci->metrics.characterWidth;
+				if (xchar > PLST) {
+					xchar -= PPW;
+					pdstBase++;
+				} else if (xchar < 0) {
+					xchar += PPW;
+					pdstBase--;
+				}
+				ppci++;
+			} /* while nglyph-- */
+			break;
+		case rgnPART:
+			{
+				afbTEXTPOS *ppos;
+				int nbox;
+				BoxPtr pbox;
+				RegionPtr cclip;
+				int xpos;				/* x position of char origin */
+				int i;
+				BoxRec clip;
+				int leftEdge, rightEdge;
+				int topEdge, bottomEdge;
+				int glyphRow;				/* first row of glyph not wholly
+										   clipped out */
+				int glyphCol;				/* leftmost visible column of glyph */
+				int getWidth;				/* bits to get from glyph */
+
+				if(!(ppos = (afbTEXTPOS *)ALLOCATE_LOCAL(nglyph * sizeof(afbTEXTPOS))))
+					return;
+
+				pdstBase = afbScanlineNoBankSwitch(pdstBase, x, y, widthDst);
+				xpos = x;
+				xchar = xpos & PIM;
+
+				for (i = 0; i < nglyph; i++) {
+					pci = ppci[i];
+
+					ppos[i].xpos = xpos;
+					ppos[i].xchar = xchar;
+					ppos[i].leftEdge = xpos + pci->metrics.leftSideBearing;
+					ppos[i].rightEdge = xpos + pci->metrics.rightSideBearing;
+					ppos[i].topEdge = y - pci->metrics.ascent;
+					ppos[i].bottomEdge = y + pci->metrics.descent;
+					ppos[i].pdstBase = pdstBase;
+					ppos[i].widthGlyph = GLYPHWIDTHBYTESPADDED(pci);
+
+					xpos += pci->metrics.characterWidth;
+					xchar += pci->metrics.characterWidth;
+					if (xchar > PLST) {
+						xchar &= PIM;
+						pdstBase++;
+					} else if (xchar < 0) {
+						xchar += PPW;
+						pdstBase--;
+					}
+				}
+
+				cclip = pGC->pCompositeClip;
+				pbox = REGION_RECTS(cclip);
+				nbox = REGION_NUM_RECTS(cclip);
+
+				/* HACK ALERT
+				   since we continue out of the loop below so often, it
+				   is easier to increment pbox at the  top than at the end.
+				   don't try this at home.
+				*/
+				pbox--;
+				while(nbox--) {
+					pbox++;
+					clip.x1 = max(bbox.x1, pbox->x1);
+					clip.y1 = max(bbox.y1, pbox->y1);
+					clip.x2 = min(bbox.x2, pbox->x2);
+					clip.y2 = min(bbox.y2, pbox->y2);
+					if ((clip.x2<=clip.x1) || (clip.y2<=clip.y1))
+						continue;
+
+					for(i=0; i<nglyph; i++) {
+						pci = ppci[i];
+						xchar = ppos[i].xchar;
+
+						/* clip the left and right edges */
+						if (ppos[i].leftEdge < clip.x1)
+							leftEdge = clip.x1;
+						else
+							leftEdge = ppos[i].leftEdge;
+
+						if (ppos[i].rightEdge > clip.x2)
+							rightEdge = clip.x2;
+						else
+							rightEdge = ppos[i].rightEdge;
+
+						w = rightEdge - leftEdge;
+						if (w <= 0)
+							continue;
+
+						/* clip the top and bottom edges */
+						if (ppos[i].topEdge < clip.y1)
+							topEdge = clip.y1;
+						else
+							topEdge = ppos[i].topEdge;
+
+						if (ppos[i].bottomEdge > clip.y2)
+							bottomEdge = clip.y2;
+						else
+							bottomEdge = ppos[i].bottomEdge;
+
+						hSave = bottomEdge - topEdge;
+						if (hSave <= 0)
+							continue;
+
+						glyphRow = (topEdge - y) + pci->metrics.ascent;
+						widthGlyph = ppos[i].widthGlyph;
+						pglyphSave = FONTGLYPHBITS(pglyphBase, pci);
+						pglyphSave += (glyphRow * widthGlyph);
+
+						glyphCol = (leftEdge - ppos[i].xpos) -
+								   (pci->metrics.leftSideBearing);
+						getWidth = w + glyphCol;
+
+						pdstSave = afbScanlineDelta(ppos[i].pdstBase, -(y-topEdge),
+													widthDst);
+						xoff = xchar + (leftEdge - ppos[i].xpos);
+						if (xoff > PLST) {
+							xoff &= PIM;
+							pdstSave++;
+						} else if (xoff < 0) {
+							xoff += PPW;
+							pdstSave--;
+						}
+
+						for (d = 0; d < depthDst; d++) {
+							h = hSave;
+							pdst = pdstSave;
+							pdstSave += sizeDst;	/* @@@@@@ NEXT PLANE @@@@@@ */
+							pglyph = pglyphSave;
+
+							if ((xoff + w) <= PPW) {
+								maskpartialbits(xoff, w, startmask);
+								switch (rrops[d]) {
+									case RROP_WHITE:
+										while (h--) {
+											getshiftedleftbits(pglyph, glyphCol, getWidth, tmpSrc);
+											*pdst |= (SCRRIGHT(tmpSrc, xoff) & startmask);
+											pglyph += widthGlyph;
+											afbScanlineInc(pdst, widthDst);
+										}
+										break;
+									case RROP_BLACK:
+										while (h--) {
+											getshiftedleftbits(pglyph, glyphCol, getWidth, tmpSrc);
+											*pdst &= ~(SCRRIGHT(tmpSrc, xoff) & startmask);
+											pglyph += widthGlyph;
+											afbScanlineInc(pdst, widthDst);
+										}
+										break;
+									case RROP_INVERT:
+										while (h--) {
+											getshiftedleftbits(pglyph, glyphCol, getWidth, tmpSrc);
+											*pdst ^= (SCRRIGHT(tmpSrc, xoff) & startmask);
+											pglyph += widthGlyph;
+											afbScanlineInc(pdst, widthDst);
+										}
+										break;
+								}
+							} else {
+								maskPPWbits(xoff, w, startmask, endmask);
+								nFirst = PPW - xoff;
+								switch (rrops[d]) {
+									case RROP_WHITE:
+										while (h--) {
+											getshiftedleftbits(pglyph, glyphCol, getWidth, tmpSrc);
+											*pdst |= (SCRRIGHT(tmpSrc, xoff) & startmask);
+											*(pdst+1) |= (SCRLEFT(tmpSrc, nFirst) & endmask);
+											pglyph += widthGlyph;
+											afbScanlineInc(pdst, widthDst);
+										}
+										break;
+									case RROP_BLACK:
+										while (h--) {
+											getshiftedleftbits(pglyph, glyphCol, getWidth, tmpSrc);
+											*pdst &= ~(SCRRIGHT(tmpSrc, xoff) & startmask);
+											*(pdst+1) &= ~(SCRLEFT(tmpSrc, nFirst) & endmask);
+											pglyph += widthGlyph;
+											afbScanlineInc(pdst, widthDst);
+										}
+										break;
+									case RROP_INVERT:
+										while (h--) {
+											getshiftedleftbits(pglyph, glyphCol, getWidth, tmpSrc);
+											*pdst ^= (SCRRIGHT(tmpSrc, xoff) & startmask);
+											*(pdst+1) ^= (SCRLEFT(tmpSrc, nFirst) & endmask);
+											pglyph += widthGlyph;
+											afbScanlineInc(pdst, widthDst);
+										}
+										break;
+								}
+							}
+						} /* depth */
+					} /* for each glyph */
+				} /* while nbox-- */
+				DEALLOCATE_LOCAL(ppos);
+				break;
+			}
+
+		default:
+			break;
+	}
+}
+@
+
+
+1.1.9.1
+log
+@OpenBSD just has imported exactly this tree into their vendor branch,
+called the same tag, in XF4/xc
+This is, apparently, the last XFree86 snapshot before the licence change
+(ie, addition of the advertising clause)
+
+Since the developers don't see any problems with that, and we would like
+to integrate improvements done by the remaining one or two (or so) XFree86
+developers (j/k), this prepares enabling us to update X-Window in the future.
+@
+text
+@d1 1
+a1 1
+/* $XFree86: xc/programs/Xserver/afb/afbplygblt.c,v 3.3 2003/10/29 22:15:19 tsi Exp $ */
+d89 2
+a90 2
+	GC				*pGC;
+	int		x, y;
+a274 1
+#if GETLEFTBITS_ALIGNMENT > 1
+a275 1
+#endif
+a366 1
+#if GETLEFTBITS_ALIGNMENT > 1
+a367 1
+#endif
+@
+
+
+1.1.1.1
+log
+@Import OpenBSD 3.3 XF4 repository from CTM 3132 the first time
+This finalizes starting an OpenBSD-mirabile (aka MirBSD) repository.
+
+### MirBSD is:
+# Copyright (c) 1982-2003 by Thorsten "mirabile" Glaser <x86@@ePost.de>
+# Copyright © 1968-2003  The authors of And contributors to UNIX®, the
+#       C Language, BSD/Berkeley Unix; 386BSD, NetBSD 1.1 and OpenBSD.
+#
+# Anyone who obtained a copy of this work is hereby permitted to freely use,
+# distribute, modify, merge, sublicence, give away or sell it as long as the
+# authors are given due credit and the following notice is retained:
+#
+# This work is provided "as is", with no explicit or implicit warranty what-
+# soever. Use it only at your own risk. In no event may an author or contri-
+# butor be held liable for any damage, directly or indirectly, that origina-
+# ted through or is caused by creation or modification of this work.
+
+MirBSD is my private tree. MirBSD does not differ very much from OpenBSD
+and intentionally tracks OpenBSD. That's why it _is_ OpenBSD, just not the
+official one. It's like with DarrenBSD.
+
+At time of this writing, no advertising for MirBSD must be done,
+because the advertising clause has not yet been sorted out.
+
+http://templeofhate.com/tglaser/MirBSD/index.php
+@
+text
+@@
+
+
+1.1.1.2
+log
+@That's what OpenBSD will, probably, ship as XF4 in 3.5
+their last sync against XFree86 4.3-current has been
+imported into our vendor branch, too
+@
+text
+@d1 1
+a1 1
+/* $XFree86: xc/programs/Xserver/afb/afbplygblt.c,v 3.3 2003/10/29 22:15:19 tsi Exp $ */
+d89 2
+a90 2
+	GC				*pGC;
+	int		x, y;
+a274 1
+#if GETLEFTBITS_ALIGNMENT > 1
+a275 1
+#endif
+a366 1
+#if GETLEFTBITS_ALIGNMENT > 1
+a367 1
+#endif
+@
+

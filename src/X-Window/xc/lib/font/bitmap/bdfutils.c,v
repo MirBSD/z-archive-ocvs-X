@@ -1,0 +1,474 @@
+head	1.1;
+branch	1.1.1;
+access;
+symbols
+	tg-mergetmp-2:1.1.1.2
+	cvs-200410241530:1.1.1.2
+	cvs-200410012000:1.1.1.2
+	cvs-200407141120:1.1.1.2
+	cvs-200406231010:1.1.1.2
+	MIRBSD_7quater:1.1.1.1
+	cvs-200405271510:1.1.1.2
+	XFree86_4_4_0:1.1.9.1
+	cvs-200403021700:1.1.1.2
+	XFREE86_20040213:1.1.9.1
+	xc:1.1.9
+	cvs-200401291925:1.1.1.1
+	MIRBSD_7_ALPHA:1.1.1.1.0.4
+	MIRBSD_7:1.1.1.1.0.2
+	MIRBSD_7ter:1.1.1.1
+	cvs-20011091815:1.1.1.1
+	cvs-200309162130:1.1.1.1
+	cvs-200308302005:1.1.1.1
+	ctmx-0387:1.1.1.1
+	ctmx-0384:1.1.1.1
+	MIRBSD_5:1.1.1.1
+	ctmx-0375:1.1.1.1
+	ctmx-0373:1.1.1.1
+	ctm-0371:1.1.1.1
+	ctm-0370:1.1.1.1
+	MIRBSD_4:1.1.1.1
+	ctm-0363:1.1.1.1
+	ctm-0359:1.1.1.1
+	ctm-0349:1.1.1.1
+	openbsd:1.1.1;
+locks; strict;
+comment	@ * @;
+
+
+1.1
+date	2003.03.22.20.05.13;	author tg;	state Exp;
+branches
+	1.1.1.1
+	1.1.9.1;
+next	;
+
+1.1.1.1
+date	2003.03.22.20.05.13;	author tg;	state Exp;
+branches;
+next	1.1.1.2;
+
+1.1.1.2
+date	2004.03.02.18.07.12;	author tg;	state Stab;
+branches;
+next	;
+
+1.1.9.1
+date	2004.02.14.19.20.08;	author tg;	state Exp;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@/* $Xorg: bdfutils.c,v 1.5 2001/02/09 02:04:02 xorgcvs Exp $ */
+/************************************************************************
+Copyright 1989 by Digital Equipment Corporation, Maynard, Massachusetts.
+
+                        All Rights Reserved
+
+Permission to use, copy, modify, and distribute this software and its
+documentation for any purpose and without fee is hereby granted,
+provided that the above copyright notice appear in all copies and that
+both that copyright notice and this permission notice appear in
+supporting documentation, and that the name of Digital not be
+used in advertising or publicity pertaining to distribution of the
+software without specific, written prior permission.
+
+DIGITAL DISCLAIMS ALL WARRANTIES WITH REGARD TO THIS SOFTWARE, INCLUDING
+ALL IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS, IN NO EVENT SHALL
+DIGITAL BE LIABLE FOR ANY SPECIAL, INDIRECT OR CONSEQUENTIAL DAMAGES OR
+ANY DAMAGES WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS,
+WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION,
+ARISING OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS
+SOFTWARE.
+
+************************************************************************/
+
+/*
+
+Copyright 1994, 1998  The Open Group
+
+Permission to use, copy, modify, distribute, and sell this software and its
+documentation for any purpose is hereby granted without fee, provided that
+the above copyright notice appear in all copies and that both that
+copyright notice and this permission notice appear in supporting
+documentation.
+
+The above copyright notice and this permission notice shall be included
+in all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
+OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
+IN NO EVENT SHALL THE OPEN GROUP BE LIABLE FOR ANY CLAIM, DAMAGES OR
+OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE,
+ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR
+OTHER DEALINGS IN THE SOFTWARE.
+
+Except as contained in this notice, the name of The Open Group shall
+not be used in advertising or otherwise to promote the sale, use or
+other dealings in this Software without prior written authorization
+from The Open Group.
+
+*/
+/* $XFree86: xc/lib/font/bitmap/bdfutils.c,v 1.10 2001/12/14 19:56:45 dawes Exp $ */
+
+#ifndef FONTMODULE
+#include <ctype.h>
+#include <stdio.h>
+#include <stdarg.h>
+#endif
+
+#include "fntfilst.h"
+#include "fontstruct.h"
+/* use bitmap structure */
+#include "bitmap.h"
+#include "bdfint.h"
+
+int bdfFileLineNum;
+
+/***====================================================================***/
+
+void
+bdfError(char* message, ...)
+{
+    va_list args;
+
+    va_start (args, message);
+    fprintf(stderr, "BDF Error on line %d: ", bdfFileLineNum);
+    vfprintf(stderr, message, args);
+    va_end (args);
+}
+
+/***====================================================================***/
+
+void
+bdfWarning(char *message, ...)
+{
+    va_list args;
+
+    va_start (args, message);
+    fprintf(stderr, "BDF Warning on line %d: ", bdfFileLineNum);
+    vfprintf(stderr, message, args);
+    va_end (args);
+}
+
+/*
+ * read the next (non-comment) line and keep a count for error messages.
+ * Returns buf, or NULL if EOF.
+ */
+
+unsigned char *
+bdfGetLine(FontFilePtr file, unsigned char *buf, int len)
+{
+    int         c;
+    unsigned char *b;
+
+    for (;;) {
+	b = buf;
+	while ((c = FontFileGetc(file)) != FontFileEOF) {
+	    if (c == '\r')
+		continue;
+	    if (c == '\n') {
+		bdfFileLineNum++;
+		break;
+	    }
+	    if (b - buf >= (len - 1))
+		break;
+	    *b++ = c;
+	}
+	*b = '\0';
+	if (c == FontFileEOF)
+	    return NULL;
+	if (b != buf && !bdfIsPrefix(buf, "COMMENT"))
+	    break;
+    }
+    return buf;
+}
+
+/***====================================================================***/
+
+Atom
+bdfForceMakeAtom(char *str, int *size)
+{
+    register int len = strlen(str);
+    extern Atom   MakeAtom(); /* Added this line to be consistent with X.org code */
+    Atom the_atom;
+
+    if (size != NULL)
+	*size += len + 1;
+    the_atom = MakeAtom(str, len, TRUE);
+    if (the_atom == None)
+      bdfError("Atom allocation failed\n");
+    return the_atom;
+}
+
+/***====================================================================***/
+
+/*
+ * Handle quoted strings.
+ */
+
+Atom
+bdfGetPropertyValue(char *s)
+{
+    register char *p,
+               *pp;
+    char *orig_s = s;
+    Atom        atom;
+
+    /* strip leading white space */
+    while (*s && (*s == ' ' || *s == '\t'))
+	s++;
+    if (*s == 0) {
+	return bdfForceMakeAtom(s, NULL);
+    }
+    if (*s != '"') {
+	pp = s;
+	/* no white space in value */
+	for (pp = s; *pp; pp++)
+	    if (*pp == ' ' || *pp == '\t' || *pp == '\015' || *pp == '\n') {
+		*pp = 0;
+		break;
+	    }
+	return bdfForceMakeAtom(s, NULL);
+    }
+    /* quoted string: strip outer quotes and undouble inner quotes */
+    s++;
+    pp = p = (char *) xalloc((unsigned) strlen(s) + 1);
+    if (pp == NULL) {
+  bdfError("Couldn't allocate property value string (%d)\n", strlen(s) + 1);
+  return None;
+    }
+    while (*s) {
+	if (*s == '"') {
+	    if (*(s + 1) != '"') {
+		*p++ = 0;
+		atom = bdfForceMakeAtom(pp, NULL);
+		xfree(pp);
+		return atom;
+	    } else {
+		s++;
+	    }
+	}
+	*p++ = *s++;
+    }
+    xfree (pp);
+    bdfError("unterminated quoted string property: %s\n", (pointer) orig_s);
+    return None;
+}
+
+/***====================================================================***/
+
+/*
+ * return TRUE if string is a valid integer
+ */
+int
+bdfIsInteger(char *str)
+{
+    char        c;
+
+    c = *str++;
+    if (!(isdigit(c) || c == '-' || c == '+'))
+	return (FALSE);
+
+    while ((c = *str++))
+	if (!isdigit(c))
+	    return (FALSE);
+
+    return (TRUE);
+}
+
+/***====================================================================***/
+
+/*
+ * make a byte from the first two hex characters in glyph picture
+ */
+
+unsigned char
+bdfHexByte(unsigned char *s)
+{
+    unsigned char b = 0;
+    register char c;
+    int         i;
+
+    for (i = 2; i; i--) {
+	c = *s++;
+	if ((c >= '0') && (c <= '9'))
+	    b = (b << 4) + (c - '0');
+	else if ((c >= 'A') && (c <= 'F'))
+	    b = (b << 4) + 10 + (c - 'A');
+	else if ((c >= 'a') && (c <= 'f'))
+	    b = (b << 4) + 10 + (c - 'a');
+	else
+	    bdfError("bad hex char '%c'", c);
+    }
+    return b;
+}
+
+/***====================================================================***/
+
+/*
+ * check for known special property values
+ */
+
+static char *SpecialAtoms[] = {
+    "FONT_ASCENT",
+#define BDF_FONT_ASCENT	0
+    "FONT_DESCENT",
+#define BDF_FONT_DESCENT 1
+    "DEFAULT_CHAR",
+#define BDF_DEFAULT_CHAR 2
+    "POINT_SIZE",
+#define BDF_POINT_SIZE 3
+    "RESOLUTION",
+#define BDF_RESOLUTION 4
+    "X_HEIGHT",
+#define BDF_X_HEIGHT 5
+    "WEIGHT",
+#define BDF_WEIGHT 6
+    "QUAD_WIDTH",
+#define BDF_QUAD_WIDTH 7
+    "FONT",
+#define BDF_FONT 8
+    "RESOLUTION_X",
+#define BDF_RESOLUTION_X 9
+    "RESOLUTION_Y",
+#define BDF_RESOLUTION_Y 10
+    0,
+};
+
+Bool
+bdfSpecialProperty(FontPtr pFont, FontPropPtr prop, 
+		   char isString, bdfFileState *bdfState)
+{
+    char      **special;
+    char       *name;
+
+    name = NameForAtom(prop->name);
+    for (special = SpecialAtoms; *special; special++)
+	if (!strcmp(name, *special))
+	    break;
+
+    switch (special - SpecialAtoms) {
+    case BDF_FONT_ASCENT:
+	if (!isString) {
+	    pFont->info.fontAscent = prop->value;
+	    bdfState->haveFontAscent = TRUE;
+	}
+	return TRUE;
+    case BDF_FONT_DESCENT:
+	if (!isString) {
+	    pFont->info.fontDescent = prop->value;
+	    bdfState->haveFontDescent = TRUE;
+	}
+	return TRUE;
+    case BDF_DEFAULT_CHAR:
+	if (!isString) {
+	    pFont->info.defaultCh = prop->value;
+	    bdfState->haveDefaultCh = TRUE;
+	}
+	return TRUE;
+    case BDF_POINT_SIZE:
+	bdfState->pointSizeProp = prop;
+	return FALSE;
+    case BDF_RESOLUTION:
+	bdfState->resolutionProp = prop;
+	return FALSE;
+    case BDF_X_HEIGHT:
+	bdfState->xHeightProp = prop;
+	return FALSE;
+    case BDF_WEIGHT:
+	bdfState->weightProp = prop;
+	return FALSE;
+    case BDF_QUAD_WIDTH:
+	bdfState->quadWidthProp = prop;
+	return FALSE;
+    case BDF_FONT:
+	bdfState->fontProp = prop;
+	return FALSE;
+    case BDF_RESOLUTION_X:
+	bdfState->resolutionXProp = prop;
+	return FALSE;
+    case BDF_RESOLUTION_Y:
+	bdfState->resolutionYProp = prop;
+	return FALSE;
+    default:
+	return FALSE;
+    }
+}
+@
+
+
+1.1.9.1
+log
+@OpenBSD just has imported exactly this tree into their vendor branch,
+called the same tag, in XF4/xc
+This is, apparently, the last XFree86 snapshot before the licence change
+(ie, addition of the advertising clause)
+
+Since the developers don't see any problems with that, and we would like
+to integrate improvements done by the remaining one or two (or so) XFree86
+developers (j/k), this prepares enabling us to update X-Window in the future.
+@
+text
+@d52 1
+a52 1
+/* $XFree86: xc/lib/font/bitmap/bdfutils.c,v 1.11 2003/09/13 21:33:02 dawes Exp $ */
+d133 1
+@
+
+
+1.1.1.1
+log
+@Import OpenBSD 3.3 XF4 repository from CTM 3132 the first time
+This finalizes starting an OpenBSD-mirabile (aka MirBSD) repository.
+
+### MirBSD is:
+# Copyright (c) 1982-2003 by Thorsten "mirabile" Glaser <x86@@ePost.de>
+# Copyright © 1968-2003  The authors of And contributors to UNIX®, the
+#       C Language, BSD/Berkeley Unix; 386BSD, NetBSD 1.1 and OpenBSD.
+#
+# Anyone who obtained a copy of this work is hereby permitted to freely use,
+# distribute, modify, merge, sublicence, give away or sell it as long as the
+# authors are given due credit and the following notice is retained:
+#
+# This work is provided "as is", with no explicit or implicit warranty what-
+# soever. Use it only at your own risk. In no event may an author or contri-
+# butor be held liable for any damage, directly or indirectly, that origina-
+# ted through or is caused by creation or modification of this work.
+
+MirBSD is my private tree. MirBSD does not differ very much from OpenBSD
+and intentionally tracks OpenBSD. That's why it _is_ OpenBSD, just not the
+official one. It's like with DarrenBSD.
+
+At time of this writing, no advertising for MirBSD must be done,
+because the advertising clause has not yet been sorted out.
+
+http://templeofhate.com/tglaser/MirBSD/index.php
+@
+text
+@@
+
+
+1.1.1.2
+log
+@That's what OpenBSD will, probably, ship as XF4 in 3.5
+their last sync against XFree86 4.3-current has been
+imported into our vendor branch, too
+@
+text
+@d52 1
+a52 1
+/* $XFree86: xc/lib/font/bitmap/bdfutils.c,v 1.11 2003/09/13 21:33:02 dawes Exp $ */
+d133 1
+@
+

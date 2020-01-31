@@ -1,0 +1,777 @@
+head	1.1;
+branch	1.1.1;
+access;
+symbols
+	tg-mergetmp-2:1.1.1.2
+	cvs-200410241530:1.1.1.2
+	cvs-200410012000:1.1.1.2
+	cvs-200407141120:1.1.1.2
+	cvs-200406231010:1.1.1.2
+	MIRBSD_7quater:1.1.1.1
+	cvs-200405271510:1.1.1.2
+	XFree86_4_4_0:1.1.9.1
+	cvs-200403021700:1.1.1.2
+	XFREE86_20040213:1.1.9.1
+	xc:1.1.9
+	cvs-200401291925:1.1.1.1
+	MIRBSD_7_ALPHA:1.1.1.1.0.4
+	MIRBSD_7:1.1.1.1.0.2
+	MIRBSD_7ter:1.1.1.1
+	cvs-20011091815:1.1.1.1
+	cvs-200309162130:1.1.1.1
+	cvs-200308302005:1.1.1.1
+	ctmx-0387:1.1.1.1
+	ctmx-0384:1.1.1.1
+	MIRBSD_5:1.1.1.1
+	ctmx-0375:1.1.1.1
+	ctmx-0373:1.1.1.1
+	ctm-0371:1.1.1.1
+	ctm-0370:1.1.1.1
+	MIRBSD_4:1.1.1.1
+	ctm-0363:1.1.1.1
+	ctm-0359:1.1.1.1
+	openbsd:1.1.1;
+locks; strict;
+comment	@ * @;
+
+
+1.1
+date	2003.04.08.18.31.26;	author tg;	state Exp;
+branches
+	1.1.1.1
+	1.1.9.1;
+next	;
+
+1.1.1.1
+date	2003.04.08.18.31.26;	author tg;	state Exp;
+branches;
+next	1.1.1.2;
+
+1.1.1.2
+date	2004.03.02.17.58.28;	author tg;	state Stab;
+branches;
+next	;
+
+1.1.9.1
+date	2004.02.14.19.17.56;	author tg;	state Exp;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@/**************************************************************************
+
+Copyright 2001 2d3d Inc., Delray Beach, FL
+
+All Rights Reserved.
+
+Permission is hereby granted, free of charge, to any person obtaining a
+copy of this software and associated documentation files (the "Software"),
+to deal in the Software without restriction, including without limitation
+on the rights to use, copy, modify, merge, publish, distribute, sub
+license, and/or sell copies of the Software, and to permit persons to whom
+the Software is furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice (including the next
+paragraph) shall be included in all copies or substantial portions of the
+Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NON-INFRINGEMENT. IN NO EVENT SHALL
+ATI, VA LINUX SYSTEMS AND/OR THEIR SUPPLIERS BE LIABLE FOR ANY CLAIM,
+DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR
+OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE
+USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+**************************************************************************/
+
+/* $XFree86: xc/lib/GL/mesa/src/drv/i830/i830_texmem.c,v 1.3 2002/12/10 01:26:53 dawes Exp $ */
+
+/*
+ * Author:
+ *   Jeff Hartmann <jhartmann@@2d3d.com>
+ *
+ * Heavily based on the I810 driver, which was written by:
+ *   Keith Whitwell <keithw@@tungstengraphics.com>
+ */
+
+#include <stdlib.h>
+#include <stdio.h>
+
+#include "glheader.h"
+#include "macros.h"
+#include "mtypes.h"
+#include "simple_list.h"
+#include "enums.h"
+#include "texformat.h"
+
+#include "mm.h"
+
+#include "i830_screen.h"
+#include "i830_dri.h"
+
+#include "i830_context.h"
+#include "i830_tex.h"
+#include "i830_state.h"
+#include "i830_ioctl.h"
+
+
+void i830DestroyTexObj(i830ContextPtr imesa, i830TextureObjectPtr t)
+{
+   if (!t) return;
+
+   /* This is sad - need to sync *in case* we upload a texture
+    * to this newly free memory...
+    */
+   if (t->MemBlock) {
+      mmFreeMem(t->MemBlock);
+      t->MemBlock = 0;
+
+      if (imesa && t->age > imesa->dirtyAge)
+	 imesa->dirtyAge = t->age;
+   }
+
+   if (t->globj)
+      t->globj->DriverData = 0;
+
+   if (imesa) {
+      if (imesa->CurrentTexObj[0] == t) {
+         imesa->CurrentTexObj[0] = 0;
+         imesa->dirty &= ~I830_UPLOAD_TEX0;
+      }
+
+      if (imesa->CurrentTexObj[1] == t) {
+         imesa->CurrentTexObj[1] = 0;
+         imesa->dirty &= ~I830_UPLOAD_TEX1;
+      }
+   }
+
+   remove_from_list(t);
+   free(t);
+}
+
+
+void i830SwapOutTexObj(i830ContextPtr imesa, i830TextureObjectPtr t)
+{
+/*     fprintf(stderr, "%s\n", __FUNCTION__); */
+
+   if (t->MemBlock) {
+      mmFreeMem(t->MemBlock);
+      t->MemBlock = 0;
+
+      if (t->age > imesa->dirtyAge)
+	 imesa->dirtyAge = t->age;
+   }
+
+   t->dirty_images = ~0;
+   move_to_tail(&(imesa->SwappedOut), t);
+}
+
+
+
+/* Upload an image from mesa's internal copy.
+ */
+static void i830UploadTexLevel( i830TextureObjectPtr t, int hwlevel )
+{
+   int level = hwlevel + t->firstLevel;
+   const struct gl_texture_image *image = t->image[hwlevel].image;
+   int i,j;
+
+   if (!image || !image->Data)
+      return;
+
+   if (0) fprintf(stderr, "Uploading level : %d\n", level);
+
+   switch (image->TexFormat->MesaFormat) {
+   case MESA_FORMAT_I8:
+   case MESA_FORMAT_L8:
+      {
+	 GLubyte *dst = (GLubyte *)(t->BufAddr + t->image[hwlevel].offset);
+	 GLubyte *src = (GLubyte *)image->Data;
+
+	 for (j = 0 ; j < image->Height ; j++, dst += t->Pitch) {
+	    for (i = 0 ; i < image->Width ; i++) {
+	       dst[i] = src[0];
+	       src++;
+	    }
+	 }
+      }
+      break;
+
+   case MESA_FORMAT_AL88:
+   case MESA_FORMAT_RGB565:
+   case MESA_FORMAT_ARGB1555:
+   case MESA_FORMAT_ARGB4444:
+      {
+	 GLushort *dst = (GLushort *)(t->BufAddr + t->image[hwlevel].offset);
+	 GLushort *src = (GLushort *)image->Data;
+
+	 for (j = 0 ; j < image->Height ; j++, dst += (t->Pitch/2)) {
+	    for (i = 0 ; i < image->Width ; i++) {
+	       dst[i] = src[0];
+	       src++;
+	    }
+	 }
+      }
+      break;
+
+   case MESA_FORMAT_ARGB8888:
+      {
+	 GLuint *dst = (GLuint *)(t->BufAddr + t->image[hwlevel].offset);
+	 GLuint *src = (GLuint *)image->Data;
+
+	 for (j = 0 ; j < image->Height ; j++, dst += (t->Pitch/4)) {
+	    for (i = 0 ; i < image->Width ; i++) {
+	       dst[i] = src[0];
+	       src++;
+	    }
+	 }
+      }
+      break;
+
+   default:
+      fprintf(stderr, "Not supported texture format %s\n",
+              _mesa_lookup_enum_by_nr(image->Format));
+   }
+}
+
+void i830PrintLocalLRU( i830ContextPtr imesa )
+{
+   i830TextureObjectPtr t;
+   int sz = 1 << (imesa->i830Screen->logTextureGranularity);
+
+   foreach( t, &imesa->TexObjList ) {
+      if (!t->globj)
+	 fprintf(stderr, "Placeholder %d at %x sz %x\n",
+		 t->MemBlock->ofs / sz,
+		 t->MemBlock->ofs,
+		 t->MemBlock->size);
+      else
+	 fprintf(stderr, "Texture at %x sz %x\n",
+		 t->MemBlock->ofs,
+		 t->MemBlock->size);
+
+   }
+}
+
+void i830PrintGlobalLRU( i830ContextPtr imesa )
+{
+   int i, j;
+   I830TexRegion *list = imesa->sarea->texList;
+
+   for (i = 0, j = I830_NR_TEX_REGIONS ; i < I830_NR_TEX_REGIONS ; i++) {
+      fprintf(stderr, "list[%d] age %d next %d prev %d\n",
+	      j, list[j].age, list[j].next, list[j].prev);
+      j = list[j].next;
+      if (j == I830_NR_TEX_REGIONS) break;
+   }
+
+   if (j != I830_NR_TEX_REGIONS)
+      fprintf(stderr, "Loop detected in global LRU\n");
+}
+
+
+void i830ResetGlobalLRU( i830ContextPtr imesa )
+{
+   I830TexRegion *list = imesa->sarea->texList;
+   int sz = 1 << imesa->i830Screen->logTextureGranularity;
+   int i;
+
+   /* (Re)initialize the global circular LRU list.  The last element
+    * in the array (I830_NR_TEX_REGIONS) is the sentinal.  Keeping it
+    * at the end of the array allows it to be addressed rationally
+    * when looking up objects at a particular location in texture
+    * memory.
+    */
+   for (i = 0 ; (i+1) * sz <= imesa->i830Screen->textureSize ; i++) {
+      list[i].prev = i-1;
+      list[i].next = i+1;
+      list[i].age = 0;
+   }
+
+   i--;
+   list[0].prev = I830_NR_TEX_REGIONS;
+   list[i].prev = i-1;
+   list[i].next = I830_NR_TEX_REGIONS;
+   list[I830_NR_TEX_REGIONS].prev = i;
+   list[I830_NR_TEX_REGIONS].next = 0;
+   imesa->sarea->texAge = 0;
+}
+
+
+void i830UpdateTexLRU( i830ContextPtr imesa, i830TextureObjectPtr t )
+{
+   int i;
+   int logsz = imesa->i830Screen->logTextureGranularity;
+   int start = t->MemBlock->ofs >> logsz;
+   int end = (t->MemBlock->ofs + t->MemBlock->size - 1) >> logsz;
+   I830TexRegion *list = imesa->sarea->texList;
+
+   imesa->texAge = ++imesa->sarea->texAge;
+
+   /* Update our local LRU
+    */
+   move_to_head( &(imesa->TexObjList), t );
+
+   /* Update the global LRU
+    */
+   for (i = start ; i <= end ; i++) {
+
+      list[i].in_use = 1;
+      list[i].age = imesa->texAge;
+
+      /* remove_from_list(i)
+       */
+      list[(unsigned)list[i].next].prev = list[i].prev;
+      list[(unsigned)list[i].prev].next = list[i].next;
+
+      /* insert_at_head(list, i)
+       */
+      list[i].prev = I830_NR_TEX_REGIONS;
+      list[i].next = list[I830_NR_TEX_REGIONS].next;
+      list[(unsigned)list[I830_NR_TEX_REGIONS].next].prev = i;
+      list[I830_NR_TEX_REGIONS].next = i;
+   }
+}
+
+
+/* Called for every shared texture region which has increased in age
+ * since we last held the lock.
+ *
+ * Figures out which of our textures have been ejected by other clients,
+ * and pushes a placeholder texture onto the LRU list to represent
+ * the other client's textures.
+ */
+void i830TexturesGone( i830ContextPtr imesa,
+					                 GLuint offset,
+					                 GLuint size,
+					                 GLuint in_use )
+{   
+   i830TextureObjectPtr t, tmp;
+
+   if (I830_DEBUG&DEBUG_TEXTURE)
+      fprintf(stderr, "%s\n", __FUNCTION__);
+
+   foreach_s ( t, tmp, &imesa->TexObjList ) {
+      if (t->MemBlock == 0 ||	
+	  t->MemBlock->ofs >= offset + size ||
+	  t->MemBlock->ofs + t->MemBlock->size <= offset)
+	 continue;
+		
+      /* It overlaps - kick it off.  Need to hold onto the currently bound
+       * objects, however.
+       */
+      if (t->bound)
+	 i830SwapOutTexObj( imesa, t );
+      else
+	 i830DestroyTexObj( imesa, t );
+   }
+
+   if (in_use) {
+      t = (i830TextureObjectPtr) calloc(1,sizeof(*t));
+      if (!t) return;
+
+      t->MemBlock = mmAllocMem( imesa->texHeap, size, 0, offset);
+      insert_at_head( &imesa->TexObjList, t );
+   }
+}
+
+
+/* This is called with the lock held.  May have to eject our own and/or
+ * other client's texture objects to make room for the upload.
+ */
+
+int i830UploadTexImages( i830ContextPtr imesa, i830TextureObjectPtr t )
+{
+   int i;
+   int ofs;
+   int numLevels;
+
+   /* Do we need to eject LRU texture objects?
+    */
+   if (!t->MemBlock) {
+      while (1)
+      {
+	 t->MemBlock = mmAllocMem( imesa->texHeap, t->totalSize, 12, 0 );
+	 if (t->MemBlock)
+	    break;
+
+/*
+	 if (imesa->TexObjList.prev == imesa->CurrentTexObj[0] ||
+	     imesa->TexObjList.prev == imesa->CurrentTexObj[1]) {
+  	    fprintf(stderr, "Hit bound texture in upload\n");
+ 	    i830PrintLocalLRU( imesa ); 
+	    return -1;
+	 }
+*/
+	 if (imesa->TexObjList.prev == &(imesa->TexObjList)) {
+ 	    fprintf(stderr, "Failed to upload texture, sz %d\n", t->totalSize);
+	    mmDumpMemInfo( imesa->texHeap );
+	    return -1;
+	 }
+
+	 i830SwapOutTexObj( imesa, imesa->TexObjList.prev );
+      }
+
+      ofs = t->MemBlock->ofs;
+      t->BufAddr = imesa->i830Screen->tex.map + ofs;
+      t->Setup[I830_TEXREG_TM0S0] = (TM0S0_USE_FENCE |
+				     (imesa->i830Screen->textureOffset + ofs));
+
+      if (t == imesa->CurrentTexObj[0])
+	 imesa->dirty |= I830_UPLOAD_TEX0;
+
+      if (t == imesa->CurrentTexObj[1])
+	 imesa->dirty |= I830_UPLOAD_TEX1;
+#if 0
+      if (t == imesa->CurrentTexObj[2])
+	 I830_STATECHANGE(imesa, I830_UPLOAD_TEX2);
+
+      if (t == imesa->CurrentTexObj[3])
+	 I830_STATECHANGE(imesa, I830_UPLOAD_TEX3);
+#endif
+      if (t->MemBlock)
+	 i830UpdateTexLRU( imesa, t );
+   }
+
+   if (imesa->dirtyAge >= GET_DISPATCH_AGE(imesa))
+      i830WaitAgeLocked( imesa, imesa->dirtyAge );
+
+   numLevels = t->lastLevel - t->firstLevel + 1;
+   for (i = 0 ; i < numLevels ; i++)
+      if (t->dirty_images & (1<<(i+t->firstLevel)))
+	 i830UploadTexLevel( t, i );
+
+   t->dirty_images = 0;
+   imesa->sarea->perf_boxes |= I830_BOX_TEXTURE_LOAD;
+
+   return 0;
+}
+@
+
+
+1.1.9.1
+log
+@OpenBSD just has imported exactly this tree into their vendor branch,
+called the same tag, in XF4/xc
+This is, apparently, the last XFree86 snapshot before the licence change
+(ie, addition of the advertising clause)
+
+Since the developers don't see any problems with that, and we would like
+to integrate improvements done by the remaining one or two (or so) XFree86
+developers (j/k), this prepares enabling us to update X-Window in the future.
+@
+text
+@d28 1
+a28 1
+/* $XFree86: xc/lib/GL/mesa/src/drv/i830/i830_texmem.c,v 1.5 2003/11/04 15:32:41 tsi Exp $ */
+d38 3
+d48 2
+d61 15
+a75 1
+   unsigned   i;
+d77 5
+d83 3
+a85 8
+   /* See if it was the driver's current object.
+    */
+   if ( imesa != NULL ) { 
+      for ( i = 0 ; i < imesa->glCtx->Const.MaxTextureUnits ; i++ ) {
+	 if ( t == imesa->CurrentTexObj[ i ] ) {
+	    imesa->CurrentTexObj[ i ] = NULL;
+	    imesa->dirty &= ~(I830_UPLOAD_TEX0 << i);
+	 }
+d88 3
+d93 2
+a94 5
+#if defined(i386) || defined(__i386__)
+/* From linux kernel i386 header files, copes with odd sizes better
+ * than COPY_DWORDS would:
+ */
+static __inline__ void * __memcpy(void * to, const void * from, size_t n)
+d96 14
+a109 19
+int d0, d1, d2;
+__asm__ __volatile__(
+	"rep ; movsl\n\t"
+	"testb $2,%b4\n\t"
+	"je 1f\n\t"
+	"movsw\n"
+	"1:\ttestb $1,%b4\n\t"
+	"je 2f\n\t"
+	"movsb\n"
+	"2:"
+	: "=&c" (d0), "=&D" (d1), "=&S" (d2)
+	:"0" (n/4), "q" (n),"1" ((long) to),"2" ((long) from)
+	: "memory");
+return (to);
+}
+#else
+/* Allow compilation on other architectures */
+#define __memcpy memcpy
+#endif
+d114 1
+a114 2
+static void i830UploadTexLevel( i830ContextPtr imesa,
+				i830TextureObjectPtr t, int hwlevel )
+d116 3
+a118 2
+   const struct gl_texture_image *image = t->image[0][hwlevel].image;
+   int j;
+d123 5
+a127 8
+   if (image->Width * image->TexFormat->TexelBytes == t->Pitch) {
+	 GLubyte *dst = (GLubyte *)(t->BufAddr + t->image[0][hwlevel].offset);
+	 GLubyte *src = (GLubyte *)image->Data;
+	 
+	 memcpy( dst, src, t->Pitch * image->Height );
+   }
+   else switch (image->TexFormat->TexelBytes) {
+   case 1:
+d129 1
+a129 1
+	 GLubyte *dst = (GLubyte *)(t->BufAddr + t->image[0][hwlevel].offset);
+d133 4
+a136 2
+	    __memcpy(dst, src, image->Width );
+	    src += image->Width;
+d141 4
+a144 1
+   case 2:
+d146 1
+a146 1
+	 GLushort *dst = (GLushort *)(t->BufAddr + t->image[0][hwlevel].offset);
+d150 4
+a153 2
+	    __memcpy(dst, src, image->Width * 2 );
+	    src += image->Width;
+d158 1
+a158 1
+   case 4:
+d160 1
+a160 1
+	 GLuint *dst = (GLuint *)(t->BufAddr + t->image[0][hwlevel].offset);
+d164 4
+a167 2
+	    __memcpy(dst, src, image->Width * 4 );
+	    src += image->Width;
+d173 143
+a315 2
+      fprintf(stderr, "%s: Not supported texel size %d\n",
+	      __FUNCTION__, image->TexFormat->TexelBytes);
+d324 1
+a324 1
+int i830UploadTexImagesLocked( i830ContextPtr imesa, i830TextureObjectPtr t )
+d326 1
+d328 10
+d339 13
+a351 2
+   if ( t->base.memBlock == NULL ) {
+      int heap;
+d353 1
+a353 4
+      heap = driAllocateTexture( imesa->texture_heaps, imesa->nr_heaps,
+				 (driTextureObject *) t );
+      if ( heap == -1 ) {
+	 return -1;
+d356 1
+a356 2
+      /* Set the base offset of the texture image */
+      ofs = t->base.memBlock->ofs;
+d373 2
+d377 2
+d380 4
+a383 6
+   /* Let the world know we've used this memory recently.
+    */
+   driUpdateTextureLRU( (driTextureObject *) t );
+
+   if (imesa->texture_heaps[0]->timestamp >= GET_DISPATCH_AGE(imesa)) 
+      i830WaitAgeLocked( imesa, imesa->texture_heaps[0]->timestamp ); 
+d385 2
+a386 13
+   /* Upload any images that are new */
+   if (t->base.dirty_images[0]) {
+      int i;
+      const int numLevels = t->base.lastLevel - t->base.firstLevel + 1;
+
+      for (i = 0 ; i < numLevels ; i++) { 
+         if ( (t->base.dirty_images[0] & (1 << (i+t->base.firstLevel))) != 0 ) {
+	    i830UploadTexLevel( imesa, t, i );
+         }
+      }
+      t->base.dirty_images[0] = 0;
+      imesa->sarea->perf_boxes |= I830_BOX_TEXTURE_LOAD;
+   }
+@
+
+
+1.1.1.1
+log
+@The X-Windowing System
+
+Import XFree86 4.3 from OpenBSD by CTM, in the hope it's stable
+@
+text
+@@
+
+
+1.1.1.2
+log
+@That's what OpenBSD will, probably, ship as XF4 in 3.5
+their last sync against XFree86 4.3-current has been
+imported into our vendor branch, too
+@
+text
+@d28 1
+a28 1
+/* $XFree86: xc/lib/GL/mesa/src/drv/i830/i830_texmem.c,v 1.5 2003/11/04 15:32:41 tsi Exp $ */
+d38 3
+d48 2
+d61 15
+a75 1
+   unsigned   i;
+d77 5
+d83 3
+a85 8
+   /* See if it was the driver's current object.
+    */
+   if ( imesa != NULL ) { 
+      for ( i = 0 ; i < imesa->glCtx->Const.MaxTextureUnits ; i++ ) {
+	 if ( t == imesa->CurrentTexObj[ i ] ) {
+	    imesa->CurrentTexObj[ i ] = NULL;
+	    imesa->dirty &= ~(I830_UPLOAD_TEX0 << i);
+	 }
+d88 3
+d93 2
+a94 5
+#if defined(i386) || defined(__i386__)
+/* From linux kernel i386 header files, copes with odd sizes better
+ * than COPY_DWORDS would:
+ */
+static __inline__ void * __memcpy(void * to, const void * from, size_t n)
+d96 14
+a109 19
+int d0, d1, d2;
+__asm__ __volatile__(
+	"rep ; movsl\n\t"
+	"testb $2,%b4\n\t"
+	"je 1f\n\t"
+	"movsw\n"
+	"1:\ttestb $1,%b4\n\t"
+	"je 2f\n\t"
+	"movsb\n"
+	"2:"
+	: "=&c" (d0), "=&D" (d1), "=&S" (d2)
+	:"0" (n/4), "q" (n),"1" ((long) to),"2" ((long) from)
+	: "memory");
+return (to);
+}
+#else
+/* Allow compilation on other architectures */
+#define __memcpy memcpy
+#endif
+d114 1
+a114 2
+static void i830UploadTexLevel( i830ContextPtr imesa,
+				i830TextureObjectPtr t, int hwlevel )
+d116 3
+a118 2
+   const struct gl_texture_image *image = t->image[0][hwlevel].image;
+   int j;
+d123 5
+a127 8
+   if (image->Width * image->TexFormat->TexelBytes == t->Pitch) {
+	 GLubyte *dst = (GLubyte *)(t->BufAddr + t->image[0][hwlevel].offset);
+	 GLubyte *src = (GLubyte *)image->Data;
+	 
+	 memcpy( dst, src, t->Pitch * image->Height );
+   }
+   else switch (image->TexFormat->TexelBytes) {
+   case 1:
+d129 1
+a129 1
+	 GLubyte *dst = (GLubyte *)(t->BufAddr + t->image[0][hwlevel].offset);
+d133 4
+a136 2
+	    __memcpy(dst, src, image->Width );
+	    src += image->Width;
+d141 4
+a144 1
+   case 2:
+d146 1
+a146 1
+	 GLushort *dst = (GLushort *)(t->BufAddr + t->image[0][hwlevel].offset);
+d150 4
+a153 2
+	    __memcpy(dst, src, image->Width * 2 );
+	    src += image->Width;
+d158 1
+a158 1
+   case 4:
+d160 1
+a160 1
+	 GLuint *dst = (GLuint *)(t->BufAddr + t->image[0][hwlevel].offset);
+d164 4
+a167 2
+	    __memcpy(dst, src, image->Width * 4 );
+	    src += image->Width;
+d173 143
+a315 2
+      fprintf(stderr, "%s: Not supported texel size %d\n",
+	      __FUNCTION__, image->TexFormat->TexelBytes);
+d324 1
+a324 1
+int i830UploadTexImagesLocked( i830ContextPtr imesa, i830TextureObjectPtr t )
+d326 1
+d328 10
+d339 13
+a351 2
+   if ( t->base.memBlock == NULL ) {
+      int heap;
+d353 1
+a353 4
+      heap = driAllocateTexture( imesa->texture_heaps, imesa->nr_heaps,
+				 (driTextureObject *) t );
+      if ( heap == -1 ) {
+	 return -1;
+d356 1
+a356 2
+      /* Set the base offset of the texture image */
+      ofs = t->base.memBlock->ofs;
+d373 2
+d377 2
+d380 4
+a383 6
+   /* Let the world know we've used this memory recently.
+    */
+   driUpdateTextureLRU( (driTextureObject *) t );
+
+   if (imesa->texture_heaps[0]->timestamp >= GET_DISPATCH_AGE(imesa)) 
+      i830WaitAgeLocked( imesa, imesa->texture_heaps[0]->timestamp ); 
+d385 2
+a386 13
+   /* Upload any images that are new */
+   if (t->base.dirty_images[0]) {
+      int i;
+      const int numLevels = t->base.lastLevel - t->base.firstLevel + 1;
+
+      for (i = 0 ; i < numLevels ; i++) { 
+         if ( (t->base.dirty_images[0] & (1 << (i+t->base.firstLevel))) != 0 ) {
+	    i830UploadTexLevel( imesa, t, i );
+         }
+      }
+      t->base.dirty_images[0] = 0;
+      imesa->sarea->perf_boxes |= I830_BOX_TEXTURE_LOAD;
+   }
+@
+

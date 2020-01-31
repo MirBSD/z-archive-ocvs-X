@@ -1,0 +1,471 @@
+head	1.1;
+branch	1.1.1;
+access;
+symbols
+	tg-mergetmp-2:1.1.1.2
+	cvs-200410241530:1.1.1.2
+	cvs-200410012000:1.1.1.2
+	cvs-200407141120:1.1.1.2
+	cvs-200406231010:1.1.1.2
+	MIRBSD_7quater:1.1.1.1
+	cvs-200405271510:1.1.1.2
+	XFree86_4_4_0:1.1.9.1
+	cvs-200403021700:1.1.1.2
+	XFREE86_20040213:1.1.9.1
+	xc:1.1.9
+	cvs-200401291925:1.1.1.1
+	MIRBSD_7_ALPHA:1.1.1.1.0.4
+	MIRBSD_7:1.1.1.1.0.2
+	MIRBSD_7ter:1.1.1.1
+	cvs-20011091815:1.1.1.1
+	cvs-200309162130:1.1.1.1
+	cvs-200308302005:1.1.1.1
+	ctmx-0387:1.1.1.1
+	ctmx-0384:1.1.1.1
+	MIRBSD_5:1.1.1.1
+	ctmx-0375:1.1.1.1
+	ctmx-0373:1.1.1.1
+	ctm-0371:1.1.1.1
+	ctm-0370:1.1.1.1
+	MIRBSD_4:1.1.1.1
+	ctm-0363:1.1.1.1
+	ctm-0359:1.1.1.1
+	ctm-0349:1.1.1.1
+	openbsd:1.1.1;
+locks; strict;
+comment	@ * @;
+
+
+1.1
+date	2003.03.22.20.06.18;	author tg;	state Exp;
+branches
+	1.1.1.1
+	1.1.9.1;
+next	;
+
+1.1.1.1
+date	2003.03.22.20.06.18;	author tg;	state Exp;
+branches;
+next	1.1.1.2;
+
+1.1.1.2
+date	2004.03.02.18.12.31;	author tg;	state Stab;
+branches;
+next	;
+
+1.1.9.1
+date	2004.02.14.19.21.52;	author tg;	state Exp;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@/*
+ * Id: fbgc.c,v 1.1 1999/11/02 03:54:45 keithp Exp $
+ *
+ * Copyright © 1998 Keith Packard
+ *
+ * Permission to use, copy, modify, distribute, and sell this software and its
+ * documentation for any purpose is hereby granted without fee, provided that
+ * the above copyright notice appear in all copies and that both that
+ * copyright notice and this permission notice appear in supporting
+ * documentation, and that the name of Keith Packard not be used in
+ * advertising or publicity pertaining to distribution of the software without
+ * specific, written prior permission.  Keith Packard makes no
+ * representations about the suitability of this software for any purpose.  It
+ * is provided "as is" without express or implied warranty.
+ *
+ * KEITH PACKARD DISCLAIMS ALL WARRANTIES WITH REGARD TO THIS SOFTWARE,
+ * INCLUDING ALL IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS, IN NO
+ * EVENT SHALL KEITH PACKARD BE LIABLE FOR ANY SPECIAL, INDIRECT OR
+ * CONSEQUENTIAL DAMAGES OR ANY DAMAGES WHATSOEVER RESULTING FROM LOSS OF USE,
+ * DATA OR PROFITS, WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER
+ * TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR
+ * PERFORMANCE OF THIS SOFTWARE.
+ */
+/* $XFree86: xc/programs/Xserver/fb/fbgc.c,v 1.12 2001/05/29 04:54:09 keithp Exp $ */
+
+#include "fb.h"
+#ifdef IN_MODULE
+#include "xf86_ansic.h"
+#endif
+
+const GCFuncs fbGCFuncs = {
+    fbValidateGC,
+    miChangeGC,
+    miCopyGC,
+    miDestroyGC,
+    miChangeClip,
+    miDestroyClip,
+    miCopyClip,
+};
+
+const GCOps	fbGCOps = {
+    fbFillSpans,
+    fbSetSpans,
+    fbPutImage,
+    fbCopyArea,
+    fbCopyPlane,
+    fbPolyPoint,
+    fbPolyLine,
+    fbPolySegment,
+    fbPolyRectangle,
+    fbPolyArc,
+    miFillPolygon,
+    fbPolyFillRect,
+    fbPolyFillArc,
+    miPolyText8,
+    miPolyText16,
+    miImageText8,
+    miImageText16,
+    fbImageGlyphBlt,
+    fbPolyGlyphBlt,
+    fbPushPixels
+#ifdef NEED_LINEHELPER
+    ,NULL
+#endif
+};
+
+Bool
+fbCreateGC(GCPtr pGC)
+{
+    pGC->clientClip = NULL;
+    pGC->clientClipType = CT_NONE;
+
+    pGC->ops = (GCOps *) &fbGCOps;
+    pGC->funcs = (GCFuncs *) &fbGCFuncs;
+
+    /* fb wants to translate before scan conversion */
+    pGC->miTranslate = 1;
+
+    fbGetRotatedPixmap(pGC) = 0;
+    fbGetExpose(pGC) = 1;
+    fbGetFreeCompClip(pGC) = 0;
+    fbGetCompositeClip(pGC) = 0;
+    fbGetGCPrivate(pGC)->bpp = BitsPerPixel (pGC->depth);
+    return TRUE;
+}
+
+/*
+ * Pad pixmap to FB_UNIT bits wide
+ */
+void
+fbPadPixmap (PixmapPtr pPixmap)
+{
+    int	    width;
+    FbBits  *bits;
+    FbBits  b;
+    FbBits  mask;
+    int	    height;
+    int	    w;
+
+    width = pPixmap->drawable.width * pPixmap->drawable.bitsPerPixel;
+    bits = pPixmap->devPrivate.ptr;
+    height = pPixmap->drawable.height;
+    mask = FbBitsMask (0, width);
+    while (height--)
+    {
+	b = *bits & mask;
+	w = width;
+	while (w < FB_UNIT)
+	{
+	    b = b | FbScrRight(b, w);
+	    w <<= 1;
+	}
+	*bits++ = b;
+    }
+}
+
+/*
+ * Verify that 'bits' repeats every 'len' bits
+ */
+static Bool
+fbBitsRepeat (FbBits bits, int len, int width)
+{
+    FbBits  mask = FbBitsMask(0, len);
+    FbBits  orig = bits & mask;
+    int	    i;
+    
+    if (width > FB_UNIT)
+	width = FB_UNIT;
+    for (i = 0; i < width / len; i++)
+    {
+	if ((bits & mask) != orig)
+	    return FALSE;
+	bits = FbScrLeft(bits,len);
+    }
+    return TRUE;
+}
+
+/*
+ * Check whether an entire bitmap line is a repetition of
+ * the first 'len' bits
+ */
+static Bool
+fbLineRepeat (FbBits *bits, int len, int width)
+{
+    FbBits  first = bits[0];
+    
+    if (!fbBitsRepeat (first, len, width))
+	return FALSE;
+    width = (width + FB_UNIT-1) >> FB_SHIFT;
+    bits++;
+    while (--width)
+	if (*bits != first)
+	    return FALSE;
+    return TRUE;
+}
+
+/*
+ * The even stipple code wants the first FB_UNIT/bpp bits on
+ * each scanline to represent the entire stipple
+ */
+static Bool
+fbCanEvenStipple (PixmapPtr pStipple, int bpp)
+{
+    int	    len = FB_UNIT / bpp;
+    FbBits  *bits;
+    int	    stride;
+    int	    stip_bpp;
+    int	    stipXoff, stipYoff;
+    int	    h;
+
+    /* can't even stipple 24bpp drawables */
+    if ((bpp & (bpp-1)) != 0)
+	return FALSE;
+    /* make sure the stipple width is a multiple of the even stipple width */
+    if (pStipple->drawable.width % len != 0)
+	return FALSE;
+    fbGetDrawable (&pStipple->drawable, bits, stride, stip_bpp, stipXoff, stipYoff);
+    h = pStipple->drawable.height;
+    /* check to see that the stipple repeats horizontally */
+    while (h--)
+    {
+	if (!fbLineRepeat (bits, len, pStipple->drawable.width))
+	    return FALSE;
+	bits += stride;
+    }
+    return TRUE;
+}
+
+void
+fbValidateGC(GCPtr pGC, unsigned long changes, DrawablePtr pDrawable)
+{
+    FbGCPrivPtr	pPriv = fbGetGCPrivate(pGC);
+    FbBits	mask;
+
+    pGC->lastWinOrg.x = pDrawable->x;
+    pGC->lastWinOrg.y = pDrawable->y;
+
+    /*
+     * if the client clip is different or moved OR the subwindowMode has
+     * changed OR the window's clip has changed since the last validation
+     * we need to recompute the composite clip 
+     */
+
+    if ((changes & (GCClipXOrigin|GCClipYOrigin|GCClipMask|GCSubwindowMode)) ||
+	(pDrawable->serialNumber != (pGC->serialNumber & DRAWABLE_SERIAL_BITS))
+	)
+    {
+	miComputeCompositeClip (pGC, pDrawable);
+	pPriv->oneRect = REGION_NUM_RECTS(fbGetCompositeClip(pGC)) == 1;
+    }
+    
+#ifdef FB_24_32BIT    
+    if (pPriv->bpp != pDrawable->bitsPerPixel)
+    {
+	changes |= GCStipple|GCForeground|GCBackground|GCPlaneMask;
+	pPriv->bpp = pDrawable->bitsPerPixel;
+    }
+    if ((changes & GCTile) && fbGetRotatedPixmap(pGC))
+    {
+	(*pGC->pScreen->DestroyPixmap) (fbGetRotatedPixmap(pGC));
+	fbGetRotatedPixmap(pGC) = 0;
+    }
+	
+    if (pGC->fillStyle == FillTiled)
+    {
+	PixmapPtr	pOldTile, pNewTile;
+
+	pOldTile = pGC->tile.pixmap;
+	if (pOldTile->drawable.bitsPerPixel != pDrawable->bitsPerPixel)
+	{
+	    pNewTile = fbGetRotatedPixmap(pGC);
+	    if (!pNewTile || pNewTile ->drawable.bitsPerPixel != pDrawable->bitsPerPixel)
+	    {
+		if (pNewTile)
+		    (*pGC->pScreen->DestroyPixmap) (pNewTile);
+		pNewTile = fb24_32ReformatTile (pOldTile, pDrawable->bitsPerPixel);
+	    }
+	    if (pNewTile)
+	    {
+		fbGetRotatedPixmap(pGC) = pOldTile;
+		pGC->tile.pixmap = pNewTile;
+		changes |= GCTile;
+	    }
+	}
+    }
+#endif
+    if (changes & GCTile)
+    {
+	if (!pGC->tileIsPixel && 
+	    FbEvenTile (pGC->tile.pixmap->drawable.width *
+			pDrawable->bitsPerPixel))
+	    fbPadPixmap (pGC->tile.pixmap);
+    }
+    if (changes & GCStipple)
+    {
+	if (pGC->stipple &&
+	    (FbEvenStip (pGC->stipple->drawable.width,
+			 pDrawable->bitsPerPixel) ||
+	     fbCanEvenStipple (pGC->stipple, pDrawable->bitsPerPixel)))
+	{
+	    pPriv->evenStipple = TRUE;
+	    if (pGC->stipple->drawable.width * pDrawable->bitsPerPixel < FB_UNIT)
+		fbPadPixmap (pGC->stipple);
+	}
+	else
+	    pPriv->evenStipple = FALSE;
+    }
+    /*
+     * Recompute reduced rop values
+     */
+    if (changes & (GCForeground|GCBackground|GCPlaneMask|GCFunction))
+    {
+	int	s;
+	FbBits	depthMask;
+	
+	mask = FbFullMask(pDrawable->bitsPerPixel);
+	depthMask = FbFullMask(pDrawable->depth);
+	
+	pPriv->fg = pGC->fgPixel & mask;
+	pPriv->bg = pGC->bgPixel & mask;
+	
+	if ((pGC->planemask & depthMask) == depthMask)
+	    pPriv->pm = mask;
+	else
+	    pPriv->pm = pGC->planemask & mask;    
+	
+	s = pDrawable->bitsPerPixel;
+	while (s < FB_UNIT)
+	{
+	    pPriv->fg |= pPriv->fg << s;
+	    pPriv->bg |= pPriv->bg << s;
+	    pPriv->pm |= pPriv->pm << s;
+	    s <<= 1;
+	}
+	pPriv->and = fbAnd(pGC->alu, pPriv->fg, pPriv->pm);
+	pPriv->xor = fbXor(pGC->alu, pPriv->fg, pPriv->pm);
+	pPriv->bgand = fbAnd(pGC->alu, pPriv->bg, pPriv->pm);
+	pPriv->bgxor = fbXor(pGC->alu, pPriv->bg, pPriv->pm);
+    }
+    if (changes & GCDashList)
+    {
+	unsigned short	n = pGC->numInDashList;
+	unsigned char	*dash = pGC->dash;
+	unsigned int	dashLength = 0;
+
+	while (n--)
+	    dashLength += (unsigned int ) *dash++;
+	pPriv->dashLength = dashLength;
+    }
+}
+@
+
+
+1.1.9.1
+log
+@OpenBSD just has imported exactly this tree into their vendor branch,
+called the same tag, in XF4/xc
+This is, apparently, the last XFree86 snapshot before the licence change
+(ie, addition of the advertising clause)
+
+Since the developers don't see any problems with that, and we would like
+to integrate improvements done by the remaining one or two (or so) XFree86
+developers (j/k), this prepares enabling us to update X-Window in the future.
+@
+text
+@d24 1
+a24 1
+/* $XFree86: xc/programs/Xserver/fb/fbgc.c,v 1.15 2003/12/18 15:25:41 alanh Exp $ */
+d256 6
+a261 10
+	pPriv->evenStipple = FALSE;
+
+	if (pGC->stipple) {
+
+	    /* can we do an even stipple ?? */
+	    if (FbEvenStip (pGC->stipple->drawable.width,
+						pDrawable->bitsPerPixel) &&
+	       (fbCanEvenStipple (pGC->stipple, pDrawable->bitsPerPixel)))
+	   	pPriv->evenStipple = TRUE;
+
+d265 2
+@
+
+
+1.1.1.1
+log
+@Import OpenBSD 3.3 XF4 repository from CTM 3132 the first time
+This finalizes starting an OpenBSD-mirabile (aka MirBSD) repository.
+
+### MirBSD is:
+# Copyright (c) 1982-2003 by Thorsten "mirabile" Glaser <x86@@ePost.de>
+# Copyright © 1968-2003  The authors of And contributors to UNIX®, the
+#       C Language, BSD/Berkeley Unix; 386BSD, NetBSD 1.1 and OpenBSD.
+#
+# Anyone who obtained a copy of this work is hereby permitted to freely use,
+# distribute, modify, merge, sublicence, give away or sell it as long as the
+# authors are given due credit and the following notice is retained:
+#
+# This work is provided "as is", with no explicit or implicit warranty what-
+# soever. Use it only at your own risk. In no event may an author or contri-
+# butor be held liable for any damage, directly or indirectly, that origina-
+# ted through or is caused by creation or modification of this work.
+
+MirBSD is my private tree. MirBSD does not differ very much from OpenBSD
+and intentionally tracks OpenBSD. That's why it _is_ OpenBSD, just not the
+official one. It's like with DarrenBSD.
+
+At time of this writing, no advertising for MirBSD must be done,
+because the advertising clause has not yet been sorted out.
+
+http://templeofhate.com/tglaser/MirBSD/index.php
+@
+text
+@@
+
+
+1.1.1.2
+log
+@That's what OpenBSD will, probably, ship as XF4 in 3.5
+their last sync against XFree86 4.3-current has been
+imported into our vendor branch, too
+@
+text
+@d24 1
+a24 1
+/* $XFree86: xc/programs/Xserver/fb/fbgc.c,v 1.15 2003/12/18 15:25:41 alanh Exp $ */
+d256 6
+a261 10
+	pPriv->evenStipple = FALSE;
+
+	if (pGC->stipple) {
+
+	    /* can we do an even stipple ?? */
+	    if (FbEvenStip (pGC->stipple->drawable.width,
+						pDrawable->bitsPerPixel) &&
+	       (fbCanEvenStipple (pGC->stipple, pDrawable->bitsPerPixel)))
+	   	pPriv->evenStipple = TRUE;
+
+d265 2
+@
+

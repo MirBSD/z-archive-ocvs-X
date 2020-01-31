@@ -1,0 +1,3719 @@
+head	1.1;
+branch	1.1.1;
+access;
+symbols
+	tg-mergetmp-2:1.1.1.3
+	cvs-200410241530:1.1.1.3
+	cvs-200410012000:1.1.1.3
+	cvs-200407141120:1.1.1.3
+	cvs-200406231010:1.1.1.3
+	MIRBSD_7quater:1.1.1.2
+	cvs-200405271510:1.1.1.3
+	XFree86_4_4_0:1.1.9.1
+	cvs-200403021700:1.1.1.3
+	XFREE86_20040213:1.1.9.1
+	xc:1.1.9
+	cvs-200401291925:1.1.1.2
+	MIRBSD_7_ALPHA:1.1.1.2.0.4
+	MIRBSD_7:1.1.1.2.0.2
+	MIRBSD_7ter:1.1.1.2
+	cvs-20011091815:1.1.1.2
+	cvs-200309162130:1.1.1.2
+	cvs-200308302005:1.1.1.2
+	ctmx-0387:1.1.1.2
+	ctmx-0384:1.1.1.2
+	MIRBSD_5:1.1.1.2
+	ctmx-0375:1.1.1.2
+	ctmx-0373:1.1.1.2
+	ctm-0371:1.1.1.2
+	ctm-0370:1.1.1.2
+	MIRBSD_4:1.1.1.2
+	ctm-0363:1.1.1.2
+	ctm-0359:1.1.1.2
+	ctm-0349:1.1.1.1
+	openbsd:1.1.1;
+locks; strict;
+comment	@ * @;
+
+
+1.1
+date	2003.03.22.20.04.16;	author tg;	state Exp;
+branches
+	1.1.1.1
+	1.1.9.1;
+next	;
+
+1.1.1.1
+date	2003.03.22.20.04.16;	author tg;	state Exp;
+branches;
+next	1.1.1.2;
+
+1.1.1.2
+date	2003.04.08.18.31.26;	author tg;	state Exp;
+branches;
+next	1.1.1.3;
+
+1.1.1.3
+date	2004.03.02.17.58.27;	author tg;	state Stab;
+branches;
+next	;
+
+1.1.9.1
+date	2004.02.14.19.17.56;	author tg;	state Exp;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@/**************************************************************************
+
+Copyright 2001 VA Linux Systems Inc., Fremont, California.
+
+All Rights Reserved.
+
+Permission is hereby granted, free of charge, to any person obtaining a
+copy of this software and associated documentation files (the "Software"),
+to deal in the Software without restriction, including without limitation
+on the rights to use, copy, modify, merge, publish, distribute, sub
+license, and/or sell copies of the Software, and to permit persons to whom
+the Software is furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice (including the next
+paragraph) shall be included in all copies or substantial portions of the
+Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NON-INFRINGEMENT. IN NO EVENT SHALL
+ATI, VA LINUX SYSTEMS AND/OR THEIR SUPPLIERS BE LIABLE FOR ANY CLAIM,
+DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR
+OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE
+USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+**************************************************************************/
+
+/* $XFree86: xc/lib/GL/mesa/src/drv/i830/i830_tex.c,v 1.1 2001/10/04 18:28:21 alanh Exp $ */
+
+/*
+ * Author:
+ *   Jeff Hartmann <jhartmann@@valinux.com>
+ *
+ * Heavily based on the I810 driver, which was written by:
+ *   Keith Whitwell <keithw@@valinux.com>
+ */
+
+#include <stdlib.h>
+#include <stdio.h>
+
+#include <GL/gl.h>
+
+#include "types.h"
+#include "enums.h"
+#include "pb.h"
+#include "dd.h"
+
+#include "mm.h"
+#include "enums.h"
+
+#include "i830_drv.h"
+#include "i830_ioctl.h"
+#include "simple_list.h"
+#include "texutil.h"
+
+static void i830SetTexWrapping(i830TextureObjectPtr tex,
+			       GLenum swrap, GLenum twrap)
+{
+   if(I830_DEBUG&DEBUG_VERBOSE_TRACE)
+      fprintf(stderr, "%s\n", __FUNCTION__);
+
+   tex->Setup[I830_TEXREG_MCS] &= ~(TEXCOORD_ADDR_U_MASK|TEXCOORD_ADDR_V_MASK);
+
+   switch( swrap ) {
+   case GL_REPEAT:
+      tex->Setup[I830_TEXREG_MCS] |= TEXCOORD_ADDR_U_MODE(TEXCOORDMODE_WRAP);
+      break;
+   case GL_CLAMP:
+      tex->Setup[I830_TEXREG_MCS] |= TEXCOORD_ADDR_U_MODE(TEXCOORDMODE_CLAMP);
+      break;
+   case GL_CLAMP_TO_EDGE:
+      tex->Setup[I830_TEXREG_MCS] |= 
+			TEXCOORD_ADDR_U_MODE(TEXCOORDMODE_CLAMP_BORDER);
+      break;
+   }
+   switch( twrap ) {
+   case GL_REPEAT:
+      tex->Setup[I830_TEXREG_MCS] |= TEXCOORD_ADDR_V_MODE(TEXCOORDMODE_WRAP);
+      break;
+   case GL_CLAMP:
+      tex->Setup[I830_TEXREG_MCS] |= TEXCOORD_ADDR_V_MODE(TEXCOORDMODE_CLAMP);
+      break;
+   case GL_CLAMP_TO_EDGE:
+      tex->Setup[I830_TEXREG_MCS] |= 
+			TEXCOORD_ADDR_V_MODE(TEXCOORDMODE_CLAMP_BORDER);
+      break;
+   }
+
+}
+
+static void i830SetTexFilter(i830ContextPtr imesa, 
+			     i830TextureObjectPtr t, 
+			     GLenum minf, GLenum magf)
+{
+   GLuint LastLevel;
+   int minFilt = 0, mipFilt = 0, magFilt = 0;
+
+   if(I830_DEBUG&DEBUG_VERBOSE_TRACE)
+      fprintf(stderr, "%s\n", __FUNCTION__);
+
+   switch (minf) {
+   case GL_NEAREST:
+      minFilt = FILTER_NEAREST;
+      mipFilt = MIPFILTER_NONE;
+      break;
+   case GL_LINEAR:
+      minFilt = FILTER_LINEAR;
+      mipFilt = MIPFILTER_NONE;
+      break;
+   case GL_NEAREST_MIPMAP_NEAREST:
+      minFilt = FILTER_NEAREST;
+      mipFilt = MIPFILTER_NEAREST;
+      break;
+   case GL_LINEAR_MIPMAP_NEAREST:
+      minFilt = FILTER_LINEAR;
+      mipFilt = MIPFILTER_NEAREST;
+      break;
+   case GL_NEAREST_MIPMAP_LINEAR:
+      minFilt = FILTER_NEAREST;
+      mipFilt = MIPFILTER_LINEAR;
+      break;
+   case GL_LINEAR_MIPMAP_LINEAR:
+      minFilt = FILTER_LINEAR;
+      mipFilt = MIPFILTER_LINEAR;
+      break;
+   default:
+      fprintf(stderr, "i830SetTexFilter(): not supported min. filter %d\n",
+	      (int)minf);
+      break;
+   }
+
+   I830_SET_FIELD(t->Setup[I830_TEXREG_MF],
+		     MIN_FILTER_MASK | MIP_FILTER_MASK,
+		     MIN_FILTER(minFilt) | mipFilt);
+
+   switch (magf) {
+   case GL_NEAREST:
+      magFilt = FILTER_NEAREST;
+      break;
+   case GL_LINEAR:
+      magFilt = FILTER_LINEAR;
+      break;
+   default:
+      fprintf(stderr, "i830SetTexFilter(): not supported mag. filter %d\n",
+	      (int)magf);
+      break;
+   }  
+
+   I830_SET_FIELD(t->Setup[I830_TEXREG_MF],
+		     MAG_FILTER_MASK, MAG_FILTER(magFilt));
+
+   if (t->globj->MinFilter != GL_NEAREST && 
+       t->globj->MinFilter != GL_LINEAR) {
+      LastLevel = t->max_level;
+   } else {
+      LastLevel = t->min_level;
+   }
+
+   I830_SET_FIELD(t->Setup[I830_TEXREG_MLL],
+		  LOD_MAX_MASK,
+		  LOD_MAX(t->min_level << 4));
+
+   I830_SET_FIELD(t->Setup[I830_TEXREG_MLL],
+		  LOD_MIN_MASK,
+		  LOD_MIN(LastLevel));
+
+   /* See OpenGL 1.2 specification */
+   if (magf == GL_LINEAR && (minf == GL_NEAREST_MIPMAP_NEAREST || 
+			     minf == GL_NEAREST_MIPMAP_LINEAR))
+   {
+      /* c = 0.5 */
+      I830_SET_FIELD(t->Setup[I830_TEXREG_MLC],
+		     MAP_LOD_MASK, 0x10);
+   } else {
+      /* c = 0 */
+      I830_SET_FIELD(t->Setup[I830_TEXREG_MLC],
+		     MAP_LOD_MASK, 0x0);
+   }
+}
+
+
+/* XXX - have to make sure MI0 has length field set to include color */
+static void i830SetTexBorderColor(i830TextureObjectPtr t, GLubyte color[4])
+{
+   if(I830_DEBUG&DEBUG_VERBOSE_TRACE)
+      fprintf(stderr, "%s\n", __FUNCTION__);
+
+    t->Setup[I830_TEXREG_MI5] = 
+        I830PACKCOLOR8888(color[0],color[1],color[2],color[3]);
+}
+
+
+static void ReplicateMesaTexState(i830ContextPtr imesa,
+				  i830TextureObjectPtr t,
+                                  struct gl_texture_object *mesatex)
+{
+   if(I830_DEBUG&DEBUG_VERBOSE_TRACE)
+      fprintf(stderr, "%s\n", __FUNCTION__);
+
+   i830SetTexWrapping(t,mesatex->WrapS,mesatex->WrapT);
+   i830SetTexFilter(imesa, t,mesatex->MinFilter,mesatex->MagFilter);
+   i830SetTexBorderColor(t,mesatex->BorderColor);
+}
+
+/* Utility function to setup the texture palette */
+static void
+i830ConvertPalette(GLuint *data, const struct gl_color_table *table)
+{
+   const GLubyte *tableUB = (const GLubyte *) table->Table;
+   GLint width = table->Size;
+   GLuint r, g, b, a;
+   int i;
+
+   ASSERT(table->TableType == GL_UNSIGNED_BYTE);
+
+   switch(table->Format) {
+   case GL_RGBA:
+      for(i = 0; i < width; i++) {
+	 r = tableUB[i * 4 + 0];
+	 g = tableUB[i * 4 + 1];
+	 b = tableUB[i * 4 + 2];
+	 a = tableUB[i * 4 + 3];
+	 data[i] = I830PACKCOLOR4444(r, g, b, a);
+      }
+      break;
+   case GL_RGB:
+      for (i = 0; i < width; i++) {
+	 r = tableUB[i * 3 + 0];
+	 g = tableUB[i * 3 + 1];
+	 b = tableUB[i * 3 + 2];
+	 data[i] = I830PACKCOLOR565(r, g, b);
+      }
+      break;
+   case GL_LUMINANCE:
+      for (i = 0; i < width; i++) {
+	 r = tableUB[i];
+	 data[i] = (255 << 8) | r;
+      }
+      break;
+   case GL_ALPHA:
+      for (i = 0; i < width; i++) {
+	 a = tableUB[i];
+	 data[i] = (a << 8) | 255;
+      }
+      break;
+   case GL_LUMINANCE_ALPHA:
+      for (i = 0; i < width; i++) {
+	 r = tableUB[i * 2 + 0];
+	 a = tableUB[i * 2 + 1];
+	 data[i] = (a << 8) | r;
+      }
+      break;
+   case GL_INTENSITY:
+      for (i = 0; i < width; i++) {
+	 a = tableUB[i];
+	 data[i] = (a << 8) | a;
+      }
+      break;
+   }
+}
+
+static i830TextureObjectPtr i830CreateTexObj(i830ContextPtr imesa,
+					     struct gl_texture_object *tObj)
+{
+   i830TextureObjectPtr t;
+   GLuint height, width, pitch, i, textureFormat;
+   struct gl_texture_image *image;
+
+   if(I830_DEBUG&DEBUG_VERBOSE_TRACE)
+      fprintf(stderr, "%s\n", __FUNCTION__);
+
+   image = tObj->Image[ 0 ];
+   if ( !image ) {
+      fprintf(stderr, "no image at level zero - not creating texobj\n");
+      return 0;
+   }
+   
+   t = (i830TextureObjectPtr) calloc(1,sizeof(*t));
+   if (!t) {
+      fprintf(stderr, "failed to allocate memory - not creating texobj\n");
+      return 0;
+   }
+
+   switch( image->Format ) {
+   case GL_RGB:
+      image->TexFormat = &(_mesa_texformat_rgb565);
+      t->texelBytes = 2;
+      textureFormat = MAPSURF_16BIT | MT_16BIT_RGB565;
+      break;
+   case GL_RGBA:
+      image->TexFormat = &(_mesa_texformat_argb4444);
+      t->texelBytes = 2;
+      textureFormat = MAPSURF_16BIT | MT_16BIT_ARGB4444;
+      break;
+   case GL_ALPHA:
+   case GL_LUMINANCE:
+   case GL_LUMINANCE_ALPHA:
+   case GL_INTENSITY:
+      image->TexFormat = &(_mesa_texformat_al88);
+      t->texelBytes = 2;
+      textureFormat = MAPSURF_16BIT | MT_16BIT_AY88;
+      break;
+   case GL_COLOR_INDEX:
+      image->TexFormat = &(_mesa_texformat_ci8);
+      textureFormat = MAPSURF_8BIT_INDEXED;
+      t->texelBytes = 1;
+
+      switch(tObj->Palette.Format) {
+      case GL_RGBA: 
+	 textureFormat |= MT_8BIT_IDX_ARGB4444;
+	 break;
+      case GL_RGB: 
+	 textureFormat |= MT_8BIT_IDX_RGB565;
+	 break;
+      case GL_LUMINANCE: 
+      case GL_ALPHA:
+      case GL_LUMINANCE_ALPHA:
+      case GL_INTENSITY: 
+	 textureFormat |= MT_8BIT_IDX_AY88; break;
+      }
+
+      /* Insure the palette is loaded */
+      i830ConvertPalette(t->palette, &tObj->Palette);
+      t->palette_format = tObj->Palette.Format;
+      break;
+   default:
+      fprintf(stderr, "i830CreateTexObj: bad image->Format\n");
+      free( t );      
+      return 0;	
+   }
+
+   /* Figure out the size now (and count the levels).  Upload won't be done
+    * until later.
+    */ 
+   width = image->Width * t->texelBytes;
+   if(width % 4) {
+      fprintf(stderr, "Pitch is not a multiple of dwords\n");
+   }
+   pitch = width; /* All pitches can be used, since we are not using 
+		   * tiled surfaces.
+		   */
+
+   t->dirty_images = 0;
+   t->bound = 0;
+   
+   for ( height = i = 0 ; i < I830_TEX_MAXLEVELS && tObj->Image[i] ; i++ ) {
+      t->image[i].image = tObj->Image[i];
+      t->image[i].offset = height * pitch;
+      t->image[i].internalFormat = image->Format;
+      t->dirty_images |= (1<<i);
+      height += t->image[i].image->Height;
+   }
+
+   t->Pitch = pitch;
+   t->totalSize = height*pitch;
+   t->max_level = i-1;
+   t->min_level = 0;
+   t->globj = tObj;
+   t->age = 0;
+
+   t->Setup[I830_TEXREG_MI0] = STATE3D_MAP_INFO_COLR_CMD;
+
+   t->Setup[I830_TEXREG_MI1] = MAP_INFO_TEX(0) |
+				textureFormat |
+				MAP_INFO_OUTMUX_F0F1F2F3 | 
+				MAP_INFO_VERTLINESTRIDE_0 |
+				MAP_INFO_VERTLINESTRIDEOFS_0 |
+				MAP_INFO_FORMAT_2D |
+				MAP_INFO_USE_FENCE;
+
+   t->Setup[I830_TEXREG_MI2] = (((1 << image->HeightLog2) - 1) << 16) |
+				((1 << image->WidthLog2) - 1);
+
+   t->Setup[I830_TEXREG_MI3] = 0;
+
+   t->Setup[I830_TEXREG_MI4] = ((pitch / 4) - 1) << 2;
+
+   t->Setup[I830_TEXREG_MI5] = 0;
+  
+   t->Setup[I830_TEXREG_MLC] = STATE3D_MAP_LOD_CNTL_CMD | MAP_UNIT(0) | 
+				ENABLE_TEXLOD_BIAS |
+				MAP_LOD_BIAS(0);
+
+   t->Setup[I830_TEXREG_MLL] = STATE3D_MAP_LOD_LIMITS_CMD | MAP_UNIT(0) |
+				ENABLE_MAX_MIP_LVL | 
+				LOD_MAX(t->min_level << 4) |
+				ENABLE_MIN_MIP_LVL |
+				LOD_MIN(t->max_level);
+
+   /* I think this is context state, really.
+    */
+   t->Setup[I830_TEXREG_MCS] = STATE3D_MAP_COORD_SET_CMD | MAP_UNIT(0) |
+				ENABLE_TEXCOORD_PARAMS |
+				TEXCOORDS_ARE_NORMAL |
+				TEXCOORDTYPE_CARTESIAN |
+				ENABLE_ADDR_V_CNTL |
+				TEXCOORD_ADDR_V_MODE(TEXCOORDMODE_WRAP) |
+				ENABLE_ADDR_U_CNTL |
+				TEXCOORD_ADDR_U_MODE(TEXCOORDMODE_WRAP);
+
+   t->Setup[I830_TEXREG_MF] = STATE3D_MAP_FILTER_CMD | MAP_UNIT(0) |
+			       ENABLE_MIP_MODE_FILTER |
+			       MIPFILTER_NEAREST |
+			       ENABLE_MAG_MODE_FILTER |
+			       MAG_FILTER(FILTER_LINEAR) |
+			       ENABLE_MIN_MODE_FILTER |
+			       MIN_FILTER(FILTER_LINEAR);
+
+   t->current_unit = 0;
+
+   ReplicateMesaTexState(imesa, t,tObj);
+   tObj->DriverData = t;
+   /* Forces tex cache flush */
+   imesa->dirty |= I830_UPLOAD_CTX;
+   make_empty_list( t );
+   return t;
+}
+
+void i830DestroyTexObj(i830ContextPtr imesa, i830TextureObjectPtr t)
+{
+   if (!t) return;
+
+   if(I830_DEBUG&DEBUG_VERBOSE_TRACE)
+      fprintf(stderr, "%s\n", __FUNCTION__);
+
+   /* This is sad - need to sync *in case* we upload a texture
+    * to this newly free memory...
+    */
+   if (t->MemBlock) {
+      mmFreeMem(t->MemBlock);
+      t->MemBlock = 0;
+
+      if (t->age > imesa->dirtyAge)
+	 imesa->dirtyAge = t->age;
+   }
+
+   if (t->globj)
+      t->globj->DriverData = 0;
+
+   if (t->bound)
+      imesa->CurrentTexObj[t->bound - 1] = 0; 
+
+   remove_from_list(t);
+   free(t);
+}
+
+
+static void i830SwapOutTexObj(i830ContextPtr imesa, i830TextureObjectPtr t)
+{
+   if(I830_DEBUG&DEBUG_VERBOSE_TRACE)
+      fprintf(stderr, "%s\n", __FUNCTION__);
+
+   if (t->MemBlock) {
+      mmFreeMem(t->MemBlock);
+      t->MemBlock = 0;      
+
+      if (t->age > imesa->dirtyAge)
+	 imesa->dirtyAge = t->age;
+   }
+
+   t->dirty_images = ~0;
+   move_to_tail(&(imesa->SwappedOut), t);
+}
+
+
+
+/* Upload an image from mesa's internal copy.
+ */
+static void i830UploadTexLevel( i830TextureObjectPtr t, int level )
+{
+   const struct gl_texture_image *image = t->image[level].image;
+   int i,j;
+
+   if(I830_DEBUG&DEBUG_VERBOSE_TRACE)
+      fprintf(stderr, "%s\n", __FUNCTION__);
+
+   if (I830_DEBUG & DEBUG_VERBOSE_LRU)
+      fprintf(stderr, "i830UploadTexLevel %d, BufAddr %p offset %x\n",
+	      level, t->BufAddr, t->image[level].offset);
+
+   switch (t->image[level].internalFormat) {
+   case GL_RGB:
+   {
+      GLushort *dst = (GLushort *)(t->BufAddr + t->image[level].offset);
+      GLubyte  *src = (GLubyte *)image->Data;
+
+      for (j = 0 ; j < image->Height ; j++, dst += (t->Pitch/2)) {
+	 for (i = 0 ; i < image->Width ; i++) {
+	    dst[i] = I830PACKCOLOR565(src[0],src[1],src[2]);
+	    src += 3;
+	 }
+      }
+   }
+   break;
+      
+   case GL_RGBA:
+   {
+      GLushort *dst = (GLushort *)(t->BufAddr + t->image[level].offset);
+      GLubyte  *src = (GLubyte *)image->Data;
+
+      for (j = 0 ; j < image->Height ; j++, dst += (t->Pitch/2)) {
+	 for (i = 0 ; i < image->Width ; i++) {
+	    dst[i] = I830PACKCOLOR4444(src[0],src[1],src[2],src[3]);
+	    src += 4;
+	 }
+      }
+   }
+   break;
+
+   case GL_INTENSITY:
+   {
+      GLushort *dst = (GLushort *)(t->BufAddr + t->image[level].offset);
+      GLubyte  *src = (GLubyte *)image->Data;
+      int i;
+
+      for (j = 0 ; j < image->Height ; j++, dst += (t->Pitch/2)) {
+	 for (i = 0 ; i < image->Width ; i++) {
+	    dst[i] = (src[0] << 8) | (src[0]);
+	    src ++;
+	 }
+      }
+   }
+   break;
+
+   case GL_LUMINANCE:
+   {
+      GLushort *dst = (GLushort *)(t->BufAddr + t->image[level].offset);
+      GLubyte  *src = (GLubyte *)image->Data;
+
+      for (j = 0 ; j < image->Height ; j++, dst += (t->Pitch/2)) {
+	 for (i = 0 ; i < image->Width ; i++) {
+	    dst[i] = (255 << 8) | (src[0]);
+	    src ++;
+	 }
+      }
+   }
+   break;
+
+   case GL_LUMINANCE_ALPHA:
+   {
+      GLushort *dst = (GLushort *)(t->BufAddr + t->image[level].offset);
+      GLubyte  *src = (GLubyte *)image->Data;
+
+      for (j = 0 ; j < image->Height ; j++, dst += (t->Pitch/2)) {
+	 for (i = 0 ; i < image->Width ; i++) {
+	    dst[i] = (src[1] << 8) | (src[0]);
+	    src += 2;
+	 }
+      }
+   }
+   break;
+
+   case GL_ALPHA:
+   {
+      GLushort *dst = (GLushort *)(t->BufAddr + t->image[level].offset);
+      GLubyte  *src = (GLubyte *)image->Data;
+
+      for (j = 0 ; j < image->Height ; j++, dst += (t->Pitch/2)) {
+	 for (i = 0 ; i < image->Width ; i++) {
+	    dst[i] = (src[0] << 8) | 255;
+	    src += 1;
+	 }
+      }
+   }
+   break;
+
+   case GL_COLOR_INDEX:
+      {
+	 GLubyte *dst = (GLubyte *)(t->BufAddr + t->image[level].offset);
+	 GLubyte *src = (GLubyte *)image->Data;
+
+	 for (j = 0 ; j < image->Height ; j++, dst += t->Pitch) {
+	    for (i = 0 ; i < image->Width ; i++) {
+	       dst[i] = src[0];
+	       src += 1;
+	    }
+	 }
+      }
+   break;
+      
+   default:
+      fprintf(stderr, "Not supported texture format %s\n",
+	      gl_lookup_enum_by_nr(image->Format));
+   }
+}
+
+
+
+void i830PrintLocalLRU( i830ContextPtr imesa ) 
+{
+   i830TextureObjectPtr t;
+   int sz = 1 << (imesa->i830Screen->logTextureGranularity);
+
+   if(I830_DEBUG&DEBUG_VERBOSE_TRACE)
+      fprintf(stderr, "%s\n", __FUNCTION__);
+
+   foreach( t, &imesa->TexObjList ) {
+      if (!t->globj)
+	 fprintf(stderr, "Placeholder %d at %x sz %x\n", 
+		 t->MemBlock->ofs / sz,
+		 t->MemBlock->ofs,
+		 t->MemBlock->size);      
+      else
+	 fprintf(stderr, "Texture (bound %d) at %x sz %x\n", 
+		 t->bound,
+		 t->MemBlock->ofs,
+		 t->MemBlock->size);      
+
+   }
+}
+
+void i830PrintGlobalLRU( i830ContextPtr imesa )
+{
+   int i, j;
+   I830TexRegion *list = imesa->sarea->texList;
+
+   if(I830_DEBUG&DEBUG_VERBOSE_TRACE)
+      fprintf(stderr, "%s\n", __FUNCTION__);
+
+   for (i = 0, j = I830_NR_TEX_REGIONS ; i < I830_NR_TEX_REGIONS ; i++) {
+      fprintf(stderr, "list[%d] age %d next %d prev %d\n",
+	      j, list[j].age, list[j].next, list[j].prev);
+      j = list[j].next;
+      if (j == I830_NR_TEX_REGIONS) break;
+   }
+   
+   if (j != I830_NR_TEX_REGIONS)
+      fprintf(stderr, "Loop detected in global LRU\n");
+}
+
+
+void i830ResetGlobalLRU( i830ContextPtr imesa )
+{
+   I830TexRegion *list = imesa->sarea->texList;
+   int sz = 1 << imesa->i830Screen->logTextureGranularity;
+   int i;
+
+   /* (Re)initialize the global circular LRU list.  The last element
+    * in the array (I830_NR_TEX_REGIONS) is the sentinal.  Keeping it
+    * at the end of the array allows it to be addressed rationally
+    * when looking up objects at a particular location in texture
+    * memory.  
+    */
+
+   if(I830_DEBUG&DEBUG_VERBOSE_TRACE)
+      fprintf(stderr, "%s\n", __FUNCTION__);
+
+   for (i = 0 ; (i+1) * sz <= imesa->i830Screen->textureSize ; i++) {
+      list[i].prev = i-1;
+      list[i].next = i+1;
+      list[i].age = 0;
+   }
+
+   i--;
+   list[0].prev = I830_NR_TEX_REGIONS;
+   list[i].prev = i-1;
+   list[i].next = I830_NR_TEX_REGIONS;
+   list[I830_NR_TEX_REGIONS].prev = i;
+   list[I830_NR_TEX_REGIONS].next = 0;
+   imesa->sarea->texAge = 0;
+}
+
+
+static void i830UpdateTexLRU( i830ContextPtr imesa, i830TextureObjectPtr t ) 
+{
+   int i;
+   int logsz = imesa->i830Screen->logTextureGranularity;
+   int start = t->MemBlock->ofs >> logsz;
+   int end = (t->MemBlock->ofs + t->MemBlock->size - 1) >> logsz;
+   I830TexRegion *list = imesa->sarea->texList;
+
+   if(I830_DEBUG&DEBUG_VERBOSE_TRACE)
+      fprintf(stderr, "%s\n", __FUNCTION__);
+   
+   imesa->texAge = ++imesa->sarea->texAge;
+
+   /* Update our local LRU
+    */
+   move_to_head( &(imesa->TexObjList), t );
+
+   /* Update the global LRU
+    */
+   for (i = start ; i <= end ; i++) {
+
+      list[i].in_use = 1;
+      list[i].age = imesa->texAge;
+
+      /* remove_from_list(i)
+       */
+      list[(unsigned)list[i].next].prev = list[i].prev;
+      list[(unsigned)list[i].prev].next = list[i].next;
+      
+      /* insert_at_head(list, i)
+       */
+      list[i].prev = I830_NR_TEX_REGIONS;
+      list[i].next = list[I830_NR_TEX_REGIONS].next;
+      list[(unsigned)list[I830_NR_TEX_REGIONS].next].prev = i;
+      list[I830_NR_TEX_REGIONS].next = i;
+   }
+}
+
+
+/* Called for every shared texture region which has increased in age
+ * since we last held the lock.
+ *
+ * Figures out which of our textures have been ejected by other clients,
+ * and pushes a placeholder texture onto the LRU list to represent 
+ * the other client's textures.  
+ */
+void i830TexturesGone( i830ContextPtr imesa,
+		       GLuint offset, 
+		       GLuint size,
+		       GLuint in_use ) 
+{
+   i830TextureObjectPtr t, tmp;
+
+   if(I830_DEBUG&DEBUG_VERBOSE_TRACE)
+      fprintf(stderr, "%s\n", __FUNCTION__);
+
+   foreach_s ( t, tmp, &imesa->TexObjList ) {
+
+      if (t->MemBlock->ofs >= offset + size ||
+	  t->MemBlock->ofs + t->MemBlock->size <= offset)
+	 continue;
+
+      /* It overlaps - kick it off.  Need to hold onto the currently bound
+       * objects, however.
+       */
+      if (t->bound)
+	 i830SwapOutTexObj( imesa, t );
+      else
+	 i830DestroyTexObj( imesa, t );
+   }
+
+   
+   if (in_use) {
+      t = (i830TextureObjectPtr) calloc(1,sizeof(*t));
+      if (!t) return;
+
+      t->MemBlock = mmAllocMem( imesa->texHeap, size, 0, offset);      
+      insert_at_head( &imesa->TexObjList, t );
+   }
+}
+
+/* This is called with the lock held.  May have to eject our own and/or
+ * other client's texture objects to make room for the upload.
+ */
+int i830UploadTexImages( i830ContextPtr imesa, i830TextureObjectPtr t )
+{
+   int i;
+   int ofs;
+
+   if(I830_DEBUG&DEBUG_VERBOSE_TRACE)
+      fprintf(stderr, "%s\n", __FUNCTION__);
+
+   /* Do we need to eject LRU texture objects?
+    */
+   if (!t->MemBlock) {
+      while (1)
+      {
+	 t->MemBlock = mmAllocMem( imesa->texHeap, t->totalSize, 12, 0 ); 
+	 if (t->MemBlock)
+	    break;
+
+	 if (imesa->TexObjList.prev->bound) {
+  	    fprintf(stderr, "Hit bound texture in upload\n"); 
+	    i830PrintLocalLRU( imesa );
+	    return -1;
+	 }
+
+	 if (imesa->TexObjList.prev == &(imesa->TexObjList)) {
+ 	    fprintf(stderr, "Failed to upload texture, sz %d\n", t->totalSize);
+	    mmDumpMemInfo( imesa->texHeap );
+	    return -1;
+	 }
+	 
+	 i830DestroyTexObj( imesa, imesa->TexObjList.prev );
+      }
+ 
+      ofs = t->MemBlock->ofs;
+      t->Setup[I830_TEXREG_MI3] = imesa->i830Screen->textureOffset + ofs;
+      t->BufAddr = imesa->i830Screen->tex.map + ofs;
+      imesa->dirty |= I830_UPLOAD_CTX;
+   }
+
+   /* Let the world know we've used this memory recently.
+    */
+   i830UpdateTexLRU( imesa, t );
+
+   if (I830_DEBUG & DEBUG_VERBOSE_LRU)
+      fprintf(stderr, "dispatch age: %d age freed memory: %d\n",
+	      GET_DISPATCH_AGE(imesa), imesa->dirtyAge);
+
+   if (imesa->dirtyAge >= GET_DISPATCH_AGE(imesa)) 
+      i830WaitAgeLocked( imesa, imesa->dirtyAge );
+   
+
+   if (t->dirty_images) {
+      if (I830_DEBUG & DEBUG_VERBOSE_LRU)
+	 fprintf(stderr, "*");
+
+      for (i = t->min_level ; i <= t->max_level ; i++)
+	 if (t->dirty_images & (1<<i)) 
+	    i830UploadTexLevel( t, i );
+   }
+
+
+   t->dirty_images = 0;
+   return 0;
+}
+
+static void i830TexSetUnit( i830TextureObjectPtr t, GLuint unit )
+{
+   if(I830_DEBUG&DEBUG_VERBOSE_TRACE)
+      fprintf(stderr, "%s unit(%d)\n", __FUNCTION__, unit);
+
+   /* This will need to be changed when I support more then 2 t units */
+   I830_SET_FIELD(t->Setup[I830_TEXREG_MI1],
+		  MAP_INFO_MASK | MAP_INFO_USE_PALETTE_1,
+		  MAP_INFO_TEX(unit) | MAP_INFO_USE_PALETTE_N(unit));
+   I830_SET_FIELD(t->Setup[I830_TEXREG_MLC], MAP_UNIT_MASK, MAP_UNIT(unit));
+   I830_SET_FIELD(t->Setup[I830_TEXREG_MLL], MAP_UNIT_MASK, MAP_UNIT(unit));
+   I830_SET_FIELD(t->Setup[I830_TEXREG_MCS], MAP_UNIT_MASK, MAP_UNIT(unit));
+   I830_SET_FIELD(t->Setup[I830_TEXREG_MF], MAP_UNIT_MASK, MAP_UNIT(unit));
+
+   t->current_unit = unit;
+}
+
+static __inline__ GLuint GetTexelOp(GLint unit)
+{
+   switch(unit) {
+    case 0: return TEXBLENDARG_TEXEL0;
+    case 1: return TEXBLENDARG_TEXEL1;
+    case 2: return TEXBLENDARG_TEXEL2;
+    case 3: return TEXBLENDARG_TEXEL3;
+    default: return TEXBLENDARG_TEXEL0;
+   }
+}
+
+/* Only 1.2 modes; make another func for combine, combine4, combiners */
+static void i830SetBlend_GL1_2(i830ContextPtr imesa, int curTex, 
+			       GLenum envMode, GLenum format)
+{
+   GLuint texel_op = GetTexelOp(curTex);
+
+   if(I830_DEBUG&DEBUG_VERBOSE_TRACE)
+     fprintf(stderr, "%s %s %s unit (%d) texel_op(0x%x)\n",
+	     __FUNCTION__,
+	     gl_lookup_enum_by_nr(format),
+	     gl_lookup_enum_by_nr(envMode),
+	     curTex,
+	     texel_op);
+
+   switch(envMode) {
+   case GL_REPLACE:
+      switch(format) {
+      case GL_ALPHA:
+	 imesa->TexBlend[curTex][0] = (STATE3D_MAP_BLEND_OP_CMD(curTex) |
+				       TEXPIPE_COLOR |
+				       ENABLE_TEXOUTPUT_WRT_SEL |
+				       TEXOP_OUTPUT_CURRENT |
+				       DISABLE_TEX_CNTRL_STAGE |
+				       TEXOP_SCALE_1X |
+				       TEXOP_MODIFY_PARMS |
+				       TEXBLENDOP_ARG1);
+	 imesa->TexBlend[curTex][1] = (STATE3D_MAP_BLEND_OP_CMD(curTex) |
+				       TEXPIPE_ALPHA |
+				       ENABLE_TEXOUTPUT_WRT_SEL |
+				       TEXOP_OUTPUT_CURRENT |
+				       TEXOP_SCALE_1X |
+				       TEXOP_MODIFY_PARMS |
+				       TEXBLENDOP_ARG1);
+	 imesa->TexBlend[curTex][2] = (STATE3D_MAP_BLEND_ARG_CMD(curTex) |
+				       TEXPIPE_COLOR |
+				       TEXBLEND_ARG1 |
+				       TEXBLENDARG_MODIFY_PARMS |
+				       TEXBLENDARG_CURRENT);
+	 imesa->TexBlend[curTex][3] = (STATE3D_MAP_BLEND_ARG_CMD(curTex) |
+				       TEXPIPE_ALPHA |
+				       TEXBLEND_ARG1 |
+				       TEXBLENDARG_MODIFY_PARMS |
+				       texel_op);
+	 imesa->TexBlendColorPipeNum[curTex] = 0;
+	 imesa->TexBlendWordsUsed[curTex] = 4;
+	 break;
+      case GL_LUMINANCE:
+      case GL_RGB:
+	 imesa->TexBlend[curTex][0] = (STATE3D_MAP_BLEND_OP_CMD(curTex) |
+				       TEXPIPE_COLOR |
+				       ENABLE_TEXOUTPUT_WRT_SEL |
+				       TEXOP_OUTPUT_CURRENT |
+				       DISABLE_TEX_CNTRL_STAGE |
+				       TEXOP_SCALE_1X |
+				       TEXOP_MODIFY_PARMS |
+				       TEXBLENDOP_ARG1);
+	 imesa->TexBlend[curTex][1] = (STATE3D_MAP_BLEND_OP_CMD(curTex) |
+				       TEXPIPE_ALPHA |
+				       ENABLE_TEXOUTPUT_WRT_SEL |
+				       TEXOP_OUTPUT_CURRENT |
+				       TEXOP_SCALE_1X |
+				       TEXOP_MODIFY_PARMS |
+				       TEXBLENDOP_ARG1);
+	 imesa->TexBlend[curTex][2] = (STATE3D_MAP_BLEND_ARG_CMD(curTex) |
+				       TEXPIPE_COLOR |
+				       TEXBLEND_ARG1 |
+				       TEXBLENDARG_MODIFY_PARMS |
+				       texel_op);
+	 imesa->TexBlend[curTex][3] = (STATE3D_MAP_BLEND_ARG_CMD(curTex) |
+				       TEXPIPE_ALPHA |
+				       TEXBLEND_ARG1 |
+				       TEXBLENDARG_MODIFY_PARMS |
+				       TEXBLENDARG_CURRENT);
+	 imesa->TexBlendColorPipeNum[curTex] = 0;
+	 imesa->TexBlendWordsUsed[curTex] = 4;
+	 break;
+
+      case GL_INTENSITY:
+      case GL_LUMINANCE_ALPHA:
+      case GL_RGBA:
+	 imesa->TexBlend[curTex][0] = (STATE3D_MAP_BLEND_OP_CMD(curTex) |
+				       TEXPIPE_COLOR |
+				       ENABLE_TEXOUTPUT_WRT_SEL |
+				       TEXOP_OUTPUT_CURRENT |
+				       DISABLE_TEX_CNTRL_STAGE |
+				       TEXOP_SCALE_1X |
+				       TEXOP_MODIFY_PARMS |
+				       TEXBLENDOP_ARG1);
+	 imesa->TexBlend[curTex][1] = (STATE3D_MAP_BLEND_OP_CMD(curTex) |
+				       TEXPIPE_ALPHA |
+				       ENABLE_TEXOUTPUT_WRT_SEL |
+				       TEXOP_OUTPUT_CURRENT |
+				       TEXOP_SCALE_1X |
+				       TEXOP_MODIFY_PARMS |
+				       TEXBLENDOP_ARG1);
+	 imesa->TexBlend[curTex][2] = (STATE3D_MAP_BLEND_ARG_CMD(curTex) |
+				       TEXPIPE_COLOR |
+				       TEXBLEND_ARG1 |
+				       TEXBLENDARG_MODIFY_PARMS |
+				       texel_op);
+	 imesa->TexBlend[curTex][3] = (STATE3D_MAP_BLEND_ARG_CMD(curTex) |
+				       TEXPIPE_ALPHA |
+				       TEXBLEND_ARG1 |
+				       TEXBLENDARG_MODIFY_PARMS |
+				       texel_op);
+	 imesa->TexBlendColorPipeNum[curTex] = 0;
+	 imesa->TexBlendWordsUsed[curTex] = 4;
+	 break;
+      default:
+	 /* Always set to passthru if something is funny */
+	 imesa->TexBlend[curTex][0] = (STATE3D_MAP_BLEND_OP_CMD(0) |
+				       TEXPIPE_COLOR |
+				       ENABLE_TEXOUTPUT_WRT_SEL |
+				       TEXOP_OUTPUT_CURRENT |
+				       DISABLE_TEX_CNTRL_STAGE |
+				       TEXOP_SCALE_1X |
+				       TEXOP_MODIFY_PARMS |
+				       TEXBLENDOP_ARG1);
+	 imesa->TexBlend[curTex][1] = (STATE3D_MAP_BLEND_OP_CMD(0) |
+				       TEXPIPE_ALPHA |
+				       ENABLE_TEXOUTPUT_WRT_SEL |
+				       TEXOP_OUTPUT_CURRENT |
+				       TEXOP_SCALE_1X |
+				       TEXOP_MODIFY_PARMS |
+				       TEXBLENDOP_ARG1);
+	 imesa->TexBlend[curTex][2] = (STATE3D_MAP_BLEND_ARG_CMD(0) |
+				       TEXPIPE_COLOR |
+				       TEXBLEND_ARG1 |
+				       TEXBLENDARG_MODIFY_PARMS |
+				       TEXBLENDARG_CURRENT);
+	 imesa->TexBlend[curTex][3] = (STATE3D_MAP_BLEND_ARG_CMD(0) |
+				       TEXPIPE_ALPHA |
+				       TEXBLEND_ARG1 |
+				       TEXBLENDARG_MODIFY_PARMS |
+				       TEXBLENDARG_CURRENT);
+	 imesa->TexBlendColorPipeNum[curTex] = 0;
+	 imesa->TexBlendWordsUsed[curTex] = 4;
+	 break;
+      }
+      break;
+
+   case GL_MODULATE:
+      switch(format) {
+      case GL_ALPHA:
+	 imesa->TexBlend[curTex][0] = (STATE3D_MAP_BLEND_OP_CMD(curTex) |
+				       TEXPIPE_COLOR |
+				       ENABLE_TEXOUTPUT_WRT_SEL |
+				       TEXOP_OUTPUT_CURRENT |
+				       DISABLE_TEX_CNTRL_STAGE |
+				       TEXOP_SCALE_1X |
+				       TEXOP_MODIFY_PARMS |
+				       TEXBLENDOP_ARG1);
+	 imesa->TexBlend[curTex][1] = (STATE3D_MAP_BLEND_OP_CMD(curTex) |
+				       TEXPIPE_ALPHA |
+				       ENABLE_TEXOUTPUT_WRT_SEL |
+				       TEXOP_OUTPUT_CURRENT |
+				       TEXOP_SCALE_1X |
+				       TEXOP_MODIFY_PARMS |
+				       TEXBLENDOP_MODULATE);
+	 imesa->TexBlend[curTex][2] = (STATE3D_MAP_BLEND_ARG_CMD(curTex) |
+				       TEXPIPE_COLOR |
+				       TEXBLEND_ARG1 |
+				       TEXBLENDARG_MODIFY_PARMS |
+				       TEXBLENDARG_CURRENT);
+	 imesa->TexBlend[curTex][3] = (STATE3D_MAP_BLEND_ARG_CMD(curTex) |
+				       TEXPIPE_ALPHA |
+				       TEXBLEND_ARG1 |
+				       TEXBLENDARG_MODIFY_PARMS |
+				       texel_op);
+	 imesa->TexBlend[curTex][4] = (STATE3D_MAP_BLEND_ARG_CMD(curTex) |
+				       TEXPIPE_ALPHA |
+				       TEXBLEND_ARG2 |
+				       TEXBLENDARG_MODIFY_PARMS |
+				       TEXBLENDARG_CURRENT);
+	 imesa->TexBlendColorPipeNum[curTex] = 0;
+	 imesa->TexBlendWordsUsed[curTex] = 5;
+	 break;
+
+      case GL_LUMINANCE:
+      case GL_RGB:
+	 imesa->TexBlend[curTex][0] = (STATE3D_MAP_BLEND_OP_CMD(curTex) |
+				       TEXPIPE_COLOR |
+				       ENABLE_TEXOUTPUT_WRT_SEL |
+				       TEXOP_OUTPUT_CURRENT |
+				       DISABLE_TEX_CNTRL_STAGE |
+				       TEXOP_SCALE_1X |
+				       TEXOP_MODIFY_PARMS |
+				       TEXBLENDOP_MODULATE);
+	 imesa->TexBlend[curTex][1] = (STATE3D_MAP_BLEND_OP_CMD(curTex) |
+				       TEXPIPE_ALPHA |
+				       ENABLE_TEXOUTPUT_WRT_SEL |
+				       TEXOP_OUTPUT_CURRENT |
+				       TEXOP_SCALE_1X |
+				       TEXOP_MODIFY_PARMS |
+				       TEXBLENDOP_ARG1);
+	 imesa->TexBlend[curTex][2] = (STATE3D_MAP_BLEND_ARG_CMD(curTex) |
+				       TEXPIPE_COLOR |
+				       TEXBLEND_ARG1 |
+				       TEXBLENDARG_MODIFY_PARMS |
+				       texel_op);
+	 imesa->TexBlend[curTex][3] = (STATE3D_MAP_BLEND_ARG_CMD(curTex) |
+				       TEXPIPE_COLOR |
+				       TEXBLEND_ARG2 |
+				       TEXBLENDARG_MODIFY_PARMS |
+				       TEXBLENDARG_CURRENT);
+	 imesa->TexBlend[curTex][4] = (STATE3D_MAP_BLEND_ARG_CMD(curTex) |
+				       TEXPIPE_ALPHA |
+				       TEXBLEND_ARG1 |
+				       TEXBLENDARG_MODIFY_PARMS |
+				       TEXBLENDARG_CURRENT);
+	 imesa->TexBlendColorPipeNum[curTex] = 0;
+	 imesa->TexBlendWordsUsed[curTex] = 5;
+	 break;
+
+      case GL_INTENSITY:
+      case GL_LUMINANCE_ALPHA:
+      case GL_RGBA:
+	 imesa->TexBlend[curTex][0] = (STATE3D_MAP_BLEND_OP_CMD(curTex) |
+				       TEXPIPE_COLOR |
+				       ENABLE_TEXOUTPUT_WRT_SEL |
+				       TEXOP_OUTPUT_CURRENT |
+				       DISABLE_TEX_CNTRL_STAGE |
+				       TEXOP_SCALE_1X |
+				       TEXOP_MODIFY_PARMS |
+				       TEXBLENDOP_MODULATE);
+	 imesa->TexBlend[curTex][1] = (STATE3D_MAP_BLEND_OP_CMD(curTex) |
+				       TEXPIPE_ALPHA |
+				       ENABLE_TEXOUTPUT_WRT_SEL |
+				       TEXOP_OUTPUT_CURRENT |
+				       TEXOP_SCALE_1X |
+				       TEXOP_MODIFY_PARMS |
+				       TEXBLENDOP_MODULATE);
+	 imesa->TexBlend[curTex][2] = (STATE3D_MAP_BLEND_ARG_CMD(curTex) |
+				       TEXPIPE_COLOR |
+				       TEXBLEND_ARG1 |
+				       TEXBLENDARG_MODIFY_PARMS |
+				       texel_op);
+	 imesa->TexBlend[curTex][3] = (STATE3D_MAP_BLEND_ARG_CMD(curTex) |
+				       TEXPIPE_COLOR |
+				       TEXBLEND_ARG2 |
+				       TEXBLENDARG_MODIFY_PARMS |
+				       TEXBLENDARG_CURRENT);
+	 imesa->TexBlend[curTex][4] = (STATE3D_MAP_BLEND_ARG_CMD(curTex) |
+				       TEXPIPE_ALPHA |
+				       TEXBLEND_ARG1 |
+				       TEXBLENDARG_MODIFY_PARMS |
+				       texel_op);
+	 imesa->TexBlend[curTex][5] = (STATE3D_MAP_BLEND_ARG_CMD(curTex) |
+				       TEXPIPE_ALPHA |
+				       TEXBLEND_ARG2 |
+				       TEXBLENDARG_MODIFY_PARMS |
+				       TEXBLENDARG_CURRENT);
+	 imesa->TexBlendColorPipeNum[curTex] = 0;
+	 imesa->TexBlendWordsUsed[curTex] = 6;
+	 break;
+      default:
+	 /* Always set to passthru if something is funny */
+	 imesa->TexBlend[curTex][0] = (STATE3D_MAP_BLEND_OP_CMD(0) |
+				       TEXPIPE_COLOR |
+				       ENABLE_TEXOUTPUT_WRT_SEL |
+				       TEXOP_OUTPUT_CURRENT |
+				       DISABLE_TEX_CNTRL_STAGE |
+				       TEXOP_SCALE_1X |
+				       TEXOP_MODIFY_PARMS |
+				       TEXBLENDOP_ARG1);
+	 imesa->TexBlend[curTex][1] = (STATE3D_MAP_BLEND_OP_CMD(0) |
+				       TEXPIPE_ALPHA |
+				       ENABLE_TEXOUTPUT_WRT_SEL |
+				       TEXOP_OUTPUT_CURRENT |
+				       TEXOP_SCALE_1X |
+				       TEXOP_MODIFY_PARMS |
+				       TEXBLENDOP_ARG1);
+	 imesa->TexBlend[curTex][2] = (STATE3D_MAP_BLEND_ARG_CMD(0) |
+				       TEXPIPE_COLOR |
+				       TEXBLEND_ARG1 |
+				       TEXBLENDARG_MODIFY_PARMS |
+				       TEXBLENDARG_CURRENT);
+	 imesa->TexBlend[curTex][3] = (STATE3D_MAP_BLEND_ARG_CMD(0) |
+				       TEXPIPE_ALPHA |
+				       TEXBLEND_ARG1 |
+				       TEXBLENDARG_MODIFY_PARMS |
+				       TEXBLENDARG_CURRENT);
+	 imesa->TexBlendColorPipeNum[curTex] = 0;
+	 imesa->TexBlendWordsUsed[curTex] = 4;
+	 break;
+      }
+      break;
+
+   case GL_DECAL:
+      switch(format) {
+      case GL_RGB:
+	 imesa->TexBlend[curTex][0] = (STATE3D_MAP_BLEND_OP_CMD(curTex) |
+				       TEXPIPE_COLOR |
+				       ENABLE_TEXOUTPUT_WRT_SEL |
+				       TEXOP_OUTPUT_CURRENT |
+				       DISABLE_TEX_CNTRL_STAGE |
+				       TEXOP_SCALE_1X |
+				       TEXOP_MODIFY_PARMS |
+				       TEXBLENDOP_ARG1);
+	 imesa->TexBlend[curTex][1] = (STATE3D_MAP_BLEND_OP_CMD(curTex) |
+				       TEXPIPE_ALPHA |
+				       ENABLE_TEXOUTPUT_WRT_SEL |
+				       TEXOP_OUTPUT_CURRENT |
+				       TEXOP_SCALE_1X |
+				       TEXOP_MODIFY_PARMS |
+				       TEXBLENDOP_ARG1);
+	 imesa->TexBlend[curTex][2] = (STATE3D_MAP_BLEND_ARG_CMD(curTex) |
+				       TEXPIPE_COLOR |
+				       TEXBLEND_ARG1 |
+				       TEXBLENDARG_MODIFY_PARMS |
+				       texel_op);
+	 imesa->TexBlend[curTex][3] = (STATE3D_MAP_BLEND_ARG_CMD(curTex) |
+				       TEXPIPE_ALPHA |
+				       TEXBLEND_ARG1 |
+				       TEXBLENDARG_MODIFY_PARMS |
+				       TEXBLENDARG_CURRENT);
+	 imesa->TexBlendColorPipeNum[curTex] = 0;
+	 imesa->TexBlendWordsUsed[curTex] = 4;
+	 break;
+
+      case GL_RGBA:
+	 imesa->TexBlend[curTex][0] = (STATE3D_MAP_BLEND_OP_CMD(curTex) |
+				       TEXPIPE_COLOR |
+				       ENABLE_TEXOUTPUT_WRT_SEL |
+				       TEXOP_OUTPUT_CURRENT |
+				       DISABLE_TEX_CNTRL_STAGE |
+				       TEXOP_SCALE_1X |
+				       TEXOP_MODIFY_PARMS |
+				       TEXBLENDOP_BLEND);
+	 imesa->TexBlend[curTex][1] = (STATE3D_MAP_BLEND_OP_CMD(curTex) |
+				       TEXPIPE_ALPHA |
+				       ENABLE_TEXOUTPUT_WRT_SEL |
+				       TEXOP_OUTPUT_CURRENT |
+				       TEXOP_SCALE_1X |
+				       TEXOP_MODIFY_PARMS |
+				       TEXBLENDOP_ARG1);
+	 imesa->TexBlend[curTex][2] = (STATE3D_MAP_BLEND_ARG_CMD(curTex) |
+				       TEXPIPE_COLOR |
+				       TEXBLEND_ARG0 |
+				       TEXBLENDARG_MODIFY_PARMS |
+				       TEXBLENDARG_REPLICATE_ALPHA |
+				       texel_op);
+	 imesa->TexBlend[curTex][3] = (STATE3D_MAP_BLEND_ARG_CMD(curTex) |
+				       TEXPIPE_COLOR |
+				       TEXBLEND_ARG1 |
+				       TEXBLENDARG_MODIFY_PARMS |
+				       texel_op);
+	 imesa->TexBlend[curTex][4] = (STATE3D_MAP_BLEND_ARG_CMD(curTex) |
+				       TEXPIPE_COLOR |
+				       TEXBLEND_ARG2 |
+				       TEXBLENDARG_MODIFY_PARMS |
+				       TEXBLENDARG_CURRENT);
+	 imesa->TexBlend[curTex][5] = (STATE3D_MAP_BLEND_ARG_CMD(curTex) |
+				       TEXPIPE_ALPHA |
+				       TEXBLEND_ARG1 |
+				       TEXBLENDARG_MODIFY_PARMS |
+				       TEXBLENDARG_CURRENT);
+	 imesa->TexBlendColorPipeNum[curTex] = 0;
+	 imesa->TexBlendWordsUsed[curTex] = 6;
+	 break;
+      default:
+	 /* Always set to passthru if something is funny */
+	 imesa->TexBlend[curTex][0] = (STATE3D_MAP_BLEND_OP_CMD(0) |
+				       TEXPIPE_COLOR |
+				       ENABLE_TEXOUTPUT_WRT_SEL |
+				       TEXOP_OUTPUT_CURRENT |
+				       DISABLE_TEX_CNTRL_STAGE |
+				       TEXOP_SCALE_1X |
+				       TEXOP_MODIFY_PARMS |
+				       TEXBLENDOP_ARG1);
+	 imesa->TexBlend[curTex][1] = (STATE3D_MAP_BLEND_OP_CMD(0) |
+				       TEXPIPE_ALPHA |
+				       ENABLE_TEXOUTPUT_WRT_SEL |
+				       TEXOP_OUTPUT_CURRENT |
+				       TEXOP_SCALE_1X |
+				       TEXOP_MODIFY_PARMS |
+				       TEXBLENDOP_ARG1);
+	 imesa->TexBlend[curTex][2] = (STATE3D_MAP_BLEND_ARG_CMD(0) |
+				       TEXPIPE_COLOR |
+				       TEXBLEND_ARG1 |
+				       TEXBLENDARG_MODIFY_PARMS |
+				       TEXBLENDARG_CURRENT);
+	 imesa->TexBlend[curTex][3] = (STATE3D_MAP_BLEND_ARG_CMD(0) |
+				       TEXPIPE_ALPHA |
+				       TEXBLEND_ARG1 |
+				       TEXBLENDARG_MODIFY_PARMS |
+				       TEXBLENDARG_CURRENT);
+	 imesa->TexBlendColorPipeNum[curTex] = 0;
+	 imesa->TexBlendWordsUsed[curTex] = 4;
+	 break;
+      }
+      break;
+
+   case GL_BLEND:
+      switch(format) {
+      case GL_ALPHA:
+	 imesa->TexBlend[curTex][0] = (STATE3D_MAP_BLEND_OP_CMD(curTex) |
+				       TEXPIPE_COLOR |
+				       ENABLE_TEXOUTPUT_WRT_SEL |
+				       TEXOP_OUTPUT_CURRENT |
+				       DISABLE_TEX_CNTRL_STAGE |
+				       TEXOP_SCALE_1X |
+				       TEXOP_MODIFY_PARMS |
+				       TEXBLENDOP_ARG1);
+	 imesa->TexBlend[curTex][1] = (STATE3D_MAP_BLEND_OP_CMD(curTex) |
+				       TEXPIPE_ALPHA |
+				       ENABLE_TEXOUTPUT_WRT_SEL |
+				       TEXOP_OUTPUT_CURRENT |
+				       TEXOP_SCALE_1X |
+				       TEXOP_MODIFY_PARMS |
+				       TEXBLENDOP_MODULATE);
+	 imesa->TexBlend[curTex][2] = (STATE3D_MAP_BLEND_ARG_CMD(curTex) |
+				       TEXPIPE_COLOR |
+				       TEXBLEND_ARG1 |
+				       TEXBLENDARG_MODIFY_PARMS |
+				       TEXBLENDARG_CURRENT);
+	 imesa->TexBlend[curTex][3] = (STATE3D_MAP_BLEND_ARG_CMD(curTex) |
+				       TEXPIPE_ALPHA |
+				       TEXBLEND_ARG1 |
+				       TEXBLENDARG_MODIFY_PARMS |
+				       texel_op);
+	 imesa->TexBlend[curTex][4] = (STATE3D_MAP_BLEND_ARG_CMD(curTex) |
+				       TEXPIPE_ALPHA |
+				       TEXBLEND_ARG2 |
+				       TEXBLENDARG_MODIFY_PARMS |
+				       TEXBLENDARG_CURRENT);
+	 imesa->TexBlendColorPipeNum[curTex] = 0;
+	 imesa->TexBlendWordsUsed[curTex] = 5;
+	 break;
+
+      case GL_LUMINANCE:
+      case GL_RGB:
+	 imesa->TexBlend[curTex][0] = (STATE3D_MAP_BLEND_OP_CMD(curTex) |
+				       TEXPIPE_COLOR |
+				       ENABLE_TEXOUTPUT_WRT_SEL |
+				       TEXOP_OUTPUT_CURRENT |
+				       DISABLE_TEX_CNTRL_STAGE |
+				       TEXOP_SCALE_1X |
+				       TEXOP_MODIFY_PARMS |
+				       TEXBLENDOP_BLEND);
+	 imesa->TexBlend[curTex][1] = (STATE3D_MAP_BLEND_OP_CMD(curTex) |
+				       TEXPIPE_ALPHA |
+				       ENABLE_TEXOUTPUT_WRT_SEL |
+				       TEXOP_OUTPUT_CURRENT |
+				       TEXOP_SCALE_1X |
+				       TEXOP_MODIFY_PARMS |
+				       TEXBLENDOP_ARG1);
+	 imesa->TexBlend[curTex][2] = (STATE3D_MAP_BLEND_ARG_CMD(curTex) |
+				       TEXPIPE_COLOR |
+				       TEXBLEND_ARG0 |
+				       TEXBLENDARG_MODIFY_PARMS |
+				       texel_op);
+	 imesa->TexBlend[curTex][3] = (STATE3D_MAP_BLEND_ARG_CMD(curTex) |
+				       TEXPIPE_COLOR |
+				       TEXBLEND_ARG1 |
+				       TEXBLENDARG_MODIFY_PARMS |
+				       TEXBLENDARG_FACTOR_N);
+	 imesa->TexBlend[curTex][4] = (STATE3D_MAP_BLEND_ARG_CMD(curTex) |
+				       TEXPIPE_COLOR |
+				       TEXBLEND_ARG2 |
+				       TEXBLENDARG_MODIFY_PARMS |
+				       TEXBLENDARG_CURRENT);
+	 imesa->TexBlend[curTex][5] = (STATE3D_MAP_BLEND_ARG_CMD(curTex) |
+				       TEXPIPE_ALPHA |
+				       TEXBLEND_ARG1 |
+				       TEXBLENDARG_MODIFY_PARMS |
+				       TEXBLENDARG_CURRENT);
+	 imesa->TexBlendColorPipeNum[curTex] = 0;
+	 imesa->TexBlendWordsUsed[curTex] = 6;
+	 break;
+
+      case GL_INTENSITY:
+	 imesa->TexBlend[curTex][0] = (STATE3D_MAP_BLEND_OP_CMD(curTex) |
+				       TEXPIPE_COLOR |
+				       ENABLE_TEXOUTPUT_WRT_SEL |
+				       TEXOP_OUTPUT_CURRENT |
+				       DISABLE_TEX_CNTRL_STAGE |
+				       TEXOP_SCALE_1X |
+				       TEXOP_MODIFY_PARMS |
+				       TEXBLENDOP_BLEND);
+	 imesa->TexBlend[curTex][1] = (STATE3D_MAP_BLEND_OP_CMD(curTex) |
+				       TEXPIPE_ALPHA |
+				       ENABLE_TEXOUTPUT_WRT_SEL |
+				       TEXOP_OUTPUT_CURRENT |
+				       TEXOP_SCALE_1X |
+				       TEXOP_MODIFY_PARMS |
+				       TEXBLENDOP_BLEND);
+	 imesa->TexBlend[curTex][2] = (STATE3D_MAP_BLEND_ARG_CMD(curTex) |
+				       TEXPIPE_COLOR |
+				       TEXBLEND_ARG0 |
+				       TEXBLENDARG_MODIFY_PARMS |
+				       texel_op);
+	 imesa->TexBlend[curTex][3] = (STATE3D_MAP_BLEND_ARG_CMD(curTex) |
+				       TEXPIPE_COLOR |
+				       TEXBLEND_ARG1 |
+				       TEXBLENDARG_MODIFY_PARMS |
+				       TEXBLENDARG_FACTOR_N);
+	 imesa->TexBlend[curTex][4] = (STATE3D_MAP_BLEND_ARG_CMD(curTex) |
+				       TEXPIPE_COLOR |
+				       TEXBLEND_ARG2 |
+				       TEXBLENDARG_MODIFY_PARMS |
+				       TEXBLENDARG_CURRENT);
+	 imesa->TexBlend[curTex][5] = (STATE3D_MAP_BLEND_ARG_CMD(curTex) |
+				       TEXPIPE_ALPHA |
+				       TEXBLEND_ARG0 |
+				       TEXBLENDARG_MODIFY_PARMS |
+				       texel_op);
+	 imesa->TexBlend[curTex][6] = (STATE3D_MAP_BLEND_ARG_CMD(curTex) |
+				       TEXPIPE_ALPHA |
+				       TEXBLEND_ARG1 |
+				       TEXBLENDARG_MODIFY_PARMS |
+				       TEXBLENDARG_FACTOR_N);
+	 imesa->TexBlend[curTex][7] = (STATE3D_MAP_BLEND_ARG_CMD(curTex) |
+				       TEXPIPE_ALPHA |
+				       TEXBLEND_ARG2 |
+				       TEXBLENDARG_MODIFY_PARMS |
+				       TEXBLENDARG_CURRENT);
+	 imesa->TexBlendColorPipeNum[curTex] = 0;
+	 imesa->TexBlendWordsUsed[curTex] = 8;
+	 break;
+
+      case GL_LUMINANCE_ALPHA:
+      case GL_RGBA:
+	 imesa->TexBlend[curTex][0] = (STATE3D_MAP_BLEND_OP_CMD(curTex) |
+				       TEXPIPE_COLOR |
+				       ENABLE_TEXOUTPUT_WRT_SEL |
+				       TEXOP_OUTPUT_CURRENT |
+				       DISABLE_TEX_CNTRL_STAGE |
+				       TEXOP_SCALE_1X |
+				       TEXOP_MODIFY_PARMS |
+				       TEXBLENDOP_BLEND);
+	 imesa->TexBlend[curTex][1] = (STATE3D_MAP_BLEND_OP_CMD(curTex) |
+				       TEXPIPE_ALPHA |
+				       ENABLE_TEXOUTPUT_WRT_SEL |
+				       TEXOP_OUTPUT_CURRENT |
+				       TEXOP_SCALE_1X |
+				       TEXOP_MODIFY_PARMS |
+				       TEXBLENDOP_MODULATE);
+	 imesa->TexBlend[curTex][2] = (STATE3D_MAP_BLEND_ARG_CMD(curTex) |
+				       TEXPIPE_COLOR |
+				       TEXBLEND_ARG0 |
+				       TEXBLENDARG_MODIFY_PARMS |
+				       texel_op);
+	 imesa->TexBlend[curTex][3] = (STATE3D_MAP_BLEND_ARG_CMD(curTex) |
+				       TEXPIPE_COLOR |
+				       TEXBLEND_ARG1 |
+				       TEXBLENDARG_MODIFY_PARMS |
+				       TEXBLENDARG_FACTOR_N);
+	 imesa->TexBlend[curTex][4] = (STATE3D_MAP_BLEND_ARG_CMD(curTex) |
+				       TEXPIPE_COLOR |
+				       TEXBLEND_ARG2 |
+				       TEXBLENDARG_MODIFY_PARMS |
+				       TEXBLENDARG_CURRENT);
+	 imesa->TexBlend[curTex][5] = (STATE3D_MAP_BLEND_ARG_CMD(curTex) |
+				       TEXPIPE_ALPHA |
+				       TEXBLEND_ARG1 |
+				       TEXBLENDARG_MODIFY_PARMS |
+				       texel_op);
+	 imesa->TexBlend[curTex][6] = (STATE3D_MAP_BLEND_ARG_CMD(curTex) |
+				       TEXPIPE_ALPHA |
+				       TEXBLEND_ARG2 |
+				       TEXBLENDARG_MODIFY_PARMS |
+				       TEXBLENDARG_CURRENT);
+	 imesa->TexBlendColorPipeNum[curTex] = 0;
+	 imesa->TexBlendWordsUsed[curTex] = 7;
+	 break;
+      default:
+	 /* Always set to passthru if something is funny */
+	 imesa->TexBlend[curTex][0] = (STATE3D_MAP_BLEND_OP_CMD(0) |
+				       TEXPIPE_COLOR |
+				       ENABLE_TEXOUTPUT_WRT_SEL |
+				       TEXOP_OUTPUT_CURRENT |
+				       DISABLE_TEX_CNTRL_STAGE |
+				       TEXOP_SCALE_1X |
+				       TEXOP_MODIFY_PARMS |
+				       TEXBLENDOP_ARG1);
+	 imesa->TexBlend[curTex][1] = (STATE3D_MAP_BLEND_OP_CMD(0) |
+				       TEXPIPE_ALPHA |
+				       ENABLE_TEXOUTPUT_WRT_SEL |
+				       TEXOP_OUTPUT_CURRENT |
+				       TEXOP_SCALE_1X |
+				       TEXOP_MODIFY_PARMS |
+				       TEXBLENDOP_ARG1);
+	 imesa->TexBlend[curTex][2] = (STATE3D_MAP_BLEND_ARG_CMD(0) |
+				       TEXPIPE_COLOR |
+				       TEXBLEND_ARG1 |
+				       TEXBLENDARG_MODIFY_PARMS |
+				       TEXBLENDARG_CURRENT);
+	 imesa->TexBlend[curTex][3] = (STATE3D_MAP_BLEND_ARG_CMD(0) |
+				       TEXPIPE_ALPHA |
+				       TEXBLEND_ARG1 |
+				       TEXBLENDARG_MODIFY_PARMS |
+				       TEXBLENDARG_CURRENT);
+	 imesa->TexBlendColorPipeNum[curTex] = 0;
+	 imesa->TexBlendWordsUsed[curTex] = 4;
+	 break;
+      }
+      break;
+
+   case GL_ADD:
+      switch(format) {
+      case GL_ALPHA:
+	 imesa->TexBlend[curTex][0] = (STATE3D_MAP_BLEND_OP_CMD(curTex) |
+				       TEXPIPE_COLOR |
+				       ENABLE_TEXOUTPUT_WRT_SEL |
+				       TEXOP_OUTPUT_CURRENT |
+				       DISABLE_TEX_CNTRL_STAGE |
+				       TEXOP_SCALE_1X |
+				       TEXOP_MODIFY_PARMS |
+				       TEXBLENDOP_ARG1);
+	 imesa->TexBlend[curTex][1] = (STATE3D_MAP_BLEND_OP_CMD(curTex) |
+				       TEXPIPE_ALPHA |
+				       ENABLE_TEXOUTPUT_WRT_SEL |
+				       TEXOP_OUTPUT_CURRENT |
+				       TEXOP_SCALE_1X |
+				       TEXOP_MODIFY_PARMS |
+				       TEXBLENDOP_MODULATE);
+	 imesa->TexBlend[curTex][2] = (STATE3D_MAP_BLEND_ARG_CMD(curTex) |
+				       TEXPIPE_COLOR |
+				       TEXBLEND_ARG1 |
+				       TEXBLENDARG_MODIFY_PARMS |
+				       TEXBLENDARG_CURRENT);
+	 imesa->TexBlend[curTex][3] = (STATE3D_MAP_BLEND_ARG_CMD(curTex) |
+				       TEXPIPE_ALPHA |
+				       TEXBLEND_ARG1 |
+				       TEXBLENDARG_MODIFY_PARMS |
+				       texel_op);
+	 imesa->TexBlend[curTex][4] = (STATE3D_MAP_BLEND_ARG_CMD(curTex) |
+				       TEXPIPE_ALPHA |
+				       TEXBLEND_ARG2 |
+				       TEXBLENDARG_MODIFY_PARMS |
+				       TEXBLENDARG_CURRENT);
+	 imesa->TexBlendColorPipeNum[curTex] = 0;
+	 imesa->TexBlendWordsUsed[curTex] = 5;
+	 break;
+      case GL_LUMINANCE:
+      case GL_RGB:
+	 imesa->TexBlend[curTex][0] = (STATE3D_MAP_BLEND_OP_CMD(curTex) |
+				       TEXPIPE_COLOR |
+				       ENABLE_TEXOUTPUT_WRT_SEL |
+				       TEXOP_OUTPUT_CURRENT |
+				       DISABLE_TEX_CNTRL_STAGE |
+				       TEXOP_SCALE_1X |
+				       TEXOP_MODIFY_PARMS |
+				       TEXBLENDOP_ADD);
+	 imesa->TexBlend[curTex][1] = (STATE3D_MAP_BLEND_OP_CMD(curTex) |
+				       TEXPIPE_ALPHA |
+				       ENABLE_TEXOUTPUT_WRT_SEL |
+				       TEXOP_OUTPUT_CURRENT |
+				       TEXOP_SCALE_1X |
+				       TEXOP_MODIFY_PARMS |
+				       TEXBLENDOP_ARG1);
+	 imesa->TexBlend[curTex][2] = (STATE3D_MAP_BLEND_ARG_CMD(curTex) |
+				       TEXPIPE_COLOR |
+				       TEXBLEND_ARG1 |
+				       TEXBLENDARG_MODIFY_PARMS |
+				       texel_op);
+	 imesa->TexBlend[curTex][3] = (STATE3D_MAP_BLEND_ARG_CMD(curTex) |
+				       TEXPIPE_COLOR |
+				       TEXBLEND_ARG2 |
+				       TEXBLENDARG_MODIFY_PARMS |
+				       TEXBLENDARG_CURRENT);
+	 imesa->TexBlend[curTex][4] = (STATE3D_MAP_BLEND_ARG_CMD(curTex) |
+				       TEXPIPE_ALPHA |
+				       TEXBLEND_ARG1 |
+				       TEXBLENDARG_MODIFY_PARMS |
+				       TEXBLENDARG_CURRENT);
+	 imesa->TexBlendColorPipeNum[curTex] = 0;
+	 imesa->TexBlendWordsUsed[curTex] = 5;
+	 break;
+
+      case GL_INTENSITY:
+	 imesa->TexBlend[curTex][0] = (STATE3D_MAP_BLEND_OP_CMD(curTex) |
+				       TEXPIPE_COLOR |
+				       ENABLE_TEXOUTPUT_WRT_SEL |
+				       TEXOP_OUTPUT_CURRENT |
+				       DISABLE_TEX_CNTRL_STAGE |
+				       TEXOP_SCALE_1X |
+				       TEXOP_MODIFY_PARMS |
+				       TEXBLENDOP_ADD);
+	 imesa->TexBlend[curTex][1] = (STATE3D_MAP_BLEND_OP_CMD(curTex) |
+				       TEXPIPE_ALPHA |
+				       ENABLE_TEXOUTPUT_WRT_SEL |
+				       TEXOP_OUTPUT_CURRENT |
+				       TEXOP_SCALE_1X |
+				       TEXOP_MODIFY_PARMS |
+				       TEXBLENDOP_ADD);
+	 imesa->TexBlend[curTex][2] = (STATE3D_MAP_BLEND_ARG_CMD(curTex) |
+				       TEXPIPE_COLOR |
+				       TEXBLEND_ARG1 |
+				       TEXBLENDARG_MODIFY_PARMS |
+				       texel_op);
+	 imesa->TexBlend[curTex][3] = (STATE3D_MAP_BLEND_ARG_CMD(curTex) |
+				       TEXPIPE_COLOR |
+				       TEXBLEND_ARG2 |
+				       TEXBLENDARG_MODIFY_PARMS |
+				       TEXBLENDARG_CURRENT);
+	 imesa->TexBlend[curTex][4] = (STATE3D_MAP_BLEND_ARG_CMD(curTex) |
+				       TEXPIPE_ALPHA |
+				       TEXBLEND_ARG1 |
+				       TEXBLENDARG_MODIFY_PARMS |
+				       texel_op);
+	 imesa->TexBlend[curTex][5] = (STATE3D_MAP_BLEND_ARG_CMD(curTex) |
+				       TEXPIPE_ALPHA |
+				       TEXBLEND_ARG2 |
+				       TEXBLENDARG_MODIFY_PARMS |
+				       TEXBLENDARG_CURRENT);
+	 imesa->TexBlendColorPipeNum[curTex] = 0;
+	 imesa->TexBlendWordsUsed[curTex] = 6;
+	 break;
+
+      case GL_LUMINANCE_ALPHA:
+      case GL_RGBA:
+	 imesa->TexBlend[curTex][0] = (STATE3D_MAP_BLEND_OP_CMD(curTex) |
+				       TEXPIPE_COLOR |
+				       ENABLE_TEXOUTPUT_WRT_SEL |
+				       TEXOP_OUTPUT_CURRENT |
+				       DISABLE_TEX_CNTRL_STAGE |
+				       TEXOP_SCALE_1X |
+				       TEXOP_MODIFY_PARMS |
+				       TEXBLENDOP_ADD);
+	 imesa->TexBlend[curTex][1] = (STATE3D_MAP_BLEND_OP_CMD(curTex) |
+				       TEXPIPE_ALPHA |
+				       ENABLE_TEXOUTPUT_WRT_SEL |
+				       TEXOP_OUTPUT_CURRENT |
+				       TEXOP_SCALE_1X |
+				       TEXOP_MODIFY_PARMS |
+				       TEXBLENDOP_MODULATE);
+	 imesa->TexBlend[curTex][2] = (STATE3D_MAP_BLEND_ARG_CMD(curTex) |
+				       TEXPIPE_COLOR |
+				       TEXBLEND_ARG1 |
+				       TEXBLENDARG_MODIFY_PARMS |
+				       texel_op);
+	 imesa->TexBlend[curTex][3] = (STATE3D_MAP_BLEND_ARG_CMD(curTex) |
+				       TEXPIPE_COLOR |
+				       TEXBLEND_ARG2 |
+				       TEXBLENDARG_MODIFY_PARMS |
+				       TEXBLENDARG_CURRENT);
+	 imesa->TexBlend[curTex][4] = (STATE3D_MAP_BLEND_ARG_CMD(curTex) |
+				       TEXPIPE_ALPHA |
+				       TEXBLEND_ARG1 |
+				       TEXBLENDARG_MODIFY_PARMS |
+				       texel_op);
+	 imesa->TexBlend[curTex][5] = (STATE3D_MAP_BLEND_ARG_CMD(curTex) |
+				       TEXPIPE_ALPHA |
+				       TEXBLEND_ARG2 |
+				       TEXBLENDARG_MODIFY_PARMS |
+				       TEXBLENDARG_CURRENT);
+	 imesa->TexBlendColorPipeNum[curTex] = 0;
+	 imesa->TexBlendWordsUsed[curTex] = 6;
+	 break;
+      default:
+	 /* Always set to passthru if something is funny */
+	 imesa->TexBlend[curTex][0] = (STATE3D_MAP_BLEND_OP_CMD(0) |
+				       TEXPIPE_COLOR |
+				       ENABLE_TEXOUTPUT_WRT_SEL |
+				       TEXOP_OUTPUT_CURRENT |
+				       DISABLE_TEX_CNTRL_STAGE |
+				       TEXOP_SCALE_1X |
+				       TEXOP_MODIFY_PARMS |
+				       TEXBLENDOP_ARG1);
+	 imesa->TexBlend[curTex][1] = (STATE3D_MAP_BLEND_OP_CMD(0) |
+				       TEXPIPE_ALPHA |
+				       ENABLE_TEXOUTPUT_WRT_SEL |
+				       TEXOP_OUTPUT_CURRENT |
+				       TEXOP_SCALE_1X |
+				       TEXOP_MODIFY_PARMS |
+				       TEXBLENDOP_ARG1);
+	 imesa->TexBlend[curTex][2] = (STATE3D_MAP_BLEND_ARG_CMD(0) |
+				       TEXPIPE_COLOR |
+				       TEXBLEND_ARG1 |
+				       TEXBLENDARG_MODIFY_PARMS |
+				       TEXBLENDARG_CURRENT);
+	 imesa->TexBlend[curTex][3] = (STATE3D_MAP_BLEND_ARG_CMD(0) |
+				       TEXPIPE_ALPHA |
+				       TEXBLEND_ARG1 |
+				       TEXBLENDARG_MODIFY_PARMS |
+				       TEXBLENDARG_CURRENT);
+	 imesa->TexBlendColorPipeNum[curTex] = 0;
+	 imesa->TexBlendWordsUsed[curTex] = 4;
+	 break;
+      }
+      break;
+   default:
+	 /* Always set to passthru if something is funny */
+	 imesa->TexBlend[curTex][0] = (STATE3D_MAP_BLEND_OP_CMD(0) |
+				       TEXPIPE_COLOR |
+				       ENABLE_TEXOUTPUT_WRT_SEL |
+				       TEXOP_OUTPUT_CURRENT |
+				       DISABLE_TEX_CNTRL_STAGE |
+				       TEXOP_SCALE_1X |
+				       TEXOP_MODIFY_PARMS |
+				       TEXBLENDOP_ARG1);
+	 imesa->TexBlend[curTex][1] = (STATE3D_MAP_BLEND_OP_CMD(0) |
+				       TEXPIPE_ALPHA |
+				       ENABLE_TEXOUTPUT_WRT_SEL |
+				       TEXOP_OUTPUT_CURRENT |
+				       TEXOP_SCALE_1X |
+				       TEXOP_MODIFY_PARMS |
+				       TEXBLENDOP_ARG1);
+	 imesa->TexBlend[curTex][2] = (STATE3D_MAP_BLEND_ARG_CMD(0) |
+				       TEXPIPE_COLOR |
+				       TEXBLEND_ARG1 |
+				       TEXBLENDARG_MODIFY_PARMS |
+				       TEXBLENDARG_CURRENT);
+	 imesa->TexBlend[curTex][3] = (STATE3D_MAP_BLEND_ARG_CMD(0) |
+				       TEXPIPE_ALPHA |
+				       TEXBLEND_ARG1 |
+				       TEXBLENDARG_MODIFY_PARMS |
+				       TEXBLENDARG_CURRENT);
+	 imesa->TexBlendColorPipeNum[curTex] = 0;
+	 imesa->TexBlendWordsUsed[curTex] = 4;
+	 break;
+   }
+
+    if (I830_DEBUG&DEBUG_VERBOSE_TRACE)
+       fprintf(stderr, "%s\n", __FUNCTION__);
+}
+
+static void i830SetTexEnvCombine(i830ContextPtr imesa,
+			     struct gl_texture_unit *texUnit, 
+			     GLint unit)
+{
+   GLuint blendop;
+   GLuint ablendop;
+   GLuint args_RGB[3];
+   GLuint args_A[3];
+   GLuint texel_op = GetTexelOp(unit);
+   int i;
+
+   if(I830_DEBUG&DEBUG_VERBOSE_TRACE)
+      fprintf(stderr, "%s\n", __FUNCTION__);
+
+   switch(texUnit->CombineModeRGB) {
+   case GL_REPLACE: blendop = TEXBLENDOP_ARG1; break;
+   case GL_MODULATE: blendop = TEXBLENDOP_MODULATE; break;
+   case GL_ADD: blendop = TEXBLENDOP_ADD; break;
+   case GL_ADD_SIGNED_EXT: blendop = TEXBLENDOP_ADDSIGNED; break;
+   case GL_INTERPOLATE_EXT: blendop = TEXBLENDOP_BLEND; break;
+   default: return;
+   }
+
+   switch(texUnit->CombineScaleShiftRGB) {
+   case 0: blendop |= TEXOP_SCALE_1X; break;
+   case 1: blendop |= TEXOP_SCALE_2X; break;
+   case 2: blendop |= TEXOP_SCALE_4X; break;
+   default: return;
+   }
+
+   switch(texUnit->CombineModeA) {
+   case GL_REPLACE: ablendop = TEXBLENDOP_ARG1; break;
+   case GL_MODULATE: ablendop = TEXBLENDOP_MODULATE; break;
+   case GL_ADD: ablendop = TEXBLENDOP_ADD; break;
+   case GL_ADD_SIGNED_EXT: ablendop = TEXBLENDOP_ADDSIGNED; break;
+   case GL_INTERPOLATE_EXT: ablendop = TEXBLENDOP_BLEND; break;
+   default: return;
+   }
+
+   switch(texUnit->CombineScaleShiftA) {
+   case 0: ablendop |= TEXOP_SCALE_1X; break;
+   case 1: ablendop |= TEXOP_SCALE_2X; break;
+   case 2: ablendop |= TEXOP_SCALE_4X; break;
+   default: return;
+   }
+
+   /* Handle RGB args */
+   for(i = 0; i < 3; i++) {
+      switch(texUnit->CombineSourceRGB[i]) {
+      case GL_TEXTURE: args_RGB[i] = texel_op; break;
+      case GL_CONSTANT_EXT: args_RGB[i] = TEXBLENDARG_FACTOR_N; break;
+      case GL_PRIMARY_COLOR_EXT: args_RGB[i] = TEXBLENDARG_DIFFUSE; break;
+      case GL_PREVIOUS_EXT: args_RGB[i] = TEXBLENDARG_CURRENT; break;
+      default: return;
+      }
+
+      switch(texUnit->CombineOperandRGB[i]) {
+      case GL_SRC_COLOR: args_RGB[i] |= 0; break;
+      case GL_ONE_MINUS_SRC_COLOR: args_RGB[i] |= TEXBLENDARG_INV_ARG; break;
+      case GL_SRC_ALPHA: args_RGB[i] |= TEXBLENDARG_REPLICATE_ALPHA; break;
+      case GL_ONE_MINUS_SRC_ALPHA: 
+		args_RGB[i] |= (TEXBLENDARG_REPLICATE_ALPHA | 
+				TEXBLENDARG_INV_ARG); 
+		break;
+      default: return;
+      }
+   }
+
+   /* Handle A args */
+   for(i = 0; i < 3; i++) {
+      switch(texUnit->CombineSourceA[i]) {
+      case GL_TEXTURE: args_A[i] = texel_op; break;
+      case GL_CONSTANT_EXT: args_A[i] = TEXBLENDARG_FACTOR_N; break;
+      case GL_PRIMARY_COLOR_EXT: args_A[i] = TEXBLENDARG_DIFFUSE; break;
+      case GL_PREVIOUS_EXT: args_A[i] = TEXBLENDARG_CURRENT; break;
+      default: return;
+      }
+
+      switch(texUnit->CombineOperandA[i]) {
+      case GL_SRC_ALPHA: args_A[i] |= 0; break;
+      case GL_ONE_MINUS_SRC_ALPHA: args_A[i] |= TEXBLENDARG_INV_ARG; break;
+      default: return;
+      }
+   }
+
+   /* Native Arg1 == Arg0 in GL_EXT_texture_env_combine spec */
+   /* Native Arg2 == Arg1 in GL_EXT_texture_env_combine spec */
+   /* Native Arg0 == Arg2 in GL_EXT_texture_env_combine spec */
+
+   /* When we render we need to figure out which is the last really enabled
+    * tex unit, and put last stage on it
+    */
+
+   imesa->TexBlendColorPipeNum[unit] = 0;
+
+   /* Build color pipeline */
+
+   imesa->TexBlend[unit][0] = (STATE3D_MAP_BLEND_OP_CMD(unit) |
+			       TEXPIPE_COLOR |
+			       ENABLE_TEXOUTPUT_WRT_SEL |
+			       TEXOP_OUTPUT_CURRENT |
+			       DISABLE_TEX_CNTRL_STAGE |
+			       TEXOP_MODIFY_PARMS |
+			       blendop);
+   imesa->TexBlend[unit][1] = (STATE3D_MAP_BLEND_ARG_CMD(unit) |
+			       TEXPIPE_COLOR |
+			       TEXBLEND_ARG1 |
+			       TEXBLENDARG_MODIFY_PARMS |
+			       args_RGB[0]);
+   imesa->TexBlend[unit][2] = (STATE3D_MAP_BLEND_ARG_CMD(unit) |
+			       TEXPIPE_COLOR |
+			       TEXBLEND_ARG2 |
+			       TEXBLENDARG_MODIFY_PARMS |
+			       args_RGB[1]);
+   imesa->TexBlend[unit][3] = (STATE3D_MAP_BLEND_ARG_CMD(unit) |
+			       TEXPIPE_COLOR |
+			       TEXBLEND_ARG0 |
+			       TEXBLENDARG_MODIFY_PARMS |
+			       args_RGB[2]);
+
+   /* Build Alpha pipeline */
+   imesa->TexBlend[unit][4] = (STATE3D_MAP_BLEND_OP_CMD(unit) |
+			       TEXPIPE_ALPHA |
+			       ENABLE_TEXOUTPUT_WRT_SEL |
+			       TEXOP_OUTPUT_CURRENT |
+			       TEXOP_MODIFY_PARMS |
+			       ablendop);
+   imesa->TexBlend[unit][5] = (STATE3D_MAP_BLEND_ARG_CMD(unit) |
+			       TEXPIPE_ALPHA |
+			       TEXBLEND_ARG1 |
+			       TEXBLENDARG_MODIFY_PARMS |
+			       args_A[0]);
+   imesa->TexBlend[unit][6] = (STATE3D_MAP_BLEND_ARG_CMD(unit) |
+			       TEXPIPE_ALPHA |
+			       TEXBLEND_ARG2 |
+			       TEXBLENDARG_MODIFY_PARMS |
+			       args_A[1]);
+   imesa->TexBlend[unit][7] = (STATE3D_MAP_BLEND_ARG_CMD(unit) |
+			       TEXPIPE_ALPHA |
+			       TEXBLEND_ARG0 |
+			       TEXBLENDARG_MODIFY_PARMS |
+			       args_A[2]);
+
+   {
+      GLubyte r, g, b, a;
+      GLfloat *fc = texUnit->EnvColor;
+
+      FLOAT_COLOR_TO_UBYTE_COLOR(r, fc[RCOMP]);
+      FLOAT_COLOR_TO_UBYTE_COLOR(g, fc[GCOMP]);
+      FLOAT_COLOR_TO_UBYTE_COLOR(b, fc[BCOMP]);
+      FLOAT_COLOR_TO_UBYTE_COLOR(a, fc[ACOMP]);
+
+      imesa->TexBlend[unit][8] = STATE3D_COLOR_FACTOR_CMD(unit);
+      imesa->TexBlend[unit][9] =  ((a << 24) |
+				   (r << 16) |
+				   (g << 8) |
+				   b);
+   }
+   imesa->TexBlendWordsUsed[unit] = 10;
+}
+
+static void i830UpdateTexState( GLcontext *ctx, int unit )
+{
+   i830ContextPtr imesa = I830_CONTEXT(ctx);
+   struct gl_texture_object	*tObj;
+   i830TextureObjectPtr t;
+
+   if(I830_DEBUG&DEBUG_VERBOSE_TRACE)
+      fprintf(stderr, "%s\n", __FUNCTION__);
+
+   tObj = ctx->Texture.Unit[unit].Current;
+
+   if ( tObj != ctx->Texture.Unit[unit].CurrentD[2] ) 
+      tObj = 0;
+
+   /* XXX grantham - need to change this shift if "TEXTURE" flags change 
+       in mesa/src/types.h */
+   if (!(ctx->Texture.ReallyEnabled & (0xf << (4 * unit)))
+       || !tObj || !tObj->Complete) {
+       return;
+   }
+
+   t = tObj->DriverData;
+  
+   if (!t) {
+      t = i830CreateTexObj( imesa, tObj );
+      if (!t) return;
+   }
+
+   i830TexSetUnit( t, unit );
+    
+   if (t->dirty_images) {
+      if(unit == 0) imesa->dirty |= I830_UPLOAD_TEX0_IMAGE;
+      if(unit == 1) imesa->dirty |= I830_UPLOAD_TEX1_IMAGE;
+   }
+
+   if((t->Setup[I830_TEXREG_MI1] & ((1<<26)|(1<<25)|(1<<24))) ==
+      MAPSURF_8BIT_INDEXED) {
+      /* Texture palette needs updated, need to do this in a smarter
+       * way, since it will always be loaded each time paletted textures
+       * are used, and texture state is reeval'ed.
+       */
+      if(0) fprintf(stderr, "\n\n\nUpdating texture palette\n");
+      if(!ctx->Texture.SharedPalette) {
+	 imesa->dirty |= I830_UPLOAD_TEX_PALETTE_N(unit);
+	 if(0) fprintf(stderr, "per texobj palette\n");
+      } else {
+	 imesa->dirty |= I830_UPLOAD_TEX_PALETTE_SHARED;
+	 if(0) fprintf(stderr, "shared palette\n");
+      }
+   }
+
+   imesa->CurrentTexObj[unit] = t;
+   t->bound = 1;
+
+   imesa->TexEnabledMask |= I830_TEX_UNIT_ENABLED(unit);
+   /* We only want the last texture unit, so we don't or this flag */
+   imesa->LastTexEnabled = I830_TEX_UNIT_ENABLED(unit);
+
+   /* Can't do this, we aren't locked here.  Causes bad bad bad things */
+#if 0
+   if (t->MemBlock)
+      i830UpdateTexLRU( imesa, t );
+#endif
+  
+}
+
+static void i830UpdateTexBlend(GLcontext *ctx, int unit )
+{
+   i830ContextPtr imesa = I830_CONTEXT(ctx);
+   struct gl_texture_unit *texUnit;
+   struct gl_texture_object *texObj;
+   i830TextureObjectPtr t;
+   GLuint col;
+
+   if(I830_DEBUG&DEBUG_VERBOSE_TRACE)
+      fprintf(stderr, "%s : unit %d\n", __FUNCTION__, unit);
+
+   texUnit = &ctx->Texture.Unit[unit];
+   texObj = ctx->Texture.Unit[unit].Current;
+
+   if (!(ctx->Texture.ReallyEnabled & (0xf << (4 * unit)))
+       || !texObj || !texObj->Complete) {
+      return;
+   }
+
+   t = (i830TextureObjectPtr) texObj->DriverData;
+   if (!t) {
+      t = i830CreateTexObj( imesa, texObj );
+      if (!t) return;
+   }
+
+   imesa->TexBlendWordsUsed[unit] = 0;
+   /* Could handle texenv_combine, register_combiners, combine4, etc */
+   if(texUnit->EnvMode == GL_COMBINE_EXT) {
+      i830SetTexEnvCombine(imesa,
+			   texUnit, 
+			   unit);
+   } else {
+      if(t->image[0].internalFormat == GL_COLOR_INDEX) {
+	 if(!ctx->Texture.SharedPalette) {
+	    i830SetBlend_GL1_2(imesa, unit, texUnit->EnvMode,
+			       t->palette_format);
+	 } else {
+	    i830SetBlend_GL1_2(imesa, unit, texUnit->EnvMode,
+			       imesa->palette_format);
+
+	 }
+      } else {
+	 i830SetBlend_GL1_2(imesa, unit, texUnit->EnvMode,
+			    t->image[0].internalFormat);
+      }
+      /* This only needs emitted when neccessary, fix it later */
+
+      /* add blend color */
+      {
+	 GLubyte r, g, b, a;
+	 GLfloat *fc = texUnit->EnvColor;
+
+	 FLOAT_COLOR_TO_UBYTE_COLOR(r, fc[RCOMP]);
+	 FLOAT_COLOR_TO_UBYTE_COLOR(g, fc[GCOMP]);
+	 FLOAT_COLOR_TO_UBYTE_COLOR(b, fc[BCOMP]);
+	 FLOAT_COLOR_TO_UBYTE_COLOR(a, fc[ACOMP]);
+
+	 col = ((a << 24) |
+		(r << 16) |
+		(g << 8) |
+		b);
+      }       
+
+      {
+	 int i;
+
+	 i = imesa->TexBlendWordsUsed[unit];
+	 imesa->TexBlend[unit][i++] = STATE3D_COLOR_FACTOR_CMD(unit);	  
+	 imesa->TexBlend[unit][i++] = col;
+
+	 imesa->TexBlendWordsUsed[unit] = i;
+      }
+   }
+   if(0) fprintf(stderr, "TexBlendWordsUsed : %d\n", imesa->TexBlendWordsUsed[unit]);
+}
+
+void i830UpdateTextureState( GLcontext *ctx )
+{
+   i830ContextPtr imesa = I830_CONTEXT(ctx);
+   int pipe_num = 0;
+
+   if(I830_DEBUG&DEBUG_VERBOSE_TRACE)
+      fprintf(stderr, "%s\n", __FUNCTION__);
+
+   if(ctx->Texture.ReallyEnabled & ~(TEXTURE0_2D|(TEXTURE0_2D<<4))) {
+      /* Bits are set for a fallback */
+      if(0) fprintf(stderr, "Falling back to software for texturing\n");
+      imesa->Fallback |= I830_FALLBACK_TEXTURE;
+      return;
+   }
+   imesa->LastTexEnabled = 0;
+   imesa->TexEnabledMask = 0;
+
+   if (imesa->CurrentTexObj[0]) imesa->CurrentTexObj[0]->bound = 0;
+   if (imesa->CurrentTexObj[1]) imesa->CurrentTexObj[1]->bound = 0;
+
+   imesa->CurrentTexObj[0] = 0;
+   imesa->CurrentTexObj[1] = 0;   
+
+   i830UpdateTexState( ctx, 0 );
+   i830UpdateTexState( ctx, 1 );
+
+   i830UpdateTexBlend( ctx, 0 );
+   i830UpdateTexBlend( ctx, 1 );
+
+   /* Need to decide the units to set to diffuse by looking at
+    * the texture units that actually got enabled */
+   if(!(imesa->TexEnabledMask & I830_TEX_UNIT_ENABLED(0))) {
+      if(0) fprintf(stderr, "Diffuse got turned on\n");
+      if(imesa->LastTexEnabled == 0) 
+	imesa->LastTexEnabled = I830_TEX_UNIT_ENABLED(0);
+
+      imesa->TexBlend[0][0] = (STATE3D_MAP_BLEND_OP_CMD(0) |
+			       TEXPIPE_COLOR |
+			       ENABLE_TEXOUTPUT_WRT_SEL |
+			       TEXOP_OUTPUT_CURRENT |
+			       DISABLE_TEX_CNTRL_STAGE |
+			       TEXOP_SCALE_1X |
+			       TEXOP_MODIFY_PARMS |
+			       TEXBLENDOP_ARG1);
+      imesa->TexBlend[0][1] = (STATE3D_MAP_BLEND_OP_CMD(0) |
+			       TEXPIPE_ALPHA |
+			       ENABLE_TEXOUTPUT_WRT_SEL |
+			       TEXOP_OUTPUT_CURRENT |
+			       TEXOP_SCALE_1X |
+			       TEXOP_MODIFY_PARMS |
+			       TEXBLENDOP_ARG1);
+      imesa->TexBlend[0][2] = (STATE3D_MAP_BLEND_ARG_CMD(0) |
+			       TEXPIPE_COLOR |
+			       TEXBLEND_ARG1 |
+			       TEXBLENDARG_MODIFY_PARMS |
+			       TEXBLENDARG_DIFFUSE);
+      imesa->TexBlend[0][3] = (STATE3D_MAP_BLEND_ARG_CMD(0) |
+			       TEXPIPE_ALPHA |
+			       TEXBLEND_ARG1 |
+			       TEXBLENDARG_MODIFY_PARMS |
+			       TEXBLENDARG_DIFFUSE);
+      imesa->TexBlendColorPipeNum[0] = 0;
+      imesa->TexBlendWordsUsed[0] = 4;
+      imesa->dirty |= I830_UPLOAD_TEXBLEND_N(0);
+   }
+
+   switch(imesa->LastTexEnabled) {
+   case I830_TEX_UNIT_ENABLED(0):
+      if(0) fprintf(stderr, "Texture unit 0 is the last stage\n");      
+      pipe_num = imesa->TexBlendColorPipeNum[0];
+      imesa->TexBlend[0][pipe_num] |= TEXOP_LAST_STAGE;
+      break;
+   case I830_TEX_UNIT_ENABLED(1):
+      if(0) fprintf(stderr, "Texture unit 1 is the last stage\n");      
+      pipe_num = imesa->TexBlendColorPipeNum[1];
+      imesa->TexBlend[1][pipe_num] |= TEXOP_LAST_STAGE;
+      break;      
+   default: break;
+   }
+
+   /* Forces texture cache flush */
+   imesa->dirty |= I830_UPLOAD_CTX;
+   if(imesa->TexEnabledMask & I830_TEX_UNIT_ENABLED(0)) {
+      if(0) fprintf(stderr, "Enabling Texture unit 0\n");
+      imesa->dirty |= (I830_UPLOAD_TEX_N(0) | I830_UPLOAD_TEXBLEND_N(0));
+   }
+   if(imesa->TexEnabledMask & I830_TEX_UNIT_ENABLED(1)) {
+      if(0) fprintf(stderr, "Enabling Texture unit 1\n");
+      imesa->dirty |= (I830_UPLOAD_TEX_N(1) | I830_UPLOAD_TEXBLEND_N(1));
+   }
+}
+
+
+
+/*****************************************
+ * DRIVER functions
+ *****************************************/
+
+/* TEXTURE_ENV_COLOR should be optimized, so we only flush when the
+ * color really changes
+ */
+
+static void i830TexEnv( GLcontext *ctx, GLenum target, 
+			GLenum pname, const GLfloat *param )
+{
+   i830ContextPtr imesa = I830_CONTEXT( ctx );
+
+   if(I830_DEBUG&DEBUG_VERBOSE_TRACE)
+      fprintf(stderr, "%s\n", __FUNCTION__);
+
+   /* Always flush texture state or texture_env_combine doesn't work */
+   FLUSH_BATCH(imesa);
+   imesa->new_state |= I830_NEW_TEXTURE;
+}
+
+static void i830TexImage( GLcontext *ctx, 
+			  GLenum target,
+			  struct gl_texture_object *tObj, 
+			  GLint level,
+			  GLint internalFormat,
+			  const struct gl_texture_image *image )
+{
+   i830ContextPtr imesa = I830_CONTEXT( ctx );
+   i830TextureObjectPtr t;
+
+   if(I830_DEBUG&DEBUG_VERBOSE_TRACE)
+      fprintf(stderr, "%s\n", __FUNCTION__);
+
+   if (target != GL_TEXTURE_2D)
+      return;
+
+   if (level >= I830_TEX_MAXLEVELS)
+      return;
+
+   t = (i830TextureObjectPtr) tObj->DriverData;
+   if (t) {
+      if (t->bound) FLUSH_BATCH(imesa);
+      /* if this is the current object, it will force an update */
+      i830DestroyTexObj( imesa, t );
+      tObj->DriverData = 0;
+      imesa->new_state |= I830_NEW_TEXTURE;
+   }
+}
+
+static void i830TexSubImage( GLcontext *ctx, GLenum target,
+			     struct gl_texture_object *tObj, GLint level,
+			     GLint xoffset, GLint yoffset,
+			     GLsizei width, GLsizei height,
+			     GLint internalFormat,
+			     const struct gl_texture_image *image ) 
+{
+   i830ContextPtr imesa = I830_CONTEXT( ctx );
+   i830TextureObjectPtr t;
+
+   if(I830_DEBUG&DEBUG_VERBOSE_TRACE)
+      fprintf(stderr, "%s\n", __FUNCTION__);
+
+   if ( target != GL_TEXTURE_2D ) 
+      return;
+   
+   t = (i830TextureObjectPtr) tObj->DriverData;
+   if (t) {
+      if (t->bound) FLUSH_BATCH( imesa );
+      i830DestroyTexObj( imesa, t );
+      tObj->DriverData = 0;
+      imesa->new_state |= I830_NEW_TEXTURE;
+   }
+}
+
+static void i830TexParameter( GLcontext *ctx, GLenum target,
+			      struct gl_texture_object *tObj,
+			      GLenum pname, const GLfloat *params )
+{
+   i830TextureObjectPtr t = (i830TextureObjectPtr) tObj->DriverData;
+   i830ContextPtr imesa = I830_CONTEXT( ctx );
+
+   if(I830_DEBUG&DEBUG_VERBOSE_TRACE)
+      fprintf(stderr, "%s\n", __FUNCTION__);
+
+   if (!t || target != GL_TEXTURE_2D)
+      return;
+
+   switch (pname) {
+   case GL_TEXTURE_MIN_FILTER:
+   case GL_TEXTURE_MAG_FILTER:
+      if (t->bound) FLUSH_BATCH( imesa );
+      i830SetTexFilter(imesa, t,tObj->MinFilter,tObj->MagFilter);
+      break;
+
+   case GL_TEXTURE_WRAP_S:
+   case GL_TEXTURE_WRAP_T:
+      if (t->bound) FLUSH_BATCH( imesa );
+      i830SetTexWrapping(t,tObj->WrapS,tObj->WrapT);
+      break;
+  
+   case GL_TEXTURE_BORDER_COLOR:
+      if (t->bound) FLUSH_BATCH( imesa );
+      i830SetTexBorderColor(t,tObj->BorderColor);
+      break;
+
+   default:
+      return;
+   }
+
+   imesa->new_state |= I830_NEW_TEXTURE;
+}
+
+static void i830BindTexture( GLcontext *ctx, GLenum target,
+			     struct gl_texture_object *tObj )
+{
+   i830ContextPtr imesa = I830_CONTEXT( ctx );
+
+   if(I830_DEBUG&DEBUG_VERBOSE_TRACE)
+      fprintf(stderr, "%s\n", __FUNCTION__);
+   
+   FLUSH_BATCH(imesa);
+
+   if (imesa->CurrentTexObj[ctx->Texture.CurrentUnit]) {
+      imesa->CurrentTexObj[ctx->Texture.CurrentUnit]->bound = 0;
+      imesa->CurrentTexObj[ctx->Texture.CurrentUnit] = 0;  
+   }
+
+   imesa->new_state |= I830_NEW_TEXTURE;
+}
+
+static void i830DeleteTexture( GLcontext *ctx, struct gl_texture_object *tObj )
+{
+   i830TextureObjectPtr t = (i830TextureObjectPtr)tObj->DriverData;
+   i830ContextPtr imesa = I830_CONTEXT( ctx );
+
+   if(I830_DEBUG&DEBUG_VERBOSE_TRACE)
+      fprintf(stderr, "%s\n", __FUNCTION__);
+
+   if (t) {
+
+      if (t->bound) {
+	 FLUSH_BATCH(imesa);
+	 imesa->CurrentTexObj[t->bound-1] = 0;
+	 imesa->new_state |= I830_NEW_TEXTURE;
+      }
+
+      i830DestroyTexObj(imesa,t);
+      tObj->DriverData=0;
+   }
+}
+
+
+static GLboolean i830IsTextureResident( GLcontext *ctx, 
+					struct gl_texture_object *t )
+{
+   i830TextureObjectPtr mt;
+
+/*     LOCK_HARDWARE; */
+   mt = (i830TextureObjectPtr)t->DriverData;
+/*     UNLOCK_HARDWARE; */
+
+   return mt && mt->MemBlock;
+}
+
+static void
+i830DDTexturePalette(GLcontext *ctx, struct gl_texture_object *tObj)
+{
+   i830ContextPtr imesa = I830_CONTEXT(ctx);
+   i830TextureObjectPtr t;
+
+   imesa->new_state |= I830_NEW_TEXTURE;
+
+   if(tObj) {
+      t = tObj->DriverData;
+
+      if(!t) {
+	 /* Will be handled elsewhere */
+	 return;
+      }
+
+      i830ConvertPalette(t->palette, &tObj->Palette);
+      t->palette_format = tObj->Palette.Format;
+   } else {
+      i830ConvertPalette(imesa->palette, &ctx->Texture.Palette);
+      imesa->palette_format = ctx->Texture.Palette.Format;
+   }
+}
+
+void i830DDInitTextureFuncs( GLcontext *ctx )
+{
+   if(I830_DEBUG&DEBUG_VERBOSE_TRACE)
+      fprintf(stderr, "%s\n", __FUNCTION__);
+
+   ctx->Driver.TexEnv = i830TexEnv;
+   ctx->Driver.TexImage = i830TexImage;
+   ctx->Driver.TexSubImage = i830TexSubImage;
+   ctx->Driver.BindTexture = i830BindTexture;
+   ctx->Driver.DeleteTexture = i830DeleteTexture;
+   ctx->Driver.TexParameter = i830TexParameter;
+   ctx->Driver.UpdateTexturePalette = i830DDTexturePalette;
+   ctx->Driver.IsTextureResident = i830IsTextureResident;
+}
+@
+
+
+1.1.9.1
+log
+@OpenBSD just has imported exactly this tree into their vendor branch,
+called the same tag, in XF4/xc
+This is, apparently, the last XFree86 snapshot before the licence change
+(ie, addition of the advertising clause)
+
+Since the developers don't see any problems with that, and we would like
+to integrate improvements done by the remaining one or two (or so) XFree86
+developers (j/k), this prepares enabling us to update X-Window in the future.
+@
+text
+@d3 1
+a3 1
+Copyright 2001 2d3d Inc., Delray Beach, FL
+d28 1
+a28 1
+/* $XFree86: xc/lib/GL/mesa/src/drv/i830/i830_tex.c,v 1.6 2003/09/28 20:15:14 alanh Exp $ */
+d32 1
+a32 1
+ *   Jeff Hartmann <jhartmann@@2d3d.com>
+d35 1
+a35 1
+ *   Keith Whitwell <keithw@@tungstengraphics.com>
+d38 6
+a43 4
+#include "glheader.h"
+#include "mtypes.h"
+#include "imports.h"
+#include "simple_list.h"
+d45 2
+a46 4
+#include "texstore.h"
+#include "texformat.h"
+#include "texmem.h"
+#include "swrast/swrast.h"
+d49 1
+d51 1
+a51 5
+#include "i830_screen.h"
+#include "i830_dri.h"
+#include "i830_context.h"
+#include "i830_tex.h"
+#include "i830_state.h"
+d53 2
+a54 28
+
+/*
+ * Compute the 'S2.4' lod bias factor from the floating point OpenGL bias.
+ */
+static void i830ComputeLodBias( i830ContextPtr imesa, unsigned unit,
+				GLfloat bias )
+{
+   int b;
+
+   b = (int) (bias * 16.0);
+   if(b > 63) b = 63;
+   else if (b < -64) b = -64;
+   imesa->LodBias[ unit ] = ((b << TM0S3_LOD_BIAS_SHIFT) & 
+			     TM0S3_LOD_BIAS_MASK);
+}
+
+
+/**
+ * Set the texture wrap modes.
+ * 
+ * The i830M (and related graphics cores) do not support GL_CLAMP.  The Intel
+ * drivers for "other operating systems" implement GL_CLAMP as
+ * GL_CLAMP_TO_EDGE, so the same is done here.
+ * 
+ * \param t Texture object whose wrap modes are to be set
+ * \param swrap Wrap mode for the \a s texture coordinate
+ * \param twrap Wrap mode for the \a t texture coordinate
+ */
+d59 3
+a68 1
+   case GL_CLAMP_TO_EDGE:
+d71 1
+a71 1
+   case GL_CLAMP_TO_BORDER:
+a74 6
+   case GL_MIRRORED_REPEAT:
+      tex->Setup[I830_TEXREG_MCS] |= 
+			TEXCOORD_ADDR_U_MODE(TEXCOORDMODE_MIRROR);
+      break;
+   default:
+      _mesa_problem(NULL, "bad S wrap mode in %s", __FUNCTION__);
+a75 1
+
+a80 1
+   case GL_CLAMP_TO_EDGE:
+d83 1
+a83 1
+   case GL_CLAMP_TO_BORDER:
+d87 55
+a141 3
+   case GL_MIRRORED_REPEAT:
+      tex->Setup[I830_TEXREG_MCS] |=
+			TEXCOORD_ADDR_V_MODE(TEXCOORDMODE_MIRROR);
+d144 34
+a177 1
+      _mesa_problem(NULL, "bad T wrap mode in %s", __FUNCTION__);
+d181 3
+a183 1
+static void i830SetTexMaxAnisotropy( i830TextureObjectPtr t, GLfloat max )
+d185 5
+a189 1
+   t->max_anisotropy = max;
+d193 68
+a260 8
+/**
+ * Set the texture magnification and minification modes.
+ * 
+ * \param t Texture whose filter modes are to be set
+ * \param minf Texture minification mode
+ * \param magf Texture magnification mode
+ * \param bias LOD bias for this texture unit.
+ */
+d262 2
+a263 2
+static void i830SetTexFilter( i830TextureObjectPtr t,
+			      GLenum minf, GLenum magf )
+d265 3
+a267 1
+   int minFilt = 0, mipFilt = 0, magFilt = 0;
+d269 1
+a269 1
+   if(I830_DEBUG&DEBUG_DRI)
+d272 39
+a310 29
+   if ( t->max_anisotropy > 1.0 ) {
+      minFilt = FILTER_ANISOTROPIC;
+      magFilt = FILTER_ANISOTROPIC;
+   }
+   else {
+      switch (minf) {
+      case GL_NEAREST:
+	 minFilt = FILTER_NEAREST;
+	 mipFilt = MIPFILTER_NONE;
+	 break;
+      case GL_LINEAR:
+	 minFilt = FILTER_LINEAR;
+	 mipFilt = MIPFILTER_NONE;
+	 break;
+      case GL_NEAREST_MIPMAP_NEAREST:
+	 minFilt = FILTER_NEAREST;
+	 mipFilt = MIPFILTER_NEAREST;
+	 break;
+      case GL_LINEAR_MIPMAP_NEAREST:
+	 minFilt = FILTER_LINEAR;
+	 mipFilt = MIPFILTER_NEAREST;
+	 break;
+      case GL_NEAREST_MIPMAP_LINEAR:
+	 minFilt = FILTER_NEAREST;
+	 mipFilt = MIPFILTER_LINEAR;
+	 break;
+      case GL_LINEAR_MIPMAP_LINEAR:
+	 minFilt = FILTER_LINEAR;
+	 mipFilt = MIPFILTER_LINEAR;
+d312 2
+a313 3
+      default:
+	 _mesa_problem(NULL, "%s: Unsupported min. filter %d", __FUNCTION__,
+		       (int) minf );
+d315 5
+d322 113
+a434 12
+      switch (magf) {
+      case GL_NEAREST:
+	 magFilt = FILTER_NEAREST;
+	 break;
+      case GL_LINEAR:
+	 magFilt = FILTER_LINEAR;
+	 break;
+      default:
+	 _mesa_problem(NULL, "%s: Unsupported mag. filter %d", __FUNCTION__,
+		       (int) magf );
+	 break;
+      }  
+d437 8
+a444 6
+   t->Setup[I830_TEXREG_TM0S3] &= ~TM0S3_MIN_FILTER_MASK;
+   t->Setup[I830_TEXREG_TM0S3] &= ~TM0S3_MIP_FILTER_MASK;
+   t->Setup[I830_TEXREG_TM0S3] &= ~TM0S3_MAG_FILTER_MASK;
+   t->Setup[I830_TEXREG_TM0S3] |= ((minFilt << TM0S3_MIN_FILTER_SHIFT) |
+				   (mipFilt << TM0S3_MIP_FILTER_SHIFT) |
+				   (magFilt << TM0S3_MAG_FILTER_SHIFT));
+d447 2
+a448 1
+static void i830SetTexBorderColor(i830TextureObjectPtr t, GLubyte color[4])
+d450 1
+a450 1
+   if(I830_DEBUG&DEBUG_DRI)
+d453 10
+a462 2
+    t->Setup[I830_TEXREG_TM0S4] = 
+        I830PACKCOLOR8888(color[0],color[1],color[2],color[3]);
+d466 2
+a467 4
+/**
+ * Allocate space for and load the mesa images into the texture memory block.
+ * This will happen before drawing with a new texture, or drawing with a
+ * texture after it was swapped out or teximaged again.
+d469 83
+d553 37
+a589 1
+static i830TextureObjectPtr i830AllocTexObj( struct gl_texture_object *texObj )
+d592 4
+d597 92
+a688 4
+   t = CALLOC_STRUCT( i830_texture_object_t );
+   texObj->DriverData = t;
+   if ( t != NULL ) {
+      /* Initialize non-image-dependent parts of the state:
+d690 12
+a701 1
+      t->base.tObj = texObj;
+d703 81
+a783 26
+      t->Setup[I830_TEXREG_TM0LI] = STATE3D_LOAD_STATE_IMMEDIATE_2;
+      t->Setup[I830_TEXREG_TM0S0] = TM0S0_USE_FENCE;
+      t->Setup[I830_TEXREG_TM0S1] = 0;
+      t->Setup[I830_TEXREG_TM0S2] = 0;
+      t->Setup[I830_TEXREG_TM0S3] = 0;
+
+      t->Setup[I830_TEXREG_NOP0] = 0;
+      t->Setup[I830_TEXREG_NOP1] = 0;
+      t->Setup[I830_TEXREG_NOP2] = 0;
+
+      t->Setup[I830_TEXREG_MCS] = (STATE3D_MAP_COORD_SET_CMD |
+				   MAP_UNIT(0) |
+				   ENABLE_TEXCOORD_PARAMS |
+				   TEXCOORDS_ARE_NORMAL |
+				   TEXCOORDTYPE_CARTESIAN |
+				   ENABLE_ADDR_V_CNTL |
+				   TEXCOORD_ADDR_V_MODE(TEXCOORDMODE_WRAP) |
+				   ENABLE_ADDR_U_CNTL |
+				   TEXCOORD_ADDR_U_MODE(TEXCOORDMODE_WRAP));
+
+      make_empty_list( & t->base );
+
+      i830SetTexWrapping( t, texObj->WrapS, texObj->WrapT );
+      i830SetTexMaxAnisotropy( t, texObj->MaxAnisotropy );
+      i830SetTexFilter( t, texObj->MinFilter, texObj->MagFilter );
+      i830SetTexBorderColor( t, texObj->_BorderChan );
+d786 41
+a826 1
+   return t;
+d829 10
+d840 3
+a842 3
+static void i830TexParameter( GLcontext *ctx, GLenum target,
+			      struct gl_texture_object *tObj,
+			      GLenum pname, const GLfloat *params )
+d844 1
+a844 5
+   i830ContextPtr imesa = I830_CONTEXT(ctx);
+   i830TextureObjectPtr t = (i830TextureObjectPtr) tObj->DriverData;
+   GLuint unit = ctx->Texture.CurrentUnit;
+   if (!t)
+      return;
+d846 70
+a915 2
+   if ( target != GL_TEXTURE_2D )
+      return;
+d917 62
+a978 12
+   /* Can't do the update now as we don't know whether to flush
+    * vertices or not.  Setting imesa->NewGLState means that
+    * i830UpdateTextureState() will be called before any triangles are
+    * rendered.  If a statechange has occurred, it will be detected at
+    * that point, and buffered vertices flushed.  
+    */
+   switch (pname) {
+   case GL_TEXTURE_MIN_FILTER:
+   case GL_TEXTURE_MAG_FILTER:
+   case GL_TEXTURE_MAX_ANISOTROPY_EXT:
+      i830SetTexMaxAnisotropy( t, tObj->MaxAnisotropy );
+      i830SetTexFilter( t, tObj->MinFilter, tObj->MagFilter );
+d981 145
+a1125 3
+   case GL_TEXTURE_WRAP_S:
+   case GL_TEXTURE_WRAP_T:
+      i830SetTexWrapping( t, tObj->WrapS, tObj->WrapT );
+d1127 104
+a1230 3
+  
+   case GL_TEXTURE_BORDER_COLOR:
+      i830SetTexBorderColor( t, tObj->_BorderChan );
+d1233 204
+a1436 9
+   case GL_TEXTURE_BASE_LEVEL:
+   case GL_TEXTURE_MAX_LEVEL:
+   case GL_TEXTURE_MIN_LOD:
+   case GL_TEXTURE_MAX_LOD:
+      /* The i830 and its successors can do a lot of this without
+       * reloading the textures.  A project for someone?
+       */
+      I830_FIREVERTICES( I830_CONTEXT(ctx) );
+      driSwapOutTextureObject( (driTextureObject *) t );
+d1439 184
+d1624 278
+d1905 53
+a1957 2
+   if (t == imesa->CurrentTexObj[unit]) {
+      I830_STATECHANGE( imesa, I830_UPLOAD_TEX0 );
+d1959 1
+d1962 101
+a2067 1
+   GLuint unit = ctx->Texture.CurrentUnit;
+d2069 26
+a2094 29
+   /* Only one env color.  Need a fallback if env colors are different
+    * and texture setup references env color in both units.  
+    */
+   switch (pname) {
+   case GL_TEXTURE_ENV_COLOR:
+   case GL_TEXTURE_ENV_MODE:
+   case GL_COMBINE_RGB_EXT:
+   case GL_COMBINE_ALPHA_EXT:
+   case GL_SOURCE0_RGB_EXT:
+   case GL_SOURCE1_RGB_EXT:
+   case GL_SOURCE2_RGB_EXT:
+   case GL_SOURCE0_ALPHA_EXT:
+   case GL_SOURCE1_ALPHA_EXT:
+   case GL_SOURCE2_ALPHA_EXT:
+   case GL_OPERAND0_RGB_EXT:
+   case GL_OPERAND1_RGB_EXT:
+   case GL_OPERAND2_RGB_EXT:
+   case GL_OPERAND0_ALPHA_EXT:
+   case GL_OPERAND1_ALPHA_EXT:
+   case GL_OPERAND2_ALPHA_EXT:
+   case GL_RGB_SCALE_EXT:
+   case GL_ALPHA_SCALE:
+      imesa->TexEnvImageFmt[unit] = 0; /* force recalc of env state */
+      break;
+
+   case GL_TEXTURE_LOD_BIAS_EXT:
+      i830ComputeLodBias( imesa, unit, *param );
+      I830_STATECHANGE( imesa, I830_UPLOAD_TEX_N(unit) );
+      break;
+d2096 7
+a2102 2
+   default:
+      break;
+d2104 1
+a2104 1
+} 
+d2106 6
+a2111 7
+static void i830TexImage2D( GLcontext *ctx, GLenum target, GLint level,
+			    GLint internalFormat,
+			    GLint width, GLint height, GLint border,
+			    GLenum format, GLenum type, const GLvoid *pixels,
+			    const struct gl_pixelstore_attrib *packing,
+			    struct gl_texture_object *texObj,
+			    struct gl_texture_image *texImage )
+d2113 10
+a2122 1
+   driTextureObject * t = (driTextureObject *) texObj->DriverData;
+d2124 4
+a2127 9
+      I830_FIREVERTICES( I830_CONTEXT(ctx) );
+      driSwapOutTextureObject( t );
+   }
+   else {
+      t = (driTextureObject *) i830AllocTexObj( texObj );
+      if (!t) {
+         _mesa_error(ctx, GL_OUT_OF_MEMORY, "glTexImage2D");
+         return;
+      }
+d2129 1
+d2131 3
+a2133 15
+   _mesa_store_teximage2d( ctx, target, level, internalFormat,
+			   width, height, border, format, type,
+			   pixels, packing, texObj, texImage );
+}
+
+static void i830TexSubImage2D( GLcontext *ctx, 
+			       GLenum target,
+			       GLint level,	
+			       GLint xoffset, GLint yoffset,
+			       GLsizei width, GLsizei height,
+			       GLenum format, GLenum type,
+			       const GLvoid *pixels,
+			       const struct gl_pixelstore_attrib *packing,
+			       struct gl_texture_object *texObj,
+			       struct gl_texture_image *texImage )
+d2135 29
+a2163 4
+   driTextureObject * t = (driTextureObject *) texObj->DriverData;
+   if (t) {
+      I830_FIREVERTICES( I830_CONTEXT(ctx) );
+      driSwapOutTextureObject( t );
+a2164 3
+   _mesa_store_texsubimage2d(ctx, target, level, xoffset, yoffset, width, 
+			     height, format, type, pixels, packing, texObj,
+			     texImage);
+d2166 1
+a2168 1
+
+d2172 10
+a2181 2
+   if (!tObj->DriverData) {
+      i830AllocTexObj( tObj );
+d2183 2
+a2186 1
+
+d2189 2
+a2190 1
+   driTextureObject * t = (driTextureObject *) tObj->DriverData;
+d2192 2
+a2193 2
+   if ( t != NULL ) {
+      i830ContextPtr imesa = I830_CONTEXT( ctx );
+d2195 6
+a2200 2
+      if ( imesa ) {
+         I830_FIREVERTICES( imesa );
+d2203 2
+a2204 1
+      driDestroyTextureObject( t );
+d2209 2
+a2210 3
+static const struct gl_texture_format *
+i830ChooseTextureFormat( GLcontext *ctx, GLint internalFormat,
+			 GLenum format, GLenum type )
+d2212 1
+a2212 3
+   i830ContextPtr imesa = I830_CONTEXT( ctx );
+   const GLboolean do32bpt = ( imesa->i830Screen->cpp == 4 &&
+			       imesa->i830Screen->textureSize > 4*1024*1024);
+d2214 3
+a2216 16
+   switch ( internalFormat ) {
+   case 4:
+   case GL_RGBA:
+   case GL_COMPRESSED_RGBA:
+      if ( format == GL_BGRA ) {
+	 if ( type == GL_UNSIGNED_INT_8_8_8_8_REV ) {
+	    return &_mesa_texformat_argb8888;
+	 }
+         else if ( type == GL_UNSIGNED_SHORT_4_4_4_4_REV ) {
+            return &_mesa_texformat_argb4444;
+	 }
+         else if ( type == GL_UNSIGNED_SHORT_1_5_5_5_REV ) {
+	    return &_mesa_texformat_argb1555;
+	 }
+      }
+      return do32bpt ? &_mesa_texformat_argb8888 : &_mesa_texformat_argb4444;
+d2218 2
+a2219 31
+   case 3:
+   case GL_RGB:
+   case GL_COMPRESSED_RGB:
+      if ( format == GL_RGB && type == GL_UNSIGNED_SHORT_5_6_5 ) {
+	 return &_mesa_texformat_rgb565;
+      }
+      return do32bpt ? &_mesa_texformat_argb8888 : &_mesa_texformat_rgb565;
+
+   case GL_RGBA8:
+   case GL_RGB10_A2:
+   case GL_RGBA12:
+   case GL_RGBA16:
+      return do32bpt ? &_mesa_texformat_argb8888 : &_mesa_texformat_argb4444;
+
+   case GL_RGBA4:
+   case GL_RGBA2:
+      return &_mesa_texformat_argb4444;
+
+   case GL_RGB5_A1:
+      return &_mesa_texformat_argb1555;
+
+   case GL_RGB8:
+   case GL_RGB10:
+   case GL_RGB12:
+   case GL_RGB16:
+      return do32bpt ? &_mesa_texformat_argb8888 : &_mesa_texformat_rgb565;
+
+   case GL_RGB5:
+   case GL_RGB4:
+   case GL_R3_G3_B2:
+      return &_mesa_texformat_rgb565;
+d2221 5
+a2225 7
+   case GL_ALPHA:
+   case GL_ALPHA4:
+   case GL_ALPHA8:
+   case GL_ALPHA12:
+   case GL_ALPHA16:
+   case GL_COMPRESSED_ALPHA:
+      return &_mesa_texformat_al88;
+d2227 1
+a2227 8
+   case 1:
+   case GL_LUMINANCE:
+   case GL_LUMINANCE4:
+   case GL_LUMINANCE8:
+   case GL_LUMINANCE12:
+   case GL_LUMINANCE16:
+   case GL_COMPRESSED_LUMINANCE:
+      return &_mesa_texformat_l8;
+d2229 2
+a2230 10
+   case 2:
+   case GL_LUMINANCE_ALPHA:
+   case GL_LUMINANCE4_ALPHA4:
+   case GL_LUMINANCE6_ALPHA2:
+   case GL_LUMINANCE8_ALPHA8:
+   case GL_LUMINANCE12_ALPHA4:
+   case GL_LUMINANCE12_ALPHA12:
+   case GL_LUMINANCE16_ALPHA16:
+   case GL_COMPRESSED_LUMINANCE_ALPHA:
+      return &_mesa_texformat_al88;
+d2232 4
+a2235 14
+   case GL_INTENSITY:
+   case GL_INTENSITY4:
+   case GL_INTENSITY8:
+   case GL_INTENSITY12:
+   case GL_INTENSITY16:
+   case GL_COMPRESSED_INTENSITY:
+      return &_mesa_texformat_i8;
+
+   case GL_YCBCR_MESA:
+      if (type == GL_UNSIGNED_SHORT_8_8_MESA ||
+	  type == GL_UNSIGNED_BYTE)
+         return &_mesa_texformat_ycbcr;
+      else
+         return &_mesa_texformat_ycbcr_rev;
+d2237 5
+a2241 3
+   default:
+      fprintf(stderr, "unexpected texture format in %s\n", __FUNCTION__);
+      return NULL;
+a2242 2
+
+   return NULL; /* never get here */
+d2247 2
+a2248 1
+   i830ContextPtr imesa = I830_CONTEXT(ctx);
+d2250 8
+a2257 23
+   ctx->Driver.TexEnv                    = i830TexEnv;
+   ctx->Driver.ChooseTextureFormat       = i830ChooseTextureFormat;
+   ctx->Driver.TexImage1D                = _mesa_store_teximage1d;
+   ctx->Driver.TexImage2D                = i830TexImage2D;
+   ctx->Driver.TexImage3D                = _mesa_store_teximage3d;
+   ctx->Driver.TexSubImage1D             = _mesa_store_texsubimage1d;
+   ctx->Driver.TexSubImage2D             = i830TexSubImage2D;
+   ctx->Driver.TexSubImage3D             = _mesa_store_texsubimage3d;
+   ctx->Driver.CopyTexImage1D            = _swrast_copy_teximage1d;
+   ctx->Driver.CopyTexImage2D            = _swrast_copy_teximage2d;
+   ctx->Driver.CopyTexSubImage1D         = _swrast_copy_texsubimage1d;
+   ctx->Driver.CopyTexSubImage2D         = _swrast_copy_texsubimage2d;
+   ctx->Driver.CopyTexSubImage3D         = _swrast_copy_texsubimage3d;
+   ctx->Driver.BindTexture               = i830BindTexture;
+   ctx->Driver.DeleteTexture             = i830DeleteTexture;
+   ctx->Driver.TexParameter              = i830TexParameter;
+   ctx->Driver.UpdateTexturePalette      = NULL;
+   ctx->Driver.IsTextureResident         = driIsTextureResident;
+   ctx->Driver.TestProxyTexImage         = _mesa_test_proxy_teximage;
+
+   driInitTextureObjects( ctx, & imesa->swapped,
+			  DRI_TEXMGR_DO_TEXTURE_2D
+			  | DRI_TEXMGR_DO_TEXTURE_RECT );
+@
+
+
+1.1.1.1
+log
+@Import OpenBSD 3.3 XF4 repository from CTM 3132 the first time
+This finalizes starting an OpenBSD-mirabile (aka MirBSD) repository.
+
+### MirBSD is:
+# Copyright (c) 1982-2003 by Thorsten "mirabile" Glaser <x86@@ePost.de>
+# Copyright © 1968-2003  The authors of And contributors to UNIX®, the
+#       C Language, BSD/Berkeley Unix; 386BSD, NetBSD 1.1 and OpenBSD.
+#
+# Anyone who obtained a copy of this work is hereby permitted to freely use,
+# distribute, modify, merge, sublicence, give away or sell it as long as the
+# authors are given due credit and the following notice is retained:
+#
+# This work is provided "as is", with no explicit or implicit warranty what-
+# soever. Use it only at your own risk. In no event may an author or contri-
+# butor be held liable for any damage, directly or indirectly, that origina-
+# ted through or is caused by creation or modification of this work.
+
+MirBSD is my private tree. MirBSD does not differ very much from OpenBSD
+and intentionally tracks OpenBSD. That's why it _is_ OpenBSD, just not the
+official one. It's like with DarrenBSD.
+
+At time of this writing, no advertising for MirBSD must be done,
+because the advertising clause has not yet been sorted out.
+
+http://templeofhate.com/tglaser/MirBSD/index.php
+@
+text
+@@
+
+
+1.1.1.2
+log
+@The X-Windowing System
+
+Import XFree86 4.3 from OpenBSD by CTM, in the hope it's stable
+@
+text
+@d3 1
+a3 1
+Copyright 2001 2d3d Inc., Delray Beach, FL
+d28 1
+a28 1
+/* $XFree86: xc/lib/GL/mesa/src/drv/i830/i830_tex.c,v 1.4 2002/12/10 01:26:53 dawes Exp $ */
+d32 1
+a32 1
+ *   Jeff Hartmann <jhartmann@@2d3d.com>
+d35 1
+a35 1
+ *   Keith Whitwell <keithw@@tungstengraphics.com>
+d42 2
+a43 4
+#include "glheader.h"
+#include "mtypes.h"
+#include "mem.h"
+#include "simple_list.h"
+d45 2
+a46 3
+#include "texstore.h"
+#include "texformat.h"
+#include "swrast/swrast.h"
+d49 1
+d51 1
+a51 5
+#include "i830_screen.h"
+#include "i830_dri.h"
+#include "i830_context.h"
+#include "i830_tex.h"
+#include "i830_state.h"
+d53 2
+a54 17
+
+/*
+ * Compute the 'S2.4' lod bias factor from the floating point OpenGL bias.
+ */
+static void i830ComputeLodBias(i830ContextPtr imesa,
+			       i830TextureObjectPtr t,
+			       GLfloat bias)
+{
+   int b;
+
+   b = (int) (bias * 16.0);
+   if(b > 63) b = 63;
+   else if (b < -64) b = -64;
+   t->Setup[I830_TEXREG_TM0S3] &= ~TM0S3_LOD_BIAS_MASK;
+   t->Setup[I830_TEXREG_TM0S3] |= ((b << TM0S3_LOD_BIAS_SHIFT) & 
+				   TM0S3_LOD_BIAS_MASK);
+}
+d59 1
+a59 1
+   if(I830_DEBUG&DEBUG_DRI)
+a74 1
+   default: break;
+a75 1
+
+a86 1
+   default: break;
+d88 1
+d93 1
+a93 2
+			     GLenum minf, GLenum magf,
+			     GLfloat bias)
+d95 1
+d98 1
+a98 1
+   if(I830_DEBUG&DEBUG_DRI)
+a112 5
+
+/*       if(magf == GL_LINEAR && 0) { */
+/* 	 bias -= 0.5; */
+/*       } */
+
+a120 5
+
+/*       if(magf == GL_LINEAR && 0) { */
+/* 	 bias -= 0.5; */
+/*       } */
+
+d132 4
+d149 9
+a157 6
+   t->Setup[I830_TEXREG_TM0S3] &= ~TM0S3_MIN_FILTER_MASK;
+   t->Setup[I830_TEXREG_TM0S3] &= ~TM0S3_MIP_FILTER_MASK;
+   t->Setup[I830_TEXREG_TM0S3] &= ~TM0S3_MAG_FILTER_MASK;
+   t->Setup[I830_TEXREG_TM0S3] |= ((minFilt << TM0S3_MIN_FILTER_SHIFT) |
+				   (mipFilt << TM0S3_MIP_FILTER_SHIFT) |
+				   (magFilt << TM0S3_MAG_FILTER_SHIFT));
+d159 20
+a178 1
+   i830ComputeLodBias(imesa, t, bias); 
+d181 2
+d185 1
+a185 1
+   if(I830_DEBUG&DEBUG_DRI)
+d188 1
+a188 1
+    t->Setup[I830_TEXREG_TM0S4] = 
+d193 15
+a207 3
+static void i830TexParameter( GLcontext *ctx, GLenum target,
+			      struct gl_texture_object *tObj,
+			      GLenum pname, const GLfloat *params )
+d209 4
+a212 5
+   i830ContextPtr imesa = I830_CONTEXT(ctx);
+   i830TextureObjectPtr t = (i830TextureObjectPtr) tObj->DriverData;
+   GLuint unit = ctx->Texture.CurrentUnit;
+   if (!t)
+      return;
+d214 1
+a214 2
+   if ( target != GL_TEXTURE_2D )
+      return;
+d216 41
+a256 12
+   /* Can't do the update now as we don't know whether to flush
+    * vertices or not.  Setting imesa->new_state means that
+    * i830UpdateTextureState() will be called before any triangles are
+    * rendered.  If a statechange has occurred, it will be detected at
+    * that point, and buffered vertices flushed.  
+    */
+   switch (pname) {
+   case GL_TEXTURE_MIN_FILTER:
+   case GL_TEXTURE_MAG_FILTER:
+      {
+         GLfloat bias = ctx->Texture.Unit[unit].LodBias;
+         i830SetTexFilter( imesa, t, tObj->MinFilter, tObj->MagFilter, bias );
+d259 24
+d284 5
+a288 3
+   case GL_TEXTURE_WRAP_S:
+   case GL_TEXTURE_WRAP_T:
+      i830SetTexWrapping( t, tObj->WrapS, tObj->WrapT );
+d290 4
+a293 3
+  
+   case GL_TEXTURE_BORDER_COLOR:
+      i830SetTexBorderColor( t, tObj->BorderColor );
+d295 26
+d322 3
+a324 9
+   case GL_TEXTURE_BASE_LEVEL:
+   case GL_TEXTURE_MAX_LEVEL:
+   case GL_TEXTURE_MIN_LOD:
+   case GL_TEXTURE_MAX_LOD:
+      /* The i830 and its successors can do a lot of this without
+       * reloading the textures.  A project for someone?
+       */
+      I830_FIREVERTICES( I830_CONTEXT(ctx) );
+      i830SwapOutTexObj( imesa, t );
+d326 147
+d474 107
+d582 43
+a624 1
+      return;
+d626 4
+d631 21
+a651 2
+   if (t == imesa->CurrentTexObj[unit]) {
+      I830_STATECHANGE( imesa, I830_UPLOAD_TEX0 );
+d653 8
+d664 1
+a664 2
+static void i830TexEnv( GLcontext *ctx, GLenum target, 
+			GLenum pname, const GLfloat *param )
+d666 14
+a679 2
+   i830ContextPtr imesa = I830_CONTEXT( ctx );
+   GLuint unit = ctx->Texture.CurrentUnit;
+d681 1
+a681 2
+   /* Only one env color.  Need a fallback if env colors are different
+    * and texture setup references env color in both units.  
+d683 72
+a754 21
+   switch (pname) {
+   case GL_TEXTURE_ENV_COLOR:
+   case GL_TEXTURE_ENV_MODE:
+   case GL_COMBINE_RGB_EXT:
+   case GL_COMBINE_ALPHA_EXT:
+   case GL_SOURCE0_RGB_EXT:
+   case GL_SOURCE1_RGB_EXT:
+   case GL_SOURCE2_RGB_EXT:
+   case GL_SOURCE0_ALPHA_EXT:
+   case GL_SOURCE1_ALPHA_EXT:
+   case GL_SOURCE2_ALPHA_EXT:
+   case GL_OPERAND0_RGB_EXT:
+   case GL_OPERAND1_RGB_EXT:
+   case GL_OPERAND2_RGB_EXT:
+   case GL_OPERAND0_ALPHA_EXT:
+   case GL_OPERAND1_ALPHA_EXT:
+   case GL_OPERAND2_ALPHA_EXT:
+   case GL_RGB_SCALE_EXT:
+   case GL_ALPHA_SCALE:
+      imesa->TexEnvImageFmt[unit] = 0; /* force recalc of env state */
+      break;
+d756 4
+a759 1
+   case GL_TEXTURE_LOD_BIAS_EXT:
+d761 14
+a774 6
+         struct gl_texture_object *tObj = ctx->Texture.Unit[unit]._Current;
+         i830TextureObjectPtr t = (i830TextureObjectPtr) tObj->DriverData;
+	 i830ComputeLodBias(imesa, t, *param);
+	 /* Do a state change */
+	 if (t == imesa->CurrentTexObj[unit]) {
+	    I830_STATECHANGE( imesa, I830_UPLOAD_TEX_N(unit) );
+d776 454
+d1233 390
+d1624 29
+a1652 1
+      break;
+a1653 1
+} 
+d1655 7
+a1661 7
+static void i830TexImage2D( GLcontext *ctx, GLenum target, GLint level,
+			    GLint internalFormat,
+			    GLint width, GLint height, GLint border,
+			    GLenum format, GLenum type, const GLvoid *pixels,
+			    const struct gl_pixelstore_attrib *packing,
+			    struct gl_texture_object *texObj,
+			    struct gl_texture_image *texImage )
+d1663 153
+a1815 4
+   i830TextureObjectPtr t = (i830TextureObjectPtr) texObj->DriverData;
+   if (t) {
+      I830_FIREVERTICES( I830_CONTEXT(ctx) );
+      i830SwapOutTexObj( I830_CONTEXT(ctx), t );
+d1817 4
+a1820 15
+   _mesa_store_teximage2d( ctx, target, level, internalFormat,
+			   width, height, border, format, type,
+			   pixels, packing, texObj, texImage );
+}
+
+static void i830TexSubImage2D( GLcontext *ctx, 
+			       GLenum target,
+			       GLint level,	
+			       GLint xoffset, GLint yoffset,
+			       GLsizei width, GLsizei height,
+			       GLenum format, GLenum type,
+			       const GLvoid *pixels,
+			       const struct gl_pixelstore_attrib *packing,
+			       struct gl_texture_object *texObj,
+			       struct gl_texture_image *texImage )
+d1822 47
+a1868 4
+   i830TextureObjectPtr t = (i830TextureObjectPtr) texObj->DriverData;
+   if (t) {
+      I830_FIREVERTICES( I830_CONTEXT(ctx) );
+      i830SwapOutTexObj( I830_CONTEXT(ctx), t );
+a1869 3
+   _mesa_store_texsubimage2d(ctx, target, level, xoffset, yoffset, width, 
+			     height, format, type, pixels, packing, texObj,
+			     texImage);
+d1871 13
+d1886 1
+a1886 2
+static void i830BindTexture( GLcontext *ctx, GLenum target,
+			     struct gl_texture_object *tObj )
+d1888 69
+a1956 40
+   if (target == GL_TEXTURE_2D) {
+      i830ContextPtr imesa = I830_CONTEXT( ctx );
+      i830TextureObjectPtr t = (i830TextureObjectPtr) tObj->DriverData;
+
+      if (!t) {
+         GLfloat bias = ctx->Texture.Unit[ctx->Texture.CurrentUnit].LodBias;
+	 t = CALLOC_STRUCT(i830_texture_object_t);
+
+	 /* Initialize non-image-dependent parts of the state:
+	  */
+	 t->globj = tObj;
+	 t->Setup[I830_TEXREG_TM0LI] = STATE3D_LOAD_STATE_IMMEDIATE_2;
+	 t->Setup[I830_TEXREG_TM0S0] = TM0S0_USE_FENCE;
+	 t->Setup[I830_TEXREG_TM0S1] = 0;
+	 t->Setup[I830_TEXREG_TM0S2] = 0;
+	 t->Setup[I830_TEXREG_TM0S3] = 0;
+
+	 t->Setup[I830_TEXREG_NOP0] = 0;
+	 t->Setup[I830_TEXREG_NOP1] = 0;
+	 t->Setup[I830_TEXREG_NOP2] = 0;
+
+	 t->Setup[I830_TEXREG_MCS] = (STATE3D_MAP_COORD_SET_CMD |
+				      MAP_UNIT(0) |
+				      ENABLE_TEXCOORD_PARAMS |
+				      TEXCOORDS_ARE_NORMAL |
+				      TEXCOORDTYPE_CARTESIAN |
+				      ENABLE_ADDR_V_CNTL |
+				      TEXCOORD_ADDR_V_MODE(TEXCOORDMODE_WRAP) |
+				      ENABLE_ADDR_U_CNTL |
+				      TEXCOORD_ADDR_U_MODE(TEXCOORDMODE_WRAP));
+
+
+	 t->dirty_images = ~0;
+
+	 tObj->DriverData = t;
+	 make_empty_list( t );
+
+	 i830SetTexWrapping( t, tObj->WrapS, tObj->WrapT );
+	 i830SetTexFilter( imesa, t, tObj->MinFilter, tObj->MagFilter, bias );
+	 i830SetTexBorderColor( t, tObj->BorderColor );
+d1959 145
+d2106 6
+a2111 1
+static void i830DeleteTexture( GLcontext *ctx, struct gl_texture_object *tObj )
+d2113 5
+a2117 1
+   i830TextureObjectPtr t = (i830TextureObjectPtr)tObj->DriverData;
+d2119 4
+d2124 1
+a2124 3
+      i830ContextPtr imesa = I830_CONTEXT( ctx );
+      if (imesa)
+         I830_FIREVERTICES( imesa );
+d2127 1
+d2131 40
+a2170 2
+static GLboolean i830IsTextureResident( GLcontext *ctx, 
+					struct gl_texture_object *tObj )
+d2172 13
+a2184 2
+   i830TextureObjectPtr t = (i830TextureObjectPtr)tObj->DriverData;
+   return t && t->MemBlock;
+d2187 1
+a2187 3
+static const struct gl_texture_format *
+i830ChooseTextureFormat( GLcontext *ctx, GLint internalFormat,
+			 GLenum format, GLenum type )
+d2189 1
+a2190 2
+   const GLboolean do32bpt = ( imesa->i830Screen->cpp == 4 &&
+			       imesa->i830Screen->textureSize > 4*1024*1024);
+d2192 9
+a2200 13
+   switch ( internalFormat ) {
+   case 4:
+   case GL_RGBA:
+      if ( format == GL_BGRA ) {
+	 if ( type == GL_UNSIGNED_INT_8_8_8_8_REV ) {
+	    return &_mesa_texformat_argb8888;
+	 }
+         else if ( type == GL_UNSIGNED_SHORT_4_4_4_4_REV ) {
+            return &_mesa_texformat_argb4444;
+	 }
+         else if ( type == GL_UNSIGNED_SHORT_1_5_5_5_REV ) {
+	    return &_mesa_texformat_argb1555;
+	 }
+a2201 1
+      return do32bpt ? &_mesa_texformat_argb8888 : &_mesa_texformat_argb4444;
+d2203 14
+a2216 6
+   case 3:
+   case GL_RGB:
+      if ( format == GL_RGB && type == GL_UNSIGNED_SHORT_5_6_5 ) {
+	 return &_mesa_texformat_rgb565;
+      }
+      return do32bpt ? &_mesa_texformat_argb8888 : &_mesa_texformat_rgb565;
+d2218 2
+a2219 23
+   case GL_RGBA8:
+   case GL_RGB10_A2:
+   case GL_RGBA12:
+   case GL_RGBA16:
+      return do32bpt ? &_mesa_texformat_argb8888 : &_mesa_texformat_argb4444;
+
+   case GL_RGBA4:
+   case GL_RGBA2:
+      return &_mesa_texformat_argb4444;
+
+   case GL_RGB5_A1:
+      return &_mesa_texformat_argb1555;
+
+   case GL_RGB8:
+   case GL_RGB10:
+   case GL_RGB12:
+   case GL_RGB16:
+      return do32bpt ? &_mesa_texformat_argb8888 : &_mesa_texformat_rgb565;
+
+   case GL_RGB5:
+   case GL_RGB4:
+   case GL_R3_G3_B2:
+      return &_mesa_texformat_rgb565;
+d2221 5
+a2225 6
+   case GL_ALPHA:
+   case GL_ALPHA4:
+   case GL_ALPHA8:
+   case GL_ALPHA12:
+   case GL_ALPHA16:
+      return &_mesa_texformat_al88;
+d2227 1
+a2227 7
+   case 1:
+   case GL_LUMINANCE:
+   case GL_LUMINANCE4:
+   case GL_LUMINANCE8:
+   case GL_LUMINANCE12:
+   case GL_LUMINANCE16:
+      return &_mesa_texformat_l8;
+d2229 2
+a2230 9
+   case 2:
+   case GL_LUMINANCE_ALPHA:
+   case GL_LUMINANCE4_ALPHA4:
+   case GL_LUMINANCE6_ALPHA2:
+   case GL_LUMINANCE8_ALPHA8:
+   case GL_LUMINANCE12_ALPHA4:
+   case GL_LUMINANCE12_ALPHA12:
+   case GL_LUMINANCE16_ALPHA16:
+      return &_mesa_texformat_al88;
+d2232 4
+a2235 6
+   case GL_INTENSITY:
+   case GL_INTENSITY4:
+   case GL_INTENSITY8:
+   case GL_INTENSITY12:
+   case GL_INTENSITY16:
+      return &_mesa_texformat_i8;
+d2237 5
+a2241 3
+   default:
+      fprintf(stderr, "unexpected texture format in %s", __FUNCTION__);
+      return NULL;
+a2242 2
+
+   return NULL; /* never get here */
+d2247 3
+d2251 2
+a2252 12
+   ctx->Driver.ChooseTextureFormat = i830ChooseTextureFormat;
+   ctx->Driver.TexImage1D = _mesa_store_teximage1d;
+   ctx->Driver.TexImage2D = i830TexImage2D;
+   ctx->Driver.TexImage3D = _mesa_store_teximage3d;
+   ctx->Driver.TexSubImage1D = _mesa_store_texsubimage1d;
+   ctx->Driver.TexSubImage2D = i830TexSubImage2D;
+   ctx->Driver.TexSubImage3D = _mesa_store_texsubimage3d;
+   ctx->Driver.CopyTexImage1D = _swrast_copy_teximage1d;
+   ctx->Driver.CopyTexImage2D = _swrast_copy_teximage2d;
+   ctx->Driver.CopyTexSubImage1D = _swrast_copy_texsubimage1d;
+   ctx->Driver.CopyTexSubImage2D = _swrast_copy_texsubimage2d;
+   ctx->Driver.CopyTexSubImage3D = _swrast_copy_texsubimage3d;
+d2256 1
+a2256 1
+   ctx->Driver.UpdateTexturePalette = 0;
+a2257 10
+   ctx->Driver.TestProxyTexImage = _mesa_test_proxy_teximage;
+
+   {
+      GLuint tmp = ctx->Texture.CurrentUnit;
+      ctx->Texture.CurrentUnit = 0;
+      i830BindTexture( ctx, GL_TEXTURE_2D, ctx->Texture.Unit[0].Current2D);
+      ctx->Texture.CurrentUnit = 1;
+      i830BindTexture( ctx, GL_TEXTURE_2D, ctx->Texture.Unit[1].Current2D);
+      ctx->Texture.CurrentUnit = tmp;
+   }
+@
+
+
+1.1.1.3
+log
+@That's what OpenBSD will, probably, ship as XF4 in 3.5
+their last sync against XFree86 4.3-current has been
+imported into our vendor branch, too
+@
+text
+@d28 1
+a28 1
+/* $XFree86: xc/lib/GL/mesa/src/drv/i830/i830_tex.c,v 1.6 2003/09/28 20:15:14 alanh Exp $ */
+d38 4
+d44 1
+a44 1
+#include "imports.h"
+a48 1
+#include "texmem.h"
+d63 3
+a65 2
+static void i830ComputeLodBias( i830ContextPtr imesa, unsigned unit,
+				GLfloat bias )
+d72 3
+a74 2
+   imesa->LodBias[ unit ] = ((b << TM0S3_LOD_BIAS_SHIFT) & 
+			     TM0S3_LOD_BIAS_MASK);
+a76 13
+
+/**
+ * Set the texture wrap modes.
+ * 
+ * The i830M (and related graphics cores) do not support GL_CLAMP.  The Intel
+ * drivers for "other operating systems" implement GL_CLAMP as
+ * GL_CLAMP_TO_EDGE, so the same is done here.
+ * 
+ * \param t Texture object whose wrap modes are to be set
+ * \param swrap Wrap mode for the \a s texture coordinate
+ * \param twrap Wrap mode for the \a t texture coordinate
+ */
+
+d80 3
+a89 1
+   case GL_CLAMP_TO_EDGE:
+d92 1
+a92 1
+   case GL_CLAMP_TO_BORDER:
+d96 1
+a96 6
+   case GL_MIRRORED_REPEAT:
+      tex->Setup[I830_TEXREG_MCS] |= 
+			TEXCOORD_ADDR_U_MODE(TEXCOORDMODE_MIRROR);
+      break;
+   default:
+      _mesa_problem(NULL, "bad S wrap mode in %s", __FUNCTION__);
+a103 1
+   case GL_CLAMP_TO_EDGE:
+d106 1
+a106 1
+   case GL_CLAMP_TO_BORDER:
+d110 1
+a110 6
+   case GL_MIRRORED_REPEAT:
+      tex->Setup[I830_TEXREG_MCS] |=
+			TEXCOORD_ADDR_V_MODE(TEXCOORDMODE_MIRROR);
+      break;
+   default:
+      _mesa_problem(NULL, "bad T wrap mode in %s", __FUNCTION__);
+d114 4
+a117 1
+static void i830SetTexMaxAnisotropy( i830TextureObjectPtr t, GLfloat max )
+d119 1
+a119 2
+   t->max_anisotropy = max;
+}
+d121 2
+d124 12
+a135 8
+/**
+ * Set the texture magnification and minification modes.
+ * 
+ * \param t Texture whose filter modes are to be set
+ * \param minf Texture minification mode
+ * \param magf Texture magnification mode
+ * \param bias LOD bias for this texture unit.
+ */
+d137 3
+a139 4
+static void i830SetTexFilter( i830TextureObjectPtr t,
+			      GLenum minf, GLenum magf )
+{
+   int minFilt = 0, mipFilt = 0, magFilt = 0;
+d141 8
+a148 2
+   if(I830_DEBUG&DEBUG_DRI)
+      fprintf(stderr, "%s\n", __FUNCTION__);
+d150 3
+a152 35
+   if ( t->max_anisotropy > 1.0 ) {
+      minFilt = FILTER_ANISOTROPIC;
+      magFilt = FILTER_ANISOTROPIC;
+   }
+   else {
+      switch (minf) {
+      case GL_NEAREST:
+	 minFilt = FILTER_NEAREST;
+	 mipFilt = MIPFILTER_NONE;
+	 break;
+      case GL_LINEAR:
+	 minFilt = FILTER_LINEAR;
+	 mipFilt = MIPFILTER_NONE;
+	 break;
+      case GL_NEAREST_MIPMAP_NEAREST:
+	 minFilt = FILTER_NEAREST;
+	 mipFilt = MIPFILTER_NEAREST;
+	 break;
+      case GL_LINEAR_MIPMAP_NEAREST:
+	 minFilt = FILTER_LINEAR;
+	 mipFilt = MIPFILTER_NEAREST;
+	 break;
+      case GL_NEAREST_MIPMAP_LINEAR:
+	 minFilt = FILTER_NEAREST;
+	 mipFilt = MIPFILTER_LINEAR;
+	 break;
+      case GL_LINEAR_MIPMAP_LINEAR:
+	 minFilt = FILTER_LINEAR;
+	 mipFilt = MIPFILTER_LINEAR;
+	 break;
+      default:
+	 _mesa_problem(NULL, "%s: Unsupported min. filter %d", __FUNCTION__,
+		       (int) minf );
+	 break;
+      }
+d154 9
+a162 12
+      switch (magf) {
+      case GL_NEAREST:
+	 magFilt = FILTER_NEAREST;
+	 break;
+      case GL_LINEAR:
+	 magFilt = FILTER_LINEAR;
+	 break;
+      default:
+	 _mesa_problem(NULL, "%s: Unsupported mag. filter %d", __FUNCTION__,
+		       (int) magf );
+	 break;
+      }  
+d165 13
+d184 2
+a197 49
+/**
+ * Allocate space for and load the mesa images into the texture memory block.
+ * This will happen before drawing with a new texture, or drawing with a
+ * texture after it was swapped out or teximaged again.
+ */
+
+static i830TextureObjectPtr i830AllocTexObj( struct gl_texture_object *texObj )
+{
+   i830TextureObjectPtr t;
+
+   t = CALLOC_STRUCT( i830_texture_object_t );
+   texObj->DriverData = t;
+   if ( t != NULL ) {
+      /* Initialize non-image-dependent parts of the state:
+       */
+      t->base.tObj = texObj;
+
+      t->Setup[I830_TEXREG_TM0LI] = STATE3D_LOAD_STATE_IMMEDIATE_2;
+      t->Setup[I830_TEXREG_TM0S0] = TM0S0_USE_FENCE;
+      t->Setup[I830_TEXREG_TM0S1] = 0;
+      t->Setup[I830_TEXREG_TM0S2] = 0;
+      t->Setup[I830_TEXREG_TM0S3] = 0;
+
+      t->Setup[I830_TEXREG_NOP0] = 0;
+      t->Setup[I830_TEXREG_NOP1] = 0;
+      t->Setup[I830_TEXREG_NOP2] = 0;
+
+      t->Setup[I830_TEXREG_MCS] = (STATE3D_MAP_COORD_SET_CMD |
+				   MAP_UNIT(0) |
+				   ENABLE_TEXCOORD_PARAMS |
+				   TEXCOORDS_ARE_NORMAL |
+				   TEXCOORDTYPE_CARTESIAN |
+				   ENABLE_ADDR_V_CNTL |
+				   TEXCOORD_ADDR_V_MODE(TEXCOORDMODE_WRAP) |
+				   ENABLE_ADDR_U_CNTL |
+				   TEXCOORD_ADDR_U_MODE(TEXCOORDMODE_WRAP));
+
+      make_empty_list( & t->base );
+
+      i830SetTexWrapping( t, texObj->WrapS, texObj->WrapT );
+      i830SetTexMaxAnisotropy( t, texObj->MaxAnisotropy );
+      i830SetTexFilter( t, texObj->MinFilter, texObj->MagFilter );
+      i830SetTexBorderColor( t, texObj->_BorderChan );
+   }
+
+   return t;
+}
+
+
+d212 1
+a212 1
+    * vertices or not.  Setting imesa->NewGLState means that
+d220 4
+a223 3
+   case GL_TEXTURE_MAX_ANISOTROPY_EXT:
+      i830SetTexMaxAnisotropy( t, tObj->MaxAnisotropy );
+      i830SetTexFilter( t, tObj->MinFilter, tObj->MagFilter );
+d232 1
+a232 1
+      i830SetTexBorderColor( t, tObj->_BorderChan );
+d243 1
+a243 1
+      driSwapOutTextureObject( (driTextureObject *) t );
+d288 9
+a296 2
+      i830ComputeLodBias( imesa, unit, *param );
+      I830_STATECHANGE( imesa, I830_UPLOAD_TEX_N(unit) );
+d312 1
+a312 1
+   driTextureObject * t = (driTextureObject *) texObj->DriverData;
+d315 1
+a315 8
+      driSwapOutTextureObject( t );
+   }
+   else {
+      t = (driTextureObject *) i830AllocTexObj( texObj );
+      if (!t) {
+         _mesa_error(ctx, GL_OUT_OF_MEMORY, "glTexImage2D");
+         return;
+      }
+a316 1
+
+d333 1
+a333 1
+   driTextureObject * t = (driTextureObject *) texObj->DriverData;
+d336 1
+a336 1
+      driSwapOutTextureObject( t );
+a343 1
+
+d347 41
+a387 2
+   if (!tObj->DriverData) {
+      i830AllocTexObj( tObj );
+a390 1
+
+d393 1
+a393 1
+   driTextureObject * t = (driTextureObject *) tObj->DriverData;
+d395 1
+a395 1
+   if ( t != NULL ) {
+d397 1
+a397 2
+
+      if ( imesa ) {
+d399 2
+a400 3
+      }
+
+      driDestroyTextureObject( t );
+d404 6
+a421 1
+   case GL_COMPRESSED_RGBA:
+a436 1
+   case GL_COMPRESSED_RGB:
+a470 1
+   case GL_COMPRESSED_ALPHA:
+a478 1
+   case GL_COMPRESSED_LUMINANCE:
+a488 1
+   case GL_COMPRESSED_LUMINANCE_ALPHA:
+a495 1
+   case GL_COMPRESSED_INTENSITY:
+a497 7
+   case GL_YCBCR_MESA:
+      if (type == GL_UNSIGNED_SHORT_8_8_MESA ||
+	  type == GL_UNSIGNED_BYTE)
+         return &_mesa_texformat_ycbcr;
+      else
+         return &_mesa_texformat_ycbcr_rev;
+
+d499 1
+a499 1
+      fprintf(stderr, "unexpected texture format in %s\n", __FUNCTION__);
+d508 28
+a535 25
+   i830ContextPtr imesa = I830_CONTEXT(ctx);
+
+   ctx->Driver.TexEnv                    = i830TexEnv;
+   ctx->Driver.ChooseTextureFormat       = i830ChooseTextureFormat;
+   ctx->Driver.TexImage1D                = _mesa_store_teximage1d;
+   ctx->Driver.TexImage2D                = i830TexImage2D;
+   ctx->Driver.TexImage3D                = _mesa_store_teximage3d;
+   ctx->Driver.TexSubImage1D             = _mesa_store_texsubimage1d;
+   ctx->Driver.TexSubImage2D             = i830TexSubImage2D;
+   ctx->Driver.TexSubImage3D             = _mesa_store_texsubimage3d;
+   ctx->Driver.CopyTexImage1D            = _swrast_copy_teximage1d;
+   ctx->Driver.CopyTexImage2D            = _swrast_copy_teximage2d;
+   ctx->Driver.CopyTexSubImage1D         = _swrast_copy_texsubimage1d;
+   ctx->Driver.CopyTexSubImage2D         = _swrast_copy_texsubimage2d;
+   ctx->Driver.CopyTexSubImage3D         = _swrast_copy_texsubimage3d;
+   ctx->Driver.BindTexture               = i830BindTexture;
+   ctx->Driver.DeleteTexture             = i830DeleteTexture;
+   ctx->Driver.TexParameter              = i830TexParameter;
+   ctx->Driver.UpdateTexturePalette      = NULL;
+   ctx->Driver.IsTextureResident         = driIsTextureResident;
+   ctx->Driver.TestProxyTexImage         = _mesa_test_proxy_teximage;
+
+   driInitTextureObjects( ctx, & imesa->swapped,
+			  DRI_TEXMGR_DO_TEXTURE_2D
+			  | DRI_TEXMGR_DO_TEXTURE_RECT );
+@
+
+

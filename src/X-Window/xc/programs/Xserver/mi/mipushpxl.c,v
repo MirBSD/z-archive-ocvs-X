@@ -1,0 +1,398 @@
+head	1.1;
+branch	1.1.1;
+access;
+symbols
+	tg-mergetmp-2:1.1.1.2
+	cvs-200410241530:1.1.1.2
+	cvs-200410012000:1.1.1.2
+	cvs-200407141120:1.1.1.2
+	cvs-200406231010:1.1.1.2
+	MIRBSD_7quater:1.1.1.1
+	cvs-200405271510:1.1.1.2
+	XFree86_4_4_0:1.1.9.1
+	cvs-200403021700:1.1.1.2
+	XFREE86_20040213:1.1.9.1
+	xc:1.1.9
+	cvs-200401291925:1.1.1.1
+	MIRBSD_7_ALPHA:1.1.1.1.0.4
+	MIRBSD_7:1.1.1.1.0.2
+	MIRBSD_7ter:1.1.1.1
+	cvs-20011091815:1.1.1.1
+	cvs-200309162130:1.1.1.1
+	cvs-200308302005:1.1.1.1
+	ctmx-0387:1.1.1.1
+	ctmx-0384:1.1.1.1
+	MIRBSD_5:1.1.1.1
+	ctmx-0375:1.1.1.1
+	ctmx-0373:1.1.1.1
+	ctm-0371:1.1.1.1
+	ctm-0370:1.1.1.1
+	MIRBSD_4:1.1.1.1
+	ctm-0363:1.1.1.1
+	ctm-0359:1.1.1.1
+	ctm-0349:1.1.1.1
+	openbsd:1.1.1;
+locks; strict;
+comment	@ * @;
+
+
+1.1
+date	2003.03.22.20.09.38;	author tg;	state Exp;
+branches
+	1.1.1.1
+	1.1.9.1;
+next	;
+
+1.1.1.1
+date	2003.03.22.20.09.38;	author tg;	state Exp;
+branches;
+next	1.1.1.2;
+
+1.1.1.2
+date	2004.03.02.18.30.14;	author tg;	state Stab;
+branches;
+next	;
+
+1.1.9.1
+date	2004.02.14.19.26.31;	author tg;	state Exp;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@/* $XFree86: xc/programs/Xserver/mi/mipushpxl.c,v 3.12 2001/12/14 20:00:26 dawes Exp $ */
+/***********************************************************
+
+Copyright 1987, 1998  The Open Group
+
+Permission to use, copy, modify, distribute, and sell this software and its
+documentation for any purpose is hereby granted without fee, provided that
+the above copyright notice appear in all copies and that both that
+copyright notice and this permission notice appear in supporting
+documentation.
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
+OPEN GROUP BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN
+AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
+CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+Except as contained in this notice, the name of The Open Group shall not be
+used in advertising or otherwise to promote the sale, use or other dealings
+in this Software without prior written authorization from The Open Group.
+
+
+Copyright 1987 by Digital Equipment Corporation, Maynard, Massachusetts.
+
+                        All Rights Reserved
+
+Permission to use, copy, modify, and distribute this software and its 
+documentation for any purpose and without fee is hereby granted, 
+provided that the above copyright notice appear in all copies and that
+both that copyright notice and this permission notice appear in 
+supporting documentation, and that the name of Digital not be
+used in advertising or publicity pertaining to distribution of the
+software without specific, written prior permission.  
+
+DIGITAL DISCLAIMS ALL WARRANTIES WITH REGARD TO THIS SOFTWARE, INCLUDING
+ALL IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS, IN NO EVENT SHALL
+DIGITAL BE LIABLE FOR ANY SPECIAL, INDIRECT OR CONSEQUENTIAL DAMAGES OR
+ANY DAMAGES WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS,
+WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION,
+ARISING OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS
+SOFTWARE.
+
+******************************************************************/
+/* $Xorg: mipushpxl.c,v 1.4 2001/02/09 02:05:21 xorgcvs Exp $ */
+#include "X.h"
+#include "gcstruct.h"
+#include "scrnintstr.h"
+#include "pixmapstr.h"
+#include "miscstruct.h"
+#include "../mfb/maskbits.h"
+#include "mi.h"
+
+#define NPT 128
+
+/* miPushPixels -- squeegees the fill style of pGC through pBitMap
+ * into pDrawable.  pBitMap is a stencil (dx by dy of it is used, it may
+ * be bigger) which is placed on the drawable at xOrg, yOrg.  Where a 1 bit
+ * is set in the bitmap, the fill style is put onto the drawable using
+ * the GC's logical function. The drawable is not changed where the bitmap
+ * has a zero bit or outside the area covered by the stencil.
+
+WARNING:
+    this code works if the 1-bit deep pixmap format returned by GetSpans
+is the same as the format defined by the mfb code (i.e. 32-bit padding
+per scanline, scanline unit = 32 bits; later, this might mean
+bitsizeof(int) padding and sacnline unit == bitsizeof(int).)
+
+ */
+
+/*
+ * in order to have both (MSB_FIRST and LSB_FIRST) versions of this
+ * in the server, we need to rename one of them
+ */
+void
+miPushPixels(pGC, pBitMap, pDrawable, dx, dy, xOrg, yOrg)
+    GCPtr	pGC;
+    PixmapPtr	pBitMap;
+    DrawablePtr pDrawable;
+    int		dx, dy, xOrg, yOrg;
+{
+    int		h, dxDivPPW, ibEnd;
+    MiBits *pwLineStart;
+    register MiBits	*pw, *pwEnd;
+    register MiBits msk;
+    register int ib, w;
+    register int ipt;		/* index into above arrays */
+    Bool 	fInBox;
+    DDXPointRec	pt[NPT], ptThisLine;
+    int		width[NPT];
+#ifdef XFree86Server
+    PixelType	startmask;
+    if (screenInfo.bitmapBitOrder == IMAGE_BYTE_ORDER)
+      if (screenInfo.bitmapBitOrder == LSBFirst)
+        startmask = (MiBits)(-1) ^
+            LONG2CHARSSAMEORDER((MiBits)(-1) << 1);
+      else
+        startmask = (MiBits)(-1) ^
+            LONG2CHARSSAMEORDER((MiBits)(-1) >> 1);
+    else
+      if (screenInfo.bitmapBitOrder == LSBFirst)
+        startmask = (MiBits)(-1) ^
+            LONG2CHARSDIFFORDER((MiBits)(-1) << 1);
+      else
+        startmask = (MiBits)(-1) ^
+            LONG2CHARSDIFFORDER((MiBits)(-1) >> 1);
+#endif
+
+    pwLineStart = (MiBits *)xalloc(BitmapBytePad(dx));
+    if (!pwLineStart)
+	return;
+    ipt = 0;
+    dxDivPPW = dx/PPW;
+
+    for(h = 0, ptThisLine.x = 0, ptThisLine.y = 0; 
+	h < dy; 
+	h++, ptThisLine.y++)
+    {
+
+	(*pBitMap->drawable.pScreen->GetSpans)((DrawablePtr)pBitMap, dx,
+			&ptThisLine, &dx, 1, (char *)pwLineStart);
+
+	pw = pwLineStart;
+	/* Process all words which are fully in the pixmap */
+	
+	fInBox = FALSE;
+	pwEnd = pwLineStart + dxDivPPW;
+	while(pw  < pwEnd)
+	{
+	    w = *pw;
+#ifdef XFree86Server
+	    msk = startmask;
+#else
+	    msk = (MiBits)(-1) ^ SCRRIGHT((MiBits)(-1), 1);
+#endif
+	    for(ib = 0; ib < PPW; ib++)
+	    {
+		if(w & msk)
+		{
+		    if(!fInBox)
+		    {
+			pt[ipt].x = ((pw - pwLineStart) << PWSH) + ib + xOrg;
+			pt[ipt].y = h + yOrg;
+			/* start new box */
+			fInBox = TRUE;
+		    }
+		}
+		else
+		{
+		    if(fInBox)
+		    {
+			width[ipt] = ((pw - pwLineStart) << PWSH) + 
+				     ib + xOrg - pt[ipt].x;
+			if (++ipt >= NPT)
+			{
+			    (*pGC->ops->FillSpans)(pDrawable, pGC, 
+					      NPT, pt, width, TRUE);
+			    ipt = 0;
+			}
+			/* end box */
+			fInBox = FALSE;
+		    }
+		}
+#ifdef XFree86Server
+    		/* This is not quite right, but it'll do for now */
+		if (screenInfo.bitmapBitOrder == IMAGE_BYTE_ORDER)
+		  if (screenInfo.bitmapBitOrder == LSBFirst)
+		    msk = LONG2CHARSSAMEORDER(LONG2CHARSSAMEORDER(msk) << 1);
+		  else
+		    msk = LONG2CHARSSAMEORDER(LONG2CHARSSAMEORDER(msk) >> 1);
+		else
+		  if (screenInfo.bitmapBitOrder == LSBFirst)
+		    msk = LONG2CHARSDIFFORDER(LONG2CHARSDIFFORDER(msk) << 1);
+		  else
+		    msk = LONG2CHARSDIFFORDER(LONG2CHARSDIFFORDER(msk) >> 1);
+#else
+		msk = SCRRIGHT(msk, 1);
+#endif
+	    }
+	    pw++;
+	}
+	ibEnd = dx & PIM;
+	if(ibEnd)
+	{
+	    /* Process final partial word on line */
+	    w = *pw;
+#ifdef XFree86Server
+	    msk = startmask;
+#else
+	    msk = (MiBits)(-1) ^ SCRRIGHT((MiBits)(-1), 1);
+#endif
+	    for(ib = 0; ib < ibEnd; ib++)
+	    {
+		if(w & msk)
+		{
+		    if(!fInBox)
+		    {
+			/* start new box */
+			pt[ipt].x = ((pw - pwLineStart) << PWSH) + ib + xOrg;
+			pt[ipt].y = h + yOrg;
+			fInBox = TRUE;
+		    }
+		}
+		else
+		{
+		    if(fInBox)
+		    {
+			/* end box */
+			width[ipt] = ((pw - pwLineStart) << PWSH) + 
+				     ib + xOrg - pt[ipt].x;
+			if (++ipt >= NPT)
+			{
+			    (*pGC->ops->FillSpans)(pDrawable, 
+					      pGC, NPT, pt, width, TRUE);
+			    ipt = 0;
+			}
+			fInBox = FALSE;
+		    }
+		}
+#ifdef XFree86Server
+    		/* This is not quite right, but it'll do for now */
+		if (screenInfo.bitmapBitOrder == IMAGE_BYTE_ORDER)
+		  if (screenInfo.bitmapBitOrder == LSBFirst)
+		    msk = LONG2CHARSSAMEORDER(LONG2CHARSSAMEORDER(msk) << 1);
+		  else
+		    msk = LONG2CHARSSAMEORDER(LONG2CHARSSAMEORDER(msk) >> 1);
+		else
+		  if (screenInfo.bitmapBitOrder == LSBFirst)
+		    msk = LONG2CHARSDIFFORDER(LONG2CHARSDIFFORDER(msk) << 1);
+		  else
+		    msk = LONG2CHARSDIFFORDER(LONG2CHARSDIFFORDER(msk) >> 1);
+#else
+		msk = SCRRIGHT(msk, 1);
+#endif
+	    }
+	}
+	/* If scanline ended with last bit set, end the box */
+	if(fInBox)
+	{
+	    width[ipt] = dx + xOrg - pt[ipt].x;
+	    if (++ipt >= NPT)
+	    {
+		(*pGC->ops->FillSpans)(pDrawable, pGC, NPT, pt, width, TRUE);
+		ipt = 0;
+	    }
+	}
+    }
+    xfree(pwLineStart);
+    /* Flush any remaining spans */
+    if (ipt)
+    {
+	(*pGC->ops->FillSpans)(pDrawable, pGC, ipt, pt, width, TRUE);
+    }
+}
+@
+
+
+1.1.9.1
+log
+@OpenBSD just has imported exactly this tree into their vendor branch,
+called the same tag, in XF4/xc
+This is, apparently, the last XFree86 snapshot before the licence change
+(ie, addition of the advertising clause)
+
+Since the developers don't see any problems with that, and we would like
+to integrate improvements done by the remaining one or two (or so) XFree86
+developers (j/k), this prepares enabling us to update X-Window in the future.
+@
+text
+@d1 1
+a1 1
+/* $XFree86: xc/programs/Xserver/mi/mipushpxl.c,v 3.13 2003/07/16 01:38:57 dawes Exp $ */
+d53 1
+a53 1
+#include "regionstr.h"
+@
+
+
+1.1.1.1
+log
+@Import OpenBSD 3.3 XF4 repository from CTM 3132 the first time
+This finalizes starting an OpenBSD-mirabile (aka MirBSD) repository.
+
+### MirBSD is:
+# Copyright (c) 1982-2003 by Thorsten "mirabile" Glaser <x86@@ePost.de>
+# Copyright © 1968-2003  The authors of And contributors to UNIX®, the
+#       C Language, BSD/Berkeley Unix; 386BSD, NetBSD 1.1 and OpenBSD.
+#
+# Anyone who obtained a copy of this work is hereby permitted to freely use,
+# distribute, modify, merge, sublicence, give away or sell it as long as the
+# authors are given due credit and the following notice is retained:
+#
+# This work is provided "as is", with no explicit or implicit warranty what-
+# soever. Use it only at your own risk. In no event may an author or contri-
+# butor be held liable for any damage, directly or indirectly, that origina-
+# ted through or is caused by creation or modification of this work.
+
+MirBSD is my private tree. MirBSD does not differ very much from OpenBSD
+and intentionally tracks OpenBSD. That's why it _is_ OpenBSD, just not the
+official one. It's like with DarrenBSD.
+
+At time of this writing, no advertising for MirBSD must be done,
+because the advertising clause has not yet been sorted out.
+
+http://templeofhate.com/tglaser/MirBSD/index.php
+@
+text
+@@
+
+
+1.1.1.2
+log
+@That's what OpenBSD will, probably, ship as XF4 in 3.5
+their last sync against XFree86 4.3-current has been
+imported into our vendor branch, too
+@
+text
+@d1 1
+a1 1
+/* $XFree86: xc/programs/Xserver/mi/mipushpxl.c,v 3.13 2003/07/16 01:38:57 dawes Exp $ */
+d53 1
+a53 1
+#include "regionstr.h"
+@
+

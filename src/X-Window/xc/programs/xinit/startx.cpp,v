@@ -1,0 +1,392 @@
+head	1.1;
+branch	1.1.1;
+access;
+symbols
+	tg-mergetmp-2:1.1.1.3
+	cvs-200410241530:1.1.1.3
+	cvs-200410012000:1.1.1.3
+	cvs-200407141120:1.1.1.3
+	cvs-200406231010:1.1.1.3
+	MIRBSD_7quater:1.1.1.2
+	cvs-200405271510:1.1.1.3
+	XFree86_4_4_0:1.1.9.1
+	cvs-200403021700:1.1.1.3
+	XFREE86_20040213:1.1.9.1
+	xc:1.1.9
+	cvs-200401291925:1.1.1.2
+	MIRBSD_7_ALPHA:1.1.1.2.0.4
+	MIRBSD_7:1.1.1.2.0.2
+	MIRBSD_7ter:1.1.1.2
+	cvs-20011091815:1.1.1.2
+	cvs-200309162130:1.1.1.2
+	cvs-200308302005:1.1.1.2
+	ctmx-0387:1.1.1.2
+	ctmx-0384:1.1.1.2
+	MIRBSD_5:1.1.1.2
+	ctmx-0375:1.1.1.2
+	ctmx-0373:1.1.1.2
+	ctm-0371:1.1.1.2
+	ctm-0370:1.1.1.2
+	MIRBSD_4:1.1.1.2
+	ctm-0363:1.1.1.2
+	ctm-0359:1.1.1.2
+	ctm-0349:1.1.1.1
+	openbsd:1.1.1;
+locks; strict;
+comment	@// @;
+
+
+1.1
+date	2003.03.22.20.10.28;	author tg;	state Exp;
+branches
+	1.1.1.1
+	1.1.9.1;
+next	;
+
+1.1.1.1
+date	2003.03.22.20.10.28;	author tg;	state Exp;
+branches;
+next	1.1.1.2;
+
+1.1.1.2
+date	2003.04.08.18.40.09;	author tg;	state Exp;
+branches;
+next	1.1.1.3;
+
+1.1.1.3
+date	2004.03.02.18.40.23;	author tg;	state Stab;
+branches;
+next	;
+
+1.1.9.1
+date	2004.02.14.19.28.48;	author tg;	state Exp;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@XCOMM!/bin/sh
+
+XCOMM $Xorg: startx.cpp,v 1.3 2000/08/17 19:54:29 cpqbld Exp $
+XCOMM
+XCOMM This is just a sample implementation of a slightly less primitive
+XCOMM interface than xinit.  It looks for user .xinitrc and .xserverrc
+XCOMM files, then system xinitrc and xserverrc files, else lets xinit choose
+XCOMM its default.  The system xinitrc should probably do things like check
+XCOMM for .Xresources files and merge them in, startup up a window manager,
+XCOMM and pop a clock and serveral xterms.
+XCOMM
+XCOMM Site administrators are STRONGLY urged to write nicer versions.
+XCOMM
+XCOMM $XFree86: xc/programs/xinit/startx.cpp,v 3.12.2.2 2002/01/28 18:27:34 tsi Exp $
+
+#ifdef SCO
+
+XCOMM Check for /usr/bin/X11 and BINDIR in the path, if not add them.
+XCOMM This allows startx to be placed in a place like /usr/bin or /usr/local/bin
+XCOMM and people may use X without changing their PATH
+
+XCOMM First our compiled path
+
+bindir=BINDIR
+if expr $PATH : ".*`echo $bindir | sed 's?/?\\/?g'`.*" > /dev/null 2>&1; then
+	:
+else
+	PATH=$PATH:BINDIR
+fi
+
+XCOMM Now the "SCO" compiled path
+
+if expr $PATH : '.*\/usr\/bin\/X11.*' > /dev/null 2>&1; then
+	:
+else
+	PATH=$PATH:/usr/bin/X11
+fi
+
+XCOMM Set up the XMERGE env var so that dos merge is happy under X
+
+if [ -f /usr/lib/merge/xmergeset.sh ]; then
+	. /usr/lib/merge/xmergeset.sh
+elif [ -f /usr/lib/merge/console.disp ]; then
+	XMERGE=`cat /usr/lib/merge/console.disp`
+	export XMERGE
+fi
+
+scoclientrc=$HOME/.startxrc
+#endif
+
+userclientrc=$HOME/.xinitrc
+userserverrc=$HOME/.xserverrc
+sysclientrc=XINITDIR/xinitrc
+sysserverrc=XINITDIR/xserverrc
+defaultclient=BINDIR/xterm
+defaultserver=BINDIR/X
+defaultclientargs=""
+defaultserverargs=""
+clientargs=""
+serverargs=""
+
+#ifdef SCO
+if [ -f $scoclientrc ]; then
+    defaultclientargs=$scoclientrc
+else
+#endif
+if [ -f $userclientrc ]; then
+    defaultclientargs=$userclientrc
+elif [ -f $sysclientrc ]; then
+    defaultclientargs=$sysclientrc
+fi
+#ifdef SCO
+fi
+#endif
+
+if [ -f $userserverrc ]; then
+    defaultserverargs=$userserverrc
+elif [ -f $sysserverrc ]; then
+    defaultserverargs=$sysserverrc
+fi
+
+whoseargs="client"
+while [ x"$1" != x ]; do
+    case "$1" in
+    # '' required to prevent cpp from treating "/*" as a C comment.
+    /''*|\./''*)
+	if [ "$whoseargs" = "client" ]; then
+	    if [ x"$clientargs" = x ]; then
+		client="$1"
+	    else
+		clientargs="$clientargs $1"
+	    fi
+	else
+	    if [ x"$serverargs" = x ]; then
+		server="$1"
+	    else
+		serverargs="$serverargs $1"
+	    fi
+	fi
+	;;
+    --)
+	whoseargs="server"
+	;;
+    *)
+	if [ "$whoseargs" = "client" ]; then
+	    clientargs="$clientargs $1"
+	else
+	    # display must be the FIRST server argument
+	    if [ x"$serverargs" = x ] && \
+		 expr "$1" : ':[0-9][0-9]*$' > /dev/null 2>&1; then
+		display="$1"
+	    else
+		serverargs="$serverargs $1"
+	    fi
+	fi
+	;;
+    esac
+    shift
+done
+
+XCOMM process client arguments
+if [ x"$client" = x ]; then
+    # if no client arguments either, use rc file instead
+    if [ x"$clientargs" = x ]; then
+	client="$defaultclientargs"
+    else
+	client=$defaultclient
+    fi
+fi
+
+XCOMM process server arguments
+if [ x"$server" = x ]; then
+    # if no server arguments or display either, use rc file instead
+    if [ x"$serverargs" = x -a x"$display" = x ]; then
+	server="$defaultserverargs"
+    else
+	server=$defaultserver
+    fi
+fi
+
+if [ x"$XAUTHORITY" = x ]; then
+    XAUTHORITY=$HOME/.Xauthority
+    export XAUTHORITY
+fi
+
+removelist=
+
+#if defined(HAS_COOKIE_MAKER) && defined(MK_COOKIE)
+XCOMM set up default Xauth info for this machine
+case `uname` in
+Linux*)
+	if [ -z "`hostname --version | grep GNU`" ]; then
+		hostname=`hostname -f`
+	else
+		hostname=`hostname`
+	fi
+	;;
+*)
+	hostname=`hostname`
+	;;
+esac
+
+authdisplay=${display:-:0}
+mcookie=`MK_COOKIE`
+for displayname in $authdisplay $hostname$authdisplay; do
+    if ! xauth list "$displayname" | grep "$displayname " >/dev/null 2>&1; then
+        xauth << EOF
+add $displayname . $mcookie
+EOF
+	removelist="$displayname $removelist"
+    fi
+done
+#endif
+
+xinit $client $clientargs -- $server $display $serverargs
+
+if [ x"$removelist" != x ]; then
+    xauth remove $removelist
+fi
+
+/*
+ * various machines need special cleaning up
+ */
+#ifdef __linux__
+if command -v deallocvt > /dev/null 2>&1; then
+    deallocvt
+fi
+#endif
+
+#ifdef macII
+Xrepair
+screenrestore
+#endif
+
+#if defined(sun) && !defined(i386)
+kbd_mode -a
+#endif
+@
+
+
+1.1.9.1
+log
+@OpenBSD just has imported exactly this tree into their vendor branch,
+called the same tag, in XF4/xc
+This is, apparently, the last XFree86 snapshot before the licence change
+(ie, addition of the advertising clause)
+
+Since the developers don't see any problems with that, and we would like
+to integrate improvements done by the remaining one or two (or so) XFree86
+developers (j/k), this prepares enabling us to update X-Window in the future.
+@
+text
+@d14 1
+a14 1
+XCOMM $XFree86: xc/programs/xinit/startx.cpp,v 3.18 2003/08/22 19:27:33 eich Exp $
+d85 1
+a85 1
+    XCOMM '' required to prevent cpp from treating "/*" as a C comment.
+d108 2
+a109 2
+	    XCOMM display must be the FIRST server argument
+	    if [ x"$serverargs" = x ] && @@@@
+d123 1
+a123 1
+    XCOMM if no client arguments either, use rc file instead
+d133 1
+a133 1
+    XCOMM if no server arguments or display either, use rc file instead
+d152 1
+a152 1
+	if [ -z "`hostname --version 2>&1 | grep GNU`" ]; then
+d167 1
+a167 1
+        xauth -q << EOF 
+@
+
+
+1.1.1.1
+log
+@Import OpenBSD 3.3 XF4 repository from CTM 3132 the first time
+This finalizes starting an OpenBSD-mirabile (aka MirBSD) repository.
+
+### MirBSD is:
+# Copyright (c) 1982-2003 by Thorsten "mirabile" Glaser <x86@@ePost.de>
+# Copyright © 1968-2003  The authors of And contributors to UNIX®, the
+#       C Language, BSD/Berkeley Unix; 386BSD, NetBSD 1.1 and OpenBSD.
+#
+# Anyone who obtained a copy of this work is hereby permitted to freely use,
+# distribute, modify, merge, sublicence, give away or sell it as long as the
+# authors are given due credit and the following notice is retained:
+#
+# This work is provided "as is", with no explicit or implicit warranty what-
+# soever. Use it only at your own risk. In no event may an author or contri-
+# butor be held liable for any damage, directly or indirectly, that origina-
+# ted through or is caused by creation or modification of this work.
+
+MirBSD is my private tree. MirBSD does not differ very much from OpenBSD
+and intentionally tracks OpenBSD. That's why it _is_ OpenBSD, just not the
+official one. It's like with DarrenBSD.
+
+At time of this writing, no advertising for MirBSD must be done,
+because the advertising clause has not yet been sorted out.
+
+http://templeofhate.com/tglaser/MirBSD/index.php
+@
+text
+@@
+
+
+1.1.1.2
+log
+@The X-Windowing System
+
+Import XFree86 4.3 from OpenBSD by CTM, in the hope it's stable
+@
+text
+@d14 1
+a14 1
+XCOMM $XFree86: xc/programs/xinit/startx.cpp,v 3.16 2003/01/24 21:30:02 herrb Exp $
+d152 1
+a152 1
+	if [ -z "`hostname --version 2>&1 | grep GNU`" ]; then
+d167 1
+a167 1
+        xauth << EOF 
+@
+
+
+1.1.1.3
+log
+@That's what OpenBSD will, probably, ship as XF4 in 3.5
+their last sync against XFree86 4.3-current has been
+imported into our vendor branch, too
+@
+text
+@d14 1
+a14 1
+XCOMM $XFree86: xc/programs/xinit/startx.cpp,v 3.18 2003/08/22 19:27:33 eich Exp $
+d85 1
+a85 1
+    XCOMM '' required to prevent cpp from treating "/*" as a C comment.
+d108 2
+a109 2
+	    XCOMM display must be the FIRST server argument
+	    if [ x"$serverargs" = x ] && @@@@
+d123 1
+a123 1
+    XCOMM if no client arguments either, use rc file instead
+d133 1
+a133 1
+    XCOMM if no server arguments or display either, use rc file instead
+d167 1
+a167 1
+        xauth -q << EOF 
+@
+
+

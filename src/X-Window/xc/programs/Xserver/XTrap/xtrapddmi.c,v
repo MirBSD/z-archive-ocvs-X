@@ -1,0 +1,327 @@
+head	1.1;
+branch	1.1.1;
+access;
+symbols
+	tg-mergetmp-2:1.1.1.2
+	cvs-200410241530:1.1.1.2
+	cvs-200410012000:1.1.1.2
+	cvs-200407141120:1.1.1.2
+	cvs-200406231010:1.1.1.2
+	MIRBSD_7quater:1.1.1.2
+	cvs-200405271510:1.1.1.2
+	XFree86_4_4_0:1.1.9.1
+	cvs-200403021700:1.1.1.2
+	XFREE86_20040213:1.1.9.1
+	xc:1.1.9
+	cvs-200401291925:1.1.1.2
+	MIRBSD_7_ALPHA:1.1.1.2.0.4
+	MIRBSD_7:1.1.1.2.0.2
+	MIRBSD_7ter:1.1.1.2
+	cvs-20011091815:1.1.1.2
+	cvs-200309162130:1.1.1.2
+	cvs-200308302005:1.1.1.2
+	ctmx-0387:1.1.1.2
+	ctmx-0384:1.1.1.2
+	MIRBSD_5:1.1.1.2
+	ctmx-0375:1.1.1.2
+	ctmx-0373:1.1.1.2
+	ctm-0371:1.1.1.2
+	ctm-0370:1.1.1.2
+	MIRBSD_4:1.1.1.2
+	ctm-0363:1.1.1.2
+	ctm-0359:1.1.1.2
+	ctm-0349:1.1.1.1
+	openbsd:1.1.1;
+locks; strict;
+comment	@ * @;
+
+
+1.1
+date	2003.03.22.20.05.53;	author tg;	state Exp;
+branches
+	1.1.1.1
+	1.1.9.1;
+next	;
+
+1.1.1.1
+date	2003.03.22.20.05.53;	author tg;	state Exp;
+branches;
+next	1.1.1.2;
+
+1.1.1.2
+date	2003.04.08.18.34.15;	author tg;	state Stab;
+branches;
+next	;
+
+1.1.9.1
+date	2004.02.14.19.20.44;	author tg;	state Exp;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@/* $XFree86: xc/programs/Xserver/XTrap/xtrapddmi.c,v 1.1 2001/11/02 23:29:29 dawes Exp $ */
+/*****************************************************************************
+Copyright 1987, 1988, 1989, 1990, 1991 by Digital Equipment Corp., Maynard, MA
+
+Permission to use, copy, modify, and distribute this software and its 
+documentation for any purpose and without fee is hereby granted, 
+provided that the above copyright notice appear in all copies and that
+both that copyright notice and this permission notice appear in 
+supporting documentation, and that the name of Digital not be
+used in advertising or publicity pertaining to distribution of the
+software without specific, written prior permission.  
+
+DIGITAL DISCLAIMS ALL WARRANTIES WITH REGARD TO THIS SOFTWARE, INCLUDING
+ALL IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS, IN NO EVENT SHALL
+DIGITAL BE LIABLE FOR ANY SPECIAL, INDIRECT OR CONSEQUENTIAL DAMAGES OR
+ANY DAMAGES WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS,
+WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION,
+ARISING OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS
+SOFTWARE.
+
+*****************************************************************************/
+/*
+ *  ABSTRACT:
+ *
+ *      This module is the platform-specific but conditionally independent
+ *      code for the XTrap extension (usually I/O or platform setup).
+ *      This is shared code and is subject to change only by team approval.
+ *
+ *  CONTRIBUTORS:
+ *
+ *      Dick Annicchiarico
+ *      Robert Chesler
+ *      Gene Durso
+ *      Marc Evans
+ *      Alan Jamison
+ *      Mark Henry
+ *      Ken Miller
+ *
+ */
+
+#include <errno.h>
+#include <X11/Xos.h>
+#ifdef PC
+# include "fcntl.h"
+# include "io.h"
+# define O_NDELAY 0L
+#endif
+
+#define NEED_REPLIES
+#define NEED_EVENTS
+#include <X11/X.h>        /* From library include environment */
+#include "input.h"    /* From server include env. (must be before Xlib.h!) */
+#ifdef PC
+# include "scrintst.h"          /* Screen struct */
+# include "extnsist.h"
+#else
+# include "extnsionst.h"        /* Server ExtensionEntry definitions */
+# include "scrnintstr.h"        /* Screen struct */
+#endif
+
+#include <X11/extensions/xtrapdi.h>
+#include <X11/extensions/xtrapddmi.h>
+#include <X11/extensions/xtrapproto.h>
+
+extern int XETrapErrorBase;
+extern xXTrapGetAvailReply XETrap_avail;
+extern DevicePtr XETrapKbdDev;
+extern DevicePtr XETrapPtrDev;
+
+/*
+ *  DESCRIPTION:
+ *
+ *      This function performs the platform specific setup for server
+ *      extension implementations.
+ */
+void XETrapPlatformSetup()
+{
+}
+
+
+#if !defined _XINPUT
+/*
+ *  DESCRIPTION:
+ *
+ *  This routine processes the simulation of some input event.
+ *
+ */
+int XETrapSimulateXEvent(register xXTrapInputReq *request,
+    register ClientPtr client)
+{
+    ScreenPtr pScr = NULL;
+    int status = Success;
+    xEvent xev;
+    register int x = request->input.x;
+    register int y = request->input.y;
+    DevicePtr keydev = LookupKeyboardDevice();
+    DevicePtr ptrdev = LookupPointerDevice();
+
+    if (request->input.screen < screenInfo.numScreens)
+    {
+        pScr = screenInfo.screens[request->input.screen];
+    }
+    else
+    {   /* Trying to play bogus events to this WS! */
+#ifdef VERBOSE
+        ErrorF("%s:  Trying to send events to screen %d!\n", XTrapExtName,
+            request->input.screen);
+#endif
+        status = XETrapErrorBase + BadScreen;
+    }
+    /* Fill in the event structure with the information
+     * Note:  root, event, child, eventX, eventY, state, and sameScreen
+     *        are all updated by FixUpEventFromWindow() when the events
+     *        are delivered via DeliverDeviceEvents() or whatever.  XTrap
+     *        needs to only concern itself with type, detail, time, rootX, 
+     *        and rootY.
+     */
+    if (status == Success)
+    {
+        xev.u.u.type   = request->input.type;
+        xev.u.u.detail = request->input.detail;
+        xev.u.keyButtonPointer.time   = GetTimeInMillis();
+        xev.u.keyButtonPointer.rootX = x;
+        xev.u.keyButtonPointer.rootY = y;
+
+        if (request->input.type == MotionNotify)
+        {   /* Set new cursor position on screen */
+            XETrap_avail.data.cur_x = x;
+            XETrap_avail.data.cur_y = y;
+          NewCurrentScreen (pScr, x, y); /* fix from amnonc@@mercury.co.il */
+            if (!(*pScr->SetCursorPosition)(pScr, x, y, xFalse))
+            {
+                status = BadImplementation;
+            }
+        }
+    }
+    if (status == Success)
+    {
+        switch(request->input.type)
+        {   /* Now process the event appropriately */
+            case KeyPress:
+            case KeyRelease:
+                (*XETrapKbdDev->realInputProc)(&xev,(DeviceIntPtr)keydev, 1L);
+                break;
+            case MotionNotify:
+            case ButtonPress:
+            case ButtonRelease:
+                (*XETrapPtrDev->realInputProc)(&xev,(DeviceIntPtr)ptrdev, 1L);
+                break;
+            default:
+                status = BadValue;
+                break;
+        }
+    }
+    return(status);
+}
+#endif /* _XINPUT */
+
+#if defined vms && !defined LINKED_IN
+/* Used by swapping code not visible from VMS (from main.c) */
+#ifndef BLADE
+void
+NotImplemented()
+{
+    FatalError("Not implemented");
+}
+#endif
+
+int
+#ifdef __STDC__
+ProcBadRequest( ClientPtr client)
+#else
+ProcBadRequest(client)
+    ClientPtr client;
+#endif
+{
+    return (BadRequest);
+}
+
+#endif /* vms && ! LINKED_IN */
+@
+
+
+1.1.9.1
+log
+@OpenBSD just has imported exactly this tree into their vendor branch,
+called the same tag, in XF4/xc
+This is, apparently, the last XFree86 snapshot before the licence change
+(ie, addition of the advertising clause)
+
+Since the developers don't see any problems with that, and we would like
+to integrate improvements done by the remaining one or two (or so) XFree86
+developers (j/k), this prepares enabling us to update X-Window in the future.
+@
+text
+@d1 1
+a1 1
+/* $XFree86: xc/programs/Xserver/XTrap/xtrapddmi.c,v 1.2 2002/01/23 03:31:39 dawes Exp $ */
+a40 1
+#ifndef EXTMODULE
+a46 3
+#endif
+#else
+#include "xf86_ansic.h"
+@
+
+
+1.1.1.1
+log
+@Import OpenBSD 3.3 XF4 repository from CTM 3132 the first time
+This finalizes starting an OpenBSD-mirabile (aka MirBSD) repository.
+
+### MirBSD is:
+# Copyright (c) 1982-2003 by Thorsten "mirabile" Glaser <x86@@ePost.de>
+# Copyright © 1968-2003  The authors of And contributors to UNIX®, the
+#       C Language, BSD/Berkeley Unix; 386BSD, NetBSD 1.1 and OpenBSD.
+#
+# Anyone who obtained a copy of this work is hereby permitted to freely use,
+# distribute, modify, merge, sublicence, give away or sell it as long as the
+# authors are given due credit and the following notice is retained:
+#
+# This work is provided "as is", with no explicit or implicit warranty what-
+# soever. Use it only at your own risk. In no event may an author or contri-
+# butor be held liable for any damage, directly or indirectly, that origina-
+# ted through or is caused by creation or modification of this work.
+
+MirBSD is my private tree. MirBSD does not differ very much from OpenBSD
+and intentionally tracks OpenBSD. That's why it _is_ OpenBSD, just not the
+official one. It's like with DarrenBSD.
+
+At time of this writing, no advertising for MirBSD must be done,
+because the advertising clause has not yet been sorted out.
+
+http://templeofhate.com/tglaser/MirBSD/index.php
+@
+text
+@@
+
+
+1.1.1.2
+log
+@The X-Windowing System
+
+Import XFree86 4.3 from OpenBSD by CTM, in the hope it's stable
+@
+text
+@d1 1
+a1 1
+/* $XFree86: xc/programs/Xserver/XTrap/xtrapddmi.c,v 1.2 2002/01/23 03:31:39 dawes Exp $ */
+a40 1
+#ifndef EXTMODULE
+a46 3
+#endif
+#else
+#include "xf86_ansic.h"
+@
+

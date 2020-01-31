@@ -1,0 +1,711 @@
+head	1.2;
+branch	1.1.1;
+access;
+symbols
+	tg-mergetmp-2:1.1.1.3
+	cvs-200410241530:1.1.1.3
+	cvs-200410012000:1.1.1.3
+	cvs-200407141120:1.1.1.3
+	cvs-200406231010:1.1.1.3
+	MIRBSD_7quater:1.1.1.2
+	cvs-200405271510:1.1.1.3
+	XFree86_4_4_0:1.1.9.1
+	cvs-200403021700:1.1.1.3
+	XFREE86_20040213:1.1.9.1
+	xc:1.1.9
+	cvs-200401291925:1.1.1.2
+	MIRBSD_7_ALPHA:1.1.1.2.0.4
+	MIRBSD_7:1.1.1.2.0.2
+	MIRBSD_7ter:1.1.1.2
+	cvs-20011091815:1.1.1.2
+	cvs-200309162130:1.1.1.2
+	cvs-200308302005:1.1.1.2
+	ctmx-0387:1.1.1.2
+	ctmx-0384:1.1.1.2
+	MIRBSD_5:1.1.1.2
+	ctmx-0375:1.1.1.2
+	ctmx-0373:1.1.1.2
+	ctm-0371:1.1.1.2
+	ctm-0370:1.1.1.2
+	MIRBSD_4:1.1.1.2
+	ctm-0363:1.1.1.2
+	ctm-0359:1.1.1.2
+	ctm-0349:1.1.1.1
+	openbsd:1.1.1;
+locks; strict;
+comment	@ * @;
+
+
+1.2
+date	2003.05.16.16.29.42;	author tg;	state dead;
+branches;
+next	1.1;
+
+1.1
+date	2003.03.22.20.01.19;	author tg;	state Exp;
+branches
+	1.1.1.1
+	1.1.9.1;
+next	;
+
+1.1.1.1
+date	2003.03.22.20.01.19;	author tg;	state Exp;
+branches;
+next	1.1.1.2;
+
+1.1.1.2
+date	2003.04.08.18.20.55;	author tg;	state Exp;
+branches;
+next	1.1.1.3;
+
+1.1.1.3
+date	2004.03.02.17.38.02;	author tg;	state Stab;
+branches;
+next	;
+
+1.1.9.1
+date	2004.02.14.19.08.51;	author tg;	state Exp;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.2
+log
+@remove a bunch of files not used in MirBSD - clean tree. People who want them got cvs.
+@
+text
+@/***************************************************************************/
+/*                                                                         */
+/*  ahglobal.c                                                             */
+/*                                                                         */
+/*    Routines used to compute global metrics automatically (body).        */
+/*                                                                         */
+/*  Copyright 2000-2001 Catharon Productions Inc.                          */
+/*  Author: David Turner                                                   */
+/*                                                                         */
+/*  This file is part of the Catharon Typography Project and shall only    */
+/*  be used, modified, and distributed under the terms of the Catharon     */
+/*  Open Source License that should come with this file under the name     */
+/*  `CatharonLicense.txt'.  By continuing to use, modify, or distribute    */
+/*  this file you indicate that you have read the license and              */
+/*  understand and accept it fully.                                        */
+/*                                                                         */
+/*  Note that this license is compatible with the FreeType license.        */
+/*                                                                         */
+/***************************************************************************/
+
+
+#include <ft2build.h>
+#include FT_INTERNAL_DEBUG_H
+#include "ahglobal.h"
+#include "ahglyph.h"
+
+
+#define MAX_TEST_CHARACTERS  12
+
+  static
+  const char*  blue_chars[ah_blue_max] =
+  {
+    "THEZOCQS",
+    "HEZLOCUS",
+    "xzroesc",
+    "xzroesc",
+    "pqgjy"
+  };
+
+
+  /* simple insertion sort */
+  static void
+  sort_values( FT_Int   count,
+               FT_Pos*  table )
+  {
+    FT_Int  i, j, swap;
+
+
+    for ( i = 1; i < count; i++ )
+    {
+      for ( j = i; j > 0; j-- )
+      {
+        if ( table[j] > table[j - 1] )
+          break;
+
+        swap         = table[j];
+        table[j]     = table[j - 1];
+        table[j - 1] = swap;
+      }
+    }
+  }
+
+
+  static FT_Error
+  ah_hinter_compute_blues( AH_Hinter*  hinter )
+  {
+    AH_Blue       blue;
+    AH_Globals*   globals = &hinter->globals->design;
+    FT_Pos        flats [MAX_TEST_CHARACTERS];
+    FT_Pos        rounds[MAX_TEST_CHARACTERS];
+    FT_Int        num_flats;
+    FT_Int        num_rounds;
+
+    FT_Face       face;
+    FT_GlyphSlot  glyph;
+    FT_Error      error;
+    FT_CharMap    charmap;
+
+
+    face  = hinter->face;
+    glyph = face->glyph;
+
+    /* save current charmap */
+    charmap = face->charmap;
+
+    /* do we have a Unicode charmap in there? */
+    error = FT_Select_Charmap( face, ft_encoding_unicode );
+    if ( error )
+      goto Exit;
+
+    /* we compute the blues simply by loading each character from the */
+    /* 'blue_chars[blues]' string, then compute its top-most and      */
+    /* bottom-most points                                             */
+
+    AH_LOG(( "blue zones computation\n" ));
+    AH_LOG(( "------------------------------------------------\n" ));
+
+    for ( blue = ah_blue_capital_top; blue < ah_blue_max; blue++ )
+    {
+      const char*  p     = blue_chars[blue];
+      const char*  limit = p + MAX_TEST_CHARACTERS;
+      FT_Pos       *blue_ref, *blue_shoot;
+
+
+      AH_LOG(( "blue %3d: ", blue ));
+
+      num_flats  = 0;
+      num_rounds = 0;
+
+      for ( ; p < limit; p++ )
+      {
+        FT_UInt     glyph_index;
+        FT_Vector*  extremum;
+        FT_Vector*  points;
+        FT_Vector*  point_limit;
+        FT_Vector*  point;
+        FT_Bool     round;
+
+
+        /* exit if we reach the end of the string */
+        if ( !*p )
+          break;
+
+        AH_LOG(( "`%c'", *p ));
+
+        /* load the character in the face -- skip unknown or empty ones */
+        glyph_index = FT_Get_Char_Index( face, (FT_UInt)*p );
+        if ( glyph_index == 0 )
+          continue;
+
+        error = FT_Load_Glyph( face, glyph_index, FT_LOAD_NO_SCALE );
+        if ( error || glyph->outline.n_points <= 0 )
+          continue;
+
+        /* now compute min or max point indices and coordinates */
+        points      = glyph->outline.points;
+        point_limit = points + glyph->outline.n_points;
+        point       = points;
+        extremum    = point;
+        point++;
+
+        if ( AH_IS_TOP_BLUE( blue ) )
+        {
+          for ( ; point < point_limit; point++ )
+            if ( point->y > extremum->y )
+              extremum = point;
+        }
+        else
+        {
+          for ( ; point < point_limit; point++ )
+            if ( point->y < extremum->y )
+              extremum = point;
+        }
+
+        AH_LOG(( "%5d", (int)extremum->y ));
+
+        /* now, check whether the point belongs to a straight or round  */
+        /* segment; we first need to find in which contour the extremum */
+        /* lies, then see its previous and next points                  */
+        {
+          FT_Int  index = (FT_Int)( extremum - points );
+          FT_Int  n;
+          FT_Int  first, last, prev, next, end;
+          FT_Pos  dist;
+
+
+          last  = -1;
+          first = 0;
+
+          for ( n = 0; n < glyph->outline.n_contours; n++ )
+          {
+            end = glyph->outline.contours[n];
+            if ( end >= index )
+            {
+              last = end;
+              break;
+            }
+            first = end + 1;
+          }
+
+          /* XXX: should never happen! */
+          if ( last < 0 )
+            continue;
+
+          /* now look for the previous and next points that are not on the */
+          /* same Y coordinate.  Threshold the `closeness'...              */
+
+          prev = index;
+          next = prev;
+
+          do
+          {
+            if ( prev > first )
+              prev--;
+            else
+              prev = last;
+
+            dist = points[prev].y - extremum->y;
+            if ( dist < -5 || dist > 5 )
+              break;
+
+          } while ( prev != index );
+
+          do
+          {
+            if ( next < last )
+              next++;
+            else
+              next = first;
+
+            dist = points[next].y - extremum->y;
+            if ( dist < -5 || dist > 5 )
+              break;
+
+          } while ( next != index );
+
+          /* now, set the `round' flag depending on the segment's kind */
+          round = FT_BOOL(
+            FT_CURVE_TAG( glyph->outline.tags[prev] ) != FT_Curve_Tag_On ||
+            FT_CURVE_TAG( glyph->outline.tags[next] ) != FT_Curve_Tag_On );
+
+          AH_LOG(( "%c ", round ? 'r' : 'f' ));
+        }
+
+        if ( round )
+          rounds[num_rounds++] = extremum->y;
+        else
+          flats[num_flats++] = extremum->y;
+      }
+
+      AH_LOG(( "\n" ));
+
+      /* we have computed the contents of the `rounds' and `flats' tables, */
+      /* now determine the reference and overshoot position of the blue;   */
+      /* we simply take the median value after a simple short              */
+      sort_values( num_rounds, rounds );
+      sort_values( num_flats,  flats  );
+
+      blue_ref   = globals->blue_refs + blue;
+      blue_shoot = globals->blue_shoots + blue;
+      if ( num_flats == 0 && num_rounds == 0 )
+      {
+        *blue_ref   = -10000;
+        *blue_shoot = -10000;
+      }
+      else if ( num_flats == 0 )
+      {
+        *blue_ref   =
+        *blue_shoot = rounds[num_rounds / 2];
+      }
+      else if ( num_rounds == 0 )
+      {
+        *blue_ref   =
+        *blue_shoot = flats[num_flats / 2];
+      }
+      else
+      {
+        *blue_ref   = flats[num_flats / 2];
+        *blue_shoot = rounds[num_rounds / 2];
+      }
+
+      /* there are sometimes problems: if the overshoot position of top     */
+      /* zones is under its reference position, or the opposite for bottom  */
+      /* zones.  We must thus check everything there and correct the errors */
+      if ( *blue_shoot != *blue_ref )
+      {
+        FT_Pos   ref      = *blue_ref;
+        FT_Pos   shoot    = *blue_shoot;
+        FT_Bool  over_ref = FT_BOOL( shoot > ref );
+
+
+        if ( AH_IS_TOP_BLUE( blue ) ^ over_ref )
+          *blue_shoot = *blue_ref = ( shoot + ref ) / 2;
+      }
+
+      AH_LOG(( "-- ref = %ld, shoot = %ld\n", *blue_ref, *blue_shoot ));
+    }
+
+    /* reset original face charmap */
+    FT_Set_Charmap( face, charmap );
+    error = 0;
+
+  Exit:
+    return error;
+  }
+
+
+  static FT_Error
+  ah_hinter_compute_widths( AH_Hinter*  hinter )
+  {
+    /* scan the array of segments in each direction */
+    AH_Outline*  outline = hinter->glyph;
+    AH_Segment*  segments;
+    AH_Segment*  limit;
+    AH_Globals*  globals = &hinter->globals->design;
+    FT_Pos*      widths;
+    FT_Int       dimension;
+    FT_Int*      p_num_widths;
+    FT_Error     error = 0;
+    FT_Pos       edge_distance_threshold = 32000;
+
+
+    globals->num_widths  = 0;
+    globals->num_heights = 0;
+
+    /* For now, compute the standard width and height from the `o'       */
+    /* character.  I started computing the stem width of the `i' and the */
+    /* stem height of the "-", but it wasn't too good.  Moreover, we now */
+    /* have a single character that gives us standard width and height.  */
+    {
+      FT_UInt   glyph_index;
+
+
+      glyph_index = FT_Get_Char_Index( hinter->face, 'o' );
+      if ( glyph_index == 0 )
+        return 0;
+
+      error = FT_Load_Glyph( hinter->face, glyph_index, FT_LOAD_NO_SCALE );
+      if ( error )
+        goto Exit;
+
+      error = ah_outline_load( hinter->glyph, hinter->face );
+      if ( error )
+        goto Exit;
+
+      ah_outline_compute_segments( hinter->glyph );
+      ah_outline_link_segments( hinter->glyph );
+    }
+
+    segments     = outline->horz_segments;
+    limit        = segments + outline->num_hsegments;
+    widths       = globals->heights;
+    p_num_widths = &globals->num_heights;
+
+    for ( dimension = 1; dimension >= 0; dimension-- )
+    {
+      AH_Segment*  seg = segments;
+      AH_Segment*  link;
+      FT_Int       num_widths = 0;
+
+
+      for ( ; seg < limit; seg++ )
+      {
+        link = seg->link;
+        /* we only consider stem segments there! */
+        if ( link && link->link == seg && link > seg )
+        {
+          FT_Int  dist;
+
+
+          dist = seg->pos - link->pos;
+          if ( dist < 0 )
+            dist = -dist;
+
+          if ( num_widths < 12 )
+            widths[num_widths++] = dist;
+        }
+      }
+
+      sort_values( num_widths, widths );
+      *p_num_widths = num_widths;
+
+      /* we will now try to find the smallest width */
+      if ( num_widths > 0 && widths[0] < edge_distance_threshold )
+        edge_distance_threshold = widths[0];
+
+      segments     = outline->vert_segments;
+      limit        = segments + outline->num_vsegments;
+      widths       = globals->widths;
+      p_num_widths = &globals->num_widths;
+
+    }
+
+    /* Now, compute the edge distance threshold as a fraction of the */
+    /* smallest width in the font. Set it in `hinter.glyph' too!     */
+    if ( edge_distance_threshold == 32000 )
+      edge_distance_threshold = 50;
+
+    /* let's try 20% */
+    hinter->glyph->edge_distance_threshold = edge_distance_threshold / 5;
+
+  Exit:
+    return error;
+  }
+
+
+  FT_LOCAL_DEF FT_Error
+  ah_hinter_compute_globals( AH_Hinter*  hinter )
+  {
+    return ah_hinter_compute_widths( hinter ) ||
+           ah_hinter_compute_blues ( hinter );
+  }
+
+
+/* END */
+@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@@
+
+
+1.1.9.1
+log
+@OpenBSD just has imported exactly this tree into their vendor branch,
+called the same tag, in XF4/xc
+This is, apparently, the last XFree86 snapshot before the licence change
+(ie, addition of the advertising clause)
+
+Since the developers don't see any problems with that, and we would like
+to integrate improvements done by the remaining one or two (or so) XFree86
+developers (j/k), this prepares enabling us to update X-Window in the future.
+@
+text
+@d7 1
+a7 1
+/*  Copyright 2000-2001, 2002 Catharon Productions Inc.                    */
+d31 1
+a31 1
+  const char*  blue_chars[AH_BLUE_MAX] =
+a34 3
+#ifdef FT_CONFIG_CHESTER_SMALL_F
+    "fijkdbh",
+#endif
+d46 1
+a46 2
+    FT_Int  i, j;
+    FT_Pos  swap;
+d65 1
+a65 1
+  ah_hinter_compute_blues( AH_Hinter  hinter )
+d68 1
+a68 1
+    AH_Globals    globals = &hinter->globals->design;
+d87 1
+a87 1
+    error = FT_Select_Charmap( face, FT_ENCODING_UNICODE );
+d98 1
+a98 1
+    for ( blue = AH_BLUE_CAPITAL_TOP; blue < AH_BLUE_MAX; blue++ )
+d161 1
+a161 1
+          FT_Int  idx = (FT_Int)( extremum - points );
+d173 1
+a173 1
+            if ( end >= idx )
+d188 1
+a188 1
+          prev = idx;
+d202 1
+a202 1
+          } while ( prev != idx );
+d215 1
+a215 1
+          } while ( next != idx );
+d219 2
+a220 2
+            FT_CURVE_TAG( glyph->outline.tags[prev] ) != FT_CURVE_TAG_ON ||
+            FT_CURVE_TAG( glyph->outline.tags[next] ) != FT_CURVE_TAG_ON );
+d289 1
+a289 1
+  ah_hinter_compute_widths( AH_Hinter  hinter )
+d292 9
+a300 9
+    AH_Outline  outline = hinter->glyph;
+    AH_Segment  segments;
+    AH_Segment  limit;
+    AH_Globals  globals = &hinter->globals->design;
+    FT_Pos*     widths;
+    FT_Int      dimension;
+    FT_Int*     p_num_widths;
+    FT_Error    error = 0;
+    FT_Pos      edge_distance_threshold = 32000;
+d322 1
+a322 1
+      error = ah_outline_load( hinter->glyph, 0x10000L, 0x10000L, hinter->face );
+d337 3
+a339 3
+      AH_Segment  seg = segments;
+      AH_Segment  link;
+      FT_Int      num_widths = 0;
+d348 1
+a348 1
+          FT_Pos  dist;
+d355 1
+a355 1
+          if ( num_widths < AH_MAX_WIDTHS )
+d371 1
+d387 2
+a388 2
+  FT_LOCAL_DEF( FT_Error )
+  ah_hinter_compute_globals( AH_Hinter  hinter )
+@
+
+
+1.1.1.1
+log
+@Import OpenBSD 3.3 XF4 repository from CTM 3132 the first time
+This finalizes starting an OpenBSD-mirabile (aka MirBSD) repository.
+
+### MirBSD is:
+# Copyright (c) 1982-2003 by Thorsten "mirabile" Glaser <x86@@ePost.de>
+# Copyright © 1968-2003  The authors of And contributors to UNIX®, the
+#       C Language, BSD/Berkeley Unix; 386BSD, NetBSD 1.1 and OpenBSD.
+#
+# Anyone who obtained a copy of this work is hereby permitted to freely use,
+# distribute, modify, merge, sublicence, give away or sell it as long as the
+# authors are given due credit and the following notice is retained:
+#
+# This work is provided "as is", with no explicit or implicit warranty what-
+# soever. Use it only at your own risk. In no event may an author or contri-
+# butor be held liable for any damage, directly or indirectly, that origina-
+# ted through or is caused by creation or modification of this work.
+
+MirBSD is my private tree. MirBSD does not differ very much from OpenBSD
+and intentionally tracks OpenBSD. That's why it _is_ OpenBSD, just not the
+official one. It's like with DarrenBSD.
+
+At time of this writing, no advertising for MirBSD must be done,
+because the advertising clause has not yet been sorted out.
+
+http://templeofhate.com/tglaser/MirBSD/index.php
+@
+text
+@@
+
+
+1.1.1.2
+log
+@The X-Windowing System
+
+Import XFree86 4.3 from OpenBSD by CTM, in the hope it's stable
+@
+text
+@d7 1
+a7 1
+/*  Copyright 2000-2001, 2002 Catharon Productions Inc.                    */
+d161 1
+a161 1
+          FT_Int  idx = (FT_Int)( extremum - points );
+d173 1
+a173 1
+            if ( end >= idx )
+d188 1
+a188 1
+          prev = idx;
+d202 1
+a202 1
+          } while ( prev != idx );
+d215 1
+a215 1
+          } while ( next != idx );
+d387 1
+a387 1
+  FT_LOCAL_DEF( FT_Error )
+@
+
+
+1.1.1.3
+log
+@That's what OpenBSD will, probably, ship as XF4 in 3.5
+their last sync against XFree86 4.3-current has been
+imported into our vendor branch, too
+@
+text
+@d31 1
+a31 1
+  const char*  blue_chars[AH_BLUE_MAX] =
+a34 3
+#ifdef FT_CONFIG_CHESTER_SMALL_F
+    "fijkdbh",
+#endif
+d46 1
+a46 2
+    FT_Int  i, j;
+    FT_Pos  swap;
+d65 1
+a65 1
+  ah_hinter_compute_blues( AH_Hinter  hinter )
+d68 1
+a68 1
+    AH_Globals    globals = &hinter->globals->design;
+d87 1
+a87 1
+    error = FT_Select_Charmap( face, FT_ENCODING_UNICODE );
+d98 1
+a98 1
+    for ( blue = AH_BLUE_CAPITAL_TOP; blue < AH_BLUE_MAX; blue++ )
+d219 2
+a220 2
+            FT_CURVE_TAG( glyph->outline.tags[prev] ) != FT_CURVE_TAG_ON ||
+            FT_CURVE_TAG( glyph->outline.tags[next] ) != FT_CURVE_TAG_ON );
+d289 1
+a289 1
+  ah_hinter_compute_widths( AH_Hinter  hinter )
+d292 9
+a300 9
+    AH_Outline  outline = hinter->glyph;
+    AH_Segment  segments;
+    AH_Segment  limit;
+    AH_Globals  globals = &hinter->globals->design;
+    FT_Pos*     widths;
+    FT_Int      dimension;
+    FT_Int*     p_num_widths;
+    FT_Error    error = 0;
+    FT_Pos      edge_distance_threshold = 32000;
+d322 1
+a322 1
+      error = ah_outline_load( hinter->glyph, 0x10000L, 0x10000L, hinter->face );
+d337 3
+a339 3
+      AH_Segment  seg = segments;
+      AH_Segment  link;
+      FT_Int      num_widths = 0;
+d348 1
+a348 1
+          FT_Pos  dist;
+d355 1
+a355 1
+          if ( num_widths < AH_MAX_WIDTHS )
+d371 1
+d388 1
+a388 1
+  ah_hinter_compute_globals( AH_Hinter  hinter )
+@
+
+

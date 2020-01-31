@@ -1,0 +1,301 @@
+head	1.4;
+branch	1.1.1;
+access;
+symbols
+	ctm-3389:1.1.1.1
+	openbsd:1.1.1
+	MIRBSD_5:1.3
+	MIRBSD_4:1.1;
+locks; strict;
+comment	@# @;
+
+
+1.4
+date	2003.08.31.20.53.01;	author tg;	state dead;
+branches;
+next	1.3;
+
+1.3
+date	2003.05.15.18.57.41;	author tg;	state Exp;
+branches;
+next	1.2;
+
+1.2
+date	2003.05.15.18.56.29;	author tg;	state dead;
+branches;
+next	1.1;
+
+1.1
+date	2003.03.23.15.03.46;	author tg;	state Exp;
+branches
+	1.1.1.1;
+next	;
+
+1.1.1.1
+date	2003.07.06.13.28.39;	author tg;	state Exp;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.4
+log
+@Merge import of OpenBSD source, ports and XF4 tree.
+
+While here,
+o clean up differences where possible
+o whitespace cleanup
+o ifdef ./. if defined()
+o '...' ./. "..."
+o echo foo > bar ./. echo foo >bar
+o `...` ./. $(...) ./. $$(...)
+o `...' ./. '...'
+o modernize "our" tree, e.g. WWW in ports
+o fix some typos and brainos introduced when renaming OpenBSD to MirBSD
+o use hardware 80387 by default
+o migrate Apache 1.3.28 OpenBSD ./. MirBSD ./. KAME
+o work around as many CVS bugs as possible (add back/delete files, ...)
+
+Synchronize stuff, ready for ongoing changes.
+@
+text
+@$MirBSD: patch-gcc_function_c,v 1.3 2003/05/15 18:57:41 tg Exp $
+--- gcc/function.c.orig	Thu Apr 10 22:25:42 2003
++++ gcc/function.c	Thu May 15 18:43:58 2003
+@@@@ -59,6 +59,7 @@@@ Software Foundation, 59 Temple Place - S
+ #include "tm_p.h"
+ #include "integrate.h"
+ #include "langhooks.h"
++#include "protector.h"
+ 
+ #ifndef TRAMPOLINE_ALIGNMENT
+ #define TRAMPOLINE_ALIGNMENT FUNCTION_BOUNDARY
+@@@@ -142,6 +143,10 @@@@ static GTY(()) varray_type epilogue;
+ /* Array of INSN_UIDs to hold the INSN_UIDs for each sibcall epilogue
+    in this function.  */
+ static GTY(()) varray_type sibcall_epilogue;
++
++/* Current boundary mark for character arrays.  */
++int temp_boundary_mark = 0;
++
+ 
+ /* In order to evaluate some expressions, such as function calls returning
+    structures in memory, we need to temporarily allocate stack locations.
+@@@@ -195,6 +200,8 @@@@ struct temp_slot GTY(())
+   /* The size of the slot, including extra space for alignment.  This
+      info is for combine_temp_slots.  */
+   HOST_WIDE_INT full_size;
++  /* Boundary mark of a character array and the others. This info is for propolice */
++  int boundary_mark;
+ };
+ 
+ /* This structure is used to record MEMs or pseudos used to replace VAR, any
+@@@@ -629,6 +636,7 @@@@ assign_stack_local (mode, size, align)
+    whose lifetime is controlled by CLEANUP_POINT_EXPRs.  KEEP is 3
+    if we are to allocate something at an inner level to be treated as
+    a variable in the block (e.g., a SAVE_EXPR).
++   KEEP is 5 if we allocate a place to return structure.
+ 
+    TYPE is the type that will be used for the stack slot.  */
+ 
+@@@@ -642,6 +650,8 @@@@ assign_stack_temp_for_type (mode, size, 
+   unsigned int align;
+   struct temp_slot *p, *best_p = 0;
+   rtx slot;
++  int char_array = (flag_propolice_protection
++		    && keep == 1 && search_string_def (type));
+ 
+   /* If SIZE is -1 it means that somebody tried to allocate a temporary
+      of a variable size.  */
+@@@@ -667,7 +677,8 @@@@ assign_stack_temp_for_type (mode, size, 
+ 	&& ! p->in_use
+ 	&& objects_must_conflict_p (p->type, type)
+ 	&& (best_p == 0 || best_p->size > p->size
+-	    || (best_p->size == p->size && best_p->align > p->align)))
++	    || (best_p->size == p->size && best_p->align > p->align))
++	&& (! char_array || p->boundary_mark != 0))
+       {
+ 	if (p->align == align && p->size == size)
+ 	  {
+@@@@ -702,6 +713,7 @@@@ assign_stack_temp_for_type (mode, size, 
+ 	      p->address = 0;
+ 	      p->rtl_expr = 0;
+ 	      p->type = best_p->type;
++	      p->boundary_mark = best_p->boundary_mark;
+ 	      p->next = temp_slots;
+ 	      temp_slots = p;
+ 
+@@@@ -762,6 +774,7 @@@@ assign_stack_temp_for_type (mode, size, 
+       p->full_size = frame_offset - frame_offset_old;
+ #endif
+       p->address = 0;
++      p->boundary_mark = char_array?++temp_boundary_mark:0;
+       p->next = temp_slots;
+       temp_slots = p;
+     }
+@@@@ -932,14 +945,16 @@@@ combine_temp_slots ()
+ 	    int delete_q = 0;
+ 	    if (! q->in_use && GET_MODE (q->slot) == BLKmode)
+ 	      {
+-		if (p->base_offset + p->full_size == q->base_offset)
++		if (p->base_offset + p->full_size == q->base_offset &&
++		    p->boundary_mark == q->boundary_mark)
+ 		  {
+ 		    /* Q comes after P; combine Q into P.  */
+ 		    p->size += q->size;
+ 		    p->full_size += q->full_size;
+ 		    delete_q = 1;
+ 		  }
+-		else if (q->base_offset + q->full_size == p->base_offset)
++		else if (q->base_offset + q->full_size == p->base_offset &&
++			 p->boundary_mark == q->boundary_mark)
+ 		  {
+ 		    /* P comes after Q; combine P into Q.  */
+ 		    q->size += p->size;
+@@@@ -1497,7 +1512,9 @@@@ put_reg_into_stack (function, reg, type,
+     new = func->x_parm_reg_stack_loc[regno];
+ 
+   if (new == 0)
+-    new = assign_stack_local_1 (decl_mode, GET_MODE_SIZE (decl_mode), 0, func);
++    new = function ?
++	assign_stack_local_1 (decl_mode, GET_MODE_SIZE (decl_mode), 0, func):
++	assign_stack_local_for_pseudo_reg (decl_mode, GET_MODE_SIZE (decl_mode), 0);
+ 
+   PUT_CODE (reg, MEM);
+   PUT_MODE (reg, decl_mode);
+@@@@ -3961,7 +3978,8 @@@@ instantiate_virtual_regs_1 (loc, object,
+ 		 constant with that register.  */
+ 	      temp = gen_reg_rtx (Pmode);
+ 	      XEXP (x, 0) = new;
+-	      if (validate_change (object, &XEXP (x, 1), temp, 0))
++	      if (validate_change (object, &XEXP (x, 1), temp, 0)
++		  && ! flag_propolice_protection)
+ 		emit_insn_before (gen_move_insn (temp, new_offset), object);
+ 	      else
+ 		{
+@
+
+
+1.3
+log
+@second round... hold your breath
+cvs hates me
+@
+text
+@d1 1
+a1 1
+$MirBSD$
+@
+
+
+1.2
+log
+@first round of gcc update, hold your breath
+@
+text
+@d1 4
+a4 4
+$MirBSD: patch-gcc_function_c,v 1.1 2003/03/23 15:03:46 tg Exp $
+--- gcc/function.c.orig	Mon Jan 27 20:31:35 2003
++++ gcc/function.c	Fri Feb 28 13:04:30 2003
+@@@@ -60,6 +60,7 @@@@ Software Foundation, 59 Temple Place - S
+d12 1
+a12 1
+@@@@ -156,6 +157,10 @@@@ static varray_type epilogue;
+d15 1
+a15 1
+ static varray_type sibcall_epilogue;
+d23 1
+a23 1
+@@@@ -209,6 +214,8 @@@@ struct temp_slot
+d32 1
+a32 1
+@@@@ -655,6 +662,7 @@@@ assign_stack_local (mode, size, align)
+d40 1
+a40 1
+@@@@ -668,6 +676,8 @@@@ assign_stack_temp_for_type (mode, size, 
+d49 1
+a49 1
+@@@@ -693,7 +703,8 @@@@ assign_stack_temp_for_type (mode, size, 
+d59 1
+a59 1
+@@@@ -728,6 +739,7 @@@@ assign_stack_temp_for_type (mode, size, 
+d67 1
+a67 1
+@@@@ -788,6 +800,7 @@@@ assign_stack_temp_for_type (mode, size, 
+d75 1
+a75 1
+@@@@ -958,14 +971,16 @@@@ combine_temp_slots ()
+d94 1
+a94 1
+@@@@ -1519,7 +1534,9 @@@@ put_reg_into_stack (function, reg, type,
+d105 1
+a105 1
+@@@@ -3950,7 +3967,8 @@@@ instantiate_virtual_regs_1 (loc, object,
+@
+
+
+1.1
+log
+@import gcc-3.2.2-propolice -system
+This is a variant of GNU gcc 3.2 with integrated
+propolice support, adaptions for i386-ELF and can
+be used as system compiler.
+@
+text
+@d1 1
+a1 1
+$MirBSD: obsd.ports,v 1.62 2003/03/22 22:33:27 tg Exp $
+@
+
+
+1.1.1.1
+log
+@Import OpenBSD ports tree
+@
+text
+@d1 4
+a4 4
+$MirBSD: patch-gcc_function_c,v 1.3 2003/05/15 18:57:41 tg Exp $
+--- gcc/function.c.orig	Thu Apr 10 22:25:42 2003
++++ gcc/function.c	Thu May 15 18:43:58 2003
+@@@@ -59,6 +59,7 @@@@ Software Foundation, 59 Temple Place - S
+d12 1
+a12 1
+@@@@ -142,6 +143,10 @@@@ static GTY(()) varray_type epilogue;
+d15 1
+a15 1
+ static GTY(()) varray_type sibcall_epilogue;
+d23 1
+a23 1
+@@@@ -195,6 +200,8 @@@@ struct temp_slot GTY(())
+d32 1
+a32 1
+@@@@ -629,6 +636,7 @@@@ assign_stack_local (mode, size, align)
+d40 1
+a40 1
+@@@@ -642,6 +650,8 @@@@ assign_stack_temp_for_type (mode, size, 
+d49 1
+a49 1
+@@@@ -667,7 +677,8 @@@@ assign_stack_temp_for_type (mode, size, 
+d59 1
+a59 1
+@@@@ -702,6 +713,7 @@@@ assign_stack_temp_for_type (mode, size, 
+d67 1
+a67 1
+@@@@ -762,6 +774,7 @@@@ assign_stack_temp_for_type (mode, size, 
+d75 1
+a75 1
+@@@@ -932,14 +945,16 @@@@ combine_temp_slots ()
+d94 1
+a94 1
+@@@@ -1497,7 +1512,9 @@@@ put_reg_into_stack (function, reg, type,
+d105 1
+a105 1
+@@@@ -3961,7 +3978,8 @@@@ instantiate_virtual_regs_1 (loc, object,
+@
+
+

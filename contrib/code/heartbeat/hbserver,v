@@ -1,0 +1,887 @@
+head	1.12;
+access;
+symbols;
+locks; strict;
+comment	@# @;
+
+
+1.12
+date	2004.11.07.19.19.02;	author tg;	state Exp;
+branches;
+next	1.11;
+
+1.11
+date	2004.11.07.18.02.57;	author tg;	state Exp;
+branches;
+next	1.10;
+
+1.10
+date	2004.11.07.18.02.39;	author tg;	state Exp;
+branches;
+next	1.9;
+
+1.9
+date	2004.11.07.17.47.55;	author tg;	state Exp;
+branches;
+next	1.8;
+
+1.8
+date	2004.11.07.13.26.50;	author tg;	state Exp;
+branches;
+next	1.7;
+
+1.7
+date	2004.11.06.20.35.26;	author tg;	state Exp;
+branches;
+next	1.6;
+
+1.6
+date	2004.11.06.20.31.00;	author tg;	state Exp;
+branches;
+next	1.5;
+
+1.5
+date	2004.11.06.20.20.58;	author tg;	state Exp;
+branches;
+next	1.4;
+
+1.4
+date	2004.11.06.19.59.13;	author tg;	state Exp;
+branches;
+next	1.3;
+
+1.3
+date	2004.11.06.18.23.18;	author tg;	state Exp;
+branches;
+next	1.2;
+
+1.2
+date	2004.11.06.16.00.56;	author tg;	state Exp;
+branches;
+next	1.1;
+
+1.1
+date	2004.10.05.20.11.40;	author tg;	state Exp;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.12
+log
+@hbClient: SixXS insists on the trailing NUL byte
+hbServer: log delta-t for heartbeats
+@
+text
+@#!/bin/ksh
+# $MirBSD: contrib/code/heartbeat/hbserver,v 1.11 2004/11/07 18:02:57 tg Exp $
+#-
+# Copyright (c) 2004
+#	Thorsten "mirabile" Glaser <tg@@66h.42h.de>
+#
+# Licensee is hereby permitted to deal in this work without restric-
+# tion, including unlimited rights to use, publicly perform, modify,
+# merge, distribute, sell, give away or sublicence, provided all co-
+# pyright notices above, these terms and the disclaimer are retained
+# in all redistributions or reproduced in accompanying documentation
+# or other materials provided with binary redistributions.
+#
+# All advertising materials mentioning features or use of this soft-
+# ware must display the following acknowledgement:
+#	This product includes material provided by Thorsten Glaser.
+#
+# Licensor hereby provides this work "AS IS" and WITHOUT WARRANTY of
+# any kind, expressed or implied, to the maximum extent permitted by
+# applicable law, but with the warranty of being written without ma-
+# licious intent or gross negligence; in no event shall licensor, an
+# author or contributor be held liable for any damage, direct, indi-
+# rect or other, however caused, arising in any way out of the usage
+# of covered work, even if advised of the possibility of such damage.
+#-
+# Sample implementation for the Heartbeat protocol, originally desi-
+# gned by the SixXS IPv6 tunnel provider. MirOS hbServer is not sup-
+# ported or endorsed by SixXS.
+# This is the server part of the implementation.
+#
+# Command overview:
+# - PASSWD
+#	<newpassword> <user/ip> <date> <md5>		-> extension
+# - HEARTBEAT
+#	TUNNEL <user/ip> <ipv4|"sender"> <date> <md5>	-> supported
+#	HOST ...					-> ignored
+# - DISABLE
+#	TUNNEL <user/ip> <ipv4|"sender"> <date> <md5>	-> supported
+#	HOST ...					-> ignored
+#
+# This script is not configurable in the source code.
+
+
+#=== global variables ===
+
+# helpers
+progname="${0:-hbServer}"	# programme name
+progname="${progname##*/}"	# basename of progname
+conf=hbserver.cfg		# configuration file
+let netcmd=0			# network sub PID
+
+# arrays for user configuration
+let anum=0			# number of users
+set -A auser			# username
+set -A apass			# password
+set -A ascript			# script
+set -A astat			# status
+
+# filedescriptors for co-routines
+set -A afd			# user script input
+let freefd=4			# first free one
+let netin=0			# network sub output
+
+#=== subroutines ===
+
+#-- general programe flow and configuration
+
+# show help
+function usage
+{
+	print "Usage: $progname [-h | -c hbserver.cfg]"
+	exit 0
+}
+
+# abort with error
+function die
+{
+	print -- "${progname}:" "$@@"
+	exit 1
+}
+
+# clean up (called by trap)
+function cleanup
+{
+	# which error code?
+	rv=${1:-0}
+	print finishing up, $anum clients, netio $netin/$netcmd
+	# shut down network coprocess
+	(( netcmd > 0 )) && kill $netcmd
+	# shut down user coprocesses
+	let i=anum
+	while (( i > 0 )); do
+		tell ${afd[--i]} QUIT
+	done
+	sleep 3
+	print bye
+	exit $rv
+}
+
+# dump current configuration
+# ATTENTION: debug only, shows passwords in plain text
+function dumpcfg
+{
+	print == Current Configuration:
+	print Number of user co-routines: $anum
+	let i=anum
+	while (( i > 0 )); do
+		let --i
+		print "id $i for user '${auser[i]}' pw '${apass[i]}'" \
+		    "calls '${ascript[i]}' on fd ${afd[i]} is ${astat[i]}"
+	done
+	print Network I/O: read from $netin, signal to $netcmd
+	print == End of Configuration Dump
+}
+
+#-- communication with co-routines
+
+# write command to co-process
+function tell
+{
+	let fd=${1:-0}
+	shift
+	(( fd > 0 )) && print -u$fd "$@@" &
+}
+
+#-- networking
+
+# netio co-routine
+function net_reader
+{
+	nc_pid=
+	trap '[[ -n $nc_pid ]] && kill $nc_pid; exit 0' TERM
+	while : ; do
+		nc -4Inluw0 3740 &
+		nc_pid=$!
+		wait
+		nc_pid=
+		print
+	done
+}
+
+#-- user functions
+
+# look through arrays for user
+function lookup
+{
+	let rv=65535	# "not found"
+	let i=anum
+	u="$1"
+	while (( i > 0 )); do
+		if [[ ${auser[--i]} = $u ]]; then
+			let rv=i
+			break
+		fi
+	done
+	print $rv
+}
+
+#-- backend calls
+
+# command PASSWD: change password for user
+function do_passwd
+{
+	let uid=$1
+	pw="$2"
+
+	# 1) log action
+	print doing PASSWD for ${auser[uid]}
+
+	# 2) edit persistent database
+	np="${auser[uid]}\t$(print -nr -- "$pw" \
+	    | b64encode -r)\t${ascript[uid]}"
+	print "/^${auser[uid]}[\t ]/ka\ni\n$np\n.\n'ad\nwq" | ed -s "$conf"
+
+	# 3) run-time info
+	apass[uid]="$pw"
+
+	# 4) heartbeat backend
+	tell ${afd[uid]} -r PASS "$pw"
+}
+
+# command HEARTBEAT/DISABLE subcommand TUNNEL
+function do_tunnel
+{
+	let uid=$1
+	newstate=$2
+
+	# did the state change?
+	if [[ ${astat[uid]} = $newstate ]]; then
+		# no, just idle
+		tell ${afd[uid]} IDLE
+	else
+		# yes, log action
+		print doing HEARTBEAT for ${auser[uid]} to $newstate
+		# and ask backend to act
+		tell ${afd[uid]} $newstate
+		astat[uid]=$newstate
+	fi
+}
+
+#=== main programme ===
+
+# parse arguments
+while getopts ":c:h" opt; do
+	case $opt {
+	c)	[[ -s $OPTARG ]] || usage
+		conf="$OPTARG"
+		;;
+	h)	usage
+		;;
+	\?)	usage
+		;;
+	}
+done
+shift $((OPTIND - 1))
+
+# parse configuration file
+[[ -s $conf && -r $conf ]] || die Configuration file "$conf" not readable
+let lineno=0
+while read s; do
+	let lineno++
+
+	# skip over comments, blanks
+	s="${s%%#*}"
+	[[ -n $s ]] || continue
+	# invalid lines
+	[[ $s = +([!$IFS])+([$IFS])+([!$IFS])+([$IFS])+([!$IFS]) ]] \
+	    || die Syntax error in "$conf" line $lineno
+
+	# parse fields
+	set -A line -- $s
+	auser[anum]="${line[0]}"
+	apass[anum]="$(print -r -- ${line[1]} | b64decode -r 2>/dev/null)"
+	ascript[anum]="${line[2]}"
+
+	# check for validity
+	[[ ${auser[anum]} = *[$IFS]* ]] \
+	    && die User contains whitespace in "$conf" line $lineno
+	[[ -n ${apass[anum]} ]] \
+	    || die Password not given or malformed in "$conf" line $lineno
+	[[ -x ${ascript[anum]} ]] \
+	    || die Script "${ascript[anum]}" not found in "$conf" line $lineno
+
+	# loop
+	let anum++
+done <"$conf"
+
+# start the subprocesses, one per user
+let i=anum
+while (( i > 0 )); do
+	# start the backend as a co-routine
+	eval "PATH=$PATH:. ${ascript[--i]} >/dev/null 2>&1 |&"
+
+	# discard output from backend
+	exec 3<&p; exec 3<&-
+
+	# initialise backend to DOWN state
+	print -rp "INIT ${auser[i]} ${apass[i]}"
+	astat[i]=DOWN
+
+	# allocate free filedescriptor and decouple
+	let afd[i]=freefd++
+	eval "exec ${afd[i]}>&p"
+done
+
+# set up exit traps
+trap "cleanup 0" HUP TERM
+trap "cleanup 1" INT
+
+# say hello to the logfile
+print starting hbServer for $anum clients
+
+# start network I/O subprocess
+net_reader |&
+netcmd=$(jobs -p %net_reader)
+# close its input filedescriptor
+exec 3>&p; exec 3>&-
+# allocate free output fd
+let netin=freefd++
+eval "exec ${netin}<&p"
+
+# check if network I/O really works
+cookie="SETUP $$ $RANDOM"
+print -n "$cookie\0" | nc -4nuw0 -p 3741 127.0.0.1 3740
+read -u$netin NETIP NETIN
+if [[ "$NETIP $NETIN" != "[127.0.0.1]:3741 $cookie" ]]; then
+	print fatal error: network I/O process not working
+	cleanup 2
+fi
+
+# main loop
+while : ; do
+	# read input from the network
+	read -u$netin NETIP NETIN
+	set -A line -- $NETIN
+
+	# 1) how many tokens do we have?
+	let ln=${#line[*]}-1		# 0 .. n-1
+	(( ln < 3 )) && continue	# min: CMD HOST TIME MD5
+
+	# 2) does the time match?
+	let i=$(date +%s)
+	let tm=${line[ln-1]}
+	# difference more than 60+(utc-tai) seconds?
+	(( (dt = ( (i > tm) ? (i - tm) : (tm - i) )) > 82 )) && continue
+
+	# 3) search for user (third token)
+	let uid=$(lookup ${line[2]})
+	(( uid < 65535 )) || continue
+
+	# 4) match MD5 given ("is") with MD5 calculated ("should be")
+	md5=$(print -nr -- "${NETIN% *} ${apass[uid]}" | md5)
+	[[ $md5 = ${line[ln]} ]] || continue
+
+	# 5) calculate IPv4 address of sender
+	ip="${NETIP#\[}"
+	ip=${ip%]*}
+
+	# 6) execute command received
+	case ${line[0]} {
+	DISABLE)
+		# correct subcommand?
+		[[ ${line[1]} = TUNNEL ]] || continue
+		do_tunnel $uid DOWN
+		;;
+	HEARTBEAT)
+		# correct subcommand?
+		[[ ${line[1]} = TUNNEL ]] || continue
+		# correct IPv4 address?
+		case ${line[3]} {
+		sender)
+			;;
+		+([0-9]).+([0-9]).+([0-9]).+([0-9]))
+			[[ ${line[3]} = $ip ]] || continue
+			;;
+		*)
+			continue
+			;;
+		}
+		do_tunnel $uid IP$ip
+		print delta temporis for ${auser[uid]} is $dt
+		;;
+	PASSWD)
+		do_passwd $uid "${line[1]}"
+		;;
+	}
+done
+# NOTREACHED
+@
+
+
+1.11
+log
+@typo
+@
+text
+@d2 1
+a2 1
+# $MirBSD: contrib/code/heartbeat/hbserver,v 1.10 2004/11/07 18:02:39 tg Exp $
+d341 1
+@
+
+
+1.10
+log
+@replace debugging by assertion
+@
+text
+@d2 1
+a2 1
+# $MirBSD: contrib/code/heartbeat/hbserver,v 1.9 2004/11/07 17:47:55 tg Exp $
+d308 1
+a308 1
+	let uid=$(lookip ${line[2]})
+@
+
+
+1.9
+log
+@rewrite hbClient and hbServer, in a more structured way
+fix typos and bugs in README and the backends
+add support for password changing to the clients
+@
+text
+@d2 1
+a2 1
+# $MirBSD: contrib/code/heartbeat/hbserver,v 1.8 2004/11/07 13:26:50 tg Exp $
+d286 4
+a289 1
+print "debug: NETIP=<$NETIP> NETIN=<$NETIN>"
+@
+
+
+1.8
+log
+@TENTATIVE support for 'sender'
+@
+text
+@d2 1
+a2 1
+# $MirBSD: contrib/code/heartbeat/hbserver,v 1.7 2004/11/06 20:35:26 tg Exp $
+d26 1
+a26 1
+# Sample implementation for the Heartbeat protocoll originally desi-
+d29 1
+d31 36
+a66 10
+# Supported commands:
+#	HEARTBEAT TUNNEL <user/ip> <ipv4|sender>
+#	DISABLE TUNNEL <user/ip> <ipv4|sender>
+#	PASSWD <newpass> <user>
+# Not supported:
+#	HEARTBEAT|DISABLE HOST
+
+# initialise
+progname="${0:-hbServer}"
+progname="${progname##*/}"
+d82 1
+a82 1
+# clean up nicely
+d85 21
+a105 1
+	print finishing up, $anum clients
+d108 3
+a110 1
+		print -u${afd[--i]} QUIT
+d112 12
+a123 1
+	sleep 2
+d126 19
+a144 1
+# tell me the array index for a user
+d149 1
+d151 1
+a151 1
+		if [[ ${auser[--i]} = $1 ]]; then
+d159 4
+a162 2
+# change password for user
+function do_chpass
+d165 8
+a172 3
+	p="$2"
+	# first, edit the persistent database
+	np="${auser[uid]}\t$(print -nr "$p" | b64encode -r)\t${ascript[uid]}"
+a173 5
+	# then, edit run-time info
+	apass[uid]="$p"
+	# finally, tell the script (which needs it for DOWN)
+	print -ru${afd[uid]} "PASS $p"
+}
+d175 5
+a179 6
+# heartbeat or disable command
+# if the IP/state has changed
+function do_heartbeat
+{
+	let uid=$1
+	print -ru${afd[uid]} ${astat[uid]}
+d182 2
+a183 3
+# heartbeat or disable command
+# if the IP/state hasn't changed
+function do_heartbeat_idle
+d186 1
+a186 2
+	print -ru${afd[uid]} IDLE
+}
+d188 11
+a198 9
+# dump config (debug only, shows passwords!)
+function dumpcfg
+{
+	let i=anum
+	while (( i > 0 )); do
+		let --i
+		print -n "id $i for user '${auser[i]}' pw '${apass[i]}'"
+		print " calls '${ascript[i]}' on fd ${afd[i]} is ${astat[i]}"
+	done
+d201 1
+a201 9
+# the network I/O (blocking read) subprocess
+function netin_reader
+{
+	while : ; do
+		print -r -- $(nc -4Inluw0 3740)
+	done
+}
+
+#=== MAIN PROGRAMME ===
+a203 1
+conf="hbserver.cfg"
+a216 11
+[[ -s $conf ]] || die Configuration file "$conf" not readable
+
+# set up environment
+let freefd=5
+let anum=0
+set -A auser
+set -A apass
+set -A ascript
+set -A afd
+set -A astat
+
+d218 1
+d222 1
+a234 2
+	let afd[anum]=freefd
+	astat[anum]=DOWN
+a244 1
+	let freefd++
+d248 1
+a248 1
+# Start the subprocesses
+d253 2
+a254 1
+	# we don't need any output from the backend
+d256 2
+a257 1
+	# tell it to initialise to DOWN state
+d259 4
+a262 1
+	# now move co-routine to background/filedescriptor
+d266 11
+a276 5
+trap "cleanup; print bye; exit 0" TERM
+print starting hbServer, $anum clients
+
+# start network reader as subprocess
+netin_reader |&
+d278 9
+a286 1
+exec 4<&p
+d290 2
+a291 2
+	# read a line from the network
+	read -u4 NETIP NETIN
+d294 21
+a314 23
+	# how many tokens do we have?
+	let ln=${#line[*]}-1
+	# min: CMD HOST TIMESTAMP MD5
+	(( ln < 3 )) && continue
+
+	# check if time matches
+	let curtm=$(date +%s)
+	md5=${line[ln--]}
+	let tm=${line[ln]}
+	# difference by more than 60+(utc-tai) seconds?
+	(( (curtm>tm) ? (curtm-tm) : (tm-curtm) > 82 )) && continue
+
+	# _third_ word is username. always.
+	let uid=$(lookup ${line[2]})
+	(( uid == 65535 )) && continue
+
+	# calculate the checksum and match it
+	mdc=$(print -nr -- "${NETIN% *} ${apass[uid]}" | md5)
+	[[ $md5 = $mdc ]] || continue
+
+	# calculate sender IP
+	rip="${NETIP#\[}"
+	rip=${rip%]*}
+d316 1
+a316 1
+	# switch on command received
+d318 4
+a321 4
+	PASSWD)
+		# MirOS extension
+		do_chpass $uid ${line[1]}
+		print doing PASSWD for ${auser[uid]}
+d323 2
+a324 2
+	HEARTBEAT|DISABLE)
+		# expect correct subcommand
+d326 15
+a340 26
+		if [[ ${line[0]} = HEARTBEAT ]]; then
+			# expect correct IPv4 address or "sender"
+			ip=${line[3]}
+			case $ip {
+			sender)
+				ip=$rip
+				;;
+			+([0-9]).+([0-9]).+([0-9]).+([0-9]))
+				[[ $ip = $rip ]] || continue
+				;;
+			*)
+				continue
+				;;
+			}
+			newstate=IP$ip
+		else
+			newstate=DOWN
+		fi
+		# check if change in state
+		if [[ ${astat[uid]} = $newstate ]]; then
+			do_heartbeat_idle $uid
+		else
+			print doing HEARTBEAT for ${auser[uid]} to $newstate
+			astat[uid]=$newstate
+			do_heartbeat $uid
+		fi
+@
+
+
+1.7
+log
+@minimal logging
+@
+text
+@d2 1
+a2 1
+# $MirBSD: contrib/code/heartbeat/hbserver,v 1.6 2004/11/06 20:31:00 tg Exp $
+d31 2
+a32 2
+#	HEARTBEAT TUNNEL <user/ip> <ipv4>
+#	DISABLE TUNNEL <user/ip> <ipv4>
+a35 1
+#	using "sender" instead of <ipv4>
+d125 1
+a125 1
+		print -r -- $(nc -4unlw0 3740)
+d213 1
+a213 1
+	read -u4 NETIN
+d236 4
+d251 1
+a251 1
+			# expect correct IPv4 address
+d253 11
+a263 2
+			[[ $ip = +([0-9]).+([0-9]).+([0-9]).+([0-9]) ]] \
+			    || continue
+@
+
+
+1.6
+log
+@don't swap < and > again...
+@
+text
+@d2 1
+a2 1
+# $MirBSD: contrib/code/heartbeat/hbserver,v 1.5 2004/11/06 20:20:58 tg Exp $
+d242 1
+d260 1
+@
+
+
+1.5
+log
+@don't pitfall the traps; allow clean exit under djb's supervision
+@
+text
+@d2 1
+a2 1
+# $MirBSD: contrib/code/heartbeat/hbserver,v 1.4 2004/11/06 19:59:13 tg Exp $
+d208 2
+a209 2
+exec 3<&p; exec 3<&-
+exec 4>&p
+@
+
+
+1.4
+log
+@tell I'm life
+@
+text
+@d2 1
+a2 1
+# $MirBSD: contrib/code/heartbeat/hbserver,v 1.3 2004/11/06 18:23:18 tg Exp $
+d59 1
+d122 8
+d150 1
+a150 1
+let freefd=4
+d203 1
+a203 1
+trap "cleanup; exit 0" TERM
+d206 5
+d214 1
+a214 1
+	NETIN="$(nc -4unlw0 3740)"
+@
+
+
+1.3
+log
+@finish testing
+now, the backends for IPv6-TSP and IPv4-MirDNSv2 have to be written
+@
+text
+@d2 1
+a2 1
+# $MirBSD: src/share/misc/licence.template,v 1.14 2004/08/15 15:29:11 tg Rel $
+d195 1
+@
+
+
+1.2
+log
+@start writing a heartbeat-compatible server
+@
+text
+@d2 28
+a29 4
+# $MirBSD$
+# Copyright (c) 2004 Thorsten Glaser.
+# Unpublished proprietary source code. All rights reserved.
+
+d38 3
+a40 1
+progname="${0##*/}"
+d45 2
+a46 2
+	print "Usage: $progname [-c hbserver.cfg]"
+	exit 1
+d52 1
+a52 1
+	print -- "$progname: " "$@@"
+d69 1
+a69 1
+	let rv=65535
+d80 42
+d124 2
+a125 2
+conf="cf"
+while getopts "c:h" opt; do
+d132 2
+d138 2
+d157 1
+a157 1
+	[[ $s = +([!^])^+([!^])^+([!^]) ]] \
+d159 1
+d161 1
+a161 1
+	IFS='^' set -A line -- $s
+d167 1
+d170 1
+a170 1
+	    || die User contains whitespace in "$conf" line $lineno
+d175 1
+d184 7
+a190 1
+	eval "${ascript[--i]} >/dev/null 2>&1 |&"
+d201 1
+d207 1
+d213 1
+d218 1
+a218 1
+	# calculate the checksum
+d222 1
+d225 1
+d241 6
+a246 2
+		[[ ${astat[uid]} = $newstate ]] \
+		    || do_heartbeat $uid $newstate
+d250 1
+@
+
+
+1.1
+log
+@add first notes directly from /dev/brain
+and a "maximum process execution time" study
+
+jedi/sector one, seems your microbsd "human time ulimit" patch is shit
+nm, this way it's more portable anyway...
+@
+text
+@d2 3
+d6 7
+a12 2
+# case study for interlocking action scripts with maximum time
+# XXX would use ulimit -T, but that doesn't work reliable with shell
+d14 11
+a24 1
+function doit
+d26 2
+a27 1
+	sleep 10
+d30 2
+a31 1
+function doom
+d33 5
+a37 4
+	set -x
+	trap 'exit 0' USR2
+	sleep 5 & wait %sleep
+	exec kill -USR1 $1
+d40 2
+a41 1
+function foo
+d43 9
+a51 6
+	set -x
+	trap 'exit 1' USR1
+	doit &
+	doom $! &
+	wait %doit
+	kill -USR2 %doom
+d54 106
+a159 2
+foo &
+wait
+@
+

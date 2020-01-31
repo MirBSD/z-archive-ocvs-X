@@ -1,0 +1,154 @@
+head	1.1;
+branch	1.1.3;
+access;
+symbols
+	start:1.1.3.1 tg:1.1.3;
+locks; strict;
+comment	@# @;
+
+
+1.1
+date	2004.07.25.12.44.03;	author tg;	state Exp;
+branches
+	1.1.3.1;
+next	;
+
+1.1.3.1
+date	2004.07.25.12.44.03;	author tg;	state Stab;
+branches;
+next	;
+
+
+desc
+@@
+
+
+
+1.1
+log
+@Initial revision
+@
+text
+@$MirBSD$
+--- src/pppoa2.c.orig	Sun Jul 25 12:10:05 2004
++++ src/pppoa2.c	Sun Jul 25 12:33:05 2004
+@@@@ -31,6 +31,12 @@@@
+ #define BRIDGING_ENABLED
+ #endif
+ 
++/* more current versions of OpenBSD and MirOS support tap */
++#if defined(__MirBSD__) && MirBSD > 0x07B4
++#define	BRIDGING_ENABLED
++#define	BRIDGING_VIA_TUN_LINK0
++#endif
++
+ #include <stdio.h>
+ #include <stdlib.h>
+ #include <unistd.h>
+@@@@ -64,6 +70,13 @@@@
+ #define TUNSETIFF     _IOW('T', 202, int)
+ #include <linux/if.h>
+ #endif /* Linux */
++# ifdef __OpenBSD__
++#include <net/route.h>
++#include <net/if.h>
++#  ifdef __RCSID
++__RCSID("$MirBSD$");
++#  endif
++# endif
+ #endif
+ 
+ 
+@@@@ -656,7 +669,7 @@@@ static void dump(unsigned char *buf, int
+ #ifndef USE_SYSLOG
+ 			printf("%02x ", buf[j]);
+ #else
+-			sprintf(ptr, "%02x ", buf[j]);
++			snprintf(ptr, (128-(ptr-line)), "%02x ", buf[j]);
+ 			ptr += 3;
+ #endif
+ 		}
+@@@@ -665,7 +678,7 @@@@ static void dump(unsigned char *buf, int
+ #ifndef USE_SYSLOG
+ 			printf("   ");
+ #else
+-			sprintf(ptr, "   ");
++			snprintf(ptr, (128-(ptr-line)), "   ");
+ 			ptr += 3;
+ #endif
+ 		}
+@@@@ -674,7 +687,7 @@@@ static void dump(unsigned char *buf, int
+ #ifndef USE_SYSLOG
+ 			printf("%c", give_char(buf[j]));
+ #else
+-			sprintf(ptr, "%c", give_char(buf[j]));
++			snprintf(ptr, (128-(ptr-line)), "%c", give_char(buf[j]));
+ 			ptr++;
+ #endif
+ 		}
+@@@@ -1408,18 +1421,47 @@@@ static unsigned short pppFCS16(unsigned 
+ static int tap_open()
+ {
+ 	int fd;
++#ifdef BRIDGING_VIA_TUN_LINK0
++	int s;
++	struct ifreq ifr;
++#endif
+ 
+-#if defined (__FreeBSD__)
++#if defined (__FreeBSD__) || defined(BRIDGING_VIA_TUN_LINK0)
+   int i;
+-  char devname[] = "/dev/tapXX";
++  char devname[12];
+ 
+   for (i=0;i<100;i++)
+   {
+-      sprintf(devname,"/dev/tap%d",i);
++#ifdef BRIDGING_VIA_TUN_LINK0
++      snprintf(devname,12,"/dev/tun%d",i);
++#else
++      snprintf(devname,12,"/dev/tap%d",i);
++#endif
+       fd = open(devname, O_RDWR | O_FSYNC);
+       if (fd < 0) {
+           continue;
+       }
++
++#ifdef BRIDGING_VIA_TUN_LINK0
++	/* switch TUN interface into TAP mode (= ifconfig tunXX link0) */
++
++	s = socket(AF_INET, SOCK_DGRAM, 0);
++	if (s < 0)
++		err(1, "socket");
++	memset(&ifr, 0, sizeof(ifr));
++	strlcpy(ifr.ifr_name, devname + 5, sizeof(ifr.ifr_name));
++
++	if (ioctl(s, SIOCGIFFLAGS, (caddr_t)&ifr) < 0) {
++		close(s);
++		err(1, "SIOCGIFFLAGS");
++	}
++	ifr.ifr_flags |= IFF_LINK0;
++	if (ioctl(s, SIOCSIFFLAGS, (caddr_t)&ifr) < 0) {
++		close(s);
++		err(1, "SIOCSIFFLAGS");
++	}
++	close(s);
++#endif
+ 
+       printf("%s\n",devname);
+       fflush(stdout);
+@
+
+
+1.1.3.1
+log
+@port of "Alcatel Speedtouch" USB drivers, asked for by maddy in IRC
+
+amended by:
+* sprintf -> snprintf
+* tap device via /dev/tunN support (open/mirbsd)
+  XXX the openbsd pieces are missing
+* fixes for fake install
+@
+text
+@@

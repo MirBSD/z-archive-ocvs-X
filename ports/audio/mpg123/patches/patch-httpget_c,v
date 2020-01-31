@@ -1,0 +1,284 @@
+head	1.4;
+access;
+symbols
+	cvs-200405281530:1.1.1.1
+	cvs-200402211630:1.1.1.1
+	cvs-200401261625:1.1.1.1
+	cvs-200401162142:1.1.1.1
+	cvs-200301141450:1.1.1.1
+	cvs-200312021610:1.1.1.1
+	cvs-200311151930:1.1.1.1
+	openbsd:1.1.1;
+locks; strict;
+comment	@# @;
+
+
+1.4
+date	2004.09.07.17.01.26;	author tg;	state Exp;
+branches;
+next	1.3;
+
+1.3
+date	2004.06.25.15.30.50;	author bsiegert;	state Stab;
+branches;
+next	1.2;
+
+1.2
+date	2004.05.12.19.34.57;	author tg;	state Exp;
+branches;
+next	1.1;
+
+1.1
+date	2003.11.15.19.57.15;	author tg;	state Exp;
+branches
+	1.1.1.1;
+next	;
+
+1.1.1.1
+date	2003.11.15.19.57.15;	author tg;	state Exp;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.4
+log
+@SECURITY: apparently exploitable buffer overflow in mpg123
+(on OpenBSD? with propolice, W^X etc.? you must be kidding)
+
+on full-disclosure, patch by Daniel Kobras (Debian maintainer);
+From: "Davide Del Vecchio" <dante@@alighieri.org>; via OpenBSD ports@@,
+noticed by: Alf Schlichting <a.schlichting@@lemarit.com>
+@
+text
+@$MirBSD: ports/audio/mpg123/patches/patch-httpget_c,v 1.3 2004/06/25 15:30:50 bsiegert Exp $
+$OpenBSD: patch-httpget_c,v 1.1 2003/11/13 20:51:50 margarida Exp $
+--- httpget.c.orig	2004-09-07 16:55:25.000000000 +0000
++++ httpget.c	2004-09-07 16:55:27.000000000 +0000
+@@@@ -55,11 +55,10 @@@@ void readstring (char *string, int maxle
+ #endif
+ 	int pos = 0;
+ 
+-	while(1) {
++	while(pos < maxlen) {
+ 		if( read(fileno(f),string+pos,1) == 1) {
+ 			pos++;
+ 			if(string[pos-1] == '\n') {
+-				string[pos] = 0;
+ 				break;
+ 			}
+ 		}
+@@@@ -68,6 +67,7 @@@@ void readstring (char *string, int maxle
+ 			exit(1);
+ 		}
+ 	}
++	string[pos] = 0;
+ #if 0
+ 	do {
+ 		result = fgets(string, maxlen, f);
+@@@@ -111,27 +111,29 @@@@ void encode64 (char *source,char *destin
+ }
+ 
+ /* VERY  simple auth-from-URL grabber */
+-int getauthfromURL(char *url,char *auth)
++int getauthfromURL(char *url,char *auth, size_t authlen)
+ {
+   char *pos;
+ 
++  if (!authlen || (url == NULL) || (auth == NULL))
++    return 0;
++
+   *auth = 0;
+ 
+   if (!(strncmp(url, "http://", 7)))
+     url += 7;
+ 
+-  if( (pos = strchr(url,'@@')) ) {
+-    int i;
+-    for(i=0;i<pos-url;i++) {
+-      if( url[i] == '/' )
+-         return 0;
+-    }
+-    strncpy(auth,url,pos-url);
+-    auth[pos-url] = 0;
+-    strcpy(url,pos+1);
+-    return 1;
++  if( (pos = strchr(url,'@@')) == NULL )
++    return 0;
++
++  *pos = 0;
++  if (strrchr(url, '/') != NULL) {
++    *pos = '@@';
++    return 0;
+   }
+-  return 0;
++  strlcpy(auth, url, authlen);
++  memmove(url, ++pos, 1 + strlen(pos));
++  return 1;
+ }
+ 
+ static const char *defaultportstr = "80";
+@@@@ -262,17 +264,16 @@@@ int http_open (char *url)
+ 		fprintf (stderr, "malloc() failed, out of memory.\n");
+ 		exit (1);
+ 	}
+-	strncpy (purl, url, 1023);
+-	purl[1023] = '\0';
++	strlcpy (purl, url, 1023);
+ 
+-        getauthfromURL(purl,httpauth1);
++        getauthfromURL(purl,httpauth1,256);
+ 
+ 	do {
+-		strcpy (request, "GET ");
++		strlcpy (request, "GET ", linelength);
+ 		if (proxyip != INADDR_NONE) {
+ 			if (strncmp(url, "http://", 7))
+-				strcat (request, "http://");
+-			strcat (request, purl);
++				strlcat (request, "http://", linelength);
++			strlcat (request, purl, linelength);
+ 			myport = proxyport;
+ 			myip = proxyip;
+ 		}
+@@@@ -290,19 +291,21 @@@@ int http_open (char *url)
+ 					host ? host : "");
+ 				exit (1);
+ 			}
+-			strcat (request, sptr);
++			strlcat (request, sptr, linelength);
+ 		}
+-		sprintf (request + strlen(request),
++		snprintf (request + strlen(request),
++			linelength - strlen(request),
+ 			" HTTP/1.0\r\nUser-Agent: %s/%s\r\n",
+ 			prgName, prgVersion);
+ 		if (host) {
+-			sprintf(request + strlen(request),
++			snprintf(request + strlen(request),
++				linelength - strlen(request),
+ 				"Host: %s:%s\r\n", host, myport);
+ #if 0
+ 			free (host);
+ #endif
+ 		}
+-		strcat (request, ACCEPT_HEAD);
++		strlcat (request, ACCEPT_HEAD, linelength);
+ 
+ #ifdef INET6
+ 		memset(&hints, 0, sizeof(hints));
+@@@@ -359,15 +362,15 @@@@ fail:
+ 
+ 		if (strlen(httpauth1) || httpauth) {
+ 			char buf[1023];
+-			strcat (request,"Authorization: Basic ");
++			strlcat (request,"Authorization: Basic ", linelength);
+                         if(strlen(httpauth1))
+                           encode64(httpauth1,buf);
+                         else
+ 			  encode64(httpauth,buf);
+-			strcat (request,buf);
+-			strcat (request,"\r\n");
++			strlcat (request,buf, linelength);
++			strlcat (request,"\r\n", linelength);
+ 		}
+-		strcat (request, "\r\n");
++		strlcat (request, "\r\n", linelength);
+ 
+ 		writestring (sock, request);
+ 		if (!(myfile = fdopen(sock, "rb"))) {
+@
+
+
+1.3
+log
+@Remove __RCSID here, too
+@
+text
+@d1 1
+a1 1
+$MirBSD: patch-httpget_c,v 1.2 2004/05/12 19:34:57 tg Exp $
+d3 3
+a5 3
+--- httpget.c.orig	2004-05-12 18:08:52.000000000 +0000
++++ httpget.c	2004-05-12 18:29:28.000000000 +0000
+@@@@ -55,11 +58,10 @@@@ void readstring (char *string, int maxle
+d18 1
+a18 1
+@@@@ -68,6 +70,7 @@@@ void readstring (char *string, int maxle
+d26 1
+a26 1
+@@@@ -111,27 +114,29 @@@@ void encode64 (char *source,char *destin
+d68 1
+a68 1
+@@@@ -262,17 +267,16 @@@@ int http_open (char *url)
+d91 1
+a91 1
+@@@@ -290,19 +294,21 @@@@ int http_open (char *url)
+d117 1
+a117 1
+@@@@ -359,15 +365,15 @@@@ fail:
+a136 5
+@@@@ -441,4 +447,3 @@@@ int http_open (char *url)
+ #endif
+ 
+ /* EOF */
+-
+@
+
+
+1.2
+log
+@* add HOWTO what to do with breaking files (headers)
+  hint from file(1) and its magic(5) file, and the principal
+  knowledge that sometimes a header magic can occur in the
+  lead-in and break tools which try to skip over the latter
+* strcat, strcpy, sprintf removal
+* MirOS localization ;)
+@
+text
+@d1 1
+a1 1
+$MirBSD$
+a4 10
+@@@@ -9,6 +9,9 @@@@
+ 
+ #if !defined(WIN32) && !defined(GENERIC)
+ 
++#include <sys/cdefs.h>
++__RCSID("$MirBSD$");
++
+ #include <stdlib.h>
+ #include <stdio.h>
+ #include <string.h>
+@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@d1 1
+d3 13
+a15 3
+--- httpget.c.orig	2003-11-13 18:34:37.000000000 +0000
++++ httpget.c	2003-11-13 18:35:10.000000000 +0000
+@@@@ -55,11 +55,10 @@@@ void readstring (char *string, int maxle
+d28 1
+a28 1
+@@@@ -68,6 +67,7 @@@@ void readstring (char *string, int maxle
+d36 116
+@
+
+
+1.1.1.1
+log
+@Import the OpenBSD ports tree into the MirPorts Framework again, in order
+to introduce recent security fixes.
+@
+text
+@@

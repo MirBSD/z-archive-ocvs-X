@@ -1,0 +1,377 @@
+head	1.2;
+access;
+symbols
+	MIRBSD_7quater:1.1.1.1
+	XFree86_4_4_0:1.1.9.1
+	cvs-200403021700:1.1.1.2
+	XFREE86_20040213:1.1.9.1
+	xc:1.1.9
+	cvs-200401291925:1.1.1.1
+	MIRBSD_7_ALPHA:1.1.1.1.0.4
+	MIRBSD_7:1.1.1.1.0.2
+	MIRBSD_7ter:1.1.1.1
+	cvs-20011091815:1.1.1.1
+	cvs-200309162130:1.1.1.1
+	cvs-200308302005:1.1.1.1
+	ctmx-0390:1.1.1.1
+	ctmx-0387:1.1.1.1
+	ctmx-0384:1.1.1.1
+	MIRBSD_5:1.1.1.1
+	ctmx-0375:1.1.1.1
+	ctmx-0373:1.1.1.1
+	ctm-0371:1.1.1.1
+	ctm-0370:1.1.1.1
+	MIRBSD_4:1.1.1.1
+	ctm-0363:1.1.1.1
+	ctm-0359:1.1.1.1
+	ctm-0349:1.1.1.1
+	openbsd:1.1.1;
+locks; strict;
+comment	@ * @;
+
+
+1.2
+date	2004.05.27.18.32.28;	author tg;	state dead;
+branches;
+next	1.1;
+
+1.1
+date	2003.03.22.20.09.38;	author tg;	state Exp;
+branches
+	1.1.1.1
+	1.1.9.1;
+next	;
+
+1.1.1.1
+date	2003.03.22.20.09.38;	author tg;	state Exp;
+branches;
+next	1.1.1.2;
+
+1.1.1.2
+date	2004.03.02.18.30.40;	author tg;	state Exp;
+branches;
+next	;
+
+1.1.9.1
+date	2004.02.14.19.26.36;	author tg;	state Exp;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.2
+log
+@merge OpenBSD 3.5-current
+@
+text
+@/*
+	alloca -- (mostly) portable public-domain implementation -- D A Gwyn
+
+	This implementation of the PWB library alloca() function,
+	which is used to allocate space off the run-time stack so
+	that it is automatically reclaimed upon procedure exit, 
+	was inspired by discussions with J. Q. Johnson of Cornell.
+
+	It should work under any C implementation that uses an
+	actual procedure stack (as opposed to a linked list of
+	frames).  There are some preprocessor constants that can
+	be defined when compiling for your specific system, for
+	improved efficiency; however, the defaults should be okay.
+
+	The general concept of this implementation is to keep
+	track of all alloca()-allocated blocks, and reclaim any
+	that are found to be deeper in the stack than the current
+	invocation.  This heuristic does not reclaim storage as
+	soon as it becomes invalid, but it will do so eventually.
+
+	As a special case, alloca(0) reclaims storage without
+	allocating any.  It is a good idea to use alloca(0) in
+	your main control loop, etc. to force garbage collection.
+*/
+#ifndef lint
+static char	SCCSid[] = "@@(#)alloca.c	1.1";	/* for the "what" utility */
+#endif
+
+#ifdef emacs
+#include "config.h"
+#ifdef static
+/* actually, only want this if static is defined as ""
+   -- this is for usg, in which emacs must undefine static
+   in order to make unexec workable
+   */
+#ifndef STACK_DIRECTION
+you
+lose
+-- must know STACK_DIRECTION at compile-time
+#endif /* STACK_DIRECTION undefined */
+#endif /* static */
+#endif /* emacs */
+
+#ifdef X3J11
+typedef void	*pointer;		/* generic pointer type */
+#else
+typedef char	*pointer;		/* generic pointer type */
+#endif
+
+#define	NULL	0			/* null pointer constant */
+
+extern void	Xfree();
+extern pointer	Xalloc();
+
+/*
+	Define STACK_DIRECTION if you know the direction of stack
+	growth for your system; otherwise it will be automatically
+	deduced at run-time.
+
+	STACK_DIRECTION > 0 => grows toward higher addresses
+	STACK_DIRECTION < 0 => grows toward lower addresses
+	STACK_DIRECTION = 0 => direction of growth unknown
+*/
+
+#ifndef STACK_DIRECTION
+#define	STACK_DIRECTION	0		/* direction unknown */
+#endif
+
+#if STACK_DIRECTION != 0
+
+#define	STACK_DIR	STACK_DIRECTION	/* known at compile-time */
+
+#else	/* STACK_DIRECTION == 0; need run-time code */
+
+static int	stack_dir;		/* 1 or -1 once known */
+#define	STACK_DIR	stack_dir
+
+static void
+find_stack_direction (/* void */)
+{
+  static char	*addr = NULL;	/* address of first
+				   `dummy', once known */
+  auto char	dummy;		/* to get stack address */
+
+  if (addr == NULL)
+    {				/* initial entry */
+      addr = &dummy;
+
+      find_stack_direction ();	/* recurse once */
+    }
+  else				/* second entry */
+    if (&dummy > addr)
+      stack_dir = 1;		/* stack grew upward */
+    else
+      stack_dir = -1;		/* stack grew downward */
+}
+
+#endif	/* STACK_DIRECTION == 0 */
+
+/*
+	An "alloca header" is used to:
+	(a) chain together all alloca()ed blocks;
+	(b) keep track of stack depth.
+
+	It is very important that sizeof(header) agree with malloc()
+	alignment chunk size.  The following default should work okay.
+*/
+
+#ifndef	ALIGN_SIZE
+#define	ALIGN_SIZE	sizeof(double)
+#endif
+
+typedef union hdr
+{
+  char	align[ALIGN_SIZE];	/* to force sizeof(header) */
+  struct
+    {
+      union hdr *next;		/* for chaining headers */
+      char *deep;		/* for stack depth measure */
+    } h;
+} header;
+
+/*
+	alloca( size ) returns a pointer to at least `size' bytes of
+	storage which will be automatically reclaimed upon exit from
+	the procedure that called alloca().  Originally, this space
+	was supposed to be taken from the current stack frame of the
+	caller, but that method cannot be made to work for some
+	implementations of C, for example under Gould's UTX/32.
+*/
+
+static header *last_alloca_header = NULL; /* -> last alloca header */
+
+pointer
+alloca (size)			/* returns pointer to storage */
+     unsigned	size;		/* # bytes to allocate */
+{
+  auto char	probe;		/* probes stack depth: */
+  register char	*depth = &probe;
+
+#if STACK_DIRECTION == 0
+  if (STACK_DIR == 0)		/* unknown growth direction */
+    find_stack_direction ();
+#endif
+
+				/* Reclaim garbage, defined as all alloca()ed storage that
+				   was allocated from deeper in the stack than currently. */
+
+  {
+    register header	*hp;	/* traverses linked list */
+
+    for (hp = last_alloca_header; hp != NULL;)
+      if (STACK_DIR > 0 && hp->h.deep > depth
+	  || STACK_DIR < 0 && hp->h.deep < depth)
+	{
+	  register header	*np = hp->h.next;
+
+	  Xfree ((pointer) hp);	/* collect garbage */
+
+	  hp = np;		/* -> next header */
+	}
+      else
+	break;			/* rest are not deeper */
+
+    last_alloca_header = hp;	/* -> last valid storage */
+  }
+
+  if (size == 0)
+    return NULL;		/* no allocation required */
+
+  /* Allocate combined header + user data storage. */
+
+  {
+    register pointer	new = Xalloc (sizeof (header) + size);
+    if (!new)
+	return NULL;
+    /* address of header */
+
+    ((header *)new)->h.next = last_alloca_header;
+    ((header *)new)->h.deep = depth;
+
+    last_alloca_header = (header *)new;
+
+    /* User storage begins just after header. */
+
+    return (pointer)((char *)new + sizeof(header));
+  }
+}
+
+@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@@
+
+
+1.1.9.1
+log
+@OpenBSD just has imported exactly this tree into their vendor branch,
+called the same tag, in XF4/xc
+This is, apparently, the last XFree86 snapshot before the licence change
+(ie, addition of the advertising clause)
+
+Since the developers don't see any problems with that, and we would like
+to integrate improvements done by the remaining one or two (or so) XFree86
+developers (j/k), this prepares enabling us to update X-Window in the future.
+@
+text
+@a24 2
+/* $XFree86: xc/programs/Xserver/os/genalloca.c,v 1.3 2003/11/03 05:36:35 tsi Exp $ */
+
+d52 2
+a53 2
+extern void	Xfree(unsigned long);
+extern pointer	Xalloc(unsigned long);
+d79 1
+a79 1
+find_stack_direction (void)
+d134 3
+a136 2
+pointer				/* returns pointer to storage */
+alloca (unsigned int size)	/* # bytes to allocate */
+d139 1
+a139 1
+  char	*depth = &probe;
+d150 1
+a150 1
+    header	*hp;		/* traverses linked list */
+d156 1
+a156 1
+	  header	*np = hp->h.next;
+d174 1
+a174 1
+    pointer	new = Xalloc (sizeof (header) + size);
+@
+
+
+1.1.1.1
+log
+@Import OpenBSD 3.3 XF4 repository from CTM 3132 the first time
+This finalizes starting an OpenBSD-mirabile (aka MirBSD) repository.
+
+### MirBSD is:
+# Copyright (c) 1982-2003 by Thorsten "mirabile" Glaser <x86@@ePost.de>
+# Copyright © 1968-2003  The authors of And contributors to UNIX®, the
+#       C Language, BSD/Berkeley Unix; 386BSD, NetBSD 1.1 and OpenBSD.
+#
+# Anyone who obtained a copy of this work is hereby permitted to freely use,
+# distribute, modify, merge, sublicence, give away or sell it as long as the
+# authors are given due credit and the following notice is retained:
+#
+# This work is provided "as is", with no explicit or implicit warranty what-
+# soever. Use it only at your own risk. In no event may an author or contri-
+# butor be held liable for any damage, directly or indirectly, that origina-
+# ted through or is caused by creation or modification of this work.
+
+MirBSD is my private tree. MirBSD does not differ very much from OpenBSD
+and intentionally tracks OpenBSD. That's why it _is_ OpenBSD, just not the
+official one. It's like with DarrenBSD.
+
+At time of this writing, no advertising for MirBSD must be done,
+because the advertising clause has not yet been sorted out.
+
+http://templeofhate.com/tglaser/MirBSD/index.php
+@
+text
+@@
+
+
+1.1.1.2
+log
+@That's what OpenBSD will, probably, ship as XF4 in 3.5
+their last sync against XFree86 4.3-current has been
+imported into our vendor branch, too
+@
+text
+@a24 2
+/* $XFree86: xc/programs/Xserver/os/genalloca.c,v 1.3 2003/11/03 05:36:35 tsi Exp $ */
+
+d52 2
+a53 2
+extern void	Xfree(unsigned long);
+extern pointer	Xalloc(unsigned long);
+d79 1
+a79 1
+find_stack_direction (void)
+d134 3
+a136 2
+pointer				/* returns pointer to storage */
+alloca (unsigned int size)	/* # bytes to allocate */
+d139 1
+a139 1
+  char	*depth = &probe;
+d150 1
+a150 1
+    header	*hp;		/* traverses linked list */
+d156 1
+a156 1
+	  header	*np = hp->h.next;
+d174 1
+a174 1
+    pointer	new = Xalloc (sizeof (header) + size);
+@
+

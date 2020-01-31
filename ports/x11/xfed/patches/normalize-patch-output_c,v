@@ -1,0 +1,179 @@
+head	1.3;
+access;
+symbols;
+locks; strict;
+comment	@# @;
+
+
+1.3
+date	2004.02.20.02.43.33;	author tg;	state Stab;
+branches;
+next	1.2;
+
+1.2
+date	2004.02.20.02.12.43;	author tg;	state Exp;
+branches;
+next	1.1;
+
+1.1
+date	2004.02.20.00.40.30;	author tg;	state Exp;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.3
+log
+@horizontal fixup, too... it was sooo ugly
+@
+text
+@$MirBSD: normalize-patch-output_c,v 1.2 2004/02/20 02:12:43 tg Exp $
+--- output.c.orig	1989-12-07 23:59:46.000000000 +0000
++++ output.c	2004-02-20 01:52:28.000000000 +0000
+@@@@ -44,7 +44,7 @@@@ char *filename;
+ 				font->sizes[2]);
+ 	fprintf(out, "FONTBOUNDINGBOX %d %d %d %d\n",
+ 				font->boundingbox.w, font->boundingbox.h,
+-				font->boundingbox.x, font->boundingbox.y);
++				font->boundingbox.x, 0);
+ 	fprintf(out, "STARTPROPERTIES %d\n", font->nprops);
+ 	for(i = 0; i < font->nprops; i++) {
+ 	    fprintf(out, "%s\n", font->props[i]);
+@@@@ -54,8 +54,10 @@@@ char *filename;
+ 
+ 	nchars = font->nchars;
+ 	charp = font->characters;
+-	while (nchars--)
++	while (nchars--) {
++	    charp->bbx.y = font->boundingbox.y - charp->bbx.y;
+ 	    outputchar(out, charp++);
++	}
+ 
+ 	fprintf(out, "ENDFONT\n");
+ 	fclose(out);
+@@@@ -65,7 +67,7 @@@@ outputchar(out, charp)
+ FILE *out;
+ struct character *charp;
+ {
+-	int i;
++	int i, X, Y;
+ 
+ 	fprintf(out, "STARTCHAR %s\n", charp->charId);
+ 	if (charp->notadobe == 0)
+@@@@ -74,14 +76,23 @@@@ struct character *charp;
+ 	    fprintf(out, "ENCODING -1 %d\n", charp->encoding);
+ 	fprintf(out, "SWIDTH %d %d\n", charp->swidth[0], charp->swidth[1]);
+ 	fprintf(out, "DWIDTH %d %d\n", charp->dwidth[0], charp->dwidth[1]);
+-	fprintf(out, "BBX %d %d %d %d\n",
+-			    charp->bbx.w, charp->bbx.h,
+-			    charp->bbx.x, charp->bbx.y);
++	fprintf(out, "BBX 8 NORM_SIZE 0 0\n");
+ 	fprintf(out, "BITMAP\n");
++	if (charp->bbx.w > 8) {
++		fprintf(stderr, "(charp->bbx.w == %d) > 8\n", charp->bbx.w);
++		fprintf(out, "*** (charp->bbx.w == %d) > 8\n", charp->bbx.w);
++		_exit(1);
++	}
++	Y = 0;
++	for (X = 0; X < (NORM_SIZE + charp->bbx.y - charp->bbx.h); ++X) {
++		fprintf(out, "00\n");
++		++Y;
++	}
+ 	for (i=0; i<charp->nrows; i++) {
+-#ifdef CLEARBITS
++		int A, B;
+ 	    char *rowbits;
+ 	    int col, bits, j;
++#ifdef CLEARBITS
+ 	    rowbits = charp->rows[i];
+ 	    for (col = 0; *rowbits; rowbits++) {
+ 	        if ((bits = *rowbits - '0') > 9 || bits < 0) {
+@@@@ -101,7 +112,35 @@@@ struct character *charp;
+ 		*rowbits = bits + ((bits < 10) ? '0' : 'a' - 10);
+ 	    }
+ #endif /* CLEARBITS */
+-	    fprintf(out, "%s\n", charp->rows[i]);
++		A = 8 - charp->bbx.w - charp->bbx.x;
++		B = 0;
++	    rowbits = charp->rows[i];
++	    for (col = 0; *rowbits; rowbits++) {
++	        if ((bits = *rowbits - '0') > 9 || bits < 0) {
++		    if (*rowbits >= 'A' && *rowbits <= 'F')
++		        bits = *rowbits - 'A' + 10;
++		    else if (*rowbits >= 'a' && *rowbits <= 'f')
++		        bits = *rowbits - 'a' + 10;
++	        }
++	        if (col++ >= charp->bbx.w)
++		    bits &= ~8;
++	        if (col++ >= charp->bbx.w)
++		    bits &= ~4;
++	        if (col++ >= charp->bbx.w)
++		    bits &= ~2;
++	        if (col++ >= charp->bbx.w)
++		    bits &= ~1;
++		B <<= 4;
++		B |= bits;
++	    }
++		B >>= A;
++
++	    fprintf(out, "%02X\n", B);
++		++Y;
++	}
++	while (Y < NORM_SIZE) {
++		fprintf(out, "00\n");
++		++Y;
+ 	}
+ 	fprintf(out, "ENDCHAR\n");
+ }
+@
+
+
+1.2
+log
+@xfed: even more flexible; allow for 8/12/14/16 font normalization
+mk: use CFLAGS
+@
+text
+@d1 1
+a1 1
+$MirBSD: normalize-patch-output_c,v 1.1 2004/02/20 00:40:30 tg Exp $
+d67 1
+a67 1
++		A = 8 - charp->bbx.w;
+@
+
+
+1.1
+log
+@make build
+install man page
+add "normalization" (8x16px) flavour [no generic use tho...]
+@
+text
+@d1 1
+a1 1
+$MirBSD$
+d3 23
+a25 2
++++ output.c	2004-02-20 00:16:49.000000000 +0000
+@@@@ -65,7 +65,7 @@@@ outputchar(out, charp)
+d34 1
+a34 1
+@@@@ -74,14 +74,23 @@@@ struct character *charp;
+d41 1
+a41 1
++	fprintf(out, "BBX 8 16 0 -4\n");
+d49 1
+a49 1
++	for (X=-4; X<charp->bbx.y; ++X) {
+d62 1
+a62 1
+@@@@ -101,7 +110,35 @@@@ struct character *charp;
+d93 1
+a93 1
++	while (Y < 16) {
+@
+

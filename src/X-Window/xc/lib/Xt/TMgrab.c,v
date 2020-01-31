@@ -1,0 +1,551 @@
+head	1.1;
+branch	1.1.1;
+access;
+symbols
+	tg-mergetmp-2:1.1.1.3
+	cvs-200410241530:1.1.1.3
+	cvs-200410012000:1.1.1.3
+	cvs-200407141120:1.1.1.3
+	cvs-200406231010:1.1.1.2
+	MIRBSD_7quater:1.1.1.1
+	cvs-200405271510:1.1.1.2
+	XFree86_4_4_0:1.1.9.1
+	cvs-200403021700:1.1.1.2
+	XFREE86_20040213:1.1.9.1
+	xc:1.1.9
+	cvs-200401291925:1.1.1.1
+	MIRBSD_7_ALPHA:1.1.1.1.0.4
+	MIRBSD_7:1.1.1.1.0.2
+	MIRBSD_7ter:1.1.1.1
+	cvs-20011091815:1.1.1.1
+	cvs-200309162130:1.1.1.1
+	cvs-200308302005:1.1.1.1
+	ctmx-0387:1.1.1.1
+	ctmx-0384:1.1.1.1
+	MIRBSD_5:1.1.1.1
+	ctmx-0375:1.1.1.1
+	ctmx-0373:1.1.1.1
+	ctm-0371:1.1.1.1
+	ctm-0370:1.1.1.1
+	MIRBSD_4:1.1.1.1
+	ctm-0363:1.1.1.1
+	ctm-0359:1.1.1.1
+	ctm-0349:1.1.1.1
+	openbsd:1.1.1;
+locks; strict;
+comment	@ * @;
+
+
+1.1
+date	2003.03.22.20.05.01;	author tg;	state Exp;
+branches
+	1.1.1.1
+	1.1.9.1;
+next	;
+
+1.1.1.1
+date	2003.03.22.20.05.01;	author tg;	state Exp;
+branches;
+next	1.1.1.2;
+
+1.1.1.2
+date	2004.03.02.18.05.22;	author tg;	state Exp;
+branches;
+next	1.1.1.3;
+
+1.1.1.3
+date	2004.07.14.11.58.30;	author tg;	state Stab;
+branches;
+next	;
+
+1.1.9.1
+date	2004.02.14.19.19.40;	author tg;	state Exp;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@/* $Xorg: TMgrab.c,v 1.4 2001/02/09 02:03:58 xorgcvs Exp $ */
+
+/***********************************************************
+Copyright 1987, 1988 by Digital Equipment Corporation, Maynard, Massachusetts
+Copyright 1993 by Sun Microsystems, Inc. Mountain View, CA.
+
+                        All Rights Reserved
+
+Permission to use, copy, modify, and distribute this software and its 
+documentation for any purpose and without fee is hereby granted, 
+provided that the above copyright notice appear in all copies and that
+both that copyright notice and this permission notice appear in 
+supporting documentation, and that the names of Digital or Sun not be
+used in advertising or publicity pertaining to distribution of the
+software without specific, written prior permission.  
+
+DIGITAL DISCLAIMS ALL WARRANTIES WITH REGARD TO THIS SOFTWARE, INCLUDING
+ALL IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS, IN NO EVENT SHALL
+DIGITAL BE LIABLE FOR ANY SPECIAL, INDIRECT OR CONSEQUENTIAL DAMAGES OR
+ANY DAMAGES WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS,
+WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION,
+ARISING OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS
+SOFTWARE.
+
+SUN DISCLAIMS ALL WARRANTIES WITH REGARD TO  THIS  SOFTWARE,
+INCLUDING ALL IMPLIED WARRANTIES OF MERCHANTABILITY AND FIT-
+NESS FOR A PARTICULAR PURPOSE. IN NO EVENT SHALL SUN BE  LI-
+ABLE  FOR  ANY SPECIAL, INDIRECT OR CONSEQUENTIAL DAMAGES OR
+ANY DAMAGES WHATSOEVER RESULTING FROM LOSS OF USE,  DATA  OR
+PROFITS,  WHETHER  IN  AN  ACTION OF CONTRACT, NEGLIGENCE OR
+OTHER TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION  WITH
+THE USE OR PERFORMANCE OF THIS SOFTWARE.
+
+******************************************************************/
+
+/*
+
+Copyright 1987, 1988, 1998  The Open Group
+
+Permission to use, copy, modify, distribute, and sell this software and its
+documentation for any purpose is hereby granted without fee, provided that
+the above copyright notice appear in all copies and that both that
+copyright notice and this permission notice appear in supporting
+documentation.
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
+OPEN GROUP BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN
+AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
+CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+Except as contained in this notice, the name of The Open Group shall not be
+used in advertising or otherwise to promote the sale, use or other dealings
+in this Software without prior written authorization from The Open Group.
+
+*/
+/* $XFree86: xc/lib/Xt/TMgrab.c,v 1.3 2001/12/14 19:56:30 dawes Exp $ */
+
+/*LINTLIBRARY*/
+#include "IntrinsicI.h"
+
+typedef struct _GrabActionRec {
+    struct _GrabActionRec* next;
+    XtActionProc action_proc;
+    Boolean owner_events;
+    unsigned int event_mask;
+    int pointer_mode, keyboard_mode;
+} GrabActionRec;
+
+static GrabActionRec *grabActionList = NULL;
+
+static void GrabAllCorrectKeys(
+    Widget widget,
+    TMTypeMatch typeMatch,
+    TMModifierMatch modMatch,
+    GrabActionRec* grabP)
+{
+    Display *dpy = XtDisplay(widget);
+    KeyCode *keycodes, *keycodeP;
+    Cardinal keycount;
+    Modifiers careOn = 0;
+    Modifiers careMask = 0;
+
+    if (modMatch->lateModifiers) {
+	Boolean resolved;
+	resolved = _XtComputeLateBindings(dpy, modMatch->lateModifiers,
+					  &careOn, &careMask);
+	if (!resolved) return;
+    }
+    careOn |= modMatch->modifiers;
+    careMask |= modMatch->modifierMask;
+
+    XtKeysymToKeycodeList(
+	    dpy,
+	    (KeySym)typeMatch->eventCode,
+	    &keycodes,
+	    &keycount
+			 );
+    if (keycount == 0) return;
+    for (keycodeP = keycodes; keycount--; keycodeP++) {
+	if (modMatch->standard) {
+	    /* find standard modifiers that produce this keysym */
+	    KeySym keysym;
+	    int std_mods, least_mod;
+	    Modifiers modifiers_return;
+	    XtTranslateKeycode( dpy, *keycodeP, (Modifiers)0,
+			        &modifiers_return, &keysym );
+	    if (careOn & modifiers_return)
+		return;
+	    if (keysym == typeMatch->eventCode) {
+		XtGrabKey(widget, *keycodeP, careOn,
+			  grabP->owner_events,
+			  grabP->pointer_mode,
+			  grabP->keyboard_mode
+			);
+		/* continue; */		/* grab all modifier combinations */
+	    }
+	    least_mod = modifiers_return & (~modifiers_return + 1);
+	    for (std_mods = modifiers_return;
+		 std_mods >= least_mod; std_mods--) {
+		Modifiers dummy;
+		 /* check all useful combinations of modifier bits */
+		if (modifiers_return & std_mods &&
+		    !(~modifiers_return & std_mods)) {
+		    XtTranslateKeycode( dpy, *keycodeP,
+					(Modifiers)std_mods,
+					&dummy, &keysym );
+		    if (keysym == typeMatch->eventCode) {
+			XtGrabKey(widget, *keycodeP,
+				  careOn | (Modifiers) std_mods,
+				  grabP->owner_events,
+				  grabP->pointer_mode,
+				  grabP->keyboard_mode
+				);
+			/* break; */	/* grab all modifier combinations */
+		    }
+		}
+	    }
+	} else /* !event->standard */ {
+	    XtGrabKey(widget, *keycodeP, careOn,
+		      grabP->owner_events,
+		      grabP->pointer_mode,
+		      grabP->keyboard_mode
+		    );
+	}
+    }
+    XtFree((char *)keycodes);
+}
+
+typedef struct {
+    TMShortCard count;
+    Widget	widget;
+    GrabActionRec *grabP;
+}DoGrabRec;
+
+static Boolean DoGrab(
+    StatePtr		state,
+    XtPointer		data)
+{
+    DoGrabRec		*doGrabP = (DoGrabRec *)data;
+    GrabActionRec* 	grabP = doGrabP->grabP;
+    Widget		widget = doGrabP->widget;
+    TMShortCard		count = doGrabP->count;
+    TMShortCard		typeIndex = state->typeIndex;
+    TMShortCard		modIndex = state->modIndex;
+    ActionRec		*action;
+    TMTypeMatch		typeMatch;
+    TMModifierMatch	modMatch;
+    Modifiers		careOn = 0;
+    Modifiers		careMask = 0;
+    Boolean		resolved;
+
+    LOCK_PROCESS;
+    typeMatch = TMGetTypeMatch(typeIndex);
+    modMatch = TMGetModifierMatch(modIndex);
+
+    for (action = state->actions; action; action = action->next)
+      if (count == action->idx) break;
+    if (!action) {
+	UNLOCK_PROCESS;
+	return False;
+    }
+    
+    switch (typeMatch->eventType) {
+      case ButtonPress:
+      case ButtonRelease:
+	if (modMatch->lateModifiers) {
+	    resolved = _XtComputeLateBindings(XtDisplay(widget),
+					      modMatch->lateModifiers,
+					      &careOn, &careMask);
+	    if (!resolved) break;
+	}
+	careOn |= modMatch->modifiers;
+	XtGrabButton(
+		     widget,
+		     (unsigned) typeMatch->eventCode,
+		     careOn,
+		     grabP->owner_events,
+		     grabP->event_mask,
+		     grabP->pointer_mode,
+		     grabP->keyboard_mode,
+		     None,
+		     None
+		     );
+	break;
+	
+      case KeyPress:
+      case KeyRelease:
+	GrabAllCorrectKeys(widget, typeMatch, modMatch, grabP);
+	break;
+	
+      case EnterNotify:
+	break;
+	
+      default:
+	XtAppWarningMsg(XtWidgetToApplicationContext(widget),
+			"invalidPopup","unsupportedOperation",XtCXtToolkitError,
+			"Pop-up menu creation is only supported on Button, Key or EnterNotify events.",
+			(String *)NULL, (Cardinal *)NULL);
+	break;
+    }
+    UNLOCK_PROCESS;
+    return False;
+}
+
+void _XtRegisterGrabs(widget)
+    Widget widget;
+{
+    XtTranslations 	xlations = widget->core.tm.translations;
+    TMComplexStateTree 	*stateTreePtr;
+    unsigned int 	count;
+    TMShortCard		i;
+    TMBindData   	bindData = (TMBindData) widget->core.tm.proc_table;
+    XtActionProc	*procs;
+
+    if (! XtIsRealized(widget) || widget->core.being_destroyed)
+	return;
+
+    /* walk the widget instance action bindings table looking for */
+    /* actions registered as grab actions. */
+    /* when you find one, do a grab on the triggering event */
+    
+    if (xlations == NULL) return;
+    stateTreePtr = (TMComplexStateTree *) xlations->stateTreeTbl;
+    if (*stateTreePtr == NULL) return;
+    for (i = 0; i < xlations->numStateTrees; i++, stateTreePtr++) {
+	if (bindData->simple.isComplex) 
+	  procs = TMGetComplexBindEntry(bindData, i)->procs;
+	else 
+	  procs = TMGetSimpleBindEntry(bindData, i)->procs;
+	for (count=0; count < (*stateTreePtr)->numQuarks; count++) {
+	    GrabActionRec* grabP;
+	    DoGrabRec      doGrab;
+
+	    LOCK_PROCESS;
+	    for (grabP = grabActionList; grabP != NULL; grabP = grabP->next) {
+		if (grabP->action_proc == procs[count]) {
+		    /* we've found a "grabber" in the action table. Find the 
+		     * states that call this action.  Note that if there is 
+		     * more than one "grabber" in the action table, we end 
+		     * up searching all of the states multiple times.
+		     */
+		    doGrab.widget = widget;
+		    doGrab.grabP = grabP;
+		    doGrab.count = count;
+		    _XtTraverseStateTree((TMStateTree)*stateTreePtr,
+					 DoGrab,
+					 (XtPointer)&doGrab);
+		}
+	    }
+	    UNLOCK_PROCESS;
+	}
+    }
+}
+
+#if NeedFunctionPrototypes
+void XtRegisterGrabAction(
+    XtActionProc action_proc, 
+    _XtBoolean owner_events,
+    unsigned int event_mask,
+    int pointer_mode,
+    int keyboard_mode
+    )
+#else
+void XtRegisterGrabAction(action_proc, owner_events, event_mask,
+			  pointer_mode, keyboard_mode)
+    XtActionProc action_proc;
+    Boolean owner_events;
+    unsigned int event_mask;
+    int pointer_mode, keyboard_mode;
+#endif
+{
+    GrabActionRec* actionP;
+
+    LOCK_PROCESS;
+    for (actionP = grabActionList; actionP != NULL; actionP = actionP->next) {
+	if (actionP->action_proc == action_proc) break;
+    }
+    if (actionP == NULL) {
+	actionP = XtNew(GrabActionRec);
+	actionP->action_proc = action_proc;
+	actionP->next = grabActionList;
+	grabActionList = actionP;
+    }
+#ifdef DEBUG
+    else
+	if (   actionP->owner_events != owner_events
+	    || actionP->event_mask != event_mask
+	    || actionP->pointer_mode != pointer_mode
+	    || actionP->keyboard_mode != keyboard_mode) {
+	    Cardinal n = 0;
+	    XtWarningMsg(
+		"argsReplaced", "xtRegisterGrabAction", XtCXtToolkitError,
+		"XtRegisterGrabAction called on same proc with different args",
+			 NULL, &n);
+	}
+#endif /*DEBUG*/
+
+    actionP->owner_events = owner_events;
+    actionP->event_mask = event_mask;
+    actionP->pointer_mode = pointer_mode;
+    actionP->keyboard_mode = keyboard_mode;
+    UNLOCK_PROCESS;
+}
+
+/*ARGSUSED*/
+void _XtGrabInitialize(app)
+    XtAppContext	app;
+{
+    LOCK_PROCESS;
+    if (grabActionList == NULL)
+	XtRegisterGrabAction( XtMenuPopupAction, True,
+			      (unsigned)(ButtonPressMask | ButtonReleaseMask),
+			      GrabModeAsync,
+			      GrabModeAsync
+			    );
+    UNLOCK_PROCESS;
+
+}
+@
+
+
+1.1.9.1
+log
+@OpenBSD just has imported exactly this tree into their vendor branch,
+called the same tag, in XF4/xc
+This is, apparently, the last XFree86 snapshot before the licence change
+(ie, addition of the advertising clause)
+
+Since the developers don't see any problems with that, and we would like
+to integrate improvements done by the remaining one or two (or so) XFree86
+developers (j/k), this prepares enabling us to update X-Window in the future.
+@
+text
+@d61 1
+a61 1
+/* $XFree86: xc/lib/Xt/TMgrab.c,v 1.4 2003/04/21 16:34:28 herrb Exp $ */
+d280 1
+d286 10
+a295 1
+    int keyboard_mode)
+@
+
+
+1.1.1.1
+log
+@Import OpenBSD 3.3 XF4 repository from CTM 3132 the first time
+This finalizes starting an OpenBSD-mirabile (aka MirBSD) repository.
+
+### MirBSD is:
+# Copyright (c) 1982-2003 by Thorsten "mirabile" Glaser <x86@@ePost.de>
+# Copyright © 1968-2003  The authors of And contributors to UNIX®, the
+#       C Language, BSD/Berkeley Unix; 386BSD, NetBSD 1.1 and OpenBSD.
+#
+# Anyone who obtained a copy of this work is hereby permitted to freely use,
+# distribute, modify, merge, sublicence, give away or sell it as long as the
+# authors are given due credit and the following notice is retained:
+#
+# This work is provided "as is", with no explicit or implicit warranty what-
+# soever. Use it only at your own risk. In no event may an author or contri-
+# butor be held liable for any damage, directly or indirectly, that origina-
+# ted through or is caused by creation or modification of this work.
+
+MirBSD is my private tree. MirBSD does not differ very much from OpenBSD
+and intentionally tracks OpenBSD. That's why it _is_ OpenBSD, just not the
+official one. It's like with DarrenBSD.
+
+At time of this writing, no advertising for MirBSD must be done,
+because the advertising clause has not yet been sorted out.
+
+http://templeofhate.com/tglaser/MirBSD/index.php
+@
+text
+@@
+
+
+1.1.1.2
+log
+@That's what OpenBSD will, probably, ship as XF4 in 3.5
+their last sync against XFree86 4.3-current has been
+imported into our vendor branch, too
+@
+text
+@d61 1
+a61 1
+/* $XFree86: xc/lib/Xt/TMgrab.c,v 1.4 2003/04/21 16:34:28 herrb Exp $ */
+d280 1
+d286 10
+a295 1
+    int keyboard_mode)
+@
+
+
+1.1.1.3
+log
+@OpenBSD XF4 tree (minus old and mit) as of today
+-> lib and fvwm fixes
+@
+text
+@d9 2
+a10 2
+Permission to use, copy, modify, and distribute this software and its
+documentation for any purpose and without fee is hereby granted,
+d12 1
+a12 1
+both that copyright notice and this permission notice appear in
+d15 1
+a15 1
+software without specific, written prior permission.
+d61 1
+a61 1
+/* $XFree86: xc/lib/Xt/TMgrab.c,v 1.5 2004/05/05 00:07:03 dickey Exp $ */
+d187 1
+a187 1
+
+d210 1
+a210 1
+
+d215 1
+a215 1
+
+d218 1
+a218 1
+
+d230 2
+a231 2
+void _XtRegisterGrabs(
+    Widget widget)
+d246 1
+a246 1
+
+d251 1
+a251 1
+	if (bindData->simple.isComplex)
+d253 1
+a253 1
+	else
+d262 3
+a264 3
+		    /* we've found a "grabber" in the action table. Find the
+		     * states that call this action.  Note that if there is
+		     * more than one "grabber" in the action table, we end
+d281 1
+a281 1
+    XtActionProc action_proc,
+d321 2
+a322 2
+void _XtGrabInitialize(
+    XtAppContext	app)
+@
+
+

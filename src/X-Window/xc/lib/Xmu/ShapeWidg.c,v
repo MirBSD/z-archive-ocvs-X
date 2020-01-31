@@ -1,0 +1,361 @@
+head	1.1;
+branch	1.1.1;
+access;
+symbols
+	tg-mergetmp-2:1.1.1.1
+	cvs-200410241530:1.1.1.1
+	cvs-200410012000:1.1.1.1
+	cvs-200407141120:1.1.1.1
+	cvs-200406231010:1.1.1.1
+	MIRBSD_7quater:1.1.1.1
+	cvs-200405271510:1.1.1.1
+	XFree86_4_4_0:1.1.9.1
+	cvs-200403021700:1.1.1.1
+	XFREE86_20040213:1.1.9.1
+	xc:1.1.9
+	cvs-200401291925:1.1.1.1
+	MIRBSD_7_ALPHA:1.1.1.1.0.4
+	MIRBSD_7:1.1.1.1.0.2
+	MIRBSD_7ter:1.1.1.1
+	cvs-20011091815:1.1.1.1
+	cvs-200309162130:1.1.1.1
+	cvs-200308302005:1.1.1.1
+	ctmx-0387:1.1.1.1
+	ctmx-0384:1.1.1.1
+	MIRBSD_5:1.1.1.1
+	ctmx-0375:1.1.1.1
+	ctmx-0373:1.1.1.1
+	ctm-0371:1.1.1.1
+	ctm-0370:1.1.1.1
+	MIRBSD_4:1.1.1.1
+	ctm-0363:1.1.1.1
+	ctm-0359:1.1.1.1
+	ctm-0349:1.1.1.1
+	openbsd:1.1.1;
+locks; strict;
+comment	@ * @;
+
+
+1.1
+date	2003.03.22.20.04.57;	author tg;	state Exp;
+branches
+	1.1.1.1
+	1.1.9.1;
+next	;
+
+1.1.1.1
+date	2003.03.22.20.04.57;	author tg;	state Stab;
+branches;
+next	;
+
+1.1.9.1
+date	2004.02.14.19.19.29;	author tg;	state Exp;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@/* $Xorg: ShapeWidg.c,v 1.4 2001/02/09 02:03:53 xorgcvs Exp $ */
+
+/* 
+ 
+Copyright 1988, 1998  The Open Group
+
+Permission to use, copy, modify, distribute, and sell this software and its
+documentation for any purpose is hereby granted without fee, provided that
+the above copyright notice appear in all copies and that both that
+copyright notice and this permission notice appear in supporting
+documentation.
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
+OPEN GROUP BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN
+AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
+CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+Except as contained in this notice, the name of The Open Group shall not be
+used in advertising or otherwise to promote the sale, use or other dealings
+in this Software without prior written authorization from The Open Group.
+
+*/
+/* $XFree86: xc/lib/Xmu/ShapeWidg.c,v 1.8 2001/12/14 19:55:48 dawes Exp $ */
+
+#include <X11/IntrinsicP.h>
+#include <X11/extensions/shape.h>
+#include "Converters.h"
+#include "Drawing.h"
+#include "Misc.h"
+
+/*
+ * Prototypes
+ */
+static void ShapeEllipseOrRoundedRectangle(Widget, Bool, int, int);
+static void ShapeError(Widget);
+static void ShapeOval(Widget);
+static void ShapeRectangle(Widget);
+
+/*
+ * Implementation
+ */
+Boolean
+XmuReshapeWidget(Widget w, int shape_style,
+		 int corner_width, int corner_height)
+{
+  switch (shape_style)
+    {
+      case XmuShapeRectangle:
+	ShapeRectangle(w);
+	break;
+      case XmuShapeOval:
+	ShapeOval(w);
+	break;
+      case XmuShapeEllipse:
+      case XmuShapeRoundedRectangle:
+      ShapeEllipseOrRoundedRectangle(w, shape_style == XmuShapeEllipse,
+				     corner_width, corner_height);
+	break;
+      default:
+	ShapeError(w);
+      return (False);
+    }
+  return (True);
+}
+
+static void
+ShapeError(Widget w)
+{
+    String params[1];
+    Cardinal num_params = 1;
+
+    params[0] = XtName(w);
+  XtAppWarningMsg(XtWidgetToApplicationContext(w),
+		     "shapeUnknown", "xmuReshapeWidget", "XmuLibrary",
+		     "Unsupported shape style for Command widget \"%s\"",
+		  params, &num_params);
+}
+
+static void
+ShapeRectangle(Widget w)
+{
+  XShapeCombineMask(XtDisplay(w), XtWindow(w),
+		    ShapeBounding, 0, 0, None, ShapeSet);
+  XShapeCombineMask(XtDisplay(w), XtWindow(w),
+		    ShapeClip, 0, 0, None, ShapeSet);
+}
+
+/*
+ * Function:
+ *	ShapeOval
+ *
+ * Parameters:
+ *	w - widget to be reshaped
+ *
+ * Description:
+ *	Reshapes a widget to a oval format.
+ *
+ * Notes:
+ *	  X11R6.3 behaviour changed. Now if the height is larger than the
+ *	width, this function inverts the sense of the oval, instead of
+ *	fallbacking to ellipse.
+ */
+static void
+ShapeOval(Widget w)
+{
+    Display *dpy = XtDisplay(w);
+    int width = w->core.width;
+    int height = w->core.height;
+    Pixmap p;
+    XGCValues values;
+    GC gc;
+    int rad;
+
+    if (width < 3 || height < 3)
+      return;
+    width += w->core.border_width << 1;
+    height += w->core.border_width << 1;
+
+    p = XCreatePixmap(dpy, XtWindow(w), width, height, 1);
+    values.foreground = 0;
+    values.background = 1;
+    values.cap_style = CapRound;
+    values.line_width = Min(width, height);
+    gc = XCreateGC(dpy, p,
+		    GCForeground | GCBackground | GCLineWidth | GCCapStyle,
+		    &values);
+    XFillRectangle(dpy, p, gc, 0, 0, width, height);
+    XSetForeground(dpy, gc, 1);
+
+    if (width < height)
+      {
+	rad = width >> 1;
+	XDrawLine(dpy, p, gc, rad, rad, rad, height - rad - 1);
+      }
+    else
+      {
+	rad = height >> 1;
+	XDrawLine(dpy, p, gc, rad, rad, width - rad - 1, rad);
+    }
+    XShapeCombineMask(dpy, XtWindow(w), ShapeBounding, 
+		      -(int)w->core.border_width, -(int)w->core.border_width,
+		      p, ShapeSet);
+    if (w->core.border_width)
+      {
+	XSetForeground(dpy, gc, 0);
+	XFillRectangle(dpy, p, gc, 0, 0, width, height);
+	values.line_width = Min(w->core.width, w->core.height);
+	values.foreground = 1;
+	XChangeGC(dpy, gc, GCLineWidth | GCForeground, &values);
+	if (w->core.width < w->core.height)
+	  {
+	    rad = w->core.width >> 1;
+	    XDrawLine(dpy, p, gc, rad, rad, rad, w->core.height - rad - 1);
+	  }
+	else
+	  {
+	    rad = w->core.height >> 1;
+	    XDrawLine(dpy, p, gc, rad, rad, w->core.width - rad - 1, rad);
+	}
+	XShapeCombineMask(dpy, XtWindow(w), ShapeClip, 0, 0, p, ShapeSet);
+    }
+    else
+      XShapeCombineMask(XtDisplay(w), XtWindow(w),
+			ShapeClip, 0, 0, None, ShapeSet);
+
+    XFreePixmap(dpy, p);
+    XFreeGC(dpy, gc);
+}
+
+/*
+ * Function:
+ *	ShapeEllipseOrRoundedRectangle
+ *
+ * Parameters:
+ *	w	- widget to be reshaped
+ *	ellipse - True if shape to ellise, rounded rectangle otherwise
+ *	ew	- horizontal radius of rounded rectangle
+ *	eh	- vertical radius of rouded rectangle
+ *
+ * Description:
+ *	  Based on the ellipse parameter, gives the widget a elliptical
+ *	shape, or rounded rectangle shape.
+ *
+ * Notes:
+ *	  The GC is created with a line width of 2, what seens to draw the
+ *	widget border correctly, if the width - height is not proportional.
+ */
+static void
+ShapeEllipseOrRoundedRectangle(Widget w, Bool ellipse, int ew, int eh)
+{
+    Display *dpy = XtDisplay(w);
+  unsigned width = w->core.width;
+  unsigned height = w->core.height;
+  Pixmap p;
+    XGCValues values;
+    GC gc;
+  unsigned long mask;
+
+  if (width < 3 || width < 3)
+    return;
+  width += w->core.border_width << 1;
+  height += w->core.border_width << 1;
+
+  mask = GCForeground | GCLineWidth;
+  p = XCreatePixmap(dpy, XtWindow(w), width, height, 1);
+
+    values.foreground = 0;
+  values.line_width = 2;
+
+  gc = XCreateGC(dpy, p, mask, &values);
+  XFillRectangle(dpy, p, gc, 0, 0, width, height);
+  XSetForeground(dpy, gc, 1);
+    if (!ellipse)
+    XmuFillRoundedRectangle(dpy, p, gc, 1, 1, width - 2, height - 2, ew, eh);
+    else
+    {
+      XDrawArc(dpy, p, gc, 1, 1, width - 2, height - 2, 0, 360 * 64);
+      XFillArc(dpy, p, gc, 2, 2, width - 4, height - 4, 0, 360 * 64);
+    }
+  XShapeCombineMask(dpy, XtWindow(w), ShapeBounding,
+		    -(int)w->core.border_width, -(int)w->core.border_width,
+		    p, ShapeSet);
+  if (w->core.border_width)
+    {
+      XSetForeground(dpy, gc, 0);
+      XFillRectangle(dpy, p, gc, 0, 0, width, height);
+      XSetForeground(dpy, gc, 1);
+	if (!ellipse)
+	XmuFillRoundedRectangle(dpy, p, gc, 1, 1,
+				w->core.width - 2, w->core.height - 2,
+				ew, eh);
+      else
+	XFillArc(dpy, p, gc, 0, 0, w->core.width, w->core.height,
+		 0, 360 * 64);
+      XShapeCombineMask(dpy, XtWindow(w), ShapeClip, 0, 0, p, ShapeSet);
+    }
+  else
+    XShapeCombineMask(XtDisplay(w), XtWindow(w),
+		      ShapeClip, 0, 0, None, ShapeSet);
+
+  XFreePixmap(dpy, p);
+  XFreeGC(dpy, gc);
+}
+@
+
+
+1.1.9.1
+log
+@OpenBSD just has imported exactly this tree into their vendor branch,
+called the same tag, in XF4/xc
+This is, apparently, the last XFree86 snapshot before the licence change
+(ie, addition of the advertising clause)
+
+Since the developers don't see any problems with that, and we would like
+to integrate improvements done by the remaining one or two (or so) XFree86
+developers (j/k), this prepares enabling us to update X-Window in the future.
+@
+text
+@@
+
+
+1.1.1.1
+log
+@Import OpenBSD 3.3 XF4 repository from CTM 3132 the first time
+This finalizes starting an OpenBSD-mirabile (aka MirBSD) repository.
+
+### MirBSD is:
+# Copyright (c) 1982-2003 by Thorsten "mirabile" Glaser <x86@@ePost.de>
+# Copyright © 1968-2003  The authors of And contributors to UNIX®, the
+#       C Language, BSD/Berkeley Unix; 386BSD, NetBSD 1.1 and OpenBSD.
+#
+# Anyone who obtained a copy of this work is hereby permitted to freely use,
+# distribute, modify, merge, sublicence, give away or sell it as long as the
+# authors are given due credit and the following notice is retained:
+#
+# This work is provided "as is", with no explicit or implicit warranty what-
+# soever. Use it only at your own risk. In no event may an author or contri-
+# butor be held liable for any damage, directly or indirectly, that origina-
+# ted through or is caused by creation or modification of this work.
+
+MirBSD is my private tree. MirBSD does not differ very much from OpenBSD
+and intentionally tracks OpenBSD. That's why it _is_ OpenBSD, just not the
+official one. It's like with DarrenBSD.
+
+At time of this writing, no advertising for MirBSD must be done,
+because the advertising clause has not yet been sorted out.
+
+http://templeofhate.com/tglaser/MirBSD/index.php
+@
+text
+@@

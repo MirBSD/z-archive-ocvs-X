@@ -1,0 +1,725 @@
+head	1.1;
+branch	1.1.1;
+access;
+symbols
+	tg-mergetmp-2:1.1.1.3
+	cvs-200410241530:1.1.1.3
+	cvs-200410012000:1.1.1.3
+	cvs-200407141120:1.1.1.3
+	cvs-200406231010:1.1.1.3
+	MIRBSD_7quater:1.1.1.2
+	cvs-200405271510:1.1.1.3
+	XFree86_4_4_0:1.1.9.1
+	cvs-200403021700:1.1.1.3
+	XFREE86_20040213:1.1.9.1
+	xc:1.1.9
+	cvs-200401291925:1.1.1.2
+	MIRBSD_7_ALPHA:1.1.1.2.0.4
+	MIRBSD_7:1.1.1.2.0.2
+	MIRBSD_7ter:1.1.1.2
+	cvs-20011091815:1.1.1.2
+	cvs-200309162130:1.1.1.2
+	cvs-200308302005:1.1.1.2
+	ctmx-0387:1.1.1.2
+	ctmx-0384:1.1.1.2
+	MIRBSD_5:1.1.1.2
+	ctmx-0375:1.1.1.2
+	ctmx-0373:1.1.1.2
+	ctm-0371:1.1.1.2
+	ctm-0370:1.1.1.2
+	MIRBSD_4:1.1.1.2
+	ctm-0363:1.1.1.2
+	ctm-0359:1.1.1.2
+	ctm-0349:1.1.1.1
+	openbsd:1.1.1;
+locks; strict;
+comment	@ * @;
+
+
+1.1
+date	2003.03.22.20.04.11;	author tg;	state Exp;
+branches
+	1.1.1.1
+	1.1.9.1;
+next	;
+
+1.1.1.1
+date	2003.03.22.20.04.11;	author tg;	state Exp;
+branches;
+next	1.1.1.2;
+
+1.1.1.2
+date	2003.04.08.18.31.19;	author tg;	state Exp;
+branches;
+next	1.1.1.3;
+
+1.1.1.3
+date	2004.03.02.17.57.43;	author tg;	state Stab;
+branches;
+next	;
+
+1.1.9.1
+date	2004.02.14.19.17.46;	author tg;	state Exp;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@/*
+ * GLX Hardware Device Driver common code
+ * Copyright (C) 1999 Keith Whitwell
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a
+ * copy of this software and associated documentation files (the "Software"),
+ * to deal in the Software without restriction, including without limitation
+ * the rights to use, copy, modify, merge, publish, distribute, sublicense,
+ * and/or sell copies of the Software, and to permit persons to whom the
+ * Software is furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included
+ * in all copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
+ * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL
+ * KEITH WHITWELL, OR ANY OTHER CONTRIBUTORS BE LIABLE FOR ANY CLAIM, 
+ * DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR 
+ * OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE 
+ * OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+ *
+ */
+/* $XFree86: xc/lib/GL/mesa/src/drv/common/mm.c,v 1.3 2001/08/18 02:51:03 dawes Exp $ */
+
+#include <stdlib.h>
+#include <stdio.h>
+
+#include "mm.h"
+#include "hwlog.h"
+
+#define ISFREE(bptr) ((bptr)->free)
+/*  #define PRINTF hwMsg(1, */
+#define PRINTF fprintf(stderr,
+
+void mmDumpMemInfo( memHeap_t *heap )
+{
+  TMemBlock *p;
+
+  PRINTF "Memory heap %p:\n", heap);
+  if (heap == 0) {
+    PRINTF "  heap == 0\n");
+  } else {
+    p = (TMemBlock *)heap;
+    while (p) {
+      PRINTF "  Offset:%08x, Size:%08x, %c%c\n",p->ofs,p->size,
+	     p->free ? '.':'U',
+	     p->reserved ? 'R':'.');
+      p = p->next;
+    }
+  }
+  PRINTF "End of memory blocks\n");
+}
+
+memHeap_t *mmInit(int ofs,
+		  int size)
+{
+   PMemBlock blocks;
+  
+   if (size <= 0) {
+      return 0;
+   }
+   blocks = (TMemBlock *) calloc(1,sizeof(TMemBlock));
+   if (blocks) {
+      blocks->ofs = ofs;
+      blocks->size = size;
+      blocks->free = 1;
+      return (memHeap_t *)blocks;
+   } else
+      return 0;
+}
+
+/* Kludgey workaround for existing i810 server.  Remove soon.
+ */
+memHeap_t *mmAddRange( memHeap_t *heap,
+		       int ofs,
+		       int size )
+{
+   PMemBlock blocks;
+   blocks = (TMemBlock *) calloc(2,sizeof(TMemBlock));
+   if (blocks) {
+      blocks[0].size = size;
+      blocks[0].free = 1;
+      blocks[0].ofs = ofs;
+      blocks[0].next = &blocks[1];
+
+      /* Discontinuity - stops JoinBlock from trying to join non-adjacent
+       * ranges.
+       */
+      blocks[1].size = 0;
+      blocks[1].free = 0;
+      blocks[1].ofs = ofs+size;
+      blocks[1].next = (PMemBlock) heap;      
+      return (memHeap_t *)blocks;
+   } 
+   else
+      return heap;
+}
+
+static TMemBlock* SliceBlock(TMemBlock *p, 
+			     int startofs, int size, 
+			     int reserved, int alignment)
+{
+  TMemBlock *newblock;
+
+  /* break left */
+  if (startofs > p->ofs) {
+    newblock = (TMemBlock*) calloc(1,sizeof(TMemBlock));
+    if (!newblock)
+       return NULL;
+    newblock->ofs = startofs;
+    newblock->size = p->size - (startofs - p->ofs);
+    newblock->free = 1;
+    newblock->next = p->next;
+    p->size -= newblock->size;
+    p->next = newblock;
+    p = newblock;
+  }
+
+  /* break right */
+  if (size < p->size) {
+    newblock = (TMemBlock*) calloc(1,sizeof(TMemBlock));
+    if (!newblock)
+       return NULL;
+    newblock->ofs = startofs + size;
+    newblock->size = p->size - size;
+    newblock->free = 1;
+    newblock->next = p->next;
+    p->size = size;
+    p->next = newblock;
+  }
+
+  /* p = middle block */
+  p->align = alignment;
+  p->free = 0;
+  p->reserved = reserved;
+  return p;
+}
+
+PMemBlock mmAllocMem( memHeap_t *heap, int size, int align2, int startSearch)
+{
+  int mask,startofs,endofs;
+  TMemBlock *p;
+
+  if (!heap || align2 < 0 || size <= 0)
+    return NULL;
+  mask = (1 << align2)-1;
+  startofs = 0;
+  p = (TMemBlock *)heap;
+  while (p) {
+    if (ISFREE(p)) {
+      startofs = (p->ofs + mask) & ~mask;
+      if ( startofs < startSearch ) {
+      	startofs = startSearch;
+      }
+      endofs = startofs+size;
+      if (endofs <= (p->ofs+p->size))
+	break;
+    }
+    p = p->next;
+  }
+  if (!p)
+    return NULL;
+  p = SliceBlock(p,startofs,size,0,mask+1);
+  p->heap = heap;
+  return p;
+}
+
+static __inline__ int Join2Blocks(TMemBlock *p)
+{
+  if (p->free && p->next && p->next->free) {
+    TMemBlock *q = p->next;
+    p->size += q->size;
+    p->next = q->next;
+    free(q);
+    return 1;
+  }
+  return 0;
+}
+
+int mmFreeMem(PMemBlock b)
+{
+  TMemBlock *p,*prev;
+
+  if (!b)
+    return 0;
+  if (!b->heap) {
+     fprintf(stderr, "no heap\n");
+     return -1;
+  }
+  p = b->heap;
+  prev = NULL;
+  while (p && p != b) {
+    prev = p;
+    p = p->next;
+  }
+  if (!p || p->free || p->reserved) {
+     if (!p)
+	fprintf(stderr, "block not found in heap\n");
+     else if (p->free)
+	fprintf(stderr, "block already free\n");
+     else
+	fprintf(stderr, "block is reserved\n");
+    return -1;
+  }
+  p->free = 1;
+  Join2Blocks(p);
+  if (prev)
+    Join2Blocks(prev);
+  return 0;
+}
+
+int mmReserveMem(memHeap_t *heap, int offset,int size)
+{
+  int endofs;
+  TMemBlock *p;
+
+  if (!heap || size <= 0)
+    return -1;
+  endofs = offset+size;
+  p = (TMemBlock *)heap;
+  while (p && p->ofs <= offset) {
+    if (ISFREE(p) && endofs <= (p->ofs+p->size)) {
+      SliceBlock(p,offset,size,1,1);
+      return 0;
+    }
+    p = p->next;
+  }
+  return -1;
+}
+
+int mmFreeReserved(memHeap_t *heap, int offset)
+{
+  TMemBlock *p,*prev;
+
+  if (!heap)
+    return -1;
+  p = (TMemBlock *)heap;
+  prev = NULL;
+  while (p && p->ofs != offset) {
+    prev = p;
+    p = p->next;
+  }
+  if (!p || !p->reserved)
+    return -1;
+  p->free = 1;
+  p->reserved = 0;
+  Join2Blocks(p);
+  if (prev)
+    Join2Blocks(prev);
+  return 0;
+}
+
+void mmDestroy(memHeap_t *heap)
+{
+  TMemBlock *p,*q;
+
+  if (!heap)
+    return;
+  p = (TMemBlock *)heap;
+  while (p) {
+    q = p->next;
+    free(p);
+    p = q;
+  }
+}
+@
+
+
+1.1.9.1
+log
+@OpenBSD just has imported exactly this tree into their vendor branch,
+called the same tag, in XF4/xc
+This is, apparently, the last XFree86 snapshot before the licence change
+(ie, addition of the advertising clause)
+
+Since the developers don't see any problems with that, and we would like
+to integrate improvements done by the remaining one or two (or so) XFree86
+developers (j/k), this prepares enabling us to update X-Window in the future.
+@
+text
+@d3 1
+a3 1
+ * Copyright (C) 1999 Wittawat Yamwong
+d18 1
+a18 1
+ * WITTAWAT YAMWONG, OR ANY OTHER CONTRIBUTORS BE LIABLE FOR ANY CLAIM, 
+d24 1
+a24 1
+/* $XFree86: xc/lib/GL/mesa/src/drv/common/mm.c,v 1.5 2003/09/28 20:15:07 alanh Exp $ */
+d32 3
+d38 1
+a38 1
+   TMemBlock *p;
+d40 13
+a52 13
+   fprintf(stderr, "Memory heap %p:\n", (void *)heap);
+   if (heap == 0) {
+      fprintf(stderr, "  heap == 0\n");
+   } else {
+      p = (TMemBlock *)heap;
+      while (p) {
+	 fprintf(stderr, "  Offset:%08x, Size:%08x, %c%c\n",p->ofs,p->size,
+		 p->free ? '.':'U',
+		 p->reserved ? 'R':'.');
+	 p = p->next;
+      }
+   }
+   fprintf(stderr, "End of memory blocks\n");
+d73 26
+d104 1
+a104 15
+   TMemBlock *newblock;
+
+   /* break left */
+   if (startofs > p->ofs) {
+      newblock = (TMemBlock*) calloc(1,sizeof(TMemBlock));
+      if (!newblock)
+	 return NULL;
+      newblock->ofs = startofs;
+      newblock->size = p->size - (startofs - p->ofs);
+      newblock->free = 1;
+      newblock->next = p->next;
+      p->size -= newblock->size;
+      p->next = newblock;
+      p = newblock;
+   }
+d106 32
+a137 18
+   /* break right */
+   if (size < p->size) {
+      newblock = (TMemBlock*) calloc(1,sizeof(TMemBlock));
+      if (!newblock)
+	 return NULL;
+      newblock->ofs = startofs + size;
+      newblock->size = p->size - size;
+      newblock->free = 1;
+      newblock->next = p->next;
+      p->size = size;
+      p->next = newblock;
+   }
+
+   /* p = middle block */
+   p->align = alignment;
+   p->free = 0;
+   p->reserved = reserved;
+   return p;
+d142 2
+a143 2
+   int mask,startofs,endofs;
+   TMemBlock *p;
+d145 10
+a154 14
+   if (!heap || align2 < 0 || size <= 0)
+      return NULL;
+   mask = (1 << align2)-1;
+   startofs = 0;
+   p = (TMemBlock *)heap;
+   while (p) {
+      if ((p)->free) {
+	 startofs = (p->ofs + mask) & ~mask;
+	 if ( startofs < startSearch ) {
+	    startofs = startSearch;
+	 }
+	 endofs = startofs+size;
+	 if (endofs <= (p->ofs+p->size))
+	    break;
+d156 11
+a166 7
+      p = p->next;
+   }
+   if (!p)
+      return NULL;
+   p = SliceBlock(p,startofs,size,0,mask+1);
+   p->heap = heap;
+   return p;
+d171 8
+a178 8
+   if (p->free && p->next && p->next->free) {
+      TMemBlock *q = p->next;
+      p->size += q->size;
+      p->next = q->next;
+      free(q);
+      return 1;
+   }
+   return 0;
+d183 29
+a211 1
+   TMemBlock *p,*prev;
+d213 12
+a224 1
+   if (!b)
+d226 4
+a229 24
+   if (!b->heap) {
+      fprintf(stderr, "no heap\n");
+      return -1;
+   }
+   p = b->heap;
+   prev = NULL;
+   while (p && p != b) {
+      prev = p;
+      p = p->next;
+   }
+   if (!p || p->free || p->reserved) {
+      if (!p)
+	 fprintf(stderr, "block not found in heap\n");
+      else if (p->free)
+	 fprintf(stderr, "block already free\n");
+      else
+	 fprintf(stderr, "block is reserved\n");
+      return -1;
+   }
+   p->free = 1;
+   Join2Blocks(p);
+   if (prev)
+      Join2Blocks(prev);
+   return 0;
+d232 21
+d256 1
+a256 1
+   TMemBlock *p,*q;
+d258 8
+a265 8
+   if (!heap)
+      return;
+   p = (TMemBlock *)heap;
+   while (p) {
+      q = p->next;
+      free(p);
+      p = q;
+   }
+@
+
+
+1.1.1.1
+log
+@Import OpenBSD 3.3 XF4 repository from CTM 3132 the first time
+This finalizes starting an OpenBSD-mirabile (aka MirBSD) repository.
+
+### MirBSD is:
+# Copyright (c) 1982-2003 by Thorsten "mirabile" Glaser <x86@@ePost.de>
+# Copyright © 1968-2003  The authors of And contributors to UNIX®, the
+#       C Language, BSD/Berkeley Unix; 386BSD, NetBSD 1.1 and OpenBSD.
+#
+# Anyone who obtained a copy of this work is hereby permitted to freely use,
+# distribute, modify, merge, sublicence, give away or sell it as long as the
+# authors are given due credit and the following notice is retained:
+#
+# This work is provided "as is", with no explicit or implicit warranty what-
+# soever. Use it only at your own risk. In no event may an author or contri-
+# butor be held liable for any damage, directly or indirectly, that origina-
+# ted through or is caused by creation or modification of this work.
+
+MirBSD is my private tree. MirBSD does not differ very much from OpenBSD
+and intentionally tracks OpenBSD. That's why it _is_ OpenBSD, just not the
+official one. It's like with DarrenBSD.
+
+At time of this writing, no advertising for MirBSD must be done,
+because the advertising clause has not yet been sorted out.
+
+http://templeofhate.com/tglaser/MirBSD/index.php
+@
+text
+@@
+
+
+1.1.1.2
+log
+@The X-Windowing System
+
+Import XFree86 4.3 from OpenBSD by CTM, in the hope it's stable
+@
+text
+@d24 1
+a24 1
+/* $XFree86: xc/lib/GL/mesa/src/drv/common/mm.c,v 1.4 2002/10/30 12:51:27 alanh Exp $ */
+d32 3
+a34 3
+/* KW: I don't know who the author of this code is, but it wasn't me
+ * despite what the copyright says...
+ */
+d38 1
+a38 1
+   TMemBlock *p;
+d40 13
+a52 13
+   fprintf(stderr, "Memory heap %p:\n", heap);
+   if (heap == 0) {
+      fprintf(stderr, "  heap == 0\n");
+   } else {
+      p = (TMemBlock *)heap;
+      while (p) {
+	 fprintf(stderr, "  Offset:%08x, Size:%08x, %c%c\n",p->ofs,p->size,
+		 p->free ? '.':'U',
+		 p->reserved ? 'R':'.');
+	 p = p->next;
+      }
+   }
+   fprintf(stderr, "End of memory blocks\n");
+d73 26
+d104 1
+a104 15
+   TMemBlock *newblock;
+
+   /* break left */
+   if (startofs > p->ofs) {
+      newblock = (TMemBlock*) calloc(1,sizeof(TMemBlock));
+      if (!newblock)
+	 return NULL;
+      newblock->ofs = startofs;
+      newblock->size = p->size - (startofs - p->ofs);
+      newblock->free = 1;
+      newblock->next = p->next;
+      p->size -= newblock->size;
+      p->next = newblock;
+      p = newblock;
+   }
+d106 32
+a137 18
+   /* break right */
+   if (size < p->size) {
+      newblock = (TMemBlock*) calloc(1,sizeof(TMemBlock));
+      if (!newblock)
+	 return NULL;
+      newblock->ofs = startofs + size;
+      newblock->size = p->size - size;
+      newblock->free = 1;
+      newblock->next = p->next;
+      p->size = size;
+      p->next = newblock;
+   }
+
+   /* p = middle block */
+   p->align = alignment;
+   p->free = 0;
+   p->reserved = reserved;
+   return p;
+d142 2
+a143 2
+   int mask,startofs,endofs;
+   TMemBlock *p;
+d145 10
+a154 14
+   if (!heap || align2 < 0 || size <= 0)
+      return NULL;
+   mask = (1 << align2)-1;
+   startofs = 0;
+   p = (TMemBlock *)heap;
+   while (p) {
+      if ((p)->free) {
+	 startofs = (p->ofs + mask) & ~mask;
+	 if ( startofs < startSearch ) {
+	    startofs = startSearch;
+	 }
+	 endofs = startofs+size;
+	 if (endofs <= (p->ofs+p->size))
+	    break;
+d156 11
+a166 7
+      p = p->next;
+   }
+   if (!p)
+      return NULL;
+   p = SliceBlock(p,startofs,size,0,mask+1);
+   p->heap = heap;
+   return p;
+d171 8
+a178 8
+   if (p->free && p->next && p->next->free) {
+      TMemBlock *q = p->next;
+      p->size += q->size;
+      p->next = q->next;
+      free(q);
+      return 1;
+   }
+   return 0;
+d183 1
+a183 1
+   TMemBlock *p,*prev;
+d185 40
+a224 1
+   if (!b)
+d226 26
+a251 24
+   if (!b->heap) {
+      fprintf(stderr, "no heap\n");
+      return -1;
+   }
+   p = b->heap;
+   prev = NULL;
+   while (p && p != b) {
+      prev = p;
+      p = p->next;
+   }
+   if (!p || p->free || p->reserved) {
+      if (!p)
+	 fprintf(stderr, "block not found in heap\n");
+      else if (p->free)
+	 fprintf(stderr, "block already free\n");
+      else
+	 fprintf(stderr, "block is reserved\n");
+      return -1;
+   }
+   p->free = 1;
+   Join2Blocks(p);
+   if (prev)
+      Join2Blocks(prev);
+   return 0;
+a253 1
+
+d256 1
+a256 1
+   TMemBlock *p,*q;
+d258 8
+a265 8
+   if (!heap)
+      return;
+   p = (TMemBlock *)heap;
+   while (p) {
+      q = p->next;
+      free(p);
+      p = q;
+   }
+@
+
+
+1.1.1.3
+log
+@That's what OpenBSD will, probably, ship as XF4 in 3.5
+their last sync against XFree86 4.3-current has been
+imported into our vendor branch, too
+@
+text
+@d3 1
+a3 1
+ * Copyright (C) 1999 Wittawat Yamwong
+d18 1
+a18 1
+ * WITTAWAT YAMWONG, OR ANY OTHER CONTRIBUTORS BE LIABLE FOR ANY CLAIM, 
+d24 1
+a24 1
+/* $XFree86: xc/lib/GL/mesa/src/drv/common/mm.c,v 1.5 2003/09/28 20:15:07 alanh Exp $ */
+d32 3
+d40 1
+a40 1
+   fprintf(stderr, "Memory heap %p:\n", (void *)heap);
+@
+
+

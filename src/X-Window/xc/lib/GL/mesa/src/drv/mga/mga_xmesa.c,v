@@ -1,0 +1,1922 @@
+head	1.1;
+branch	1.1.1;
+access;
+symbols
+	tg-mergetmp-2:1.1.1.3
+	cvs-200410241530:1.1.1.3
+	cvs-200410012000:1.1.1.3
+	cvs-200407141120:1.1.1.3
+	cvs-200406231010:1.1.1.3
+	MIRBSD_7quater:1.1.1.2
+	cvs-200405271510:1.1.1.3
+	XFree86_4_4_0:1.1.9.1
+	cvs-200403021700:1.1.1.3
+	XFREE86_20040213:1.1.9.1
+	xc:1.1.9
+	cvs-200401291925:1.1.1.2
+	MIRBSD_7_ALPHA:1.1.1.2.0.4
+	MIRBSD_7:1.1.1.2.0.2
+	MIRBSD_7ter:1.1.1.2
+	cvs-20011091815:1.1.1.2
+	cvs-200309162130:1.1.1.2
+	cvs-200308302005:1.1.1.2
+	ctmx-0387:1.1.1.2
+	ctmx-0384:1.1.1.2
+	MIRBSD_5:1.1.1.2
+	ctmx-0375:1.1.1.2
+	ctmx-0373:1.1.1.2
+	ctm-0371:1.1.1.2
+	ctm-0370:1.1.1.2
+	MIRBSD_4:1.1.1.2
+	ctm-0363:1.1.1.2
+	ctm-0359:1.1.1.2
+	ctm-0349:1.1.1.1
+	openbsd:1.1.1;
+locks; strict;
+comment	@ * @;
+
+
+1.1
+date	2003.03.22.20.04.16;	author tg;	state Exp;
+branches
+	1.1.1.1
+	1.1.9.1;
+next	;
+
+1.1.1.1
+date	2003.03.22.20.04.16;	author tg;	state Exp;
+branches;
+next	1.1.1.2;
+
+1.1.1.2
+date	2003.04.08.18.31.27;	author tg;	state Exp;
+branches;
+next	1.1.1.3;
+
+1.1.1.3
+date	2004.03.02.17.58.31;	author tg;	state Stab;
+branches;
+next	;
+
+1.1.9.1
+date	2004.02.14.19.17.58;	author tg;	state Exp;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@/* $XFree86: xc/lib/GL/mesa/src/drv/mga/mga_xmesa.c,v 1.12 2001/04/10 16:07:50 dawes Exp $ */
+/*
+ * Copyright 2000-2001 VA Linux Systems, Inc.
+ * All Rights Reserved.
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a
+ * copy of this software and associated documentation files (the "Software"),
+ * to deal in the Software without restriction, including without limitation
+ * on the rights to use, copy, modify, merge, publish, distribute, sub
+ * license, and/or sell copies of the Software, and to permit persons to whom
+ * the Software is furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice (including the next
+ * paragraph) shall be included in all copies or substantial portions of the
+ * Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NON-INFRINGEMENT.  IN NO EVENT SHALL
+ * VA LINUX SYSTEMS AND/OR ITS SUPPLIERS BE LIABLE FOR ANY CLAIM, DAMAGES OR
+ * OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE,
+ * ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR
+ * OTHER DEALINGS IN THE SOFTWARE.
+ *
+ * Authors:
+ *    Keith Whitwell <keithw@@valinux.com>
+ */
+
+#ifdef GLX_DIRECT_RENDERING
+
+#include <X11/Xlibint.h>
+#include <stdio.h>
+
+#include "drm.h"
+#include "mga_xmesa.h"
+#include "context.h"
+#include "vbxform.h"
+#include "matrix.h"
+#include "mmath.h"
+#include "simple_list.h"
+#include "mem.h"
+
+#include "mgadd.h"
+#include "mgastate.h"
+#include "mgatex.h"
+#include "mgaspan.h"
+#include "mgatris.h"
+#include "mgapipeline.h"
+#include "mgabuffers.h"
+#include "mgapixel.h"
+
+#include "xf86dri.h"
+#include "mga_xmesa.h"
+
+#include "mga_dri.h"
+
+
+#ifndef MGA_DEBUG
+int MGA_DEBUG = (0
+/*		 | DEBUG_ALWAYS_SYNC */
+/*		 | DEBUG_VERBOSE_MSG */
+/*		 | DEBUG_VERBOSE_LRU */
+/*		 | DEBUG_VERBOSE_DRI */
+/*		 | DEBUG_VERBOSE_IOCTL */
+/*		 | DEBUG_VERBOSE_2D */
+/*		 | DEBUG_VERBOSE_FALLBACK */
+   );
+#endif
+
+
+static mgaContextPtr      mgaCtx = 0;
+
+
+/* These functions are accessed externally to the driver:
+ *
+ * XMesaInitDriver
+ * XMesaResetDriver
+ * XMesaCreateVisual
+ * XMesaDestroyVisual
+ * XMesaCreateContext
+ * XMesaDestroyContext
+ * XMesaCreateWindowBuffer
+ * XMesaCreatePixmapBuffer
+ * XMesaDestroyBuffer
+ * XMesaSwapBuffers
+ * XMesaMakeCurrent
+ *
+ */
+
+GLboolean XMesaInitDriver(__DRIscreenPrivate *sPriv)
+{
+   mgaScreenPrivate *mgaScreen;
+   MGADRIPtr         serverInfo = (MGADRIPtr)sPriv->pDevPriv;
+
+   if (MGA_DEBUG&DEBUG_VERBOSE_DRI)
+      fprintf(stderr, "XMesaInitDriver\n");
+
+   /* Check the DRI version */
+   {
+      int major, minor, patch;
+      if (XF86DRIQueryVersion(sPriv->display, &major, &minor, &patch)) {
+         if (major != 4 || minor < 0) {
+            char msg[1000];
+            sprintf(msg, "MGA DRI driver expected DRI version 4.0.x but got version %d.%d.%d", major, minor, patch);
+            __driMesaMessage(msg);
+            return GL_FALSE;
+         }
+      }
+   }
+
+   /* Check that the DDX driver version is compatible */
+   if (sPriv->ddxMajor != 1 ||
+       sPriv->ddxMinor < 0) {
+      char msg[1000];
+      sprintf(msg, "MGA DRI driver expected DDX driver version 1.0.x but got version %d.%d.%d", sPriv->ddxMajor, sPriv->ddxMinor, sPriv->ddxPatch);
+      __driMesaMessage(msg);
+      return GL_FALSE;
+   }
+
+   /* Check that the DRM driver version is compatible */
+   if (sPriv->drmMajor != 3 ||
+       sPriv->drmMinor < 0) {
+      char msg[1000];
+      sprintf(msg, "MGA DRI driver expected DRM driver version 3.0.x but got version %d.%d.%d", sPriv->drmMajor, sPriv->drmMinor, sPriv->drmPatch);
+      __driMesaMessage(msg);
+      return GL_FALSE;
+   }
+
+
+   /* Allocate the private area */
+   mgaScreen = (mgaScreenPrivate *)MALLOC(sizeof(mgaScreenPrivate));
+   if (!mgaScreen) {
+      __driMesaMessage("Couldn't malloc screen struct");
+      return GL_FALSE;
+   }
+
+   mgaScreen->sPriv = sPriv;
+   sPriv->private = (void *)mgaScreen;
+
+   if (serverInfo->chipset != MGA_CARD_TYPE_G200 &&
+       serverInfo->chipset != MGA_CARD_TYPE_G400) {
+      XFree(mgaScreen);
+      sPriv->private = NULL;
+      __driMesaMessage("Unrecognized chipset");
+      return GL_FALSE;
+   }
+
+
+   mgaScreen->chipset = serverInfo->chipset;
+   mgaScreen->width = serverInfo->width;
+   mgaScreen->height = serverInfo->height;
+   mgaScreen->mem = serverInfo->mem;
+   mgaScreen->cpp = serverInfo->cpp;
+
+   mgaScreen->agpMode = serverInfo->agpMode;
+
+   mgaScreen->frontPitch = serverInfo->frontPitch;
+   mgaScreen->frontOffset = serverInfo->frontOffset;
+   mgaScreen->backOffset = serverInfo->backOffset;
+   mgaScreen->backPitch  =  serverInfo->backPitch;
+   mgaScreen->depthOffset = serverInfo->depthOffset;
+   mgaScreen->depthPitch  =  serverInfo->depthPitch;
+
+   mgaScreen->mmio.handle = serverInfo->registers.handle;
+   mgaScreen->mmio.size = serverInfo->registers.size;
+   if ( drmMap( sPriv->fd,
+		mgaScreen->mmio.handle, mgaScreen->mmio.size,
+		&mgaScreen->mmio.map ) < 0 ) {
+      FREE( mgaScreen );
+      sPriv->private = NULL;
+      __driMesaMessage( "Couldn't map MMIO registers" );
+      return GL_FALSE;
+   }
+
+#if 0
+   mgaScreen->status.handle = serverInfo->status.handle;
+   mgaScreen->status.size = serverInfo->status.size;
+   if ( drmMap( sPriv->fd,
+		mgaScreen->status.handle, mgaScreen->status.size,
+		&mgaScreen->status.map ) < 0 ) {
+      drmUnmap( mgaScreen->mmio.map, mgaScreen->mmio.size );
+      FREE( mgaScreen );
+      sPriv->private = NULL;
+      __driMesaMessage( "Couldn't map status page" );
+      return GL_FALSE;
+   }
+#endif
+
+   mgaScreen->primary.handle = serverInfo->primary.handle;
+   mgaScreen->primary.size = serverInfo->primary.size;
+   mgaScreen->buffers.handle = serverInfo->buffers.handle;
+   mgaScreen->buffers.size = serverInfo->buffers.size;
+
+#if 0
+   mgaScreen->agp.handle = serverInfo->agp;
+   mgaScreen->agp.size = serverInfo->agpSize;
+
+   if (drmMap(sPriv->fd,
+	      mgaScreen->agp.handle,
+	      mgaScreen->agp.size,
+	      (drmAddress *)&mgaScreen->agp.map) != 0)
+   {
+      Xfree(mgaScreen);
+      sPriv->private = NULL;
+      __driMesaMessage("Couldn't map agp region");
+      return GL_FALSE;
+   }
+#endif
+
+   mgaScreen->textureOffset[MGA_CARD_HEAP] = serverInfo->textureOffset;
+   mgaScreen->textureOffset[MGA_AGP_HEAP] = (serverInfo->agpTextureOffset |
+					     PDEA_pagpxfer_enable | 1);
+
+   mgaScreen->textureSize[MGA_CARD_HEAP] = serverInfo->textureSize;
+   mgaScreen->textureSize[MGA_AGP_HEAP] = serverInfo->agpTextureSize;
+
+   mgaScreen->logTextureGranularity[MGA_CARD_HEAP] =
+      serverInfo->logTextureGranularity;
+   mgaScreen->logTextureGranularity[MGA_AGP_HEAP] =
+      serverInfo->logAgpTextureGranularity;
+
+   mgaScreen->texVirtual[MGA_CARD_HEAP] = (char *)(mgaScreen->sPriv->pFB +
+					   serverInfo->textureOffset);
+#if 0
+   mgaScreen->texVirtual[MGA_AGP_HEAP] = (mgaScreen->agp.map +
+					  serverInfo->agpTextureOffset);
+#endif
+
+   mgaScreen->mAccess = serverInfo->mAccess;
+
+   /* For calculating setupdma addresses.
+    */
+   mgaScreen->dmaOffset = serverInfo->buffers.handle;
+
+   mgaScreen->bufs = drmMapBufs(sPriv->fd);
+   if (!mgaScreen->bufs) {
+      /*drmUnmap(mgaScreen->agp_tex.map, mgaScreen->agp_tex.size);*/
+      XFree(mgaScreen);
+      sPriv->private = NULL;
+      __driMesaMessage("Couldn't map dma buffers");
+      return GL_FALSE;
+   }
+   mgaScreen->sarea_priv_offset = serverInfo->sarea_priv_offset;
+
+   mgaDDFastPathInit();
+   mgaDDEltPathInit();
+   mgaDDTrifuncInit();
+   mgaDDSetupInit();
+
+   return GL_TRUE;
+}
+
+
+/* Accessed by dlsym from dri_mesa_init.c
+ */
+void XMesaResetDriver(__DRIscreenPrivate *sPriv)
+{
+   mgaScreenPrivate *mgaScreen = (mgaScreenPrivate *) sPriv->private;
+
+   if (MGA_DEBUG&DEBUG_VERBOSE_DRI)
+      fprintf(stderr, "XMesaResetDriver\n");
+
+   /*drmUnmap(mgaScreen->agp_tex.map, mgaScreen->agp_tex.size);*/
+   Xfree(mgaScreen);
+   sPriv->private = NULL;
+}
+
+
+GLvisual *XMesaCreateVisual(Display *dpy,
+                            __DRIscreenPrivate *driScrnPriv,
+                            const XVisualInfo *visinfo,
+                            const __GLXvisualConfig *config)
+{
+   if (MGA_DEBUG&DEBUG_VERBOSE_DRI)
+      fprintf(stderr, "XMesaCreateVisual\n");
+
+   /* Drivers may change the args to _mesa_create_visual() in order to
+    * setup special visuals.
+    */
+   return _mesa_create_visual( config->rgba,
+                               config->doubleBuffer,
+                               config->stereo,
+                               _mesa_bitcount(visinfo->red_mask),
+                               _mesa_bitcount(visinfo->green_mask),
+                               _mesa_bitcount(visinfo->blue_mask),
+                               config->alphaSize,
+                               0, /* index bits */
+                               config->depthSize,
+                               config->stencilSize,
+                               config->accumRedSize,
+                               config->accumGreenSize,
+                               config->accumBlueSize,
+                               config->accumAlphaSize,
+                               0 /* num samples */ );
+}
+
+
+GLboolean XMesaCreateContext( Display *dpy, GLvisual *mesaVis,
+                              __DRIcontextPrivate *driContextPriv )
+{
+   int i;
+   GLcontext *ctx;
+   mgaContextPtr mmesa;
+   __DRIscreenPrivate *sPriv = driContextPriv->driScreenPriv;
+   mgaScreenPrivate *mgaScreen = (mgaScreenPrivate *)sPriv->private;
+   MGASAREAPrivPtr saPriv = (MGASAREAPrivPtr)(((char*)sPriv->pSAREA)+
+					      mgaScreen->sarea_priv_offset);
+
+   if (MGA_DEBUG&DEBUG_VERBOSE_DRI)
+      fprintf(stderr, "XMesaCreateContext\n");
+
+   mmesa = (mgaContextPtr)CALLOC(sizeof(mgaContext));
+   if (!mmesa) {
+      return GL_FALSE;
+   }
+
+   ctx = driContextPriv->mesaContext;
+
+   mmesa->display = dpy;
+   mmesa->hHWContext = driContextPriv->hHWContext;
+   mmesa->driFd = sPriv->fd;
+   mmesa->driHwLock = &sPriv->pSAREA->lock;
+
+   mmesa->mgaScreen = mgaScreen;
+   mmesa->driScreen = sPriv;
+   mmesa->sarea = saPriv;
+   mmesa->glBuffer = NULL;
+
+   make_empty_list(&mmesa->SwappedOut);
+
+   mmesa->lastTexHeap = mgaScreen->texVirtual[MGA_AGP_HEAP] ? 2 : 1;
+
+   for (i = 0 ; i < mmesa->lastTexHeap ; i++) {
+      mmesa->texHeap[i] = mmInit( 0, mgaScreen->textureSize[i]);
+      make_empty_list(&mmesa->TexObjList[i]);
+   }
+
+   /* Set the maximum texture size small enough that we can guarentee
+    * that both texture units can bind a maximal texture and have them
+    * on the card at once.
+    */
+   {
+      int nr = 2;
+
+      if (mgaScreen->chipset == MGA_CARD_TYPE_G200)
+	 nr = 1;
+
+      if (mgaScreen->textureSize[0] < nr*1024*1024) {
+	 ctx->Const.MaxTextureLevels = 9;
+	 ctx->Const.MaxTextureSize = 1<<8;
+      } else if (mgaScreen->textureSize[0] < nr*4*1024*1024) {
+	 ctx->Const.MaxTextureLevels = 10;
+	 ctx->Const.MaxTextureSize = 1<<9;
+      } else {
+	 ctx->Const.MaxTextureLevels = 11;
+	 ctx->Const.MaxTextureSize = 1<<10;
+      }
+   }
+
+   mmesa->hw_stencil = mesaVis->StencilBits && mesaVis->DepthBits == 24;
+
+   switch (mesaVis->DepthBits) {
+   case 16:
+      mmesa->depth_scale = 1.0/(GLdouble)0xffff;
+      mmesa->depth_clear_mask = ~0;
+      mmesa->ClearDepth = 0xffff;
+      break;
+   case 24:
+      mmesa->depth_scale = 1.0/(GLdouble)0xffffff;
+      if (mmesa->hw_stencil) {
+	 mmesa->depth_clear_mask = 0xffffff00;
+	 mmesa->stencil_clear_mask = 0x000000ff;
+      } else
+	 mmesa->depth_clear_mask = ~0;
+      mmesa->ClearDepth = 0xffffff00;
+      break;
+   case 32:
+      mmesa->depth_scale = 1.0/(GLdouble)0xffffffff;
+      mmesa->depth_clear_mask = ~0;
+      mmesa->ClearDepth = 0xffffffff;
+      break;
+   };
+
+   mmesa->canDoStipple = GL_FALSE;
+   mmesa->renderindex = -1;		/* impossible value */
+   mmesa->new_state = ~0;
+   mmesa->dirty = ~0;
+   mmesa->warp_pipe = 0;
+   mmesa->CurrentTexObj[0] = 0;
+   mmesa->CurrentTexObj[1] = 0;
+
+   mmesa->texAge[0] = 0;
+   mmesa->texAge[1] = 0;
+
+#if 0
+   mmesa->status = (GLuint *)mmesa->mgaScreen->status.map;
+#endif
+   mmesa->primary_offset = mmesa->mgaScreen->primary.handle;
+
+   ctx->DriverCtx = (void *) mmesa;
+   mmesa->glCtx = ctx;
+
+   mgaDDExtensionsInit( ctx );
+
+   mgaDDInitStateFuncs( ctx );
+   mgaDDInitTextureFuncs( ctx );
+   mgaDDInitSpanFuncs( ctx );
+   mgaDDInitDriverFuncs( ctx );
+   mgaDDInitIoctlFuncs( ctx );
+/*   mgaDDInitPixelFuncs( ctx );*/
+
+   ctx->Driver.TriangleCaps = (DD_TRI_CULL|
+			       DD_TRI_LIGHT_TWOSIDE|
+			       DD_TRI_STIPPLE|
+			       DD_TRI_OFFSET);
+
+   /* Ask mesa to clip fog coordinates for us.
+    */
+   ctx->TriangleCaps |= DD_CLIP_FOG_COORD;
+
+   if (ctx->VB)
+      mgaDDRegisterVB( ctx->VB );
+
+   if (ctx->NrPipelineStages)
+      ctx->NrPipelineStages =
+	 mgaDDRegisterPipelineStages(ctx->PipelineStage,
+				      ctx->PipelineStage,
+				      ctx->NrPipelineStages);
+
+   mgaInitState( mmesa );
+
+   driContextPriv->driverPrivate = (void *) mmesa;
+
+   return GL_TRUE;
+}
+
+void XMesaDestroyContext(__DRIcontextPrivate *driContextPriv)
+{
+   mgaContextPtr mmesa = (mgaContextPtr) driContextPriv->driverPrivate;
+
+   if (MGA_DEBUG&DEBUG_VERBOSE_DRI)
+      fprintf(stderr, "XMesaDestroyContext\n");
+
+   if (mmesa) {
+      Xfree(mmesa);
+      driContextPriv->driverPrivate = NULL;
+   }
+}
+
+
+GLframebuffer *XMesaCreateWindowBuffer( Display *dpy,
+                                        __DRIscreenPrivate *driScrnPriv,
+                                        __DRIdrawablePrivate *driDrawPriv,
+                                        GLvisual *mesaVis)
+{
+   GLboolean swStencil = mesaVis->StencilBits > 0 && mesaVis->DepthBits != 24;
+
+   if (MGA_DEBUG&DEBUG_VERBOSE_DRI)
+      fprintf(stderr, "XMesaCreateWindowBuffer\n");
+
+   return gl_create_framebuffer(mesaVis,
+                                GL_FALSE,  /* software depth buffer? */
+                                swStencil,
+                                mesaVis->AccumRedBits > 0,
+                                GL_FALSE   /* software alpha buffer/ */
+                                );
+}
+
+
+GLframebuffer *XMesaCreatePixmapBuffer( Display *dpy,
+                                        __DRIscreenPrivate *driScrnPriv,
+                                        __DRIdrawablePrivate *driDrawPriv,
+                                        GLvisual *mesaVis)
+{
+#if 0
+   /* Different drivers may have different combinations of hardware and
+    * software ancillary buffers.
+    */
+   return gl_create_framebuffer(mesaVis,
+                                GL_FALSE,  /* software depth buffer? */
+                                mesaVis->StencilBits > 0,
+                                mesaVis->AccumRedBits > 0,
+                                mesaVis->AlphaBits > 0
+                                );
+#else
+   return NULL;  /* not implemented yet */
+#endif
+}
+
+
+void XMesaSwapBuffers(__DRIdrawablePrivate *driDrawPriv)
+{
+   /* XXX should do swap according to the buffer, not the context! */
+   mgaContextPtr mmesa = mgaCtx;
+   FLUSH_VB( mmesa->glCtx, "swap buffers" );
+   mgaSwapBuffers(mmesa);
+}
+
+
+GLboolean XMesaUnbindContext(__DRIcontextPrivate *driContextPriv)
+{
+   mgaContextPtr mmesa = (mgaContextPtr) driContextPriv->driverPrivate;
+   if (mmesa)
+      mmesa->dirty = ~0;
+
+   return GL_TRUE;
+}
+
+GLboolean
+XMesaOpenFullScreen(__DRIcontextPrivate *driContextPriv)
+{
+    return GL_TRUE;
+}
+
+GLboolean
+XMesaCloseFullScreen(__DRIcontextPrivate *driContextPriv)
+{
+    return GL_TRUE;
+}
+
+
+/* This looks buggy to me - the 'b' variable isn't used anywhere...
+ * Hmm - It seems that the drawable is already hooked in to
+ * driDrawablePriv.
+ *
+ * But why are we doing context initialization here???
+ */
+GLboolean XMesaMakeCurrent(__DRIcontextPrivate *driContextPriv,
+                           __DRIdrawablePrivate *driDrawPriv,
+                           __DRIdrawablePrivate *driReadPriv)
+{
+   if (driContextPriv) {
+      mgaCtx = (mgaContextPtr) driContextPriv->driverPrivate;
+
+      gl_make_current2(mgaCtx->glCtx, driDrawPriv->mesaBuffer, driReadPriv->mesaBuffer);
+
+      if (mgaCtx->driDrawable != driDrawPriv) {
+	 mgaCtx->driDrawable = driDrawPriv;
+	 mgaCtx->dirty = ~0;
+	 mgaCtx->dirty_cliprects = (MGA_FRONT|MGA_BACK);
+      }
+
+      if (!mgaCtx->glCtx->Viewport.Width)
+	 gl_Viewport(mgaCtx->glCtx, 0, 0, driDrawPriv->w, driDrawPriv->h);
+
+   }
+   else {
+      gl_make_current(0,0);
+      mgaCtx = NULL;
+   }
+
+   return GL_TRUE;
+}
+
+
+void mgaGetLock( mgaContextPtr mmesa, GLuint flags )
+{
+   __DRIdrawablePrivate *dPriv = mmesa->driDrawable;
+   MGASAREAPrivPtr sarea = mmesa->sarea;
+   int me = mmesa->hHWContext;
+   int i;
+
+   drmGetLock(mmesa->driFd, mmesa->hHWContext, flags);
+
+   if (*(dPriv->pStamp) != mmesa->lastStamp) {
+      mmesa->lastStamp = *(dPriv->pStamp);
+      mmesa->setupdone = 0;
+      mmesa->dirty_cliprects = (MGA_FRONT|MGA_BACK);
+      mgaUpdateRects( mmesa, (MGA_FRONT|MGA_BACK) );
+   }
+
+   mmesa->dirty |= MGA_UPLOAD_CONTEXT | MGA_UPLOAD_CLIPRECTS;
+
+    mmesa->sarea->dirty |= MGA_UPLOAD_CONTEXT;
+
+   if (sarea->ctxOwner != me) {
+      mmesa->dirty |= (MGA_UPLOAD_CONTEXT | MGA_UPLOAD_TEX0 |
+		       MGA_UPLOAD_TEX1 | MGA_UPLOAD_PIPE);
+      sarea->ctxOwner=me;
+   }
+
+   for (i = 0 ; i < mmesa->lastTexHeap ; i++)
+      if (sarea->texAge[i] != mmesa->texAge[i])
+	 mgaAgeTextures( mmesa, i );
+
+   sarea->last_quiescent = -1;	/* just kill it for now */
+}
+
+
+
+
+#endif
+@
+
+
+1.1.9.1
+log
+@OpenBSD just has imported exactly this tree into their vendor branch,
+called the same tag, in XF4/xc
+This is, apparently, the last XFree86 snapshot before the licence change
+(ie, addition of the advertising clause)
+
+Since the developers don't see any problems with that, and we would like
+to integrate improvements done by the remaining one or two (or so) XFree86
+developers (j/k), this prepares enabling us to update X-Window in the future.
+@
+text
+@d1 1
+a1 1
+/* $XFree86: xc/lib/GL/mesa/src/drv/mga/mga_xmesa.c,v 1.22 2003/12/08 22:45:30 alanh Exp $ */
+d26 1
+a26 1
+ *    Keith Whitwell <keith@@tungstengraphics.com>
+d31 4
+a34 1
+#include "mga_common.h"
+d37 1
+d39 1
+d41 1
+a41 8
+#include "imports.h"
+
+#include "swrast/swrast.h"
+#include "swrast_setup/swrast_setup.h"
+#include "tnl/tnl.h"
+#include "array_cache/acache.h"
+
+#include "tnl/t_pipeline.h"
+a46 1
+#include "mgaioctl.h"
+d48 2
+a49 1
+#include "mgavb.h"
+d51 2
+d54 1
+a57 4
+#include "utils.h"
+#include "vblank.h"
+#include "glxextensions.h"
+
+d59 9
+a67 1
+int MGA_DEBUG = 0;
+a69 1
+static int getSwapInfo( __DRIdrawablePrivate *dPriv, __DRIswapInfo * sInfo );
+d71 20
+a90 2
+static GLboolean
+mgaInitDriver(__DRIscreenPrivate *sPriv)
+d95 31
+a125 1
+   if ( ! driCheckDriDdxDrmVersions( sPriv, "MGA", 4, 0, 1, 0, 3, 0 ) )
+d127 2
+d133 1
+a133 1
+      __driUtilMessage("Couldn't malloc screen struct");
+a139 35
+   if (sPriv->drmMinor >= 1) {
+      int ret;
+      drmMGAGetParam gp;
+
+      gp.param = MGA_PARAM_IRQ_NR;
+      gp.value = &mgaScreen->irq;
+
+      ret = drmCommandWriteRead( sPriv->fd, DRM_MGA_GETPARAM,
+				    &gp, sizeof(gp));
+      if (ret) {
+	    fprintf(stderr, "drmMgaGetParam (MGA_PARAM_IRQ_NR): %d\n", ret);
+	    XFree(mgaScreen);
+	    sPriv->private = NULL;
+	    return GL_FALSE;
+      }
+   }
+   
+   mgaScreen->linecomp_sane = (sPriv->ddxMajor > 1) || (sPriv->ddxMinor > 1)
+       || ((sPriv->ddxMinor == 1) && (sPriv->ddxPatch > 0));
+   if ( driCompareGLXAPIVersion( 20030813 ) >= 0 ) {
+      PFNGLXSCRENABLEEXTENSIONPROC glx_enable_extension =
+          (PFNGLXSCRENABLEEXTENSIONPROC) glXGetProcAddress( (const GLubyte *) "__glXScrEnableExtension" );
+      void * const psc = sPriv->psc->screenConfigs;
+
+      if ( glx_enable_extension != NULL ) {
+	 if ( mgaScreen->linecomp_sane ) {
+	    (*glx_enable_extension)( psc, "GLX_SGI_swap_control" );
+	    (*glx_enable_extension)( psc, "GLX_SGI_video_sync" );
+	    (*glx_enable_extension)( psc, "GLX_MESA_swap_control" );
+	 }
+
+	 (*glx_enable_extension)( psc, "GLX_MESA_swap_frame_usage" );
+      }
+   }
+
+d144 1
+a144 1
+      __driUtilMessage("Unrecognized chipset");
+d171 1
+a171 1
+      __driUtilMessage( "Couldn't map MMIO registers" );
+d175 14
+d205 1
+a205 1
+      __driUtilMessage("Couldn't map agp region");
+a223 11
+   if (drmMap(sPriv->fd,
+              serverInfo->agpTextureOffset,
+              serverInfo->agpTextureSize,
+              (drmAddress *)&mgaScreen->texVirtual[MGA_AGP_HEAP]) != 0)
+   {
+      Xfree(mgaScreen);
+      sPriv->private = NULL;
+      __driUtilMessage("Couldn't map agptexture region");
+      return GL_FALSE;
+   }
+
+d240 1
+a240 1
+      __driUtilMessage("Couldn't map dma buffers");
+d245 5
+d254 3
+a256 2
+static void
+mgaDestroyScreen(__DRIscreenPrivate *sPriv)
+d261 1
+a261 1
+      fprintf(stderr, "mgaDestroyScreen\n");
+d269 7
+a275 1
+extern const struct gl_pipeline_stage _mga_render_stage;
+d277 18
+a294 70
+static const struct gl_pipeline_stage *mga_pipeline[] = {
+   &_tnl_vertex_transform_stage, 
+   &_tnl_normal_transform_stage, 
+   &_tnl_lighting_stage,	
+   &_tnl_fog_coordinate_stage,
+   &_tnl_texgen_stage, 
+   &_tnl_texture_transform_stage, 
+				/* REMOVE: point attenuation stage */
+#if 0
+   &_mga_render_stage,		/* ADD: unclipped rastersetup-to-dma */
+                                /* Need new ioctl for wacceptseq */
+#endif
+   &_tnl_render_stage,		
+   0,
+};
+
+
+static const char * const g400_extensions[] =
+{
+   "GL_ARB_multitexture",
+   "GL_ARB_texture_env_add",
+   "GL_EXT_texture_env_add",
+   "GL_ARB_texture_env_combine",
+   "GL_EXT_texture_env_combine",
+   "GL_ARB_texture_env_crossbar",
+   "GL_ATI_texture_env_combine3",
+   "GL_EXT_texture_edge_clamp",
+   "GL_SGIS_texture_edge_clamp",
+#if defined (MESA_packed_depth_stencil)
+   "GL_MESA_packed_depth_stencil",
+#endif
+   NULL
+};
+
+static const char * const card_extensions[] =
+{
+   "GL_ARB_multisample",
+   "GL_ARB_texture_compression",
+   "GL_EXT_blend_logic_op",
+   "GL_EXT_fog_coord",
+   /* paletted_textures currently doesn't work, but we could fix them later */
+#if 0
+   "GL_EXT_shared_texture_palette",
+   "GL_EXT_paletted_texture",
+#endif
+   "GL_EXT_secondary_color",
+   "GL_EXT_stencil_wrap",
+   "GL_MESA_ycbcr_texture",
+   "GL_SGIS_generate_mipmap",
+   "GL_SGIS_texture_lod",
+   "GL_NV_texture_rectangle",
+   NULL
+};
+
+static const struct dri_debug_control debug_control[] =
+{
+    { "fall",  DEBUG_VERBOSE_FALLBACK },
+    { "tex",   DEBUG_VERBOSE_TEXTURE },
+    { "ioctl", DEBUG_VERBOSE_IOCTL },
+    { "verb",  DEBUG_VERBOSE_MSG },
+    { "dri",   DEBUG_VERBOSE_DRI },
+    { NULL,    0 }
+};
+
+
+static int
+get_ust_nop( int64_t * ust )
+{
+   *ust = 1;
+   return 0;
+d298 2
+a299 4
+static GLboolean
+mgaCreateContext( const __GLcontextModes *mesaVis,
+                  __DRIcontextPrivate *driContextPriv,
+                  void *sharedContextPrivate )
+d302 1
+a302 2
+   unsigned   maxlevels;
+   GLcontext *ctx, *shareCtx;
+d306 1
+a306 1
+   MGASAREAPrivPtr saPriv=(MGASAREAPrivPtr)(((char*)sPriv->pSAREA)+
+d310 1
+a310 1
+      fprintf(stderr, "mgaCreateContext\n");
+d312 1
+a312 2
+   /* allocate mga context */
+   mmesa = (mgaContextPtr) CALLOC(sizeof(mgaContext));
+d317 1
+a317 11
+   /* Allocate the Mesa context */
+   if (sharedContextPrivate)
+      shareCtx = ((mgaContextPtr) sharedContextPrivate)->glCtx;
+   else 
+      shareCtx = NULL;
+   mmesa->glCtx = _mesa_create_context(mesaVis, shareCtx, (void *) mmesa, GL_TRUE);
+   if (!mmesa->glCtx) {
+      FREE(mmesa);
+      return GL_FALSE;
+   }
+   driContextPriv->driverPrivate = mmesa;
+d319 1
+a319 1
+   /* Init mga state */
+d326 1
+a326 1
+   mmesa->sarea = (void *)saPriv;
+d329 3
+a331 2
+   (void) memset( mmesa->texture_heaps, 0, sizeof( mmesa->texture_heaps ) );
+   make_empty_list( & mmesa->swapped );
+d333 3
+a335 11
+   mmesa->nr_heaps = mgaScreen->texVirtual[MGA_AGP_HEAP] ? 2 : 1;
+   for ( i = 0 ; i < mmesa->nr_heaps ; i++ ) {
+      mmesa->texture_heaps[i] = driCreateTextureHeap( i, mmesa,
+	    mgaScreen->textureSize[i],
+	    6,
+	    MGA_NR_TEX_REGIONS,
+	    mmesa->sarea->texList[i],
+	    & mmesa->sarea->texAge[i],
+	    & mmesa->swapped,
+	    sizeof( mgaTextureObject_t ),
+	    (destroy_texture_object_t *) mgaDestroyTexObj );
+d342 2
+a343 4
+   ctx = mmesa->glCtx;
+   if ( mgaScreen->chipset == MGA_CARD_TYPE_G200 ) {
+      ctx->Const.MaxTextureUnits = 1;
+      maxlevels = G200_TEX_MAXLEVELS;
+d345 13
+a357 4
+   }
+   else {
+      ctx->Const.MaxTextureUnits = 2;
+      maxlevels = G400_TEX_MAXLEVELS;
+d360 5
+a364 23
+   driCalculateMaxTextureLevels( mmesa->texture_heaps,
+				 mmesa->nr_heaps,
+				 & ctx->Const,
+				 4,
+				 11, /* max 2D texture size is 2048x2048 */
+				 0,  /* 3D textures unsupported. */
+				 0,  /* cube textures unsupported. */
+				 11, /* max texture rect size is 2048x2048 */
+				 maxlevels,
+				 GL_FALSE );
+
+   ctx->Const.MinLineWidth = 1.0;
+   ctx->Const.MinLineWidthAA = 1.0;
+   ctx->Const.MaxLineWidth = 10.0;
+   ctx->Const.MaxLineWidthAA = 10.0;
+   ctx->Const.LineWidthGranularity = 1.0;
+
+   mmesa->default32BitTextures = (mesaVis->rgbBits >= 24);
+   mmesa->hw_stencil = mesaVis->stencilBits && mesaVis->depthBits == 24;
+
+   switch (mesaVis->depthBits) {
+   case 16: 
+      mmesa->depth_scale = 1.0/(GLdouble)0xffff; 
+d384 3
+a386 2
+   mmesa->haveHwStipple = GL_FALSE;
+   mmesa->RenderIndex = -1;		/* impossible value */
+d388 1
+a388 1
+   mmesa->vertex_format = 0;   
+a390 2
+   mmesa->tmu_source[0] = 0;
+   mmesa->tmu_source[1] = 1;
+a393 18
+   
+   /* Initialize the software rasterizer and helper modules.
+    */
+   _swrast_CreateContext( ctx );
+   _ac_CreateContext( ctx );
+   _tnl_CreateContext( ctx );
+   
+   _swsetup_CreateContext( ctx );
+
+   /* Install the customized pipeline:
+    */
+   _tnl_destroy_pipeline( ctx );
+   _tnl_install_pipeline( ctx, mga_pipeline );
+
+   /* Configure swrast to match hardware characteristics:
+    */
+   _swrast_allow_pixel_fog( ctx, GL_FALSE );
+   _swrast_allow_vertex_fog( ctx, GL_TRUE );
+d395 3
+d403 1
+a403 5
+   driInitExtensions( ctx, card_extensions, GL_FALSE );
+
+   if (MGA_IS_G400(MGA_CONTEXT(ctx))) {
+      driInitExtensions( ctx, g400_extensions, GL_FALSE );
+   }
+d410 1
+a410 2
+   mgaDDInitPixelFuncs( ctx );
+   mgaDDInitTriFuncs( ctx );
+d412 4
+a415 2
+   mgaInitVB( ctx );
+   mgaInitState( mmesa );
+d417 3
+a419 1
+   driContextPriv->driverPrivate = (void *) mmesa;
+d421 2
+a422 4
+#if DO_DEBUG
+   MGA_DEBUG = driParseDebugString( getenv( "MGA_DEBUG" ),
+				    debug_control );
+#endif
+d424 5
+a428 3
+   mmesa->vblank_flags = ((mmesa->mgaScreen->irq == 0) 
+			  || !mmesa->mgaScreen->linecomp_sane)
+       ? VBLANK_FLAG_NO_IRQ : driGetDefaultVBlankFlags();
+d430 1
+a430 4
+   mmesa->get_ust = (PFNGLXGETUSTPROC) glXGetProcAddress( (const GLubyte *) "__glXGetUST" );
+   if ( mmesa->get_ust == NULL ) {
+      mmesa->get_ust = get_ust_nop;
+   }
+d432 1
+a432 1
+   (*mmesa->get_ust)( & mmesa->swap_ust );
+d437 1
+a437 2
+static void
+mgaDestroyContext(__DRIcontextPrivate *driContextPriv)
+d442 1
+a442 2
+      fprintf( stderr, "[%s:%d] mgaDestroyContext start\n",
+	       __FILE__, __LINE__ );
+a443 1
+   assert(mmesa); /* should never be null */
+d445 2
+a446 30
+      GLboolean   release_texture_heaps;
+
+
+      release_texture_heaps = (mmesa->glCtx->Shared->RefCount == 1);
+      _swsetup_DestroyContext( mmesa->glCtx );
+      _tnl_DestroyContext( mmesa->glCtx );
+      _ac_DestroyContext( mmesa->glCtx );
+      _swrast_DestroyContext( mmesa->glCtx );
+
+      mgaFreeVB( mmesa->glCtx );
+
+      /* free the Mesa context */
+      mmesa->glCtx->DriverCtx = NULL;
+      _mesa_destroy_context(mmesa->glCtx);
+       
+      if ( release_texture_heaps ) {
+         /* This share group is about to go away, free our private
+          * texture object data.
+          */
+         int i;
+
+         for ( i = 0 ; i < mmesa->nr_heaps ; i++ ) {
+	    driDestroyTextureHeap( mmesa->texture_heaps[ i ] );
+	    mmesa->texture_heaps[ i ] = NULL;
+         }
+
+	 assert( is_empty_list( & mmesa->swapped ) );
+      }
+
+      FREE(mmesa);
+a447 4
+
+   if (MGA_DEBUG&DEBUG_VERBOSE_DRI)
+      fprintf( stderr, "[%s:%d] mgaDestroyContext done\n",
+	       __FILE__, __LINE__ );
+d451 4
+a454 5
+static GLboolean
+mgaCreateBuffer( __DRIscreenPrivate *driScrnPriv,
+                 __DRIdrawablePrivate *driDrawPriv,
+                 const __GLcontextModes *mesaVis,
+                 GLboolean isPixmap )
+d456 1
+a456 6
+   if (isPixmap) {
+      return GL_FALSE; /* not implemented */
+   }
+   else {
+      GLboolean swStencil = (mesaVis->stencilBits > 0 && 
+			     mesaVis->depthBits != 24);
+d458 2
+a459 6
+      driDrawPriv->driverPrivate = (void *) 
+         _mesa_create_framebuffer(mesaVis,
+                                  GL_FALSE,  /* software depth buffer? */
+                                  swStencil,
+                                  mesaVis->accumRedBits > 0,
+                                  mesaVis->alphaBits > 0 );
+d461 6
+a466 2
+      return (driDrawPriv->driverPrivate != NULL);
+   }
+d470 4
+a473 2
+static void
+mgaDestroyBuffer(__DRIdrawablePrivate *driDrawPriv)
+d475 13
+a487 1
+   _mesa_destroy_framebuffer((GLframebuffer *) (driDrawPriv->driverPrivate));
+d490 2
+a491 2
+static void
+mgaSwapBuffers(__DRIdrawablePrivate *dPriv)
+d493 5
+a497 5
+   if (dPriv->driContextPriv && dPriv->driContextPriv->driverPrivate) {
+      mgaContextPtr mmesa;
+      GLcontext *ctx;
+      mmesa = (mgaContextPtr) dPriv->driContextPriv->driverPrivate;
+      ctx = mmesa->glCtx;
+a498 9
+      if (ctx->Visual.doubleBufferMode) {
+         _mesa_notifySwapBuffers( ctx );
+         mgaCopyBuffer( dPriv );
+      }
+   } else {
+      /* XXX this shouldn't be an error but we can't handle it for now */
+      _mesa_problem(NULL, "%s: drawable has no context!\n", __FUNCTION__);
+   }
+}
+d500 1
+a500 2
+static GLboolean
+mgaUnbindContext(__DRIcontextPrivate *driContextPriv)
+d509 8
+a516 2
+static GLboolean
+mgaOpenCloseFullScreen(__DRIcontextPrivate *driContextPriv)
+d528 3
+a530 4
+static GLboolean
+mgaMakeCurrent(__DRIcontextPrivate *driContextPriv,
+               __DRIdrawablePrivate *driDrawPriv,
+               __DRIdrawablePrivate *driReadPriv)
+d533 3
+a535 1
+      mgaContextPtr mmesa = (mgaContextPtr) driContextPriv->driverPrivate;
+d537 4
+a540 4
+      if (mmesa->driDrawable != driDrawPriv) {
+	 mmesa->driDrawable = driDrawPriv;
+	 mmesa->dirty = ~0; 
+	 mmesa->dirty_cliprects = (MGA_FRONT|MGA_BACK); 
+d543 2
+a544 7
+      _mesa_make_current2(mmesa->glCtx,
+                          (GLframebuffer *) driDrawPriv->driverPrivate,
+                          (GLframebuffer *) driReadPriv->driverPrivate);
+
+      if (!mmesa->glCtx->Viewport.Width)
+	 _mesa_set_viewport(mmesa->glCtx, 0, 0,
+                            driDrawPriv->w, driDrawPriv->h);
+d548 2
+a549 1
+      _mesa_make_current(NULL, NULL);
+d567 1
+a567 1
+      mmesa->SetupNewInputs |= VERT_BIT_CLIP;
+d582 3
+a584 3
+   for ( i = 0 ; i < mmesa->nr_heaps ; i++ ) {
+      DRI_AGE_TEXTURES( mmesa->texture_heaps[ i ] );
+   }
+a589 32
+static const struct __DriverAPIRec mgaAPI = {
+   .InitDriver      = mgaInitDriver,
+   .DestroyScreen   = mgaDestroyScreen,
+   .CreateContext   = mgaCreateContext,
+   .DestroyContext  = mgaDestroyContext,
+   .CreateBuffer    = mgaCreateBuffer,
+   .DestroyBuffer   = mgaDestroyBuffer,
+   .SwapBuffers     = mgaSwapBuffers,
+   .MakeCurrent     = mgaMakeCurrent,
+   .UnbindContext   = mgaUnbindContext,
+   .OpenFullScreen  = mgaOpenCloseFullScreen,
+   .CloseFullScreen = mgaOpenCloseFullScreen,
+   .GetSwapInfo     = getSwapInfo,
+   .GetMSC          = driGetMSC32,
+   .WaitForMSC      = driWaitForMSC32,
+   .WaitForSBC      = NULL,
+   .SwapBuffersMSC  = NULL
+};
+
+
+/*
+ * This is the bootstrap function for the driver.
+ * The __driCreateScreen name is the symbol that libGL.so fetches.
+ * Return:  pointer to a __DRIscreenPrivate.
+ */
+void *__driCreateScreen(Display *dpy, int scrn, __DRIscreen *psc,
+                        int numConfigs, __GLXvisualConfig *config)
+{
+   __DRIscreenPrivate *psp;
+   psp = __driUtilCreateScreen(dpy, scrn, psc, numConfigs, config, &mgaAPI);
+   return (void *) psp;
+}
+a591 25
+/**
+ * Get information about previous buffer swaps.
+ */
+static int
+getSwapInfo( __DRIdrawablePrivate *dPriv, __DRIswapInfo * sInfo )
+{
+   mgaContextPtr  mmesa;
+
+   if ( (dPriv == NULL) || (dPriv->driContextPriv == NULL)
+	|| (dPriv->driContextPriv->driverPrivate == NULL)
+	|| (sInfo == NULL) ) {
+      return -1;
+   }
+
+   mmesa = (mgaContextPtr) dPriv->driContextPriv->driverPrivate;
+   sInfo->swap_count = mmesa->swap_count;
+   sInfo->swap_ust = mmesa->swap_ust;
+   sInfo->swap_missed_count = mmesa->swap_missed_count;
+
+   sInfo->swap_missed_usage = (sInfo->swap_missed_count != 0)
+       ? driCalculateSwapUsage( dPriv, 0, mmesa->swap_missed_ust )
+       : 0.0;
+
+   return 0;
+}
+@
+
+
+1.1.1.1
+log
+@Import OpenBSD 3.3 XF4 repository from CTM 3132 the first time
+This finalizes starting an OpenBSD-mirabile (aka MirBSD) repository.
+
+### MirBSD is:
+# Copyright (c) 1982-2003 by Thorsten "mirabile" Glaser <x86@@ePost.de>
+# Copyright © 1968-2003  The authors of And contributors to UNIX®, the
+#       C Language, BSD/Berkeley Unix; 386BSD, NetBSD 1.1 and OpenBSD.
+#
+# Anyone who obtained a copy of this work is hereby permitted to freely use,
+# distribute, modify, merge, sublicence, give away or sell it as long as the
+# authors are given due credit and the following notice is retained:
+#
+# This work is provided "as is", with no explicit or implicit warranty what-
+# soever. Use it only at your own risk. In no event may an author or contri-
+# butor be held liable for any damage, directly or indirectly, that origina-
+# ted through or is caused by creation or modification of this work.
+
+MirBSD is my private tree. MirBSD does not differ very much from OpenBSD
+and intentionally tracks OpenBSD. That's why it _is_ OpenBSD, just not the
+official one. It's like with DarrenBSD.
+
+At time of this writing, no advertising for MirBSD must be done,
+because the advertising clause has not yet been sorted out.
+
+http://templeofhate.com/tglaser/MirBSD/index.php
+@
+text
+@@
+
+
+1.1.1.2
+log
+@The X-Windowing System
+
+Import XFree86 4.3 from OpenBSD by CTM, in the hope it's stable
+@
+text
+@d1 1
+a1 1
+/* $XFree86: xc/lib/GL/mesa/src/drv/mga/mga_xmesa.c,v 1.18 2002/12/16 16:18:52 dawes Exp $ */
+d26 1
+a26 1
+ *    Keith Whitwell <keith@@tungstengraphics.com>
+d34 1
+a34 2
+#include "xf86drm.h"
+#include "mga_common.h"
+d37 1
+a42 7
+#include "swrast/swrast.h"
+#include "swrast_setup/swrast_setup.h"
+#include "tnl/tnl.h"
+#include "array_cache/acache.h"
+
+#include "tnl/t_pipeline.h"
+
+a46 1
+#include "mgaioctl.h"
+d48 1
+a48 1
+#include "mgavb.h"
+d71 20
+a90 2
+static GLboolean
+mgaInitDriver(__DRIscreenPrivate *sPriv)
+d96 1
+a96 1
+      fprintf(stderr, "mgaInitDriver\n");
+d103 3
+a105 1
+            __driUtilMessage("MGA DRI driver expected DRI version 4.0.x but got version %d.%d.%d", major, minor, patch);
+d114 3
+a116 1
+      __driUtilMessage("MGA DRI driver expected DDX driver version 1.0.x but got version %d.%d.%d", sPriv->ddxMajor, sPriv->ddxMinor, sPriv->ddxPatch);
+d123 3
+a125 1
+      __driUtilMessage("MGA DRI driver expected DRM driver version 3.0.x but got version %d.%d.%d", sPriv->drmMajor, sPriv->drmMinor, sPriv->drmPatch);
+d133 1
+a133 1
+      __driUtilMessage("Couldn't malloc screen struct");
+a139 18
+   if (sPriv->drmMinor >= 1) {
+      int ret;
+      drmMGAGetParam gp;
+
+      gp.param = MGA_PARAM_IRQ_NR;
+      gp.value = &mgaScreen->irq;
+
+      ret = drmCommandWriteRead( sPriv->fd, DRM_MGA_GETPARAM,
+				    &gp, sizeof(gp));
+      if (ret) {
+	    fprintf(stderr, "drmMgaGetParam (MGA_PARAM_IRQ_NR): %d\n", ret);
+	    XFree(mgaScreen);
+	    sPriv->private = NULL;
+	    return GL_FALSE;
+      }
+   }
+   
+
+d144 1
+a144 1
+      __driUtilMessage("Unrecognized chipset");
+d171 1
+a171 1
+      __driUtilMessage( "Couldn't map MMIO registers" );
+d175 14
+d205 1
+a205 1
+      __driUtilMessage("Couldn't map agp region");
+a223 11
+   if (drmMap(sPriv->fd,
+              serverInfo->agpTextureOffset,
+              serverInfo->agpTextureSize,
+              (drmAddress *)&mgaScreen->texVirtual[MGA_AGP_HEAP]) != 0)
+   {
+      Xfree(mgaScreen);
+      sPriv->private = NULL;
+      __driUtilMessage("Couldn't map agptexture region");
+      return GL_FALSE;
+   }
+
+d240 1
+a240 1
+      __driUtilMessage("Couldn't map dma buffers");
+d245 5
+d254 3
+a256 2
+static void
+mgaDestroyScreen(__DRIscreenPrivate *sPriv)
+d261 1
+a261 1
+      fprintf(stderr, "mgaDestroyScreen\n");
+d269 7
+a275 1
+extern const struct gl_pipeline_stage _mga_render_stage;
+d277 19
+a295 15
+static const struct gl_pipeline_stage *mga_pipeline[] = {
+   &_tnl_vertex_transform_stage, 
+   &_tnl_normal_transform_stage, 
+   &_tnl_lighting_stage,	
+   &_tnl_fog_coordinate_stage,
+   &_tnl_texgen_stage, 
+   &_tnl_texture_transform_stage, 
+				/* REMOVE: point attenuation stage */
+#if 0
+   &_mga_render_stage,		/* ADD: unclipped rastersetup-to-dma */
+                                /* Need new ioctl for wacceptseq */
+#endif
+   &_tnl_render_stage,		
+   0,
+};
+d298 2
+a299 4
+static GLboolean
+mgaCreateContext( Display *dpy, const __GLcontextModes *mesaVis,
+                  __DRIcontextPrivate *driContextPriv,
+                  void *sharedContextPrivate )
+d302 1
+a302 1
+   GLcontext *ctx, *shareCtx;
+d306 1
+a306 1
+   MGASAREAPrivPtr saPriv=(MGASAREAPrivPtr)(((char*)sPriv->pSAREA)+
+d310 1
+a310 1
+      fprintf(stderr, "mgaCreateContext\n");
+d312 1
+a312 2
+   /* allocate mga context */
+   mmesa = (mgaContextPtr) CALLOC(sizeof(mgaContext));
+d317 1
+a317 11
+   /* Allocate the Mesa context */
+   if (sharedContextPrivate)
+      shareCtx = ((mgaContextPtr) sharedContextPrivate)->glCtx;
+   else 
+      shareCtx = NULL;
+   mmesa->glCtx = _mesa_create_context(mesaVis, shareCtx, mmesa, GL_TRUE);
+   if (!mmesa->glCtx) {
+      FREE(mmesa);
+      return GL_FALSE;
+   }
+   driContextPriv->driverPrivate = mmesa;
+a318 1
+   /* Init mga state */
+d326 1
+a326 1
+   mmesa->sarea = (void *)saPriv;
+d342 1
+a342 2
+   ctx = mmesa->glCtx;
+   { 
+d350 1
+d353 1
+d356 1
+a357 2
+
+      ctx->Const.MaxTextureUnits = nr;
+d360 1
+a360 7
+   ctx->Const.MinLineWidth = 1.0;
+   ctx->Const.MinLineWidthAA = 1.0;
+   ctx->Const.MaxLineWidth = 10.0;
+   ctx->Const.MaxLineWidthAA = 10.0;
+   ctx->Const.LineWidthGranularity = 1.0;
+
+   mmesa->hw_stencil = mesaVis->stencilBits && mesaVis->depthBits == 24;
+d362 3
+a364 3
+   switch (mesaVis->depthBits) {
+   case 16: 
+      mmesa->depth_scale = 1.0/(GLdouble)0xffff; 
+d384 2
+a385 2
+   mmesa->haveHwStipple = GL_FALSE;
+   mmesa->RenderIndex = -1;		/* impossible value */
+d388 1
+a388 1
+   mmesa->vertex_format = 0;   
+a390 2
+   mmesa->tmu_source[0] = 0;
+   mmesa->tmu_source[1] = 1;
+a393 18
+   
+   /* Initialize the software rasterizer and helper modules.
+    */
+   _swrast_CreateContext( ctx );
+   _ac_CreateContext( ctx );
+   _tnl_CreateContext( ctx );
+   
+   _swsetup_CreateContext( ctx );
+
+   /* Install the customized pipeline:
+    */
+   _tnl_destroy_pipeline( ctx );
+   _tnl_install_pipeline( ctx, mga_pipeline );
+
+   /* Configure swrast to match hardware characteristics:
+    */
+   _swrast_allow_pixel_fog( ctx, GL_FALSE );
+   _swrast_allow_vertex_fog( ctx, GL_TRUE );
+d395 3
+d410 19
+a428 2
+   mgaDDInitPixelFuncs( ctx );
+   mgaDDInitTriFuncs( ctx );
+a429 1
+   mgaInitVB( ctx );
+d437 1
+a437 2
+static void
+mgaDestroyContext(__DRIcontextPrivate *driContextPriv)
+d442 1
+a442 1
+      fprintf(stderr, "mgaDestroyContext\n");
+a443 1
+   assert(mmesa); /* should never be null */
+d445 2
+a446 12
+      _swsetup_DestroyContext( mmesa->glCtx );
+      _tnl_DestroyContext( mmesa->glCtx );
+      _ac_DestroyContext( mmesa->glCtx );
+      _swrast_DestroyContext( mmesa->glCtx );
+
+      mgaFreeVB( mmesa->glCtx );
+
+      /* free the Mesa context */
+      mmesa->glCtx->DriverCtx = NULL;
+      _mesa_destroy_context(mmesa->glCtx);
+      /* free the mga context */
+      FREE(mmesa);
+d451 4
+a454 6
+static GLboolean
+mgaCreateBuffer( Display *dpy,
+                 __DRIscreenPrivate *driScrnPriv,
+                 __DRIdrawablePrivate *driDrawPriv,
+                 const __GLcontextModes *mesaVis,
+                 GLboolean isPixmap )
+d456 12
+a467 6
+   if (isPixmap) {
+      return GL_FALSE; /* not implemented */
+   }
+   else {
+      GLboolean swStencil = (mesaVis->stencilBits > 0 && 
+			     mesaVis->depthBits != 24);
+a468 6
+      driDrawPriv->driverPrivate = (void *) 
+         _mesa_create_framebuffer(mesaVis,
+                                  GL_FALSE,  /* software depth buffer? */
+                                  swStencil,
+                                  mesaVis->accumRedBits > 0,
+                                  mesaVis->alphaBits > 0 );
+d470 18
+a487 2
+      return (driDrawPriv->driverPrivate != NULL);
+   }
+d491 1
+a491 2
+static void
+mgaDestroyBuffer(__DRIdrawablePrivate *driDrawPriv)
+d493 4
+a496 1
+   _mesa_destroy_framebuffer((GLframebuffer *) (driDrawPriv->driverPrivate));
+d500 1
+a500 2
+static GLboolean
+mgaUnbindContext(__DRIcontextPrivate *driContextPriv)
+d509 2
+a510 2
+static GLboolean
+mgaOpenFullScreen(__DRIcontextPrivate *driContextPriv)
+d515 2
+a516 2
+static GLboolean
+mgaCloseFullScreen(__DRIcontextPrivate *driContextPriv)
+d528 3
+a530 4
+static GLboolean
+mgaMakeCurrent(__DRIcontextPrivate *driContextPriv,
+               __DRIdrawablePrivate *driDrawPriv,
+               __DRIdrawablePrivate *driReadPriv)
+d533 3
+a535 1
+      mgaContextPtr mmesa = (mgaContextPtr) driContextPriv->driverPrivate;
+d537 4
+a540 4
+      if (mmesa->driDrawable != driDrawPriv) {
+	 mmesa->driDrawable = driDrawPriv;
+	 mmesa->dirty = ~0; 
+	 mmesa->dirty_cliprects = (MGA_FRONT|MGA_BACK); 
+d543 2
+a544 7
+      _mesa_make_current2(mmesa->glCtx,
+                          (GLframebuffer *) driDrawPriv->driverPrivate,
+                          (GLframebuffer *) driReadPriv->driverPrivate);
+
+      if (!mmesa->glCtx->Viewport.Width)
+	 _mesa_set_viewport(mmesa->glCtx, 0, 0,
+                            driDrawPriv->w, driDrawPriv->h);
+d548 2
+a549 1
+      _mesa_make_current(NULL, NULL);
+d567 1
+a567 1
+      mmesa->SetupNewInputs |= VERT_CLIP;
+a588 30
+
+
+static const struct __DriverAPIRec mgaAPI = {
+   mgaInitDriver,
+   mgaDestroyScreen,
+   mgaCreateContext,
+   mgaDestroyContext,
+   mgaCreateBuffer,
+   mgaDestroyBuffer,
+   mgaSwapBuffers,
+   mgaMakeCurrent,
+   mgaUnbindContext,
+   mgaOpenFullScreen,
+   mgaCloseFullScreen
+};
+
+
+
+/*
+ * This is the bootstrap function for the driver.
+ * The __driCreateScreen name is the symbol that libGL.so fetches.
+ * Return:  pointer to a __DRIscreenPrivate.
+ */
+void *__driCreateScreen(Display *dpy, int scrn, __DRIscreen *psc,
+                        int numConfigs, __GLXvisualConfig *config)
+{
+   __DRIscreenPrivate *psp;
+   psp = __driUtilCreateScreen(dpy, scrn, psc, numConfigs, config, &mgaAPI);
+   return (void *) psp;
+}
+@
+
+
+1.1.1.3
+log
+@That's what OpenBSD will, probably, ship as XF4 in 3.5
+their last sync against XFree86 4.3-current has been
+imported into our vendor branch, too
+@
+text
+@d1 1
+a1 1
+/* $XFree86: xc/lib/GL/mesa/src/drv/mga/mga_xmesa.c,v 1.22 2003/12/08 22:45:30 alanh Exp $ */
+d31 4
+d39 1
+d41 1
+a41 1
+#include "imports.h"
+d57 1
+d59 2
+d62 1
+a65 4
+#include "utils.h"
+#include "vblank.h"
+#include "glxextensions.h"
+
+d67 9
+a75 1
+int MGA_DEBUG = 0;
+a77 1
+static int getSwapInfo( __DRIdrawablePrivate *dPriv, __DRIswapInfo * sInfo );
+d85 18
+a102 1
+   if ( ! driCheckDriDdxDrmVersions( sPriv, "MGA", 4, 0, 1, 0, 3, 0 ) )
+d104 9
+a140 17
+   mgaScreen->linecomp_sane = (sPriv->ddxMajor > 1) || (sPriv->ddxMinor > 1)
+       || ((sPriv->ddxMinor == 1) && (sPriv->ddxPatch > 0));
+   if ( driCompareGLXAPIVersion( 20030813 ) >= 0 ) {
+      PFNGLXSCRENABLEEXTENSIONPROC glx_enable_extension =
+          (PFNGLXSCRENABLEEXTENSIONPROC) glXGetProcAddress( (const GLubyte *) "__glXScrEnableExtension" );
+      void * const psc = sPriv->psc->screenConfigs;
+
+      if ( glx_enable_extension != NULL ) {
+	 if ( mgaScreen->linecomp_sane ) {
+	    (*glx_enable_extension)( psc, "GLX_SGI_swap_control" );
+	    (*glx_enable_extension)( psc, "GLX_SGI_video_sync" );
+	    (*glx_enable_extension)( psc, "GLX_MESA_swap_control" );
+	 }
+
+	 (*glx_enable_extension)( psc, "GLX_MESA_swap_frame_usage" );
+      }
+   }
+a280 56
+static const char * const g400_extensions[] =
+{
+   "GL_ARB_multitexture",
+   "GL_ARB_texture_env_add",
+   "GL_EXT_texture_env_add",
+   "GL_ARB_texture_env_combine",
+   "GL_EXT_texture_env_combine",
+   "GL_ARB_texture_env_crossbar",
+   "GL_ATI_texture_env_combine3",
+   "GL_EXT_texture_edge_clamp",
+   "GL_SGIS_texture_edge_clamp",
+#if defined (MESA_packed_depth_stencil)
+   "GL_MESA_packed_depth_stencil",
+#endif
+   NULL
+};
+
+static const char * const card_extensions[] =
+{
+   "GL_ARB_multisample",
+   "GL_ARB_texture_compression",
+   "GL_EXT_blend_logic_op",
+   "GL_EXT_fog_coord",
+   /* paletted_textures currently doesn't work, but we could fix them later */
+#if 0
+   "GL_EXT_shared_texture_palette",
+   "GL_EXT_paletted_texture",
+#endif
+   "GL_EXT_secondary_color",
+   "GL_EXT_stencil_wrap",
+   "GL_MESA_ycbcr_texture",
+   "GL_SGIS_generate_mipmap",
+   "GL_SGIS_texture_lod",
+   "GL_NV_texture_rectangle",
+   NULL
+};
+
+static const struct dri_debug_control debug_control[] =
+{
+    { "fall",  DEBUG_VERBOSE_FALLBACK },
+    { "tex",   DEBUG_VERBOSE_TEXTURE },
+    { "ioctl", DEBUG_VERBOSE_IOCTL },
+    { "verb",  DEBUG_VERBOSE_MSG },
+    { "dri",   DEBUG_VERBOSE_DRI },
+    { NULL,    0 }
+};
+
+
+static int
+get_ust_nop( int64_t * ust )
+{
+   *ust = 1;
+   return 0;
+}
+
+
+d282 1
+a282 1
+mgaCreateContext( const __GLcontextModes *mesaVis,
+a286 1
+   unsigned   maxlevels;
+d308 1
+a308 1
+   mmesa->glCtx = _mesa_create_context(mesaVis, shareCtx, (void *) mmesa, GL_TRUE);
+d316 1
+d326 3
+a328 2
+   (void) memset( mmesa->texture_heaps, 0, sizeof( mmesa->texture_heaps ) );
+   make_empty_list( & mmesa->swapped );
+d330 3
+a332 11
+   mmesa->nr_heaps = mgaScreen->texVirtual[MGA_AGP_HEAP] ? 2 : 1;
+   for ( i = 0 ; i < mmesa->nr_heaps ; i++ ) {
+      mmesa->texture_heaps[i] = driCreateTextureHeap( i, mmesa,
+	    mgaScreen->textureSize[i],
+	    6,
+	    MGA_NR_TEX_REGIONS,
+	    mmesa->sarea->texList[i],
+	    & mmesa->sarea->texAge[i],
+	    & mmesa->swapped,
+	    sizeof( mgaTextureObject_t ),
+	    (destroy_texture_object_t *) mgaDestroyTexObj );
+d340 13
+a352 3
+   if ( mgaScreen->chipset == MGA_CARD_TYPE_G200 ) {
+      ctx->Const.MaxTextureUnits = 1;
+      maxlevels = G200_TEX_MAXLEVELS;
+d354 1
+a355 15
+   else {
+      ctx->Const.MaxTextureUnits = 2;
+      maxlevels = G400_TEX_MAXLEVELS;
+   }
+
+   driCalculateMaxTextureLevels( mmesa->texture_heaps,
+				 mmesa->nr_heaps,
+				 & ctx->Const,
+				 4,
+				 11, /* max 2D texture size is 2048x2048 */
+				 0,  /* 3D textures unsupported. */
+				 0,  /* cube textures unsupported. */
+				 11, /* max texture rect size is 2048x2048 */
+				 maxlevels,
+				 GL_FALSE );
+a362 1
+   mmesa->default32BitTextures = (mesaVis->rgbBits >= 24);
+d389 1
+d423 1
+a423 5
+   driInitExtensions( ctx, card_extensions, GL_FALSE );
+
+   if (MGA_IS_G400(MGA_CONTEXT(ctx))) {
+      driInitExtensions( ctx, g400_extensions, GL_FALSE );
+   }
+a437 16
+#if DO_DEBUG
+   MGA_DEBUG = driParseDebugString( getenv( "MGA_DEBUG" ),
+				    debug_control );
+#endif
+
+   mmesa->vblank_flags = ((mmesa->mgaScreen->irq == 0) 
+			  || !mmesa->mgaScreen->linecomp_sane)
+       ? VBLANK_FLAG_NO_IRQ : driGetDefaultVBlankFlags();
+
+   mmesa->get_ust = (PFNGLXGETUSTPROC) glXGetProcAddress( (const GLubyte *) "__glXGetUST" );
+   if ( mmesa->get_ust == NULL ) {
+      mmesa->get_ust = get_ust_nop;
+   }
+
+   (*mmesa->get_ust)( & mmesa->swap_ust );
+
+d447 1
+a447 2
+      fprintf( stderr, "[%s:%d] mgaDestroyContext start\n",
+	       __FILE__, __LINE__ );
+a450 4
+      GLboolean   release_texture_heaps;
+
+
+      release_texture_heaps = (mmesa->glCtx->Shared->RefCount == 1);
+d461 1
+a461 15
+       
+      if ( release_texture_heaps ) {
+         /* This share group is about to go away, free our private
+          * texture object data.
+          */
+         int i;
+
+         for ( i = 0 ; i < mmesa->nr_heaps ; i++ ) {
+	    driDestroyTextureHeap( mmesa->texture_heaps[ i ] );
+	    mmesa->texture_heaps[ i ] = NULL;
+         }
+
+	 assert( is_empty_list( & mmesa->swapped ) );
+      }
+
+a463 4
+
+   if (MGA_DEBUG&DEBUG_VERBOSE_DRI)
+      fprintf( stderr, "[%s:%d] mgaDestroyContext done\n",
+	       __FILE__, __LINE__ );
+d468 2
+a469 1
+mgaCreateBuffer( __DRIscreenPrivate *driScrnPriv,
+a498 18
+static void
+mgaSwapBuffers(__DRIdrawablePrivate *dPriv)
+{
+   if (dPriv->driContextPriv && dPriv->driContextPriv->driverPrivate) {
+      mgaContextPtr mmesa;
+      GLcontext *ctx;
+      mmesa = (mgaContextPtr) dPriv->driContextPriv->driverPrivate;
+      ctx = mmesa->glCtx;
+
+      if (ctx->Visual.doubleBufferMode) {
+         _mesa_notifySwapBuffers( ctx );
+         mgaCopyBuffer( dPriv );
+      }
+   } else {
+      /* XXX this shouldn't be an error but we can't handle it for now */
+      _mesa_problem(NULL, "%s: drawable has no context!\n", __FUNCTION__);
+   }
+}
+d511 7
+a517 1
+mgaOpenCloseFullScreen(__DRIcontextPrivate *driContextPriv)
+d571 1
+a571 1
+      mmesa->SetupNewInputs |= VERT_BIT_CLIP;
+d586 3
+a588 3
+   for ( i = 0 ; i < mmesa->nr_heaps ; i++ ) {
+      DRI_AGE_TEXTURES( mmesa->texture_heaps[ i ] );
+   }
+d594 1
+d596 11
+a606 16
+   .InitDriver      = mgaInitDriver,
+   .DestroyScreen   = mgaDestroyScreen,
+   .CreateContext   = mgaCreateContext,
+   .DestroyContext  = mgaDestroyContext,
+   .CreateBuffer    = mgaCreateBuffer,
+   .DestroyBuffer   = mgaDestroyBuffer,
+   .SwapBuffers     = mgaSwapBuffers,
+   .MakeCurrent     = mgaMakeCurrent,
+   .UnbindContext   = mgaUnbindContext,
+   .OpenFullScreen  = mgaOpenCloseFullScreen,
+   .CloseFullScreen = mgaOpenCloseFullScreen,
+   .GetSwapInfo     = getSwapInfo,
+   .GetMSC          = driGetMSC32,
+   .WaitForMSC      = driWaitForMSC32,
+   .WaitForSBC      = NULL,
+   .SwapBuffersMSC  = NULL
+d610 1
+a624 7
+/**
+ * Get information about previous buffer swaps.
+ */
+static int
+getSwapInfo( __DRIdrawablePrivate *dPriv, __DRIswapInfo * sInfo )
+{
+   mgaContextPtr  mmesa;
+a625 17
+   if ( (dPriv == NULL) || (dPriv->driContextPriv == NULL)
+	|| (dPriv->driContextPriv->driverPrivate == NULL)
+	|| (sInfo == NULL) ) {
+      return -1;
+   }
+
+   mmesa = (mgaContextPtr) dPriv->driContextPriv->driverPrivate;
+   sInfo->swap_count = mmesa->swap_count;
+   sInfo->swap_ust = mmesa->swap_ust;
+   sInfo->swap_missed_count = mmesa->swap_missed_count;
+
+   sInfo->swap_missed_usage = (sInfo->swap_missed_count != 0)
+       ? driCalculateSwapUsage( dPriv, 0, mmesa->swap_missed_ust )
+       : 0.0;
+
+   return 0;
+}
+@
+
+

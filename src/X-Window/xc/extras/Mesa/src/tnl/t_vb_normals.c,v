@@ -1,0 +1,412 @@
+head	1.2;
+branch	1.1.1;
+access;
+symbols
+	tg-mergetmp-2:1.1.1.2
+	cvs-200410241530:1.1.1.2
+	cvs-200410012000:1.1.1.2
+	cvs-200407141120:1.1.1.2
+	cvs-200406231010:1.1.1.2
+	MIRBSD_7quater:1.1.1.1
+	cvs-200405271510:1.1.1.2
+	XFree86_4_4_0:1.1.9.1
+	cvs-200403021700:1.1.1.2
+	XFREE86_20040213:1.1.9.1
+	xc:1.1.9
+	cvs-200401291925:1.1.1.1
+	MIRBSD_7_ALPHA:1.1.1.1.0.4
+	MIRBSD_7:1.1.1.1.0.2
+	MIRBSD_7ter:1.1.1.1
+	cvs-20011091815:1.1.1.1
+	cvs-200309162130:1.1.1.1
+	cvs-200308302005:1.1.1.1
+	ctmx-0387:1.1.1.1
+	ctmx-0384:1.1.1.1
+	MIRBSD_5:1.1.1.1
+	ctmx-0375:1.1.1.1
+	ctmx-0373:1.1.1.1
+	ctm-0371:1.1.1.1
+	ctm-0370:1.1.1.1
+	MIRBSD_4:1.1.1.1
+	ctm-0363:1.1.1.1
+	ctm-0359:1.1.1.1
+	openbsd:1.1.1;
+locks; strict;
+comment	@ * @;
+
+
+1.2
+date	2003.05.16.16.29.01;	author tg;	state dead;
+branches;
+next	1.1;
+
+1.1
+date	2003.04.08.18.20.16;	author tg;	state Exp;
+branches
+	1.1.1.1
+	1.1.9.1;
+next	;
+
+1.1.1.1
+date	2003.04.08.18.20.16;	author tg;	state Exp;
+branches;
+next	1.1.1.2;
+
+1.1.1.2
+date	2004.03.02.17.30.28;	author tg;	state Stab;
+branches;
+next	;
+
+1.1.9.1
+date	2004.02.14.19.05.18;	author tg;	state Exp;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.2
+log
+@remove a bunch of files not used in MirBSD - clean tree. People who want them got cvs.
+@
+text
+@
+/*
+ * Mesa 3-D graphics library
+ * Version:  4.0.3
+ *
+ * Copyright (C) 1999-2001  Brian Paul   All Rights Reserved.
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a
+ * copy of this software and associated documentation files (the "Software"),
+ * to deal in the Software without restriction, including without limitation
+ * the rights to use, copy, modify, merge, publish, distribute, sublicense,
+ * and/or sell copies of the Software, and to permit persons to whom the
+ * Software is furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included
+ * in all copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
+ * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL
+ * BRIAN PAUL BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN
+ * AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
+ * CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+ *
+ * Authors:
+ *    Keith Whitwell <keithw@@valinux.com>
+ */
+
+
+#include "glheader.h"
+#include "colormac.h"
+#include "context.h"
+#include "macros.h"
+#include "mem.h"
+#include "mmath.h"
+#include "mtypes.h"
+
+#include "math/m_xform.h"
+
+#include "t_context.h"
+#include "t_pipeline.h"
+
+
+
+struct normal_stage_data {
+   normal_func NormalTransform;
+   GLvector3f normal;
+};
+
+#define NORMAL_STAGE_DATA(stage) ((struct normal_stage_data *)stage->privatePtr)
+
+
+
+
+static GLboolean run_normal_stage( GLcontext *ctx,
+				   struct gl_pipeline_stage *stage )
+{
+   struct normal_stage_data *store = NORMAL_STAGE_DATA(stage);
+   struct vertex_buffer *VB = &TNL_CONTEXT(ctx)->vb;
+
+   ASSERT(store->NormalTransform);
+
+   if (stage->changed_inputs) {
+      /* We can only use the display list's saved normal lengths if we've
+       * got a transformation matrix with uniform scaling.
+       */
+      const GLfloat *lengths;
+      if (ctx->ModelView.flags & MAT_FLAG_GENERAL_SCALE)
+         lengths = NULL;
+      else
+         lengths = VB->NormalLengthPtr;
+
+      store->NormalTransform( &ctx->ModelView,
+			      ctx->_ModelViewInvScale,
+			      VB->NormalPtr,
+			      lengths,
+			      &store->normal );
+   }
+
+   VB->NormalPtr = &store->normal;
+   VB->NormalLengthPtr = 0;	/* no longer valid */
+   return GL_TRUE;
+}
+
+
+static GLboolean run_validate_normal_stage( GLcontext *ctx,
+					    struct gl_pipeline_stage *stage )
+{
+   struct normal_stage_data *store = NORMAL_STAGE_DATA(stage);
+
+   ASSERT(ctx->_NeedNormals);
+
+   if (ctx->_NeedEyeCoords) {
+      GLuint transform = NORM_TRANSFORM_NO_ROT;
+
+      if (ctx->ModelView.flags & (MAT_FLAG_GENERAL |
+				  MAT_FLAG_ROTATION |
+				  MAT_FLAG_GENERAL_3D |
+				  MAT_FLAG_PERSPECTIVE))
+	 transform = NORM_TRANSFORM;
+
+
+      if (ctx->Transform.Normalize) {
+	 store->NormalTransform = _mesa_normal_tab[transform | NORM_NORMALIZE];
+      }
+      else if (ctx->Transform.RescaleNormals &&
+	       ctx->_ModelViewInvScale != 1.0) {
+	 store->NormalTransform = _mesa_normal_tab[transform | NORM_RESCALE];
+      }
+      else {
+	 store->NormalTransform = _mesa_normal_tab[transform];
+      }
+   }
+   else {
+      if (ctx->Transform.Normalize) {
+	 store->NormalTransform = _mesa_normal_tab[NORM_NORMALIZE];
+      }
+      else if (!ctx->Transform.RescaleNormals &&
+	       ctx->_ModelViewInvScale != 1.0) {
+	 store->NormalTransform = _mesa_normal_tab[NORM_RESCALE];
+      }
+      else {
+	 store->NormalTransform = 0;
+      }
+   }
+
+   if (store->NormalTransform) {
+      stage->run = run_normal_stage;
+      return stage->run( ctx, stage );
+   } else {
+      stage->active = GL_FALSE;	/* !!! */
+      return GL_TRUE;
+   }
+}
+
+
+static void check_normal_transform( GLcontext *ctx,
+				    struct gl_pipeline_stage *stage )
+{
+   stage->active = ctx->_NeedNormals;
+   /* Don't clobber the initialize function:
+    */
+   if (stage->privatePtr)
+      stage->run = run_validate_normal_stage;
+}
+
+
+static GLboolean alloc_normal_data( GLcontext *ctx,
+				 struct gl_pipeline_stage *stage )
+{
+   TNLcontext *tnl = TNL_CONTEXT(ctx);
+   struct normal_stage_data *store;
+   stage->privatePtr = MALLOC(sizeof(*store));
+   store = NORMAL_STAGE_DATA(stage);
+   if (!store)
+      return GL_FALSE;
+
+   _mesa_vector3f_alloc( &store->normal, 0, tnl->vb.Size, 32 );
+
+   /* Now run the stage.
+    */
+   stage->run = run_validate_normal_stage;
+   return stage->run( ctx, stage );
+}
+
+
+
+static void free_normal_data( struct gl_pipeline_stage *stage )
+{
+   struct normal_stage_data *store = NORMAL_STAGE_DATA(stage);
+   if (store) {
+      _mesa_vector3f_free( &store->normal );
+      FREE( store );
+      stage->privatePtr = NULL;
+   }
+}
+
+#define _TNL_NEW_NORMAL_TRANSFORM        (_NEW_MODELVIEW| \
+					  _NEW_TRANSFORM| \
+                                          _MESA_NEW_NEED_NORMALS| \
+                                          _MESA_NEW_NEED_EYE_COORDS)
+
+
+
+const struct gl_pipeline_stage _tnl_normal_transform_stage =
+{
+   "normal transform",
+   _TNL_NEW_NORMAL_TRANSFORM,	/* re-check */
+   _TNL_NEW_NORMAL_TRANSFORM,	/* re-run */
+   0,VERT_NORM,VERT_NORM,	/* active, inputs, outputs */
+   0, 0,			/* changed_inputs, private */
+   free_normal_data,		/* destructor */
+   check_normal_transform,	/* check */
+   alloc_normal_data		/* run -- initially set to alloc */
+};
+@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@@
+
+
+1.1.9.1
+log
+@OpenBSD just has imported exactly this tree into their vendor branch,
+called the same tag, in XF4/xc
+This is, apparently, the last XFree86 snapshot before the licence change
+(ie, addition of the advertising clause)
+
+Since the developers don't see any problems with that, and we would like
+to integrate improvements done by the remaining one or two (or so) XFree86
+developers (j/k), this prepares enabling us to update X-Window in the future.
+@
+text
+@d4 1
+a4 1
+ * Version:  4.1
+d6 1
+a6 1
+ * Copyright (C) 1999-2002  Brian Paul   All Rights Reserved.
+d26 1
+a26 1
+ *    Keith Whitwell <keith@@tungstengraphics.com>
+d34 1
+a34 1
+#include "imports.h"
+d47 1
+a47 1
+   GLvector4f normal;
+d68 1
+a68 1
+      if (ctx->ModelviewMatrixStack.Top->flags & MAT_FLAG_GENERAL_SCALE)
+d73 1
+a73 1
+      store->NormalTransform( ctx->ModelviewMatrixStack.Top,
+d75 1
+a75 1
+			      VB->NormalPtr,  /* input normals */
+d77 1
+a77 1
+			      &store->normal ); /* resulting normals */
+d96 1
+a96 1
+      if (ctx->ModelviewMatrixStack.Top->flags & (MAT_FLAG_GENERAL |
+d140 1
+a140 1
+   stage->active = ctx->_NeedNormals && !ctx->VertexProgram.Enabled;
+d158 1
+a158 1
+   _mesa_vector4f_alloc( &store->normal, 0, tnl->vb.Size, 32 );
+d172 1
+a172 1
+      _mesa_vector4f_free( &store->normal );
+d187 1
+a187 1
+   "normal transform",		/* name */
+d190 2
+a191 5
+   GL_FALSE,			/* active? */
+   VERT_BIT_NORMAL,		/* inputs */
+   VERT_BIT_NORMAL,		/* outputs */
+   0,				/* changed_inputs */
+   NULL,			/* private data */
+@
+
+
+1.1.1.1
+log
+@The X-Windowing System
+
+Import XFree86 4.3 from OpenBSD by CTM, in the hope it's stable
+@
+text
+@@
+
+
+1.1.1.2
+log
+@That's what OpenBSD will, probably, ship as XF4 in 3.5
+their last sync against XFree86 4.3-current has been
+imported into our vendor branch, too
+@
+text
+@d4 1
+a4 1
+ * Version:  4.1
+d6 1
+a6 1
+ * Copyright (C) 1999-2002  Brian Paul   All Rights Reserved.
+d26 1
+a26 1
+ *    Keith Whitwell <keith@@tungstengraphics.com>
+d34 1
+a34 1
+#include "imports.h"
+d47 1
+a47 1
+   GLvector4f normal;
+d68 1
+a68 1
+      if (ctx->ModelviewMatrixStack.Top->flags & MAT_FLAG_GENERAL_SCALE)
+d73 1
+a73 1
+      store->NormalTransform( ctx->ModelviewMatrixStack.Top,
+d75 1
+a75 1
+			      VB->NormalPtr,  /* input normals */
+d77 1
+a77 1
+			      &store->normal ); /* resulting normals */
+d96 1
+a96 1
+      if (ctx->ModelviewMatrixStack.Top->flags & (MAT_FLAG_GENERAL |
+d140 1
+a140 1
+   stage->active = ctx->_NeedNormals && !ctx->VertexProgram.Enabled;
+d158 1
+a158 1
+   _mesa_vector4f_alloc( &store->normal, 0, tnl->vb.Size, 32 );
+d172 1
+a172 1
+      _mesa_vector4f_free( &store->normal );
+d187 1
+a187 1
+   "normal transform",		/* name */
+d190 2
+a191 5
+   GL_FALSE,			/* active? */
+   VERT_BIT_NORMAL,		/* inputs */
+   VERT_BIT_NORMAL,		/* outputs */
+   0,				/* changed_inputs */
+   NULL,			/* private data */
+@
+

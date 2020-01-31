@@ -1,0 +1,940 @@
+head	1.2;
+branch	1.1.1;
+access;
+symbols
+	tg-mergetmp-2:1.1.1.2
+	cvs-200410241530:1.1.1.2
+	cvs-200410012000:1.1.1.2
+	cvs-200407141120:1.1.1.2
+	cvs-200406231010:1.1.1.2
+	MIRBSD_7quater:1.1.1.2
+	cvs-200405271510:1.1.1.2
+	XFree86_4_4_0:1.1.9.1
+	cvs-200403021700:1.1.1.2
+	XFREE86_20040213:1.1.9.1
+	xc:1.1.9
+	cvs-200401291925:1.1.1.2
+	MIRBSD_7_ALPHA:1.1.1.2.0.4
+	MIRBSD_7:1.1.1.2.0.2
+	MIRBSD_7ter:1.1.1.2
+	cvs-20011091815:1.1.1.2
+	cvs-200309162130:1.1.1.2
+	cvs-200308302005:1.1.1.2
+	ctmx-0387:1.1.1.2
+	ctmx-0384:1.1.1.2
+	MIRBSD_5:1.1.1.2
+	ctmx-0375:1.1.1.2
+	ctmx-0373:1.1.1.2
+	ctm-0371:1.1.1.2
+	ctm-0370:1.1.1.2
+	MIRBSD_4:1.1.1.2
+	ctm-0363:1.1.1.2
+	ctm-0359:1.1.1.2
+	ctm-0349:1.1.1.1
+	openbsd:1.1.1;
+locks; strict;
+comment	@ * @;
+
+
+1.2
+date	2003.05.16.16.29.26;	author tg;	state dead;
+branches;
+next	1.1;
+
+1.1
+date	2003.03.22.20.01.14;	author tg;	state Exp;
+branches
+	1.1.1.1
+	1.1.9.1;
+next	;
+
+1.1.1.1
+date	2003.03.22.20.01.14;	author tg;	state Exp;
+branches;
+next	1.1.1.2;
+
+1.1.1.2
+date	2003.04.08.18.20.43;	author tg;	state Stab;
+branches;
+next	;
+
+1.1.9.1
+date	2004.02.14.19.08.33;	author tg;	state Exp;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.2
+log
+@remove a bunch of files not used in MirBSD - clean tree. People who want them got cvs.
+@
+text
+@// TetiSoft: Modified to avoid fopen() fclose() fread() fseek() ftell()
+// malloc() realloc() and free() which can't be used in an amiga
+// shared run-time library linked with libinit.o
+
+#ifdef __GNUC__
+// Avoid warnings "struct X declared inside parameter list"
+#include <exec/memory.h>
+#include <exec/devices.h>
+#include <exec/io.h>
+#include <exec/semaphores.h>
+#include <dos/exall.h>
+#endif
+
+#include <proto/exec.h>
+#include <proto/dos.h>
+
+#ifndef __GNUC__
+/* TetiSoft: Missing in alib_protos.h, see amiga.lib autodoc
+ * (These amiga.lib functions work under AmigaOS V33 and up)
+ */
+extern APTR __asm AsmCreatePool(register __d0 ULONG memFlags,
+                                register __d1 ULONG puddleSize,
+                                register __d2 ULONG threshSize,
+                                register __a6 struct ExecBase *SysBase);
+
+extern VOID __asm AsmDeletePool(register __a0 APTR poolHeader,
+                                register __a6 struct ExecBase *SysBase);
+
+extern APTR __asm AsmAllocPooled(register __a0 APTR poolHeader,
+                                 register __d0 ULONG memSize,
+                                 register __a6 struct ExecBase *SysBase);
+
+extern VOID __asm AsmFreePooled(register __a0 APTR poolHeader,
+                                register __a1 APTR memory,
+                                register __d0 ULONG memSize,
+                                register __a6 struct ExecBase *SysBase);
+#endif
+
+
+// TetiSoft: C implementation of AllocVecPooled (see autodoc exec/AllocPooled)
+APTR AllocVecPooled(APTR poolHeader, ULONG memSize)
+{
+        ULONG newSize = memSize + sizeof(ULONG);
+#ifdef __GNUC__
+        ULONG *mem = AllocPooled(poolHeader, newSize);
+#else
+        ULONG *mem = AsmAllocPooled(poolHeader, newSize, SysBase);
+#endif
+
+        if (!mem)
+                return NULL;
+        *mem = newSize;
+        return mem + 1;
+}
+
+// TetiSoft: C implementation of FreeVecPooled (see autodoc exec/AllocPooled)
+void FreeVecPooled(APTR poolHeader, APTR memory)
+{
+        ULONG *realmem = (ULONG *)memory - 1;
+
+#ifdef __GNUC__
+        FreePooled(poolHeader, realmem, *realmem);
+#else
+        AsmFreePooled(poolHeader, realmem, *realmem, SysBase);
+#endif
+}
+
+/***************************************************************************/
+/*                                                                         */
+/*  ftsystem.c                                                             */
+/*                                                                         */
+/*    ANSI-specific FreeType low-level system interface (body).            */
+/*                                                                         */
+/*  Copyright 1996-2001 by                                                 */
+/*  David Turner, Robert Wilhelm, and Werner Lemberg.                      */
+/*                                                                         */
+/*  This file is part of the FreeType project, and may only be used,       */
+/*  modified, and distributed under the terms of the FreeType project      */
+/*  license, LICENSE.TXT.  By continuing to use, modify, or distribute     */
+/*  this file you indicate that you have read the license and              */
+/*  understand and accept it fully.                                        */
+/*                                                                         */
+/***************************************************************************/
+
+  /*************************************************************************/
+  /*                                                                       */
+  /* This file contains the default interface used by FreeType to access   */
+  /* low-level, i.e. memory management, i/o access as well as thread       */
+  /* synchronisation.  It can be replaced by user-specific routines if     */
+  /* necessary.                                                            */
+  /*                                                                       */
+  /*************************************************************************/
+
+
+#include <ft2build.h>
+#include FT_CONFIG_CONFIG_H
+#include FT_INTERNAL_DEBUG_H
+#include FT_SYSTEM_H
+#include FT_ERRORS_H
+#include FT_TYPES_H
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+
+  /*************************************************************************/
+  /*                                                                       */
+  /*                       MEMORY MANAGEMENT INTERFACE                     */
+  /*                                                                       */
+  /*************************************************************************/
+
+  /*************************************************************************/
+  /*                                                                       */
+  /* It is not necessary to do any error checking for the                  */
+  /* allocation-related functions.  This will be done by the higher level  */
+  /* routines like FT_Alloc() or FT_Realloc().                             */
+  /*                                                                       */
+  /*************************************************************************/
+
+
+  /*************************************************************************/
+  /*                                                                       */
+  /* <Function>                                                            */
+  /*    ft_alloc                                                           */
+  /*                                                                       */
+  /* <Description>                                                         */
+  /*    The memory allocation function.                                    */
+  /*                                                                       */
+  /* <Input>                                                               */
+  /*    memory :: A pointer to the memory object.                          */
+  /*                                                                       */
+  /*    size   :: The requested size in bytes.                             */
+  /*                                                                       */
+  /* <Return>                                                              */
+  /*    The address of newly allocated block.                              */
+  /*                                                                       */
+  FT_CALLBACK_DEF( void* )
+  ft_alloc( FT_Memory  memory,
+            long       size )
+  {
+//  FT_UNUSED( memory );
+
+//  return malloc( size );
+    return AllocVecPooled( memory->user, size );
+  }
+
+
+  /*************************************************************************/
+  /*                                                                       */
+  /* <Function>                                                            */
+  /*    ft_realloc                                                         */
+  /*                                                                       */
+  /* <Description>                                                         */
+  /*    The memory reallocation function.                                  */
+  /*                                                                       */
+  /* <Input>                                                               */
+  /*    memory   :: A pointer to the memory object.                        */
+  /*                                                                       */
+  /*    cur_size :: The current size of the allocated memory block.        */
+  /*                                                                       */
+  /*    new_size :: The newly requested size in bytes.                     */
+  /*                                                                       */
+  /*    block    :: The current address of the block in memory.            */
+  /*                                                                       */
+  /* <Return>                                                              */
+  /*    The address of the reallocated memory block.                       */
+  /*                                                                       */
+  FT_CALLBACK_DEF( void* )
+  ft_realloc( FT_Memory  memory,
+              long       cur_size,
+              long       new_size,
+              void*      block )
+  {
+//  FT_UNUSED( memory );
+//  FT_UNUSED( cur_size );
+
+//  return realloc( block, new_size );
+
+    void* new_block;
+
+    new_block = AllocVecPooled ( memory->user, new_size );
+    if ( new_block != NULL )
+    {
+      CopyMem ( block, new_block,
+                ( new_size > cur_size ) ? cur_size : new_size );
+      FreeVecPooled ( memory->user, block );
+    }
+    return new_block;
+  }
+
+
+  /*************************************************************************/
+  /*                                                                       */
+  /* <Function>                                                            */
+  /*    ft_free                                                            */
+  /*                                                                       */
+  /* <Description>                                                         */
+  /*    The memory release function.                                       */
+  /*                                                                       */
+  /* <Input>                                                               */
+  /*    memory  :: A pointer to the memory object.                         */
+  /*                                                                       */
+  /*    block   :: The address of block in memory to be freed.             */
+  /*                                                                       */
+  FT_CALLBACK_DEF( void )
+  ft_free( FT_Memory  memory,
+           void*      block )
+  {
+//  FT_UNUSED( memory );
+
+//  free( block );
+
+    FreeVecPooled( memory->user, block );
+  }
+
+
+  /*************************************************************************/
+  /*                                                                       */
+  /*                     RESOURCE MANAGEMENT INTERFACE                     */
+  /*                                                                       */
+  /*************************************************************************/
+
+
+  /*************************************************************************/
+  /*                                                                       */
+  /* The macro FT_COMPONENT is used in trace mode.  It is an implicit      */
+  /* parameter of the FT_TRACE() and FT_ERROR() macros, used to print/log  */
+  /* messages during execution.                                            */
+  /*                                                                       */
+#undef  FT_COMPONENT
+#define FT_COMPONENT  trace_io
+
+  /* We use the macro STREAM_FILE for convenience to extract the       */
+  /* system-specific stream handle from a given FreeType stream object */
+//#define STREAM_FILE( stream )  ( (FILE*)stream->descriptor.pointer )
+#define STREAM_FILE( stream )  ( (BPTR)stream->descriptor.pointer )     // TetiSoft
+
+
+  /*************************************************************************/
+  /*                                                                       */
+  /* <Function>                                                            */
+  /*    ft_close_stream                                                    */
+  /*                                                                       */
+  /* <Description>                                                         */
+  /*    The function to close a stream.                                    */
+  /*                                                                       */
+  /* <Input>                                                               */
+  /*    stream :: A pointer to the stream object.                          */
+  /*                                                                       */
+  FT_CALLBACK_DEF( void )
+  ft_close_stream( FT_Stream  stream )
+  {
+//  fclose( STREAM_FILE( stream ) );
+    Close( STREAM_FILE( stream ) );     // TetiSoft
+
+    stream->descriptor.pointer = NULL;
+    stream->size               = 0;
+    stream->base               = 0;
+  }
+
+
+  /*************************************************************************/
+  /*                                                                       */
+  /* <Function>                                                            */
+  /*    ft_io_stream                                                       */
+  /*                                                                       */
+  /* <Description>                                                         */
+  /*    The function to open a stream.                                     */
+  /*                                                                       */
+  /* <Input>                                                               */
+  /*    stream :: A pointer to the stream object.                          */
+  /*                                                                       */
+  /*    offset :: The position in the data stream to start reading.        */
+  /*                                                                       */
+  /*    buffer :: The address of buffer to store the read data.            */
+  /*                                                                       */
+  /*    count  :: The number of bytes to read from the stream.             */
+  /*                                                                       */
+  /* <Return>                                                              */
+  /*    The number of bytes actually read.                                 */
+  /*                                                                       */
+  FT_CALLBACK_DEF( unsigned long )
+  ft_io_stream( FT_Stream       stream,
+                unsigned long   offset,
+                unsigned char*  buffer,
+                unsigned long   count )
+  {
+//  FILE*  file;
+    BPTR   file;        // TetiSoft
+
+
+    file = STREAM_FILE( stream );
+
+//  fseek( file, offset, SEEK_SET );
+    Seek( file, offset, OFFSET_BEGINNING );     // TetiSoft
+
+//  return (unsigned long)fread( buffer, 1, count, file );
+    return (unsigned long)FRead( file, buffer, 1, count);
+  }
+
+
+  /* documentation is in ftobjs.h */
+
+  FT_EXPORT_DEF( FT_Error )
+  FT_New_Stream( const char*  filepathname,
+                 FT_Stream    astream )
+  {
+//  FILE*  file;
+    BPTR   file;                // TetiSoft
+    struct FileInfoBlock *fib;  // TetiSoft
+
+
+    if ( !astream )
+      return FT_Err_Invalid_Stream_Handle;
+
+//  file = fopen( filepathname, "rb" );
+    file = Open( filepathname, MODE_OLDFILE );  // TetiSoft
+    if ( !file )
+    {
+      FT_ERROR(( "FT_New_Stream:" ));
+      FT_ERROR(( " could not open `%s'\n", filepathname ));
+
+      return FT_Err_Cannot_Open_Resource;
+    }
+
+//  fseek( file, 0, SEEK_END );
+//  astream->size = ftell( file );
+//  fseek( file, 0, SEEK_SET );
+    fib = AllocDosObject( DOS_FIB, NULL );
+    if ( !fib )
+    {
+      Close ( file );
+      FT_ERROR(( "FT_New_Stream:" ));
+      FT_ERROR(( " could not open `%s'\n", filepathname ));
+
+      return FT_Err_Cannot_Open_Resource;
+    }
+    if (!( ExamineFH ( file, fib )))
+    {
+      FreeDosObject(DOS_FIB, fib);
+      Close ( file );
+      FT_ERROR(( "FT_New_Stream:" ));
+      FT_ERROR(( " could not open `%s'\n", filepathname ));
+
+      return FT_Err_Cannot_Open_Resource;
+    }
+    astream->size = fib->fib_Size;
+    FreeDosObject(DOS_FIB, fib);
+
+//  astream->descriptor.pointer = file;
+    astream->descriptor.pointer = (void *)file;
+
+    astream->pathname.pointer   = (char*)filepathname;
+    astream->pos                = 0;
+
+    astream->read  = ft_io_stream;
+    astream->close = ft_close_stream;
+
+    FT_TRACE1(( "FT_New_Stream:" ));
+    FT_TRACE1(( " opened `%s' (%d bytes) successfully\n",
+                filepathname, astream->size ));
+
+    return FT_Err_Ok;
+  }
+
+
+
+#ifdef FT_DEBUG_MEMORY
+
+  extern FT_Int
+  ft_mem_debug_init( FT_Memory  memory );
+  
+  extern void
+  ft_mem_debug_done( FT_Memory  memory );
+  
+#endif  
+      
+
+  /* documentation is in ftobjs.h */
+
+  FT_EXPORT_DEF( FT_Memory )
+  FT_New_Memory( void )
+  {
+    FT_Memory  memory;
+
+
+//  memory = (FT_Memory)malloc( sizeof ( *memory ) );
+    memory = (FT_Memory)AllocVec( sizeof ( *memory ), MEMF_PUBLIC );
+    if ( memory )
+    {
+//    memory->user    = 0;
+#ifdef __GNUC__
+      memory->user    = CreatePool ( MEMF_PUBLIC, 2048, 2048 );
+#else
+      memory->user    = AsmCreatePool ( MEMF_PUBLIC, 2048, 2048, SysBase );
+#endif
+      if ( memory->user == NULL )
+      {
+        FreeVec ( memory );
+        memory = NULL;
+      }
+      else
+      {
+        memory->alloc   = ft_alloc;
+        memory->realloc = ft_realloc;
+        memory->free    = ft_free;
+#ifdef FT_DEBUG_MEMORY
+        ft_mem_debug_init( memory );
+#endif    
+      }
+    }
+
+    return memory;
+  }
+
+
+  /* documentation is in ftobjs.h */
+
+  FT_EXPORT_DEF( void )
+  FT_Done_Memory( FT_Memory  memory )
+  {
+#ifdef FT_DEBUG_MEMORY
+    ft_mem_debug_done( memory );
+#endif  
+
+#ifdef __GNUC__
+    DeletePool( memory->user );
+#else
+    AsmDeletePool( memory->user, SysBase );
+#endif
+    FreeVec( memory );
+  }
+
+
+/* END */
+@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@@
+
+
+1.1.9.1
+log
+@OpenBSD just has imported exactly this tree into their vendor branch,
+called the same tag, in XF4/xc
+This is, apparently, the last XFree86 snapshot before the licence change
+(ie, addition of the advertising clause)
+
+Since the developers don't see any problems with that, and we would like
+to integrate improvements done by the remaining one or two (or so) XFree86
+developers (j/k), this prepares enabling us to update X-Window in the future.
+@
+text
+@a0 28
+/***************************************************************************/
+/*                                                                         */
+/*  ftsystem.c                                                             */
+/*                                                                         */
+/*    Amiga-specific FreeType low-level system interface (body).           */
+/*                                                                         */
+/*  Copyright 1996-2001, 2002 by                                           */
+/*  David Turner, Robert Wilhelm, and Werner Lemberg.                      */
+/*                                                                         */
+/*  This file is part of the FreeType project, and may only be used,       */
+/*  modified, and distributed under the terms of the FreeType project      */
+/*  license, LICENSE.TXT.  By continuing to use, modify, or distribute     */
+/*  this file you indicate that you have read the license and              */
+/*  understand and accept it fully.                                        */
+/*                                                                         */
+/***************************************************************************/
+
+  /*************************************************************************/
+  /*                                                                       */
+  /* This file contains the Amiga interface used by FreeType to access     */
+  /* low-level, i.e. memory management, i/o access as well as thread       */
+  /* synchronisation.                                                      */
+  /*                                                                       */
+  /*************************************************************************/
+
+
+// Maintained by Detlef Würkner <TetiSoft@@apg.lahn.de>
+
+a4 2
+#include <exec/memory.h>
+
+d7 1
+a13 3
+// Necessary with OS3.9 includes
+#define __USE_SYSBASE
+
+d21 16
+a36 20
+extern APTR __asm
+AsmCreatePool( register __d0 ULONG             memFlags,
+               register __d1 ULONG             puddleSize,
+               register __d2 ULONG             threshSize,
+               register __a6 struct ExecBase*  SysBase );
+
+extern VOID __asm
+AsmDeletePool( register __a0 APTR              poolHeader,
+               register __a6 struct ExecBase*  SysBase );
+
+extern APTR __asm
+AsmAllocPooled( register __a0 APTR              poolHeader,
+                register __d0 ULONG             memSize,
+                register __a6 struct ExecBase*  SysBase );
+
+extern VOID __asm
+AsmFreePooled( register __a0 APTR              poolHeader,
+               register __a1 APTR              memory,
+               register __d0 ULONG             memSize,
+               register __a6 struct ExecBase*  SysBase);
+d41 1
+a41 3
+APTR
+AllocVecPooled( APTR   poolHeader,
+                ULONG  memSize )
+d43 1
+a43 1
+  ULONG  newSize = memSize + sizeof ( ULONG );
+d45 1
+a45 1
+  ULONG  *mem = AllocPooled( poolHeader, newSize );
+d47 1
+a47 1
+  ULONG  *mem = AsmAllocPooled( poolHeader, newSize, SysBase );
+d50 4
+a53 4
+  if ( !mem )
+    return NULL;
+  *mem = newSize;
+  return mem + 1;
+a55 1
+
+d57 1
+a57 3
+void
+FreeVecPooled( APTR  poolHeader,
+               APTR  memory )
+d59 1
+a59 1
+  ULONG  *realmem = (ULONG *)memory - 1;
+d62 1
+a62 1
+  FreePooled( poolHeader, realmem, *realmem );
+d64 1
+a64 1
+ AsmFreePooled( poolHeader, realmem, *realmem, SysBase );
+d68 26
+d202 1
+a202 1
+  /*    memory :: A pointer to the memory object.                          */
+d204 1
+a204 1
+  /*    block  :: The address of block in memory to be freed.              */
+d236 1
+a236 1
+// #define STREAM_FILE( stream )  ( (FILE*)stream->descriptor.pointer )
+d306 2
+a307 2
+  FT_Stream_Open( FT_Stream    stream,
+                  const char*  filepathname )
+d309 3
+a311 3
+//  FILE*                  file;
+    BPTR                   file; // TetiSoft
+    struct FileInfoBlock*  fib;  // TetiSoft
+d314 1
+a314 1
+    if ( !stream )
+d321 1
+a321 1
+      FT_ERROR(( "FT_Stream_Open:" ));
+d334 1
+a334 1
+      FT_ERROR(( "FT_Stream_Open:" ));
+d339 1
+a339 1
+    if ( !( ExamineFH( file, fib ) ) )
+d341 1
+a341 1
+      FreeDosObject( DOS_FIB, fib );
+d343 1
+a343 1
+      FT_ERROR(( "FT_Stream_Open:" ));
+d348 2
+a349 2
+    stream->size = fib->fib_Size;
+    FreeDosObject( DOS_FIB, fib );
+d351 2
+a352 2
+//  stream->descriptor.pointer = file;
+    stream->descriptor.pointer = (void *)file;
+d354 2
+a355 2
+    stream->pathname.pointer   = (char*)filepathname;
+    stream->pos                = 0;
+d357 2
+a358 2
+    stream->read  = ft_io_stream;
+    stream->close = ft_close_stream;
+d360 1
+a360 1
+    FT_TRACE1(( "FT_Stream_Open:" ));
+d362 1
+a362 1
+                filepathname, stream->size ));
+d368 1
+d373 1
+a373 1
+
+d376 3
+a378 3
+
+#endif
+
+d392 1
+a392 1
+//    memory->user = 0;
+d394 1
+a394 1
+      memory->user = CreatePool( MEMF_PUBLIC, 2048, 2048 );
+d396 1
+a396 1
+      memory->user = AsmCreatePool( MEMF_PUBLIC, 2048, 2048, SysBase );
+d400 1
+a400 1
+        FreeVec( memory );
+d410 1
+a410 1
+#endif
+d425 1
+a425 1
+#endif
+@
+
+
+1.1.1.1
+log
+@Import OpenBSD 3.3 XF4 repository from CTM 3132 the first time
+This finalizes starting an OpenBSD-mirabile (aka MirBSD) repository.
+
+### MirBSD is:
+# Copyright (c) 1982-2003 by Thorsten "mirabile" Glaser <x86@@ePost.de>
+# Copyright © 1968-2003  The authors of And contributors to UNIX®, the
+#       C Language, BSD/Berkeley Unix; 386BSD, NetBSD 1.1 and OpenBSD.
+#
+# Anyone who obtained a copy of this work is hereby permitted to freely use,
+# distribute, modify, merge, sublicence, give away or sell it as long as the
+# authors are given due credit and the following notice is retained:
+#
+# This work is provided "as is", with no explicit or implicit warranty what-
+# soever. Use it only at your own risk. In no event may an author or contri-
+# butor be held liable for any damage, directly or indirectly, that origina-
+# ted through or is caused by creation or modification of this work.
+
+MirBSD is my private tree. MirBSD does not differ very much from OpenBSD
+and intentionally tracks OpenBSD. That's why it _is_ OpenBSD, just not the
+official one. It's like with DarrenBSD.
+
+At time of this writing, no advertising for MirBSD must be done,
+because the advertising clause has not yet been sorted out.
+
+http://templeofhate.com/tglaser/MirBSD/index.php
+@
+text
+@@
+
+
+1.1.1.2
+log
+@The X-Windowing System
+
+Import XFree86 4.3 from OpenBSD by CTM, in the hope it's stable
+@
+text
+@a0 28
+/***************************************************************************/
+/*                                                                         */
+/*  ftsystem.c                                                             */
+/*                                                                         */
+/*    Amiga-specific FreeType low-level system interface (body).           */
+/*                                                                         */
+/*  Copyright 1996-2001, 2002 by                                           */
+/*  David Turner, Robert Wilhelm, and Werner Lemberg.                      */
+/*                                                                         */
+/*  This file is part of the FreeType project, and may only be used,       */
+/*  modified, and distributed under the terms of the FreeType project      */
+/*  license, LICENSE.TXT.  By continuing to use, modify, or distribute     */
+/*  this file you indicate that you have read the license and              */
+/*  understand and accept it fully.                                        */
+/*                                                                         */
+/***************************************************************************/
+
+  /*************************************************************************/
+  /*                                                                       */
+  /* This file contains the Amiga interface used by FreeType to access     */
+  /* low-level, i.e. memory management, i/o access as well as thread       */
+  /* synchronisation.                                                      */
+  /*                                                                       */
+  /*************************************************************************/
+
+
+// Maintained by Detlef Würkner <TetiSoft@@apg.lahn.de>
+
+a4 2
+#include <exec/memory.h>
+
+d7 1
+a13 3
+// Necessary with OS3.9 includes
+#define __USE_SYSBASE
+
+d21 16
+a36 20
+extern APTR __asm
+AsmCreatePool( register __d0 ULONG             memFlags,
+               register __d1 ULONG             puddleSize,
+               register __d2 ULONG             threshSize,
+               register __a6 struct ExecBase*  SysBase );
+
+extern VOID __asm
+AsmDeletePool( register __a0 APTR              poolHeader,
+               register __a6 struct ExecBase*  SysBase );
+
+extern APTR __asm
+AsmAllocPooled( register __a0 APTR              poolHeader,
+                register __d0 ULONG             memSize,
+                register __a6 struct ExecBase*  SysBase );
+
+extern VOID __asm
+AsmFreePooled( register __a0 APTR              poolHeader,
+               register __a1 APTR              memory,
+               register __d0 ULONG             memSize,
+               register __a6 struct ExecBase*  SysBase);
+d41 1
+a41 3
+APTR
+AllocVecPooled( APTR   poolHeader,
+                ULONG  memSize )
+d43 1
+a43 1
+  ULONG  newSize = memSize + sizeof ( ULONG );
+d45 1
+a45 1
+  ULONG  *mem = AllocPooled( poolHeader, newSize );
+d47 1
+a47 1
+  ULONG  *mem = AsmAllocPooled( poolHeader, newSize, SysBase );
+d50 4
+a53 4
+  if ( !mem )
+    return NULL;
+  *mem = newSize;
+  return mem + 1;
+a55 1
+
+d57 1
+a57 3
+void
+FreeVecPooled( APTR  poolHeader,
+               APTR  memory )
+d59 1
+a59 1
+  ULONG  *realmem = (ULONG *)memory - 1;
+d62 1
+a62 1
+  FreePooled( poolHeader, realmem, *realmem );
+d64 1
+a64 1
+ AsmFreePooled( poolHeader, realmem, *realmem, SysBase );
+d68 26
+d202 1
+a202 1
+  /*    memory :: A pointer to the memory object.                          */
+d204 1
+a204 1
+  /*    block  :: The address of block in memory to be freed.              */
+d236 1
+a236 1
+// #define STREAM_FILE( stream )  ( (FILE*)stream->descriptor.pointer )
+d306 2
+a307 2
+  FT_Stream_Open( FT_Stream    stream,
+                  const char*  filepathname )
+d309 3
+a311 3
+//  FILE*                  file;
+    BPTR                   file; // TetiSoft
+    struct FileInfoBlock*  fib;  // TetiSoft
+d314 1
+a314 1
+    if ( !stream )
+d321 1
+a321 1
+      FT_ERROR(( "FT_Stream_Open:" ));
+d334 1
+a334 1
+      FT_ERROR(( "FT_Stream_Open:" ));
+d339 1
+a339 1
+    if ( !( ExamineFH( file, fib ) ) )
+d341 1
+a341 1
+      FreeDosObject( DOS_FIB, fib );
+d343 1
+a343 1
+      FT_ERROR(( "FT_Stream_Open:" ));
+d348 2
+a349 2
+    stream->size = fib->fib_Size;
+    FreeDosObject( DOS_FIB, fib );
+d351 2
+a352 2
+//  stream->descriptor.pointer = file;
+    stream->descriptor.pointer = (void *)file;
+d354 2
+a355 2
+    stream->pathname.pointer   = (char*)filepathname;
+    stream->pos                = 0;
+d357 2
+a358 2
+    stream->read  = ft_io_stream;
+    stream->close = ft_close_stream;
+d360 1
+a360 1
+    FT_TRACE1(( "FT_Stream_Open:" ));
+d362 1
+a362 1
+                filepathname, stream->size ));
+d368 1
+d373 1
+a373 1
+
+d376 3
+a378 3
+
+#endif
+
+d392 1
+a392 1
+//    memory->user = 0;
+d394 1
+a394 1
+      memory->user = CreatePool( MEMF_PUBLIC, 2048, 2048 );
+d396 1
+a396 1
+      memory->user = AsmCreatePool( MEMF_PUBLIC, 2048, 2048, SysBase );
+d400 1
+a400 1
+        FreeVec( memory );
+d410 1
+a410 1
+#endif
+d425 1
+a425 1
+#endif
+@
+

@@ -1,0 +1,759 @@
+head	1.1;
+branch	1.1.1;
+access;
+symbols
+	tg-mergetmp-2:1.1.1.3
+	cvs-200410241530:1.1.1.3
+	cvs-200410012000:1.1.1.3
+	cvs-200407141120:1.1.1.3
+	cvs-200406231010:1.1.1.3
+	MIRBSD_7quater:1.1.1.2
+	cvs-200405271510:1.1.1.3
+	XFree86_4_4_0:1.1.9.1
+	cvs-200403021700:1.1.1.3
+	XFREE86_20040213:1.1.9.1
+	xc:1.1.9
+	cvs-200401291925:1.1.1.2
+	MIRBSD_7_ALPHA:1.1.1.2.0.4
+	MIRBSD_7:1.1.1.2.0.2
+	MIRBSD_7ter:1.1.1.2
+	cvs-20011091815:1.1.1.2
+	cvs-200309162130:1.1.1.2
+	cvs-200308302005:1.1.1.2
+	ctmx-0387:1.1.1.2
+	ctmx-0384:1.1.1.2
+	MIRBSD_5:1.1.1.2
+	ctmx-0375:1.1.1.2
+	ctmx-0373:1.1.1.2
+	ctm-0371:1.1.1.2
+	ctm-0370:1.1.1.2
+	MIRBSD_4:1.1.1.2
+	ctm-0363:1.1.1.2
+	ctm-0359:1.1.1.2
+	ctm-0349:1.1.1.1
+	openbsd:1.1.1;
+locks; strict;
+comment	@ * @;
+
+
+1.1
+date	2003.03.22.20.04.15;	author tg;	state Exp;
+branches
+	1.1.1.1
+	1.1.9.1;
+next	;
+
+1.1.1.1
+date	2003.03.22.20.04.15;	author tg;	state Exp;
+branches;
+next	1.1.1.2;
+
+1.1.1.2
+date	2003.04.08.18.31.25;	author tg;	state Exp;
+branches;
+next	1.1.1.3;
+
+1.1.1.3
+date	2004.03.02.17.58.11;	author tg;	state Stab;
+branches;
+next	;
+
+1.1.9.1
+date	2004.02.14.19.17.52;	author tg;	state Exp;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@/*
+ * GLX Hardware Device Driver for Intel i810
+ * Copyright (C) 1999 Keith Whitwell
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a
+ * copy of this software and associated documentation files (the "Software"),
+ * to deal in the Software without restriction, including without limitation
+ * the rights to use, copy, modify, merge, publish, distribute, sublicense,
+ * and/or sell copies of the Software, and to permit persons to whom the
+ * Software is furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included
+ * in all copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
+ * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL
+ * KEITH WHITWELL, OR ANY OTHER CONTRIBUTORS BE LIABLE FOR ANY CLAIM, 
+ * DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR 
+ * OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE 
+ * OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+ *
+ */
+/* $XFree86: xc/lib/GL/mesa/src/drv/i810/i810context.h,v 1.6 2001/08/27 21:12:19 dawes Exp $ */
+
+#ifndef I810CONTEXT_INC
+#define I810CONTEXT_INC
+
+typedef struct i810_context_t i810Context;
+typedef struct i810_context_t *i810ContextPtr;
+typedef struct i810_texture_object_t *i810TextureObjectPtr;
+
+#include <X11/Xlibint.h>
+#include "dri_tmm.h"
+#include "dri_mesaint.h"
+#include "dri_mesa.h"
+
+#include "types.h"
+#include "i810_init.h"
+#include "drm.h"
+#include "mm.h"
+#include "i810log.h"
+
+#include "i810tex.h"
+#include "i810vb.h"
+
+
+/* Reasons to fallback on all primitives.  (see also
+ * imesa->IndirectTriangles).  
+ */
+#define I810_FALLBACK_TEXTURE        0x1
+#define I810_FALLBACK_DRAW_BUFFER    0x2
+#define I810_FALLBACK_READ_BUFFER    0x4
+#define I810_FALLBACK_COLORMASK      0x8  
+#define I810_FALLBACK_STIPPLE        0x10  
+#define I810_FALLBACK_SPECULAR       0x20 
+#define I810_FALLBACK_LOGICOP        0x40
+
+
+
+/* for i810ctx.new_state - manage GL->driver state changes
+ */
+#define I810_NEW_TEXTURE 0x1
+
+
+typedef void (*i810_interp_func)( GLfloat t, 
+				  GLfloat *result,
+				  const GLfloat *in,
+				  const GLfloat *out );
+
+#ifndef PCI_CHIP_I810				 
+#define PCI_CHIP_I810              0x7121
+#define PCI_CHIP_I810_DC100        0x7123
+#define PCI_CHIP_I810_E            0x7125 
+#define PCI_CHIP_I815              0x1132 
+#endif
+
+#define IS_I810(imesa) (imesa->i810Screen->deviceID == PCI_CHIP_I810 ||	\
+			imesa->i810Screen->deviceID == PCI_CHIP_I810_DC100 || \
+			imesa->i810Screen->deviceID == PCI_CHIP_I810_E)
+#define IS_I815(imesa) (imesa->i810Screen->deviceID == PCI_CHIP_I815)
+
+
+struct i810_context_t {
+   GLint refcount;
+
+   GLcontext *glCtx;
+
+   i810TextureObjectPtr CurrentTexObj[2];
+
+   struct i810_texture_object_t TexObjList;
+   struct i810_texture_object_t SwappedOut; 
+
+   int TextureMode;
+
+   /* Hardware state
+    */
+   GLuint Setup[I810_CTX_SETUP_SIZE];
+   GLuint BufferSetup[I810_DEST_SETUP_SIZE];
+   int vertsize;
+   
+
+   /* Support for CVA and the fast paths.
+    */
+   GLuint setupdone;
+   GLuint setupindex;
+   GLuint renderindex;
+   GLuint using_fast_path;
+   i810_interp_func interp;
+
+   /* Shortcircuit some state changes.
+    */
+   points_func PointsFunc;
+   line_func LineFunc;
+   triangle_func TriangleFunc;
+   quad_func QuadFunc;
+
+   /* Manage our own state */
+   GLuint new_state; 
+
+   /* Manage hardware state */
+   GLuint dirty;
+   memHeap_t *texHeap;
+
+   /* One of the few bits of hardware state that can't be calculated
+    * completely on the fly:
+    */
+   GLuint LcsCullMode;
+
+   /* Funny mesa mirrors
+    */
+   GLushort MonoColor;
+   GLushort ClearColor;
+
+   /* DRI stuff
+    */
+   drmBufPtr  vertex_dma_buffer;
+   GLuint vertex_prim;
+
+   GLframebuffer *glBuffer;
+   
+   /* Two flags to keep track of fallbacks.
+    */
+   GLuint IndirectTriangles;
+   GLuint Fallback;
+
+
+   GLuint needClip;
+
+   /* These refer to the current draw (front vs. back) buffer:
+    */
+   char *drawMap;		/* draw buffer address in virtual mem */
+   char *readMap;	
+   int drawX;			/* origin of drawable in draw buffer */
+   int drawY;
+   GLuint numClipRects;		/* cliprects for that buffer */
+   XF86DRIClipRectPtr pClipRects;
+
+   int lastSwap;
+   int secondLastSwap;
+   int texAge;
+   int ctxAge;
+   int dirtyAge;
+   int any_contend;		/* throttle me harder */
+
+   int scissor;
+   drm_clip_rect_t draw_rect;
+   drm_clip_rect_t scissor_rect;
+
+   drmContext hHWContext;
+   drmLock *driHwLock;
+   int driFd;
+   Display *display;
+
+   __DRIdrawablePrivate *driDrawable;
+   __DRIscreenPrivate *driScreen;
+   i810ScreenPrivate *i810Screen; 
+   drm_i810_sarea_t *sarea;
+};
+
+
+/* To remove all debugging, make sure I810_DEBUG is defined as a
+ * preprocessor symbol, and equal to zero.  
+ */
+#define I810_DEBUG 0   
+#ifndef I810_DEBUG
+#warning "Debugging enabled - expect reduced performance"
+extern int I810_DEBUG;
+#endif
+
+#define DEBUG_VERBOSE_2D     0x1
+#define DEBUG_VERBOSE_RING   0x8
+#define DEBUG_VERBOSE_OUTREG 0x10
+#define DEBUG_ALWAYS_SYNC    0x40
+#define DEBUG_VERBOSE_MSG    0x80
+#define DEBUG_NO_OUTRING     0x100
+#define DEBUG_NO_OUTREG      0x200
+#define DEBUG_VERBOSE_API    0x400
+#define DEBUG_VALIDATE_RING  0x800
+#define DEBUG_VERBOSE_LRU    0x1000
+#define DEBUG_VERBOSE_DRI    0x2000
+#define DEBUG_VERBOSE_IOCTL  0x4000
+
+
+#endif
+@
+
+
+1.1.9.1
+log
+@OpenBSD just has imported exactly this tree into their vendor branch,
+called the same tag, in XF4/xc
+This is, apparently, the last XFree86 snapshot before the licence change
+(ie, addition of the advertising clause)
+
+Since the developers don't see any problems with that, and we would like
+to integrate improvements done by the remaining one or two (or so) XFree86
+developers (j/k), this prepares enabling us to update X-Window in the future.
+@
+text
+@d24 1
+a24 1
+/* $XFree86: xc/lib/GL/mesa/src/drv/i810/i810context.h,v 1.10 2003/09/28 20:15:11 alanh Exp $ */
+d33 8
+a40 1
+#include "mtypes.h"
+d42 1
+a43 1
+#include "i810screen.h"
+d45 1
+d48 2
+a49 1
+/* Reasons to disable hardware rasterization. 
+d55 1
+a57 4
+#define I810_FALLBACK_RENDERMODE     0x80
+#define I810_FALLBACK_STENCIL        0x100
+#define I810_FALLBACK_BLEND_EQ       0x200
+#define I810_FALLBACK_BLEND_FUNC     0x400
+d60 11
+d84 2
+a85 1
+#define I810_UPLOAD_TEX(i) (I810_UPLOAD_TEX0<<(i))
+a86 13
+/* Use the templated vertex formats:
+ */
+#define TAG(x) i810##x
+#include "tnl_dd/t_dd_vertex.h"
+#undef TAG
+
+typedef void (*i810_tri_func)( i810ContextPtr, i810Vertex *, i810Vertex *,
+			       i810Vertex * );
+typedef void (*i810_line_func)( i810ContextPtr, i810Vertex *, i810Vertex * );
+typedef void (*i810_point_func)( i810ContextPtr, i810Vertex * );
+
+struct i810_context_t {
+   GLint refcount;   
+d89 1
+a89 5
+   /* Texture object bookkeeping
+    */
+   unsigned              nr_heaps;
+   driTexHeap          * texture_heaps[1];
+   driTextureObject      swapped;
+d91 2
+a92 1
+   struct i810_texture_object_t *CurrentTexObj[2];
+d94 1
+d96 1
+a96 1
+   /* Bit flag to keep track of fallbacks.
+d98 3
+a100 24
+   GLuint Fallback;
+
+   /* Temporaries for translating away float colors:
+    */
+   struct gl_client_array UbyteColor;
+   struct gl_client_array UbyteSecondaryColor;
+
+   /* State for i810vb.c and i810tris.c.
+    */
+   GLuint new_state;		/* _NEW_* flags */
+   GLuint SetupNewInputs;
+   GLuint SetupIndex;
+   GLuint RenderIndex;
+   GLmatrix ViewportMatrix;
+   GLenum render_primitive;
+   GLenum reduced_primitive;
+   GLuint hw_primitive;
+   GLubyte *verts;
+
+   drmBufPtr  vertex_buffer;
+   char *vertex_addr;
+   GLuint vertex_low;
+   GLuint vertex_high;
+   GLuint vertex_last_prim;
+a101 2
+   GLboolean upload_cliprects;
+
+d103 1
+a103 1
+   /* Fallback rasterization functions 
+d105 19
+a123 15
+   i810_point_func draw_point;
+   i810_line_func draw_line;
+   i810_tri_func draw_tri;
+
+   /* Hardware state 
+    */
+   GLuint dirty;		/* I810_UPLOAD_* */
+   GLuint Setup[I810_CTX_SETUP_SIZE];
+   GLuint BufferSetup[I810_DEST_SETUP_SIZE];
+   int vertex_size;
+   int vertex_stride_shift;
+   unsigned int lastStamp;
+   GLboolean stipple_in_hw;
+
+   GLenum TexEnvImageFmt[2];
+d125 2
+a126 1
+   /* State which can't be computed completely on the fly:
+a128 2
+   GLuint LcsLineWidth;
+   GLuint LcsPointSize;
+d132 1
+d137 11
+a148 2
+   GLframebuffer *glBuffer;
+   GLboolean doPageFlip;
+d160 1
+d164 5
+a168 5
+  
+ 
+   GLboolean scissor;
+   XF86DRIClipRectRec draw_rect;
+   XF86DRIClipRectRec scissor_rect;
+d173 1
+d178 1
+a178 1
+   I810SAREAPtr sarea;
+d182 2
+a183 7
+#define I810_CONTEXT(ctx)    ((i810ContextPtr)(ctx->DriverCtx))
+
+#define GET_DISPATCH_AGE( imesa ) imesa->sarea->last_dispatch
+#define GET_ENQUEUE_AGE( imesa ) imesa->sarea->last_enqueue
+
+
+/* Lock the hardware and validate our state.  
+d185 3
+a187 43
+#define LOCK_HARDWARE( imesa )				\
+  do {							\
+    char __ret=0;					\
+    DRM_CAS(imesa->driHwLock, imesa->hHWContext,	\
+	    (DRM_LOCK_HELD|imesa->hHWContext), __ret);	\
+    if (__ret)						\
+        i810GetLock( imesa, 0 );			\
+  } while (0)
+
+
+
+/* Release the kernel lock.
+ */
+#define UNLOCK_HARDWARE(imesa)					\
+    DRM_UNLOCK(imesa->driFd, imesa->driHwLock, imesa->hHWContext);	
+
+
+/* This is the wrong way to do it, I'm sure.  Otherwise the drm
+ * bitches that I've already got the heavyweight lock.  At worst,
+ * this is 3 ioctls.  The best solution probably only gets me down 
+ * to 2 ioctls in the worst case.
+ */
+#define LOCK_HARDWARE_QUIESCENT( imesa ) do {	\
+   LOCK_HARDWARE( imesa );			\
+   i810RegetLockQuiescent( imesa );		\
+} while(0)
+
+
+extern void i810GetLock( i810ContextPtr imesa, GLuint flags );
+extern void i810EmitHwStateLocked( i810ContextPtr imesa );
+extern void i810EmitScissorValues( i810ContextPtr imesa, int box_nr, int emit );
+extern void i810EmitDrawingRectangle( i810ContextPtr imesa );
+extern void i810XMesaSetBackClipRects( i810ContextPtr imesa );
+extern void i810XMesaSetFrontClipRects( i810ContextPtr imesa );
+
+#define SUBPIXEL_X -.5
+#define SUBPIXEL_Y -.5
+
+/* ================================================================
+ * Debugging:
+ */
+#define DO_DEBUG		1
+#if DO_DEBUG
+a188 2
+#else
+#define I810_DEBUG		0
+d191 13
+a203 12
+#define DEBUG_TEXTURE	0x1
+#define DEBUG_STATE	0x2
+#define DEBUG_IOCTL	0x4
+#define DEBUG_PRIMS	0x8
+#define DEBUG_VERTS	0x10
+#define DEBUG_FALLBACKS	0x20
+#define DEBUG_VERBOSE	0x40
+#define DEBUG_DRI       0x80
+#define DEBUG_DMA       0x100
+#define DEBUG_SANITY    0x200
+#define DEBUG_SYNC      0x400
+#define DEBUG_SLEEP     0x800
+@
+
+
+1.1.1.1
+log
+@Import OpenBSD 3.3 XF4 repository from CTM 3132 the first time
+This finalizes starting an OpenBSD-mirabile (aka MirBSD) repository.
+
+### MirBSD is:
+# Copyright (c) 1982-2003 by Thorsten "mirabile" Glaser <x86@@ePost.de>
+# Copyright © 1968-2003  The authors of And contributors to UNIX®, the
+#       C Language, BSD/Berkeley Unix; 386BSD, NetBSD 1.1 and OpenBSD.
+#
+# Anyone who obtained a copy of this work is hereby permitted to freely use,
+# distribute, modify, merge, sublicence, give away or sell it as long as the
+# authors are given due credit and the following notice is retained:
+#
+# This work is provided "as is", with no explicit or implicit warranty what-
+# soever. Use it only at your own risk. In no event may an author or contri-
+# butor be held liable for any damage, directly or indirectly, that origina-
+# ted through or is caused by creation or modification of this work.
+
+MirBSD is my private tree. MirBSD does not differ very much from OpenBSD
+and intentionally tracks OpenBSD. That's why it _is_ OpenBSD, just not the
+official one. It's like with DarrenBSD.
+
+At time of this writing, no advertising for MirBSD must be done,
+because the advertising clause has not yet been sorted out.
+
+http://templeofhate.com/tglaser/MirBSD/index.php
+@
+text
+@@
+
+
+1.1.1.2
+log
+@The X-Windowing System
+
+Import XFree86 4.3 from OpenBSD by CTM, in the hope it's stable
+@
+text
+@d24 1
+a24 1
+/* $XFree86: xc/lib/GL/mesa/src/drv/i810/i810context.h,v 1.9 2002/12/16 16:18:51 dawes Exp $ */
+d34 7
+a40 2
+
+#include "mtypes.h"
+d42 1
+a43 1
+#include "i810screen.h"
+d45 1
+d48 2
+a49 1
+/* Reasons to disable hardware rasterization. 
+d55 1
+a57 4
+#define I810_FALLBACK_RENDERMODE     0x80
+#define I810_FALLBACK_STENCIL        0x100
+#define I810_FALLBACK_BLEND_EQ       0x200
+#define I810_FALLBACK_BLEND_FUNC     0x400
+d60 11
+d84 2
+a85 12
+#define I810_UPLOAD_TEX(i) (I810_UPLOAD_TEX0<<(i))
+
+/* Use the templated vertex formats:
+ */
+#define TAG(x) i810##x
+#include "tnl_dd/t_dd_vertex.h"
+#undef TAG
+
+typedef void (*i810_tri_func)( i810ContextPtr, i810Vertex *, i810Vertex *,
+			       i810Vertex * );
+typedef void (*i810_line_func)( i810ContextPtr, i810Vertex *, i810Vertex * );
+typedef void (*i810_point_func)( i810ContextPtr, i810Vertex * );
+a86 2
+struct i810_context_t {
+   GLint refcount;   
+a88 2
+   /* Textures
+    */
+d90 1
+a92 1
+   memHeap_t *texHeap;
+d94 1
+a94 3
+   /* Bit flag to keep track of fallbacks.
+    */
+   GLuint Fallback;
+d96 1
+a96 1
+   /* Temporaries for translating away float colors:
+d98 3
+a100 20
+   struct gl_client_array UbyteColor;
+   struct gl_client_array UbyteSecondaryColor;
+
+   /* State for i810vb.c and i810tris.c.
+    */
+   GLuint new_state;		/* _NEW_* flags */
+   GLuint SetupNewInputs;
+   GLuint SetupIndex;
+   GLuint RenderIndex;
+   GLmatrix ViewportMatrix;
+   GLenum render_primitive;
+   GLenum reduced_primitive;
+   GLuint hw_primitive;
+   char *verts;
+
+   drmBufPtr  vertex_buffer;
+   char *vertex_addr;
+   GLuint vertex_low;
+   GLuint vertex_high;
+   GLuint vertex_last_prim;
+a101 2
+   GLboolean upload_cliprects;
+
+d103 1
+a103 1
+   /* Fallback rasterization functions 
+d105 12
+a116 3
+   i810_point_func draw_point;
+   i810_line_func draw_line;
+   i810_tri_func draw_tri;
+d118 2
+a119 9
+   /* Hardware state 
+    */
+   GLuint dirty;		/* I810_UPLOAD_* */
+   GLuint Setup[I810_CTX_SETUP_SIZE];
+   GLuint BufferSetup[I810_DEST_SETUP_SIZE];
+   int vertex_size;
+   int vertex_stride_shift;
+   unsigned int lastStamp;
+   GLboolean stipple_in_hw;
+d121 3
+a123 1
+   GLenum TexEnvImageFmt[2];
+d125 2
+a126 1
+   /* State which can't be computed completely on the fly:
+a128 2
+   GLuint LcsLineWidth;
+   GLuint LcsPointSize;
+d132 1
+d137 11
+a148 2
+   GLframebuffer *glBuffer;
+   GLboolean doPageFlip;
+d160 1
+d164 1
+d166 3
+a168 3
+   GLboolean scissor;
+   XF86DRIClipRectRec draw_rect;
+   XF86DRIClipRectRec scissor_rect;
+d178 1
+a178 1
+   I810SAREAPtr sarea;
+d182 2
+a183 7
+#define I810_CONTEXT(ctx)    ((i810ContextPtr)(ctx->DriverCtx))
+
+#define GET_DISPATCH_AGE( imesa ) imesa->sarea->last_dispatch
+#define GET_ENQUEUE_AGE( imesa ) imesa->sarea->last_enqueue
+
+
+/* Lock the hardware and validate our state.  
+d185 5
+a189 34
+#define LOCK_HARDWARE( imesa )				\
+  do {							\
+    char __ret=0;					\
+    DRM_CAS(imesa->driHwLock, imesa->hHWContext,	\
+	    (DRM_LOCK_HELD|imesa->hHWContext), __ret);	\
+    if (__ret)						\
+        i810GetLock( imesa, 0 );			\
+  } while (0)
+
+
+
+/* Release the kernel lock.
+ */
+#define UNLOCK_HARDWARE(imesa)					\
+    DRM_UNLOCK(imesa->driFd, imesa->driHwLock, imesa->hHWContext);	
+
+
+/* This is the wrong way to do it, I'm sure.  Otherwise the drm
+ * bitches that I've already got the heavyweight lock.  At worst,
+ * this is 3 ioctls.  The best solution probably only gets me down 
+ * to 2 ioctls in the worst case.
+ */
+#define LOCK_HARDWARE_QUIESCENT( imesa ) do {	\
+   LOCK_HARDWARE( imesa );			\
+   i810RegetLockQuiescent( imesa );		\
+} while(0)
+
+
+extern void i810GetLock( i810ContextPtr imesa, GLuint flags );
+extern void i810EmitHwStateLocked( i810ContextPtr imesa );
+extern void i810EmitScissorValues( i810ContextPtr imesa, int box_nr, int emit );
+extern void i810EmitDrawingRectangle( i810ContextPtr imesa );
+extern void i810XMesaSetBackClipRects( i810ContextPtr imesa );
+extern void i810XMesaSetFrontClipRects( i810ContextPtr imesa );
+d191 12
+a202 2
+#define SUBPIXEL_X -.5
+#define SUBPIXEL_Y -.5
+@
+
+
+1.1.1.3
+log
+@That's what OpenBSD will, probably, ship as XF4 in 3.5
+their last sync against XFree86 4.3-current has been
+imported into our vendor branch, too
+@
+text
+@d24 1
+a24 1
+/* $XFree86: xc/lib/GL/mesa/src/drv/i810/i810context.h,v 1.10 2003/09/28 20:15:11 alanh Exp $ */
+d33 2
+d86 1
+a86 1
+   /* Texture object bookkeeping
+d88 4
+a91 6
+   unsigned              nr_heaps;
+   driTexHeap          * texture_heaps[1];
+   driTextureObject      swapped;
+
+   struct i810_texture_object_t *CurrentTexObj[2];
+
+d112 1
+a112 1
+   GLubyte *verts;
+d170 1
+a170 2
+  
+ 
+d178 1
+a232 22
+/* ================================================================
+ * Debugging:
+ */
+#define DO_DEBUG		1
+#if DO_DEBUG
+extern int I810_DEBUG;
+#else
+#define I810_DEBUG		0
+#endif
+
+#define DEBUG_TEXTURE	0x1
+#define DEBUG_STATE	0x2
+#define DEBUG_IOCTL	0x4
+#define DEBUG_PRIMS	0x8
+#define DEBUG_VERTS	0x10
+#define DEBUG_FALLBACKS	0x20
+#define DEBUG_VERBOSE	0x40
+#define DEBUG_DRI       0x80
+#define DEBUG_DMA       0x100
+#define DEBUG_SANITY    0x200
+#define DEBUG_SYNC      0x400
+#define DEBUG_SLEEP     0x800
+@
+
+

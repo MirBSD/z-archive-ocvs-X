@@ -1,0 +1,1365 @@
+head	1.1;
+branch	1.1.1;
+access;
+symbols
+	tg-mergetmp-2:1.1.1.3
+	cvs-200410241530:1.1.1.3
+	cvs-200410012000:1.1.1.3
+	cvs-200407141120:1.1.1.3
+	cvs-200406231010:1.1.1.3
+	MIRBSD_7quater:1.1.1.2
+	cvs-200405271510:1.1.1.3
+	XFree86_4_4_0:1.1.9.1
+	cvs-200403021700:1.1.1.3
+	XFREE86_20040213:1.1.9.1
+	xc:1.1.9
+	cvs-200401291925:1.1.1.2
+	MIRBSD_7_ALPHA:1.1.1.2.0.4
+	MIRBSD_7:1.1.1.2.0.2
+	MIRBSD_7ter:1.1.1.2
+	cvs-20011091815:1.1.1.2
+	cvs-200309162130:1.1.1.2
+	cvs-200308302005:1.1.1.2
+	ctmx-0387:1.1.1.2
+	ctmx-0384:1.1.1.2
+	MIRBSD_5:1.1.1.2
+	ctmx-0375:1.1.1.2
+	ctmx-0373:1.1.1.2
+	ctm-0371:1.1.1.2
+	ctm-0370:1.1.1.2
+	MIRBSD_4:1.1.1.2
+	ctm-0363:1.1.1.2
+	ctm-0359:1.1.1.2
+	ctm-0349:1.1.1.1
+	openbsd:1.1.1;
+locks; strict;
+comment	@ * @;
+
+
+1.1
+date	2003.03.22.20.04.15;	author tg;	state Exp;
+branches
+	1.1.1.1
+	1.1.9.1;
+next	;
+
+1.1.1.1
+date	2003.03.22.20.04.15;	author tg;	state Exp;
+branches;
+next	1.1.1.2;
+
+1.1.1.2
+date	2003.04.08.18.31.25;	author tg;	state Exp;
+branches;
+next	1.1.1.3;
+
+1.1.1.3
+date	2004.03.02.17.58.09;	author tg;	state Stab;
+branches;
+next	;
+
+1.1.9.1
+date	2004.02.14.19.17.52;	author tg;	state Exp;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@/* $XFree86: xc/lib/GL/mesa/src/drv/gamma/gamma_xmesa.c,v 1.12 2001/03/21 16:14:20 dawes Exp $ */
+/**************************************************************************
+
+Copyright 1998-1999 Precision Insight, Inc., Cedar Park, Texas.
+All Rights Reserved.
+
+Permission is hereby granted, free of charge, to any person obtaining a
+copy of this software and associated documentation files (the
+"Software"), to deal in the Software without restriction, including
+without limitation the rights to use, copy, modify, merge, publish,
+distribute, sub license, and/or sell copies of the Software, and to
+permit persons to whom the Software is furnished to do so, subject to
+the following conditions:
+
+The above copyright notice and this permission notice (including the
+next paragraph) shall be included in all copies or substantial portions
+of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
+OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NON-INFRINGEMENT.
+IN NO EVENT SHALL PRECISION INSIGHT AND/OR ITS SUPPLIERS BE LIABLE FOR
+ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,
+TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
+SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+**************************************************************************/
+
+/*
+ * Authors:
+ *   Kevin E. Martin <kevin@@precisioninsight.com>
+ *   Brian Paul <brian@@precisioninsight.com>
+ *   Alan Hourihane <alanh@@fairlite.demon.co.uk>
+ */
+
+#ifdef GLX_DIRECT_RENDERING
+
+#include <X11/Xlibint.h>
+#include "gamma_init.h"
+#include "gamma_gl.h"
+#include "glapi.h"
+#include "glint_dri.h"
+#include "gamma_dlist.h"
+#include "context.h"
+#include "mmath.h"
+#include "hash.h"
+
+
+__DRIcontextPrivate *nullCC  = NULL;
+__DRIcontextPrivate *gCC = NULL;
+gammaContextPrivate *gCCPriv = NULL;
+
+GLboolean XMesaInitDriver(__DRIscreenPrivate *sPriv)
+{
+    gammaScreenPrivate *gsp;
+
+#if 0
+    /* Check the DRI version */
+    {
+       int major, minor, patch;
+       if (XF86DRIQueryVersion(sPriv->display, &major, &minor, &patch)) {
+          if (major != 4 || minor < 0) {
+             char msg[1000];
+             sprintf(msg, "gamma DRI driver expected DRI version 4.0.x but got version %d.%d.%d", major, minor, patch);
+             __driMesaMessage(msg);
+             return GL_FALSE;
+          }
+       }
+    }
+
+    /* Check that the DDX driver version is compatible */
+    if (sPriv->ddxMajor != 1 ||
+        sPriv->ddxMinor < 0) {
+        char msg[1000];
+        sprintf(msg, "gamma DRI driver expected DDX driver version 1.0.x but got version %d.%d.%d", sPriv->ddxMajor, sPriv->ddxMinor, sPriv->ddxPatch);
+        __driMesaMessage(msg);
+        return GL_FALSE;
+    }
+
+    /* Check that the DRM driver version is compatible */
+    if (sPriv->drmMajor != 1 ||
+        sPriv->drmMinor < 0) {
+        char msg[1000];
+        sprintf(msg, "gamm DRI driver expected DRM driver version 1.0.x but got version %d.%d.%d", sPriv->drmMajor, sPriv->drmMinor, sPriv->drmPatch);
+        __driMesaMessage(msg);
+        return GL_FALSE;
+    }
+#endif
+
+    /* Allocate the private area */
+    gsp = (gammaScreenPrivate *)Xmalloc(sizeof(gammaScreenPrivate));
+    if (!gsp) {
+	return GL_FALSE;
+    }
+    gsp->driScrnPriv = sPriv;
+
+    sPriv->private = (void *)gsp;
+
+    if (!gammaMapAllRegions(sPriv)) {
+	Xfree(sPriv->private);
+	return GL_FALSE;
+    }
+
+    return GL_TRUE;
+}
+
+void XMesaResetDriver(__DRIscreenPrivate *sPriv)
+{
+    gammaUnmapAllRegions(sPriv);
+    Xfree(sPriv->private);
+    sPriv->private = NULL;
+}
+
+GLvisual *XMesaCreateVisual(Display *dpy,
+                            __DRIscreenPrivate *driScrnPriv,
+                            const XVisualInfo *visinfo,
+                            const __GLXvisualConfig *config)
+{
+   /* Drivers may change the args to _mesa_create_visual() in order to
+    * setup special visuals.
+    */
+   return _mesa_create_visual( config->rgba,
+                               config->doubleBuffer,
+                               config->stereo,
+                               _mesa_bitcount(visinfo->red_mask),
+                               _mesa_bitcount(visinfo->green_mask),
+                               _mesa_bitcount(visinfo->blue_mask),
+                               config->alphaSize,
+                               0, /* index bits */
+                               config->depthSize,
+                               config->stencilSize,
+                               config->accumRedSize,
+                               config->accumGreenSize,
+                               config->accumBlueSize,
+                               config->accumAlphaSize,
+                               0 /* num samples */ );
+}
+
+
+GLboolean XMesaCreateContext( Display *dpy,
+                              GLvisual *mesaVis,
+                              __DRIcontextPrivate *driContextPriv )
+{
+    int i;
+    gammaContextPrivate *cPriv;
+    __DRIscreenPrivate *driScrnPriv = driContextPriv->driScreenPriv;
+    gammaScreenPrivate *gPriv = (gammaScreenPrivate *)driScrnPriv->private;
+    GLINTDRIPtr         gDRIPriv = (GLINTDRIPtr)driScrnPriv->pDevPriv;
+
+    cPriv = (gammaContextPrivate *)Xmalloc(sizeof(gammaContextPrivate));
+    if (!cPriv) {
+	return GL_FALSE;
+    }
+
+    if (!cPriv->Exec) {
+       GLuint size = _glapi_get_dispatch_table_size() * sizeof(GLvoid *);
+       cPriv->Exec = (struct _glapi_table *) malloc(size);
+       _gamma_init_exec(cPriv->Exec);
+    }
+
+    cPriv->API = cPriv->Exec;
+
+    if (!cPriv->Save) {
+       GLuint size = _glapi_get_dispatch_table_size() * sizeof(GLvoid *);
+       cPriv->Save = (struct _glapi_table *) malloc(size);
+       _gamma_init_save(cPriv->Save);
+    }
+
+    cPriv->hHWContext = driContextPriv->hHWContext;
+    GET_FIRST_DMA(driScrnPriv->fd, cPriv->hHWContext,
+		  1, &cPriv->bufIndex, &cPriv->bufSize,
+		  &cPriv->buf, &cPriv->bufCount, gPriv);
+
+#ifdef DO_VALIDATE
+    GET_FIRST_DMA(driScrnPriv->fd, cPriv->hHWContext,
+		  1, &cPriv->WCbufIndex, &cPriv->WCbufSize,
+		  &cPriv->WCbuf, &cPriv->WCbufCount, gPriv);
+#endif
+
+    gamma_init_lists();
+
+    /* Display List stuff */
+    cPriv->DisplayList = _mesa_NewHashTable();
+    cPriv->List.ListBase = 0;
+    cPriv->CallDepth = 0;
+    cPriv->ExecuteFlag = GL_TRUE;
+    cPriv->CompileFlag = GL_FALSE;
+    cPriv->CurrentListPtr = NULL;
+    cPriv->CurrentBlock = NULL;
+    cPriv->CurrentListNum = 0;
+    cPriv->CurrentPos = 0;
+
+    /* Vertex arrays */
+    cPriv->Array.VertexSize = 4;
+    cPriv->Array.VertexType = GL_FLOAT;
+    cPriv->Array.VertexStride = 0;
+    cPriv->Array.VertexStrideB = 0;
+    cPriv->Array.VertexPtr = NULL;
+    cPriv->Array.VertexEnabled = GL_FALSE;
+    cPriv->Array.NormalType = GL_FLOAT;
+    cPriv->Array.NormalStride = 0;
+    cPriv->Array.NormalStrideB = 0;
+    cPriv->Array.NormalPtr = NULL;
+    cPriv->Array.NormalEnabled = GL_FALSE;
+    cPriv->Array.ColorSize = 4;
+    cPriv->Array.ColorType = GL_FLOAT;
+    cPriv->Array.ColorStride = 0;
+    cPriv->Array.ColorStrideB = 0;
+    cPriv->Array.ColorPtr = NULL;
+    cPriv->Array.ColorEnabled = GL_FALSE;
+    cPriv->Array.IndexType = GL_FLOAT;
+    cPriv->Array.IndexStride = 0;
+    cPriv->Array.IndexStrideB = 0;
+    cPriv->Array.IndexPtr = NULL;
+    cPriv->Array.IndexEnabled = GL_FALSE;
+    cPriv->Array.EdgeFlagStride = 0;
+    cPriv->Array.EdgeFlagStrideB = 0;
+    cPriv->Array.EdgeFlagPtr = NULL;
+    cPriv->Array.EdgeFlagEnabled = GL_FALSE;
+
+    cPriv->Unpack.Alignment = 4;
+    cPriv->Unpack.RowLength = 0;
+    cPriv->Unpack.SkipPixels = 0;
+    cPriv->Unpack.SkipRows = 0;
+    cPriv->Unpack.SwapBytes = GL_FALSE;
+    cPriv->Unpack.LsbFirst = GL_FALSE;
+
+    cPriv->ClearColor[0] = 0.0;
+    cPriv->ClearColor[1] = 0.0;
+    cPriv->ClearColor[2] = 0.0;
+    cPriv->ClearColor[3] = 1.0;
+    cPriv->ClearDepth = 1.0;
+    cPriv->x = 0;
+    cPriv->y = 0;
+    cPriv->w = 0;
+    cPriv->h = 0;
+    cPriv->FrameCount = 0;
+    cPriv->MatrixMode = GL_MODELVIEW;
+    cPriv->ModelViewCount = 0;
+    cPriv->ProjCount = 0;
+    cPriv->TextureCount = 0;
+
+    for (i = 0; i < 16; i++)
+	if (i % 5 == 0)
+	    cPriv->ModelView[i] =
+		cPriv->Proj[i] =
+		cPriv->ModelViewProj[i] =
+		cPriv->Texture[i] = 1.0;
+	else
+	    cPriv->ModelView[i] =
+		cPriv->Proj[i] =
+		cPriv->ModelViewProj[i] =
+		cPriv->Texture[i] = 0.0;
+
+    cPriv->LBReadMode = (LBReadSrcDisable |
+			 LBReadDstDisable |
+			 LBDataTypeDefault |
+			 LBWindowOriginBot |
+			 gDRIPriv->pprod);
+    cPriv->FBReadMode = (FBReadSrcDisable |
+			 FBReadDstDisable |
+			 FBDataTypeDefault |
+			 FBWindowOriginBot |
+			 gDRIPriv->pprod);
+ 
+    if (gDRIPriv->numMultiDevices == 2) {
+	cPriv->LBReadMode |= LBScanLineInt2;
+	cPriv->FBReadMode |= FBScanLineInt2;
+    	cPriv->FBWindowBase =driScrnPriv->fbWidth*(driScrnPriv->fbHeight/2 - 1);
+    	cPriv->LBWindowBase =driScrnPriv->fbWidth*(driScrnPriv->fbHeight/2 - 1);
+    } else {
+    	cPriv->FBWindowBase = driScrnPriv->fbWidth * driScrnPriv->fbHeight;
+    	cPriv->LBWindowBase = driScrnPriv->fbWidth * driScrnPriv->fbHeight;
+    }
+
+    cPriv->Begin = (B_AreaStippleDisable |
+		    B_LineStippleDisable |
+		    B_AntiAliasDisable |
+		    B_TextureDisable |
+		    B_FogDisable |
+		    B_SubPixelCorrectEnable |
+		    B_PrimType_Null);
+
+    cPriv->ColorDDAMode = (ColorDDAEnable |
+			   ColorDDAGouraud);
+
+#ifdef CULL_ALL_PRIMS
+    cPriv->GeometryMode = (GM_TextureDisable |
+			   GM_FogDisable |
+			   GM_FogExp |
+			   GM_FrontPolyFill |
+			   GM_BackPolyFill |
+			   GM_FrontFaceCCW |
+			   GM_PolyCullDisable |
+			   GM_PolyCullBoth |
+			   GM_ClipShortLinesDisable |
+			   GM_ClipSmallTrisDisable |
+			   GM_RenderMode |
+			   GM_Feedback2D |
+			   GM_CullFaceNormDisable |
+			   GM_AutoFaceNormDisable |
+			   GM_GouraudShading |
+			   GM_UserClipNone |
+			   GM_PolyOffsetPointDisable |
+			   GM_PolyOffsetLineDisable |
+			   GM_PolyOffsetFillDisable |
+			   GM_InvertFaceNormCullDisable);
+#else
+    cPriv->GeometryMode = (GM_TextureDisable |
+			   GM_FogDisable |
+			   GM_FogExp |
+			   GM_FrontPolyFill |
+			   GM_BackPolyFill |
+			   GM_FrontFaceCCW |
+			   GM_PolyCullDisable |
+			   GM_PolyCullBack |
+			   GM_ClipShortLinesDisable |
+			   GM_ClipSmallTrisDisable |
+			   GM_RenderMode |
+			   GM_Feedback2D |
+			   GM_CullFaceNormDisable |
+			   GM_AutoFaceNormDisable |
+			   GM_GouraudShading |
+			   GM_UserClipNone |
+			   GM_PolyOffsetPointDisable |
+			   GM_PolyOffsetLineDisable |
+			   GM_PolyOffsetFillDisable |
+			   GM_InvertFaceNormCullDisable);
+#endif
+
+    cPriv->AlphaTestMode = (AlphaTestModeDisable |
+			    AT_Always);
+
+    cPriv->AlphaBlendMode = (AlphaBlendModeDisable |
+			     AB_Src_One |
+			     AB_Dst_Zero |
+			     AB_ColorFmt_8888 |
+			     AB_NoAlphaBufferPresent |
+			     AB_ColorOrder_RGB |
+			     AB_OpenGLType |
+			     AB_AlphaDst_FBData |
+			     AB_ColorConversionScale |
+			     AB_AlphaConversionScale);
+
+    cPriv->AB_FBReadMode_Save = cPriv->AB_FBReadMode = 0;
+
+    cPriv->Window = (WindowEnable  | /* For GID testing */
+		     W_PassIfEqual |
+		     (0 << 5)); /* GID part is set from draw priv (below) */
+
+    cPriv->NotClipped = GL_FALSE;
+    cPriv->WindowChanged = GL_TRUE;
+
+    /*
+    ** NOT_DONE:
+    ** 1. These values should be calculated from the registers.
+    ** 2. Only one client can use texture memory at this time.
+    ** 3. A two-tiered texture allocation routine is needed to properly
+    **    handle texture management.
+    */
+    cPriv->tmm = driTMMCreate(0x00080000,
+			      0x00800000 - 0x00080000,
+			      4, 1,
+			      gammaTOLoad,
+			      gammaTOLoadSub);
+
+    cPriv->curTexObj = gammaTOFind(0);
+    cPriv->curTexObj1D = cPriv->curTexObj;
+    cPriv->curTexObj2D = cPriv->curTexObj;
+    cPriv->Texture1DEnabled = GL_FALSE;
+    cPriv->Texture2DEnabled = GL_FALSE;
+
+#ifdef FORCE_DEPTH32
+    cPriv->DepthSize = 32;
+#else
+    cPriv->DepthSize = mesaVis->DepthBits;
+#endif
+    cPriv->zNear = 0.0;
+    cPriv->zFar  = 1.0;
+
+    cPriv->Flags  = GAMMA_FRONT_BUFFER;
+    cPriv->Flags |= (mesaVis->DBflag ? GAMMA_BACK_BUFFER  : 0);
+    cPriv->Flags |= (cPriv->DepthSize > 0 ? GAMMA_DEPTH_BUFFER : 0);
+
+    cPriv->EnabledFlags = GAMMA_FRONT_BUFFER;
+    cPriv->EnabledFlags |= (mesaVis->DBflag ? GAMMA_BACK_BUFFER  : 0);
+
+    cPriv->DepthMode = (DepthModeDisable |
+			DM_WriteMask |
+			DM_Less);
+
+    cPriv->DeltaMode = (DM_SubPixlCorrectionEnable |
+			DM_SmoothShadingEnable |
+			DM_Target500TXMX);
+
+    switch (cPriv->DepthSize) {
+    case 16:
+	cPriv->DeltaMode |= DM_Depth16;
+	break;
+    case 24:
+	cPriv->DeltaMode |= DM_Depth24;
+	break;
+    case 32:
+	cPriv->DeltaMode |= DM_Depth32;
+	break;
+    default:
+	break;
+    }
+
+    cPriv->gammaScrnPriv = gPriv;
+
+    cPriv->LightingMode = LightingModeDisable | LightingModeSpecularEnable;
+    cPriv->Light0Mode = LNM_Off;
+    cPriv->Light1Mode = LNM_Off;
+    cPriv->Light2Mode = LNM_Off;
+    cPriv->Light3Mode = LNM_Off;
+    cPriv->Light4Mode = LNM_Off;
+    cPriv->Light5Mode = LNM_Off;
+    cPriv->Light6Mode = LNM_Off;
+    cPriv->Light7Mode = LNM_Off;
+    cPriv->Light8Mode = LNM_Off;
+    cPriv->Light9Mode = LNM_Off;
+    cPriv->Light10Mode = LNM_Off;
+    cPriv->Light11Mode = LNM_Off;
+    cPriv->Light12Mode = LNM_Off;
+    cPriv->Light13Mode = LNM_Off;
+    cPriv->Light14Mode = LNM_Off;
+    cPriv->Light15Mode = LNM_Off;
+
+    cPriv->LogicalOpMode = LogicalOpModeDisable;
+
+    cPriv->MaterialMode = MaterialModeDisable;
+
+    cPriv->ScissorMode = UserScissorDisable | ScreenScissorDisable;
+
+    cPriv->TransformMode = XM_UseModelViewProjMatrix;
+
+    driContextPriv->driverPrivate = cPriv;
+
+    /* Initialize the HW to a known state */
+    gammaInitHW(cPriv);
+
+    return GL_TRUE;
+}
+
+void XMesaDestroyContext(__DRIcontextPrivate *driContextPriv)
+{
+    gammaContextPrivate *cPriv;
+    cPriv = (gammaContextPrivate *) driContextPriv->driverPrivate;
+    if (cPriv) {
+       /* XXX free driver context data? */
+    }
+}
+
+
+GLframebuffer *XMesaCreateWindowBuffer( Display *dpy,
+                                        __DRIscreenPrivate *driScrnPriv,
+                                        __DRIdrawablePrivate *driDrawPriv,
+                                        GLvisual *mesaVis)
+{
+   return gl_create_framebuffer(mesaVis,
+                                GL_FALSE,  /* software depth buffer? */
+                                mesaVis->StencilBits > 0,
+                                mesaVis->AccumRedBits > 0,
+                                mesaVis->AlphaBits > 0
+                                );
+}
+
+
+GLframebuffer *XMesaCreatePixmapBuffer( Display *dpy,
+                                        __DRIscreenPrivate *driScrnPriv,
+                                        __DRIdrawablePrivate *driDrawPriv,
+                                        GLvisual *mesaVis)
+{
+#if 0
+   /* Different drivers may have different combinations of hardware and
+    * software ancillary buffers.
+    */
+   return gl_create_framebuffer(mesaVis,
+                                GL_FALSE,  /* software depth buffer? */
+                                mesaVis->StencilBits > 0,
+                                mesaVis->AccumRedBits > 0,
+                                mesaVis->AlphaBits > 0
+                                );
+#else
+   return NULL;  /* not implemented yet */
+#endif
+}
+
+
+void XMesaSwapBuffers(__DRIdrawablePrivate *driDrawPriv)
+{
+    /*
+    ** NOT_DONE: This assumes buffer is currently bound to a context.
+    ** This needs to be able to swap buffers when not currently bound.
+    */
+    if (gCC == NULL || gCCPriv == NULL)
+	return;
+
+    VALIDATE_DRAWABLE_INFO(gCC,gCCPriv);
+
+    /* Flush any partially filled buffers */
+    FLUSH_DMA_BUFFER(gCC, gCCPriv);
+
+    if (gCCPriv->EnabledFlags & GAMMA_BACK_BUFFER) {
+	int src, dst, x0, y0, x1, h;
+	int i;
+	int nRect = driDrawPriv->numClipRects;
+	XF86DRIClipRectPtr pRect = driDrawPriv->pClipRects;
+	__DRIscreenPrivate *driScrnPriv = gCC->driScreenPriv;
+
+#ifdef DO_VALIDATE
+	DRM_SPINLOCK(&driScrnPriv->pSAREA->drawable_lock,
+		     driScrnPriv->drawLockID);
+	VALIDATE_DRAWABLE_INFO_NO_LOCK(gCC,gCCPriv);
+#endif
+
+	CHECK_DMA_BUFFER(nullCC, gCCPriv, 2);
+	WRITE(gCCPriv->buf, FBReadMode, (gCCPriv->FBReadMode |
+					 FBReadSrcEnable));
+	WRITE(gCCPriv->buf, LBWriteMode, LBWriteModeDisable);
+
+	for (i = 0; i < nRect; i++, pRect++) {
+	    x0 = pRect->x1;
+	    x1 = pRect->x2;
+	    h  = pRect->y2 - pRect->y1;
+	    y0 = driScrnPriv->fbHeight - (pRect->y1+h);
+
+	    src = (y0/2)*driScrnPriv->fbWidth+x0;
+	    y0 += driScrnPriv->fbHeight;
+	    dst = (y0/2)*driScrnPriv->fbWidth+x0;
+
+	    CHECK_DMA_BUFFER(nullCC, gCCPriv, 9);
+	    WRITE(gCCPriv->buf, StartXDom,       x0<<16);   /* X0dest */
+	    WRITE(gCCPriv->buf, StartY,          y0<<16);   /* Y0dest */
+	    WRITE(gCCPriv->buf, StartXSub,       x1<<16);   /* X1dest */
+	    WRITE(gCCPriv->buf, GLINTCount,      h);        /* H */
+	    WRITE(gCCPriv->buf, dY,              1<<16);    /* ydir */
+	    WRITE(gCCPriv->buf, dXDom,           0<<16);
+	    WRITE(gCCPriv->buf, dXSub,           0<<16);
+	    WRITE(gCCPriv->buf, FBSourceOffset, (dst-src));
+	    WRITE(gCCPriv->buf, Render,          0x00040048); /* NOT_DONE */
+	}
+
+	/*
+	** NOTE: FBSourceOffset (above) is backwards from what is
+	** described in the manual (i.e., dst-src instead of src-dst)
+	** due to our using the bottom-left window origin instead of the
+	** top-left window origin.
+	*/
+
+	/* Restore FBReadMode */
+	CHECK_DMA_BUFFER(nullCC, gCCPriv, 2);
+	WRITE(gCCPriv->buf, FBReadMode, (gCCPriv->FBReadMode |
+					 gCCPriv->AB_FBReadMode));
+	WRITE(gCCPriv->buf, LBWriteMode, LBWriteModeEnable);
+
+#ifdef DO_VALIDATE
+	PROCESS_DMA_BUFFER_TOP_HALF(gCCPriv);
+
+	DRM_SPINUNLOCK(&driScrnPriv->pSAREA->drawable_lock,
+		       driScrnPriv->drawLockID);
+	VALIDATE_DRAWABLE_INFO_NO_LOCK_POST(gCC,gCCPriv);
+
+	PROCESS_DMA_BUFFER_BOTTOM_HALF(gCCPriv);
+#else
+	FLUSH_DMA_BUFFER(gCC,gCCPriv);
+#endif
+
+    }
+}
+
+GLboolean XMesaMakeCurrent(__DRIcontextPrivate *driContextPriv,
+                           __DRIdrawablePrivate *driDrawPriv,
+                           __DRIdrawablePrivate *driReadPriv)
+{
+    if (driContextPriv) {
+	gCC     = driContextPriv;
+	gCCPriv = (gammaContextPrivate *) driContextPriv->driverPrivate;
+
+	gCCPriv->Window &= ~W_GIDMask;
+	gCCPriv->Window |= (driDrawPriv->index << 5);
+
+	CHECK_DMA_BUFFER(gCC, gCCPriv, 1);
+	WRITE(gCCPriv->buf, GLINTWindow, gCCPriv->Window);
+
+        _glapi_set_dispatch(gCCPriv->API);
+
+	_gamma_Viewport(0, 0, driDrawPriv->w, driDrawPriv->h);
+    } else {
+	gCC     = NULL;
+	gCCPriv = NULL;
+    }
+    return GL_TRUE;
+}
+
+
+GLboolean XMesaUnbindContext( __DRIcontextPrivate *driContextPriv )
+{
+   /* XXX not 100% sure what's supposed to be done here */
+   return GL_TRUE;
+}
+
+GLboolean
+XMesaOpenFullScreen(__DRIcontextPrivate *driContextPriv)
+{
+    return GL_TRUE;
+}
+
+GLboolean
+XMesaCloseFullScreen(__DRIcontextPrivate *driContextPriv)
+{
+    return GL_TRUE;
+}
+
+
+void __driRegisterExtensions(void)
+{
+   /* No extensions */
+}
+
+
+#endif
+@
+
+
+1.1.9.1
+log
+@OpenBSD just has imported exactly this tree into their vendor branch,
+called the same tag, in XF4/xc
+This is, apparently, the last XFree86 snapshot before the licence change
+(ie, addition of the advertising clause)
+
+Since the developers don't see any problems with that, and we would like
+to integrate improvements done by the remaining one or two (or so) XFree86
+developers (j/k), this prepares enabling us to update X-Window in the future.
+@
+text
+@d1 28
+a28 1
+/* $XFree86: xc/lib/GL/mesa/src/drv/gamma/gamma_xmesa.c,v 1.15 2003/09/28 20:15:10 alanh Exp $ */
+d30 4
+a33 23
+ * Copyright 2001 by Alan Hourihane.
+ *
+ * Permission to use, copy, modify, distribute, and sell this software and its
+ * documentation for any purpose is hereby granted without fee, provided that
+ * the above copyright notice appear in all copies and that both that
+ * copyright notice and this permission notice appear in supporting
+ * documentation, and that the name of Alan Hourihane not be used in
+ * advertising or publicity pertaining to distribution of the software without
+ * specific, written prior permission.  Alan Hourihane makes no representations
+ * about the suitability of this software for any purpose.  It is provided
+ * "as is" without express or implied warranty.
+ *
+ * ALAN HOURIHANE DISCLAIMS ALL WARRANTIES WITH REGARD TO THIS SOFTWARE,
+ * INCLUDING ALL IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS, IN NO
+ * EVENT SHALL ALAN HOURIHANE BE LIABLE FOR ANY SPECIAL, INDIRECT OR
+ * CONSEQUENTIAL DAMAGES OR ANY DAMAGES WHATSOEVER RESULTING FROM LOSS OF USE,
+ * DATA OR PROFITS, WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER
+ * TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR
+ * PERFORMANCE OF THIS SOFTWARE.
+ *
+ * Authors:  Alan Hourihane, <alanh@@tungstengraphics.com>
+ *
+ * 3DLabs Gamma driver
+d36 8
+a43 2
+#include "gamma_context.h"
+#include "gamma_vb.h"
+d45 3
+a47 2
+#include "matrix.h"
+#include "glint_dri.h"
+d49 3
+a51 4
+#include "swrast/swrast.h"
+#include "swrast_setup/swrast_setup.h"
+#include "tnl/tnl.h"
+#include "array_cache/acache.h"
+d53 1
+a53 2
+static GLboolean 
+gammaInitDriver(__DRIscreenPrivate *sPriv)
+d55 15
+a69 1
+    sPriv->private = (void *) gammaCreateScreen( sPriv );
+d71 30
+a100 2
+    if (!sPriv->private) {
+	gammaDestroyScreen( sPriv );
+d107 11
+a117 2
+static void 
+gammaDestroyContext(__DRIcontextPrivate *driContextPriv)
+d119 19
+a137 1
+    gammaContextPtr gmesa = (gammaContextPtr)driContextPriv->driverPrivate;
+a138 5
+    if (gmesa) {
+      _swsetup_DestroyContext( gmesa->glCtx );
+      _tnl_DestroyContext( gmesa->glCtx );
+      _ac_DestroyContext( gmesa->glCtx );
+      _swrast_DestroyContext( gmesa->glCtx );
+d140 9
+a148 1
+      gammaFreeVB( gmesa->glCtx );
+d150 4
+a153 3
+      /* free the Mesa context */
+      gmesa->glCtx->DriverCtx = NULL;
+      _mesa_destroy_context(gmesa->glCtx);
+d155 4
+a158 2
+      Xfree(gmesa);
+      driContextPriv->driverPrivate = NULL;
+d160 284
+d446 1
+a446 6
+
+static GLboolean
+gammaCreateBuffer( __DRIscreenPrivate *driScrnPriv,
+                   __DRIdrawablePrivate *driDrawPriv,
+                   const __GLcontextModes *mesaVis,
+                   GLboolean isPixmap )
+d448 5
+a452 13
+   if (isPixmap) {
+      return GL_FALSE; /* not implemented */
+   }
+   else {
+      driDrawPriv->driverPrivate = (void *) 
+         _mesa_create_framebuffer(mesaVis,
+                                  GL_FALSE,  /* software depth buffer? */
+                                  mesaVis->stencilBits > 0,
+                                  mesaVis->accumRedBits > 0,
+                                  mesaVis->alphaBits > 0
+                                  );
+      return (driDrawPriv->driverPrivate != NULL);
+   }
+d456 4
+a459 2
+static void
+gammaDestroyBuffer(__DRIdrawablePrivate *driDrawPriv)
+d461 6
+a466 1
+   _mesa_destroy_framebuffer((GLframebuffer *) (driDrawPriv->driverPrivate));
+d469 5
+a473 2
+static void
+gammaSwapBuffers( __DRIdrawablePrivate *dPriv )
+d475 14
+a488 4
+   if (dPriv->driContextPriv && dPriv->driContextPriv->driverPrivate) {
+    gammaContextPtr gmesa;
+    __DRIscreenPrivate *driScrnPriv;
+    GLcontext *ctx;
+a489 3
+    gmesa = (gammaContextPtr) dPriv->driContextPriv->driverPrivate;
+    ctx = gmesa->glCtx;
+    driScrnPriv = gmesa->driScreen;
+d491 8
+a498 1
+    _mesa_notifySwapBuffers(ctx);
+d500 1
+a500 1
+    VALIDATE_DRAWABLE_INFO(gmesa);
+d503 1
+a503 1
+    FLUSH_DMA_BUFFER(gmesa);
+d505 1
+a505 5
+    DRM_SPINLOCK(&driScrnPriv->pSAREA->drawable_lock,
+		     driScrnPriv->drawLockID);
+    VALIDATE_DRAWABLE_INFO_NO_LOCK(gmesa);
+
+    if (gmesa->EnabledFlags & GAMMA_BACK_BUFFER) {
+d508 9
+a516 4
+	int nRect = dPriv->numClipRects;
+	XF86DRIClipRectPtr pRect = dPriv->pClipRects;
+	__DRIscreenPrivate *driScrnPriv = gmesa->driScreen;
+   	GLINTDRIPtr gDRIPriv = (GLINTDRIPtr)driScrnPriv->pDevPriv;
+d518 2
+a519 2
+	CHECK_DMA_BUFFER(gmesa, 2);
+	WRITE(gmesa->buf, FBReadMode, (gmesa->FBReadMode |
+d521 1
+a521 1
+	WRITE(gmesa->buf, LBWriteMode, LBWriteModeDisable);
+a526 1
+
+a527 4
+	    if (gDRIPriv->numMultiDevices == 2) 
+	    	src = (y0/2)*driScrnPriv->fbWidth+x0;
+	    else
+	    	src = y0*driScrnPriv->fbWidth+x0;
+d529 1
+d531 12
+a542 15
+	    if (gDRIPriv->numMultiDevices == 2) 
+	    	dst = (y0/2)*driScrnPriv->fbWidth+x0;
+	    else
+	    	dst = y0*driScrnPriv->fbWidth+x0;
+
+	    CHECK_DMA_BUFFER(gmesa, 9);
+	    WRITE(gmesa->buf, StartXDom,       x0<<16);   /* X0dest */
+	    WRITE(gmesa->buf, StartY,          y0<<16);   /* Y0dest */
+	    WRITE(gmesa->buf, StartXSub,       x1<<16);   /* X1dest */
+	    WRITE(gmesa->buf, GLINTCount,      h);        /* H */
+	    WRITE(gmesa->buf, dY,              1<<16);    /* ydir */
+	    WRITE(gmesa->buf, dXDom,           0<<16);
+	    WRITE(gmesa->buf, dXSub,           0<<16);
+	    WRITE(gmesa->buf, FBSourceOffset, (dst-src));
+	    WRITE(gmesa->buf, Render,          0x00040048); /* NOT_DONE */
+d553 4
+a556 5
+	CHECK_DMA_BUFFER(gmesa, 2);
+	WRITE(gmesa->buf, FBReadMode, (gmesa->FBReadMode |
+				       gmesa->AB_FBReadMode));
+	WRITE(gmesa->buf, LBWriteMode, LBWriteModeEnable);
+    }
+d558 2
+a559 2
+    if (gmesa->EnabledFlags & GAMMA_BACK_BUFFER)
+        PROCESS_DMA_BUFFER_TOP_HALF(gmesa);
+d561 1
+a561 1
+    DRM_SPINUNLOCK(&driScrnPriv->pSAREA->drawable_lock,
+d563 6
+a568 1
+    VALIDATE_DRAWABLE_INFO_NO_LOCK_POST(gmesa);
+d570 1
+a570 5
+    if (gmesa->EnabledFlags & GAMMA_BACK_BUFFER)
+        PROCESS_DMA_BUFFER_BOTTOM_HALF(gmesa);
+  } else {
+    _mesa_problem(NULL, "gammaSwapBuffers: drawable has no context!\n");
+  }
+d573 3
+a575 4
+static GLboolean 
+gammaMakeCurrent(__DRIcontextPrivate *driContextPriv,
+		 __DRIdrawablePrivate *driDrawPriv,
+		 __DRIdrawablePrivate *driReadPriv)
+d578 2
+a579 3
+	GET_CURRENT_CONTEXT(ctx);
+	gammaContextPtr oldGammaCtx = ctx ? GAMMA_CONTEXT(ctx) : NULL;
+	gammaContextPtr newGammaCtx = (gammaContextPtr) driContextPriv->driverPrivate;
+d581 2
+a582 3
+	if ( newGammaCtx != oldGammaCtx ) {
+	    newGammaCtx->dirty = ~0;
+	}
+d584 2
+a585 12
+	if (newGammaCtx->driDrawable != driDrawPriv) {
+	    newGammaCtx->driDrawable = driDrawPriv;
+	    gammaUpdateWindow ( newGammaCtx->glCtx );
+	    gammaUpdateViewportOffset( newGammaCtx->glCtx );
+	}
+
+#if 0
+	newGammaCtx->Window &= ~W_GIDMask;
+	newGammaCtx->Window |= (driDrawPriv->index << 5);
+	CHECK_DMA_BUFFER(newGammaCtx,1);
+	WRITE(newGammaCtx->buf, GLINTWindow, newGammaCtx->Window);
+#endif
+d587 1
+a587 1
+newGammaCtx->new_state |= GAMMA_NEW_WINDOW; /* FIXME */
+d589 1
+a589 8
+	_mesa_make_current2( newGammaCtx->glCtx, 
+			  (GLframebuffer *) driDrawPriv->driverPrivate,
+			  (GLframebuffer *) driReadPriv->driverPrivate );
+
+	if (!newGammaCtx->glCtx->Viewport.Width) {
+	    _mesa_set_viewport(newGammaCtx->glCtx, 0, 0, 
+					driDrawPriv->w, driDrawPriv->h);
+	}
+d591 2
+a592 1
+	_mesa_make_current( 0, 0 );
+d598 1
+a598 2
+static GLboolean 
+gammaUnbindContext( __DRIcontextPrivate *driContextPriv )
+d600 1
+d604 2
+a605 2
+static GLboolean
+gammaOpenFullScreen(__DRIcontextPrivate *driContextPriv)
+d610 2
+a611 2
+static GLboolean
+gammaCloseFullScreen(__DRIcontextPrivate *driContextPriv)
+d617 4
+a620 13
+static struct __DriverAPIRec gammaAPI = {
+   gammaInitDriver,
+   gammaDestroyScreen,
+   gammaCreateContext,
+   gammaDestroyContext,
+   gammaCreateBuffer,
+   gammaDestroyBuffer,
+   gammaSwapBuffers,
+   gammaMakeCurrent,
+   gammaUnbindContext,
+   gammaOpenFullScreen,
+   gammaCloseFullScreen
+};
+d623 1
+a623 13
+
+/*
+ * This is the bootstrap function for the driver.
+ * The __driCreateScreen name is the symbol that libGL.so fetches.
+ * Return:  pointer to a __DRIscreenPrivate.
+ */
+void *__driCreateScreen(Display *dpy, int scrn, __DRIscreen *psc,
+                        int numConfigs, __GLXvisualConfig *config)
+{
+   __DRIscreenPrivate *psp;
+   psp = __driUtilCreateScreen(dpy, scrn, psc, numConfigs, config, &gammaAPI);
+   return (void *) psp;
+}
+@
+
+
+1.1.1.1
+log
+@Import OpenBSD 3.3 XF4 repository from CTM 3132 the first time
+This finalizes starting an OpenBSD-mirabile (aka MirBSD) repository.
+
+### MirBSD is:
+# Copyright (c) 1982-2003 by Thorsten "mirabile" Glaser <x86@@ePost.de>
+# Copyright © 1968-2003  The authors of And contributors to UNIX®, the
+#       C Language, BSD/Berkeley Unix; 386BSD, NetBSD 1.1 and OpenBSD.
+#
+# Anyone who obtained a copy of this work is hereby permitted to freely use,
+# distribute, modify, merge, sublicence, give away or sell it as long as the
+# authors are given due credit and the following notice is retained:
+#
+# This work is provided "as is", with no explicit or implicit warranty what-
+# soever. Use it only at your own risk. In no event may an author or contri-
+# butor be held liable for any damage, directly or indirectly, that origina-
+# ted through or is caused by creation or modification of this work.
+
+MirBSD is my private tree. MirBSD does not differ very much from OpenBSD
+and intentionally tracks OpenBSD. That's why it _is_ OpenBSD, just not the
+official one. It's like with DarrenBSD.
+
+At time of this writing, no advertising for MirBSD must be done,
+because the advertising clause has not yet been sorted out.
+
+http://templeofhate.com/tglaser/MirBSD/index.php
+@
+text
+@@
+
+
+1.1.1.2
+log
+@The X-Windowing System
+
+Import XFree86 4.3 from OpenBSD by CTM, in the hope it's stable
+@
+text
+@d1 28
+a28 1
+/* $XFree86: xc/lib/GL/mesa/src/drv/gamma/gamma_xmesa.c,v 1.14 2002/10/30 12:51:30 alanh Exp $ */
+d30 4
+a33 23
+ * Copyright 2001 by Alan Hourihane.
+ *
+ * Permission to use, copy, modify, distribute, and sell this software and its
+ * documentation for any purpose is hereby granted without fee, provided that
+ * the above copyright notice appear in all copies and that both that
+ * copyright notice and this permission notice appear in supporting
+ * documentation, and that the name of Alan Hourihane not be used in
+ * advertising or publicity pertaining to distribution of the software without
+ * specific, written prior permission.  Alan Hourihane makes no representations
+ * about the suitability of this software for any purpose.  It is provided
+ * "as is" without express or implied warranty.
+ *
+ * ALAN HOURIHANE DISCLAIMS ALL WARRANTIES WITH REGARD TO THIS SOFTWARE,
+ * INCLUDING ALL IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS, IN NO
+ * EVENT SHALL ALAN HOURIHANE BE LIABLE FOR ANY SPECIAL, INDIRECT OR
+ * CONSEQUENTIAL DAMAGES OR ANY DAMAGES WHATSOEVER RESULTING FROM LOSS OF USE,
+ * DATA OR PROFITS, WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER
+ * TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR
+ * PERFORMANCE OF THIS SOFTWARE.
+ *
+ * Authors:  Alan Hourihane, <alanh@@tungstengraphics.com>
+ *
+ * 3DLabs Gamma driver
+d36 8
+a43 2
+#include "gamma_context.h"
+#include "gamma_vb.h"
+d46 2
+a47 2
+#include "matrix.h"
+#include "glint_dri.h"
+d49 3
+a51 4
+#include "swrast/swrast.h"
+#include "swrast_setup/swrast_setup.h"
+#include "tnl/tnl.h"
+#include "array_cache/acache.h"
+d53 1
+a53 2
+static GLboolean 
+gammaInitDriver(__DRIscreenPrivate *sPriv)
+d55 15
+a69 1
+    sPriv->private = (void *) gammaCreateScreen( sPriv );
+d71 30
+a100 2
+    if (!sPriv->private) {
+	gammaDestroyScreen( sPriv );
+d107 1
+a107 2
+static void 
+gammaDestroyContext(__DRIcontextPrivate *driContextPriv)
+d109 29
+a137 1
+    gammaContextPtr gmesa = (gammaContextPtr)driContextPriv->driverPrivate;
+a138 5
+    if (gmesa) {
+      _swsetup_DestroyContext( gmesa->glCtx );
+      _tnl_DestroyContext( gmesa->glCtx );
+      _ac_DestroyContext( gmesa->glCtx );
+      _swrast_DestroyContext( gmesa->glCtx );
+d140 9
+a148 1
+      gammaFreeVB( gmesa->glCtx );
+d150 31
+a180 3
+      /* free the Mesa context */
+      gmesa->glCtx->DriverCtx = NULL;
+      _mesa_destroy_context(gmesa->glCtx);
+d182 226
+a407 2
+      Xfree(gmesa);
+      driContextPriv->driverPrivate = NULL;
+d409 35
+d446 1
+a446 7
+
+static GLboolean
+gammaCreateBuffer( Display *dpy,
+                   __DRIscreenPrivate *driScrnPriv,
+                   __DRIdrawablePrivate *driDrawPriv,
+                   const __GLcontextModes *mesaVis,
+                   GLboolean isPixmap )
+d448 5
+a452 13
+   if (isPixmap) {
+      return GL_FALSE; /* not implemented */
+   }
+   else {
+      driDrawPriv->driverPrivate = (void *) 
+         _mesa_create_framebuffer(mesaVis,
+                                  GL_FALSE,  /* software depth buffer? */
+                                  mesaVis->stencilBits > 0,
+                                  mesaVis->accumRedBits > 0,
+                                  mesaVis->alphaBits > 0
+                                  );
+      return (driDrawPriv->driverPrivate != NULL);
+   }
+d456 11
+a466 4
+static void
+gammaDestroyBuffer(__DRIdrawablePrivate *driDrawPriv)
+{
+   _mesa_destroy_framebuffer((GLframebuffer *) (driDrawPriv->driverPrivate));
+d469 5
+a473 2
+static void
+gammaSwapBuffers(Display *dpy, void *drawablePrivate)
+d475 14
+a488 2
+   __DRIdrawablePrivate *dPriv = (__DRIdrawablePrivate *) drawablePrivate;
+   (void) dpy;
+a489 4
+   if (dPriv->driContextPriv && dPriv->driContextPriv->driverPrivate) {
+    gammaContextPtr gmesa;
+    __DRIscreenPrivate *driScrnPriv;
+    GLcontext *ctx;
+d491 8
+a498 3
+    gmesa = (gammaContextPtr) dPriv->driContextPriv->driverPrivate;
+    ctx = gmesa->glCtx;
+    driScrnPriv = gmesa->driScreen;
+d500 1
+a500 1
+    VALIDATE_DRAWABLE_INFO(gmesa);
+d503 1
+a503 5
+    FLUSH_DMA_BUFFER(gmesa);
+
+    DRM_SPINLOCK(&driScrnPriv->pSAREA->drawable_lock,
+		     driScrnPriv->drawLockID);
+    VALIDATE_DRAWABLE_INFO_NO_LOCK(gmesa);
+d505 1
+a505 1
+    if (gmesa->EnabledFlags & GAMMA_BACK_BUFFER) {
+d508 3
+a510 4
+	int nRect = dPriv->numClipRects;
+	XF86DRIClipRectPtr pRect = dPriv->pClipRects;
+	__DRIscreenPrivate *driScrnPriv = gmesa->driScreen;
+   	GLINTDRIPtr gDRIPriv = (GLINTDRIPtr)driScrnPriv->pDevPriv;
+d512 8
+a519 2
+	CHECK_DMA_BUFFER(gmesa, 2);
+	WRITE(gmesa->buf, FBReadMode, (gmesa->FBReadMode |
+d521 1
+a521 1
+	WRITE(gmesa->buf, LBWriteMode, LBWriteModeDisable);
+a526 1
+
+a527 4
+	    if (gDRIPriv->numMultiDevices == 2) 
+	    	src = (y0/2)*driScrnPriv->fbWidth+x0;
+	    else
+	    	src = y0*driScrnPriv->fbWidth+x0;
+d529 1
+d531 12
+a542 15
+	    if (gDRIPriv->numMultiDevices == 2) 
+	    	dst = (y0/2)*driScrnPriv->fbWidth+x0;
+	    else
+	    	dst = y0*driScrnPriv->fbWidth+x0;
+
+	    CHECK_DMA_BUFFER(gmesa, 9);
+	    WRITE(gmesa->buf, StartXDom,       x0<<16);   /* X0dest */
+	    WRITE(gmesa->buf, StartY,          y0<<16);   /* Y0dest */
+	    WRITE(gmesa->buf, StartXSub,       x1<<16);   /* X1dest */
+	    WRITE(gmesa->buf, GLINTCount,      h);        /* H */
+	    WRITE(gmesa->buf, dY,              1<<16);    /* ydir */
+	    WRITE(gmesa->buf, dXDom,           0<<16);
+	    WRITE(gmesa->buf, dXSub,           0<<16);
+	    WRITE(gmesa->buf, FBSourceOffset, (dst-src));
+	    WRITE(gmesa->buf, Render,          0x00040048); /* NOT_DONE */
+d553 4
+a556 5
+	CHECK_DMA_BUFFER(gmesa, 2);
+	WRITE(gmesa->buf, FBReadMode, (gmesa->FBReadMode |
+				       gmesa->AB_FBReadMode));
+	WRITE(gmesa->buf, LBWriteMode, LBWriteModeEnable);
+    }
+d558 2
+a559 2
+    if (gmesa->EnabledFlags & GAMMA_BACK_BUFFER)
+        PROCESS_DMA_BUFFER_TOP_HALF(gmesa);
+d561 1
+a561 1
+    DRM_SPINUNLOCK(&driScrnPriv->pSAREA->drawable_lock,
+d563 1
+a563 1
+    VALIDATE_DRAWABLE_INFO_NO_LOCK_POST(gmesa);
+d565 6
+a570 5
+    if (gmesa->EnabledFlags & GAMMA_BACK_BUFFER)
+        PROCESS_DMA_BUFFER_BOTTOM_HALF(gmesa);
+  } else {
+    _mesa_problem(NULL, "gammaSwapBuffers: drawable has no context!\n");
+  }
+d573 3
+a575 4
+static GLboolean 
+gammaMakeCurrent(__DRIcontextPrivate *driContextPriv,
+		 __DRIdrawablePrivate *driDrawPriv,
+		 __DRIdrawablePrivate *driReadPriv)
+d578 2
+a579 3
+	GET_CURRENT_CONTEXT(ctx);
+	gammaContextPtr oldGammaCtx = ctx ? GAMMA_CONTEXT(ctx) : NULL;
+	gammaContextPtr newGammaCtx = (gammaContextPtr) driContextPriv->driverPrivate;
+d581 2
+a582 9
+	if ( newGammaCtx != oldGammaCtx ) {
+	    newGammaCtx->dirty = ~0;
+	}
+
+	if (newGammaCtx->driDrawable != driDrawPriv) {
+	    newGammaCtx->driDrawable = driDrawPriv;
+	    gammaUpdateWindow ( newGammaCtx->glCtx );
+	    gammaUpdateViewportOffset( newGammaCtx->glCtx );
+	}
+d584 2
+a585 6
+#if 0
+	newGammaCtx->Window &= ~W_GIDMask;
+	newGammaCtx->Window |= (driDrawPriv->index << 5);
+	CHECK_DMA_BUFFER(newGammaCtx,1);
+	WRITE(newGammaCtx->buf, GLINTWindow, newGammaCtx->Window);
+#endif
+d587 1
+a587 1
+newGammaCtx->new_state |= GAMMA_NEW_WINDOW; /* FIXME */
+d589 1
+a589 8
+	_mesa_make_current2( newGammaCtx->glCtx, 
+			  (GLframebuffer *) driDrawPriv->driverPrivate,
+			  (GLframebuffer *) driReadPriv->driverPrivate );
+
+	if (!newGammaCtx->glCtx->Viewport.Width) {
+	    _mesa_set_viewport(newGammaCtx->glCtx, 0, 0, 
+					driDrawPriv->w, driDrawPriv->h);
+	}
+d591 2
+a592 1
+	_mesa_make_current( 0, 0 );
+d598 1
+a598 2
+static GLboolean 
+gammaUnbindContext( __DRIcontextPrivate *driContextPriv )
+d600 1
+d604 2
+a605 2
+static GLboolean
+gammaOpenFullScreen(__DRIcontextPrivate *driContextPriv)
+d610 2
+a611 2
+static GLboolean
+gammaCloseFullScreen(__DRIcontextPrivate *driContextPriv)
+a616 29
+static struct __DriverAPIRec gammaAPI = {
+   gammaInitDriver,
+   gammaDestroyScreen,
+   gammaCreateContext,
+   gammaDestroyContext,
+   gammaCreateBuffer,
+   gammaDestroyBuffer,
+   gammaSwapBuffers,
+   gammaMakeCurrent,
+   gammaUnbindContext,
+   gammaOpenFullScreen,
+   gammaCloseFullScreen
+};
+
+
+
+/*
+ * This is the bootstrap function for the driver.
+ * The __driCreateScreen name is the symbol that libGL.so fetches.
+ * Return:  pointer to a __DRIscreenPrivate.
+ */
+void *__driCreateScreen(Display *dpy, int scrn, __DRIscreen *psc,
+                        int numConfigs, __GLXvisualConfig *config)
+{
+   __DRIscreenPrivate *psp;
+   psp = __driUtilCreateScreen(dpy, scrn, psc, numConfigs, config, &gammaAPI);
+   return (void *) psp;
+}
+
+d623 1
+@
+
+
+1.1.1.3
+log
+@That's what OpenBSD will, probably, ship as XF4 in 3.5
+their last sync against XFree86 4.3-current has been
+imported into our vendor branch, too
+@
+text
+@d1 1
+a1 1
+/* $XFree86: xc/lib/GL/mesa/src/drv/gamma/gamma_xmesa.c,v 1.15 2003/09/28 20:15:10 alanh Exp $ */
+d31 1
+d77 2
+a78 1
+gammaCreateBuffer( __DRIscreenPrivate *driScrnPriv,
+d106 1
+a106 1
+gammaSwapBuffers( __DRIdrawablePrivate *dPriv )
+d108 3
+a119 2
+    _mesa_notifySwapBuffers(ctx);
+
+d290 7
+@
+
+

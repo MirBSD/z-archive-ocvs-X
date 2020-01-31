@@ -1,0 +1,548 @@
+head	1.3;
+access;
+symbols;
+locks; strict;
+comment	@# @;
+
+
+1.3
+date	2005.02.14.21.34.08;	author tg;	state Exp;
+branches;
+next	1.2;
+
+1.2
+date	2004.02.21.10.57.09;	author tg;	state Stab;
+branches;
+next	1.1;
+
+1.1
+date	2003.10.21.17.23.10;	author tg;	state Exp;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.3
+log
+@up to 0.96
+please test
+@
+text
+@$MirBSD: patch-stage2_boot_c,v 1.1 2003/10/21 17:23:10 tg Exp $
+--- stage2/boot.c.orig	Tue Mar 30 11:43:46 2004
++++ stage2/boot.c	Mon Feb 14 21:14:14 2005
+@@@@ -95,10 +95,13 @@@@ load_image (char *kernel, char *arg, ker
+      or bzImage.  */
+   lh = (struct linux_kernel_header *) buffer;
+   
+-  /* ELF loading supported if multiboot, FreeBSD and NetBSD.  */
++  /* ELF loading supported if multiboot, FreeBSD, OpenBSD and NetBSD.  */
+   if ((type == KERNEL_TYPE_MULTIBOOT
+        || pu.elf->e_ident[EI_OSABI] == ELFOSABI_FREEBSD
++       || pu.elf->e_ident[EI_OSABI] == ELFOSABI_OPENBSD
+        || grub_strcmp (pu.elf->e_ident + EI_BRAND, "FreeBSD") == 0
++       || suggested_type == 0
++       || suggested_type == KERNEL_TYPE_OPENBSD
+        || suggested_type == KERNEL_TYPE_NETBSD)
+       && len > sizeof (Elf32_Ehdr)
+       && BOOTABLE_I386_ELF ((*((Elf32_Ehdr *) buffer))))
+@@@@ -128,13 +131,19 @@@@ load_image (char *kernel, char *arg, ker
+ 	      str2 = "NetBSD";
+ 	      type = suggested_type;
+ 	    }
+-	  else
++	  else if (suggested_type == KERNEL_TYPE_FREEBSD ||
++              pu.elf->e_ident[EI_OSABI] == ELFOSABI_FREEBSD)
+ 	    {
+ 	      str2 = "FreeBSD";
+ 	      type = KERNEL_TYPE_FREEBSD;
+ 	    }
++	  else
++	    {
++	      str2 = "OpenBSD/ekkoBSD/MirBSD";
++	      type = KERNEL_TYPE_OPENBSD;
+ 	}
+     }
++    }
+   else if (flags & MULTIBOOT_AOUT_KLUDGE)
+     {
+       pu.mb = (struct multiboot_header *) (buffer + i);
+@@@@ -196,11 +205,11 @@@@ load_image (char *kernel, char *arg, ker
+ 	    }
+ 	  else
+ 	    {
+-	      type = KERNEL_TYPE_NETBSD;
++	      type = KERNEL_TYPE_OPENBSD;
+ 	      cur_addr = (int) entry_addr & 0xF00000;
+ 	      if (N_GETMAGIC ((*(pu.aout))) != NMAGIC)
+ 		align_4k = 0;
+-	      str2 = "NetBSD";
++	      str2 = "OpenBSD/ekkoBSD/MirBSD";
+ 	    }
+ 	}
+ 
+@@@@ -607,7 +616,8 @@@@ load_image (char *kernel, char *arg, ker
+ 	      grub_seek (phdr->p_offset);
+ 	      filesiz = phdr->p_filesz;
+ 	      
+-	      if (type == KERNEL_TYPE_FREEBSD || type == KERNEL_TYPE_NETBSD)
++	      if (type == KERNEL_TYPE_FREEBSD || type == KERNEL_TYPE_NETBSD
++              || type == KERNEL_TYPE_OPENBSD)
+ 		memaddr = RAW_ADDR (phdr->p_paddr & 0xFFFFFF);
+ 	      else
+ 		memaddr = RAW_ADDR (phdr->p_paddr);
+@@@@ -1018,3 +1028,10 @@@@ bsd_boot (kernel_t type, int bootdev, ch
+ 		     extended_memory, mbi.mem_lower);
+     }
+ }
++
++#ifdef GRUB_UTIL
++void openbsd_boot (kernel_t type, int bootdev, char *arg)
++ { bsd_boot(type, bootdev, arg);}
++#else
++#include "openbsd.c"
++#endif
+@
+
+
+1.2
+log
+@have GNU GRUB recognize 0x27 partition type and
+add MirBSD types
+
+pt out by bsiegert@@ - live code from www.fosdem.org
+@
+text
+@d2 3
+a4 13
+--- stage2/boot.c.orig	2002-11-30 17:28:54.000000000 +0000
++++ stage2/boot.c	2004-02-21 10:52:14.000000000 +0000
+@@@@ -67,7 +67,7 @@@@ load_image (char *kernel, char *arg, ker
+   if (!(len = grub_read (buffer, MULTIBOOT_SEARCH)) || len < 32)
+     {
+       grub_close ();
+-      
++
+       if (!errnum)
+ 	errnum = ERR_EXEC_FORMAT;
+ 
+@@@@ -94,11 +94,14 @@@@ load_image (char *kernel, char *arg, ker
+   /* Use BUFFER as a linux kernel header, if the image is Linux zImage
+d7 1
+a7 1
+-  
+a8 1
++
+d19 1
+a19 1
+@@@@ -128,11 +131,17 @@@@ load_image (char *kernel, char *arg, ker
+a33 1
++	    }
+d36 1
+d38 2
+a39 26
+@@@@ -146,14 +155,14 @@@@ load_image (char *kernel, char *arg, ker
+       /* If the load end address is zero, load the whole contents.  */
+       if (! pu.mb->load_end_addr)
+ 	pu.mb->load_end_addr = cur_addr + filemax;
+-      
++
+       text_len = pu.mb->load_end_addr - cur_addr;
+       data_len = 0;
+ 
+       /* If the bss end address is zero, assume that there is no bss area.  */
+       if (! pu.mb->bss_end_addr)
+ 	pu.mb->bss_end_addr = pu.mb->load_end_addr;
+-      
++
+       bss_len = pu.mb->bss_end_addr - pu.mb->load_end_addr;
+ 
+       if (pu.mb->header_addr < pu.mb->load_addr
+@@@@ -187,7 +196,7 @@@@ load_image (char *kernel, char *arg, ker
+ 	   *  method to use.
+ 	   */
+ 	  entry_addr = (entry_func) ((int) entry_addr & 0xFFFFFF);
+-	  
++
+ 	  if (buffer[0] == 0xb && buffer[1] == 1)
+ 	    {
+ 	      type = KERNEL_TYPE_FREEBSD;
+d54 1
+a54 191
+@@@@ -254,12 +263,12 @@@@ load_image (char *kernel, char *arg, ker
+ 	  /* Your kernel is quite old...  */
+ 	  lh->cl_magic = LINUX_CL_MAGIC;
+ 	  lh->cl_offset = LINUX_CL_OFFSET;
+-	  
++
+ 	  setup_sects = LINUX_DEFAULT_SETUP_SECTS;
+ 
+ 	  linux_data_real_addr = (char *) LINUX_OLD_REAL_MODE_ADDR;
+ 	}
+-      
++
+       /* If SETUP_SECTS is not set, set it to the default (4).  */
+       if (! setup_sects)
+ 	setup_sects = LINUX_DEFAULT_SETUP_SECTS;
+@@@@ -268,7 +277,7 @@@@ load_image (char *kernel, char *arg, ker
+       text_len = filemax - data_len - SECTOR_SIZE;
+ 
+       linux_data_tmp_addr = (char *) LINUX_BZIMAGE_ADDR + text_len;
+-      
++
+       if (! big_linux
+ 	  && text_len > linux_data_real_addr - (char *) LINUX_ZIMAGE_ADDR)
+ 	{
+@@@@ -290,14 +299,14 @@@@ load_image (char *kernel, char *arg, ker
+ 	     any more. -okuji  */
+ 	  {
+ 	    char *vga;
+-	
++
+ 	    /* Find the substring "vga=".  */
+ 	    vga = grub_strstr (arg, "vga=");
+ 	    if (vga)
+ 	      {
+ 		char *value = vga + 4;
+ 		int vid_mode;
+-	    
++
+ 		/* Handle special strings.  */
+ 		if (substring ("normal", value) < 1)
+ 		  vid_mode = LINUX_VID_MODE_NORMAL;
+@@@@ -314,7 +323,7 @@@@ load_image (char *kernel, char *arg, ker
+ 		    grub_close ();
+ 		    return KERNEL_TYPE_NONE;
+ 		  }
+-	    
++
+ 		lh->vid_mode = vid_mode;
+ 	      }
+ 	  }
+@@@@ -322,12 +331,12 @@@@ load_image (char *kernel, char *arg, ker
+ 	  /* Check the mem= option to limit memory used for initrd.  */
+ 	  {
+ 	    char *mem;
+-	
++
+ 	    mem = grub_strstr (arg, "mem=");
+ 	    if (mem)
+ 	      {
+ 		char *value = mem + 4;
+-	    
++
+ 		safe_parse_maxint (&value, &linux_mem_size);
+ 		switch (errnum)
+ 		  {
+@@@@ -338,11 +347,11 @@@@ load_image (char *kernel, char *arg, ker
+ 		    linux_mem_size = LINUX_INITRD_MAX_ADDRESS;
+ 		    errnum = ERR_NONE;
+ 		    break;
+-		
++
+ 		  case ERR_NONE:
+ 		    {
+ 		      int shift = 0;
+-		  
++
+ 		      switch (grub_tolower (*value))
+ 			{
+ 			case 'g':
+@@@@ -354,7 +363,7 @@@@ load_image (char *kernel, char *arg, ker
+ 			default:
+ 			  break;
+ 			}
+-		  
++
+ 		      /* Check an overflow.  */
+ 		      if (linux_mem_size > (MAXINT >> shift))
+ 			linux_mem_size = LINUX_INITRD_MAX_ADDRESS;
+@@@@ -362,7 +371,7 @@@@ load_image (char *kernel, char *arg, ker
+ 			linux_mem_size <<= shift;
+ 		    }
+ 		    break;
+-		
++
+ 		  default:
+ 		    linux_mem_size = 0;
+ 		    errnum = ERR_NONE;
+@@@@ -372,7 +381,7 @@@@ load_image (char *kernel, char *arg, ker
+ 	    else
+ 	      linux_mem_size = 0;
+ 	  }
+-      
++
+ 	  /* It is possible that DATA_LEN is greater than MULTIBOOT_SEARCH,
+ 	     so the data may have been read partially.  */
+ 	  if (data_len <= MULTIBOOT_SEARCH)
+@@@@ -384,14 +393,14 @@@@ load_image (char *kernel, char *arg, ker
+ 	      grub_read (linux_data_tmp_addr + MULTIBOOT_SEARCH,
+ 			 data_len + SECTOR_SIZE - MULTIBOOT_SEARCH);
+ 	    }
+-	  
++
+ 	  if (lh->header != LINUX_MAGIC_SIGNATURE ||
+ 	      lh->version < 0x0200)
+ 	    /* Clear the heap space.  */
+ 	    grub_memset (linux_data_tmp_addr + ((setup_sects + 1) << 9),
+ 			 0,
+ 			 (64 - setup_sects - 1) << 9);
+-      
++
+ 	  /* Copy command-line plus memory hack to staging area.
+ 	     NOTE: Linux has a bug that it doesn't handle multiple spaces
+ 	     between two options and a space after a "mem=" option isn't
+@@@@ -403,10 +412,10 @@@@ load_image (char *kernel, char *arg, ker
+ 	  {
+ 	    char *src = skip_to (0, arg);
+ 	    char *dest = linux_data_tmp_addr + LINUX_CL_OFFSET;
+-	
++
+ 	    while (dest < linux_data_tmp_addr + LINUX_CL_END_OFFSET && *src)
+ 	      *(dest++) = *(src++);
+-	
++
+ 	    /* Add a mem option automatically only if the user doesn't
+ 	       specify it explicitly.  */
+ 	    if (! grub_strstr (arg, "mem=")
+@@@@ -418,24 +427,24 @@@@ load_image (char *kernel, char *arg, ker
+ 		*dest++ = 'e';
+ 		*dest++ = 'm';
+ 		*dest++ = '=';
+-	    
++
+ 		dest = convert_to_ascii (dest, 'u', (extended_memory + 0x400));
+ 		*dest++ = 'K';
+ 	      }
+-	
++
+ 	    *dest = 0;
+ 	  }
+-      
++
+ 	  /* offset into file */
+ 	  grub_seek (data_len + SECTOR_SIZE);
+-      
++
+ 	  cur_addr = (int) linux_data_tmp_addr + LINUX_SETUP_MOVE_SIZE;
+ 	  grub_read ((char *) LINUX_BZIMAGE_ADDR, text_len);
+-      
++
+ 	  if (errnum == ERR_NONE)
+ 	    {
+ 	      grub_close ();
+-	  
++
+ 	      /* Sanity check.  */
+ 	      if (suggested_type != KERNEL_TYPE_NONE
+ 		  && ((big_linux && suggested_type != KERNEL_TYPE_BIG_LINUX)
+@@@@ -444,10 +453,10 @@@@ load_image (char *kernel, char *arg, ker
+ 		  errnum = ERR_EXEC_FORMAT;
+ 		  return KERNEL_TYPE_NONE;
+ 		}
+-	  
++
+ 	      /* Ugly hack.  */
+ 	      linux_text_len = text_len;
+-	  
++
+ 	      return big_linux ? KERNEL_TYPE_BIG_LINUX : KERNEL_TYPE_LINUX;
+ 	    }
+ 	}
+@@@@ -530,7 +539,7 @@@@ load_image (char *kernel, char *arg, ker
+ 
+ 	  *((int *) RAW_ADDR (cur_addr)) = pu.aout->a_syms;
+ 	  cur_addr += sizeof (int);
+-	  
++
+ 	  printf (", symtab=0x%x", pu.aout->a_syms);
+ 
+ 	  if (grub_read ((char *) RAW_ADDR (cur_addr), pu.aout->a_syms)
+@@@@ -592,12 +601,13 @@@@ load_image (char *kernel, char *arg, ker
+ 	      /* offset into file */
+d57 1
+a57 1
+-	      
+a58 1
++
+d64 1
+a64 151
+-	      
++
+ 	      memsiz = phdr->p_memsz;
+ 	      if (memaddr < RAW_ADDR (0x100000))
+ 		errnum = ERR_BELOW_1MB;
+@@@@ -609,7 +619,7 @@@@ load_image (char *kernel, char *arg, ker
+ 		  && (unsigned) entry_addr < phdr->p_vaddr + memsiz)
+ 		real_entry_addr = (entry_func) ((unsigned) entry_addr
+ 						+ memaddr - phdr->p_vaddr);
+-		
++
+ 	      /* make sure we only load what we're supposed to! */
+ 	      if (filesiz > memsiz)
+ 		filesiz = memsiz;
+@@@@ -647,13 +657,13 @@@@ load_image (char *kernel, char *arg, ker
+ 	      mbi.syms.e.num = pu.elf->e_shnum;
+ 	      mbi.syms.e.size = pu.elf->e_shentsize;
+ 	      mbi.syms.e.shndx = pu.elf->e_shstrndx;
+-	      
++
+ 	      /* We should align to a 4K boundary here for good measure.  */
+ 	      if (align_4k)
+ 		cur_addr = (cur_addr + 0xFFF) & 0xFFFFF000;
+-	      
++
+ 	      tab_size = pu.elf->e_shentsize * pu.elf->e_shnum;
+-	      
++
+ 	      grub_seek (pu.elf->e_shoff);
+ 	      if (grub_read ((char *) RAW_ADDR (cur_addr), tab_size)
+ 		  == tab_size)
+@@@@ -661,26 +671,26 @@@@ load_image (char *kernel, char *arg, ker
+ 		  mbi.syms.e.addr = cur_addr;
+ 		  shdr = (Elf32_Shdr *) mbi.syms.e.addr;
+ 		  cur_addr += tab_size;
+-		  
++
+ 		  printf (", shtab=0x%x", cur_addr);
+-  		  
++
+ 		  for (i = 0; i < mbi.syms.e.num; i++)
+ 		    {
+ 		      /* This section is a loaded section,
+ 			 so we don't care.  */
+ 		      if (shdr[i].sh_addr != 0)
+ 			continue;
+-		      
++
+ 		      /* This section is empty, so we don't care.  */
+ 		      if (shdr[i].sh_size == 0)
+ 			continue;
+-		      
++
+ 		      /* Align the section to a sh_addralign bits boundary.  */
+-		      cur_addr = ((cur_addr + shdr[i].sh_addralign) & 
++		      cur_addr = ((cur_addr + shdr[i].sh_addralign) &
+ 				  - (int) shdr[i].sh_addralign);
+-		      
++
+ 		      grub_seek (shdr[i].sh_offset);
+-		      
++
+ 		      sec_size = shdr[i].sh_size;
+ 
+ 		      if (! (memcheck (cur_addr, sec_size)
+@@@@ -691,18 +701,18 @@@@ load_image (char *kernel, char *arg, ker
+ 			  symtab_err = 1;
+ 			  break;
+ 			}
+-		      
++
+ 		      shdr[i].sh_addr = cur_addr;
+ 		      cur_addr += sec_size;
+ 		    }
+ 		}
+-	      else 
++	      else
+ 		symtab_err = 1;
+-	      
++
+ 	      if (mbi.syms.e.addr < RAW_ADDR(0x10000))
+ 		symtab_err = 1;
+-	      
+-	      if (symtab_err) 
++
++	      if (symtab_err)
+ 		{
+ 		  printf ("(bad)");
+ 		  mbi.syms.e.num = 0;
+@@@@ -720,7 +730,7 @@@@ load_image (char *kernel, char *arg, ker
+   if (! errnum)
+     {
+       grub_printf (", entry=0x%x]\n", (unsigned) entry_addr);
+-      
++
+       /* If the entry address is physically different from that of the ELF
+ 	 header, correct it here.  */
+       if (real_entry_addr)
+@@@@ -740,7 +750,7 @@@@ load_image (char *kernel, char *arg, ker
+       errnum = ERR_EXEC_FORMAT;
+       return KERNEL_TYPE_NONE;
+     }
+-  
++
+   return type;
+ }
+ 
+@@@@ -788,11 +798,11 @@@@ load_initrd (char *initrd)
+   unsigned long moveto;
+   struct linux_kernel_header *lh
+     = (struct linux_kernel_header *) (cur_addr - LINUX_SETUP_MOVE_SIZE);
+-  
++
+ #ifndef NO_DECOMPRESSION
+   no_decompression = 1;
+ #endif
+-  
++
+   if (! grub_open (initrd))
+     goto fail;
+ 
+@@@@ -807,11 +817,11 @@@@ load_initrd (char *initrd)
+     moveto = linux_mem_size;
+   else
+     moveto = (mbi.mem_upper + 0x400) << 10;
+-  
++
+   moveto = (moveto - len) & 0xfffff000;
+   if (moveto + len >= LINUX_INITRD_MAX_ADDRESS)
+     moveto = (LINUX_INITRD_MAX_ADDRESS - len) & 0xfffff000;
+-  
++
+   /* XXX: Linux 2.3.xx has a bug in the memory range check, so avoid
+      the last page.
+      XXX: Linux 2.2.xx has a bug in the memory range check, which is
+@@@@ -828,7 +838,7 @@@@ load_initrd (char *initrd)
+   grub_close ();
+ 
+  fail:
+-  
++
+ #ifndef NO_DECOMPRESSION
+   no_decompression = 0;
+ #endif
+@@@@ -996,8 +1006,15 @@@@ bsd_boot (kernel_t type, int bootdev, ch
+       else
+ 	/* FIXME: it should be mbi.syms.e.size.  */
+ 	end_mark = 0;
+-      
++
+       (*entry_addr) (clval, bootdev, 0, end_mark,
+@
+
+
+1.1
+log
+@GNU GRUB, that boot loader, with an additional hacked support
+for netbooting MirBSD kernels
+
+Comes as floppy, PXE and NBI (Etherboot) image, with GNU Texinfo docs
+@
+text
+@d1 1
+a1 1
+$MirBSD$
+d3 1
+a3 1
++++ stage2/boot.c	2003-10-21 17:09:59.000000000 +0000
+d43 1
+a43 1
++	      str2 = "OpenBSD";
+d85 1
+a85 1
++	      str2 = "OpenBSD";
+@
+

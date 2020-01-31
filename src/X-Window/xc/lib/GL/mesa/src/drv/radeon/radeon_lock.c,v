@@ -1,0 +1,453 @@
+head	1.1;
+branch	1.1.1;
+access;
+symbols
+	tg-mergetmp-2:1.1.1.3
+	cvs-200410241530:1.1.1.3
+	cvs-200410012000:1.1.1.3
+	cvs-200407141120:1.1.1.3
+	cvs-200406231010:1.1.1.3
+	MIRBSD_7quater:1.1.1.2
+	cvs-200405271510:1.1.1.3
+	XFree86_4_4_0:1.1.9.1
+	cvs-200403021700:1.1.1.3
+	XFREE86_20040213:1.1.9.1
+	xc:1.1.9
+	cvs-200401291925:1.1.1.2
+	MIRBSD_7_ALPHA:1.1.1.2.0.4
+	MIRBSD_7:1.1.1.2.0.2
+	MIRBSD_7ter:1.1.1.2
+	cvs-20011091815:1.1.1.2
+	cvs-200309162130:1.1.1.2
+	cvs-200308302005:1.1.1.2
+	ctmx-0387:1.1.1.2
+	ctmx-0384:1.1.1.2
+	MIRBSD_5:1.1.1.2
+	ctmx-0375:1.1.1.2
+	ctmx-0373:1.1.1.2
+	ctm-0371:1.1.1.2
+	ctm-0370:1.1.1.2
+	MIRBSD_4:1.1.1.2
+	ctm-0363:1.1.1.2
+	ctm-0359:1.1.1.2
+	ctm-0349:1.1.1.1
+	openbsd:1.1.1;
+locks; strict;
+comment	@ * @;
+
+
+1.1
+date	2003.03.22.20.04.19;	author tg;	state Exp;
+branches
+	1.1.1.1
+	1.1.9.1;
+next	;
+
+1.1.1.1
+date	2003.03.22.20.04.19;	author tg;	state Exp;
+branches;
+next	1.1.1.2;
+
+1.1.1.2
+date	2003.04.08.18.31.33;	author tg;	state Exp;
+branches;
+next	1.1.1.3;
+
+1.1.1.3
+date	2004.03.02.17.59.14;	author tg;	state Stab;
+branches;
+next	;
+
+1.1.9.1
+date	2004.02.14.19.18.07;	author tg;	state Exp;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@/* $XFree86: xc/lib/GL/mesa/src/drv/radeon/radeon_lock.c,v 1.3 2001/04/10 16:07:53 dawes Exp $ */
+/**************************************************************************
+
+Copyright 2000, 2001 ATI Technologies Inc., Ontario, Canada, and
+                     VA Linux Systems Inc., Fremont, California.
+
+All Rights Reserved.
+
+Permission is hereby granted, free of charge, to any person obtaining a
+copy of this software and associated documentation files (the "Software"),
+to deal in the Software without restriction, including without limitation
+on the rights to use, copy, modify, merge, publish, distribute, sub
+license, and/or sell copies of the Software, and to permit persons to whom
+the Software is furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice (including the next
+paragraph) shall be included in all copies or substantial portions of the
+Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NON-INFRINGEMENT. IN NO EVENT SHALL
+ATI, VA LINUX SYSTEMS AND/OR THEIR SUPPLIERS BE LIABLE FOR ANY CLAIM,
+DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR
+OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE
+USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+**************************************************************************/
+
+/*
+ * Authors:
+ *   Kevin E. Martin <martin@@valinux.com>
+ *   Gareth Hughes <gareth@@valinux.com>
+ *
+ */
+
+#include "radeon_context.h"
+#include "radeon_lock.h"
+#include "radeon_tex.h"
+
+#if DEBUG_LOCKING
+char *prevLockFile = NULL;
+int prevLockLine = 0;
+#endif
+
+
+/* Update the hardware state.  This is called if another context has
+ * grabbed the hardware lock, which includes the X server.  This
+ * function also updates the driver's window state after the X server
+ * moves, resizes or restacks a window -- the change will be reflected
+ * in the drawable position and clip rects.  Since the X server grabs
+ * the hardware lock when it changes the window state, this routine will
+ * automatically be called after such a change.
+ */
+void radeonGetLock( radeonContextPtr rmesa, GLuint flags )
+{
+   __DRIdrawablePrivate *dPriv = rmesa->driDrawable;
+   __DRIscreenPrivate *sPriv = rmesa->driScreen;
+   RADEONSAREAPrivPtr sarea = rmesa->sarea;
+   int i;
+
+   drmGetLock( rmesa->driFd, rmesa->hHWContext, flags );
+
+   /* The window might have moved, so we might need to get new clip
+    * rects.
+    *
+    * NOTE: This releases and regrabs the hw lock to allow the X server
+    * to respond to the DRI protocol request for new drawable info.
+    * Since the hardware state depends on having the latest drawable
+    * clip rects, all state checking must be done _after_ this call.
+    */
+   XMESA_VALIDATE_DRAWABLE_INFO( rmesa->display, sPriv, dPriv );
+
+   if ( rmesa->lastStamp != *(dPriv->pStamp) ) {
+      rmesa->lastStamp = *(dPriv->pStamp);
+      rmesa->new_state |= RADEON_NEW_WINDOW | RADEON_NEW_CLIP;
+      rmesa->SetupDone = 0;
+   }
+
+   rmesa->dirty |= RADEON_UPLOAD_CONTEXT | RADEON_UPLOAD_CLIPRECTS;
+
+   rmesa->numClipRects = dPriv->numClipRects;
+   rmesa->pClipRects = dPriv->pClipRects;
+
+   if ( sarea->ctxOwner != rmesa->hHWContext ) {
+      sarea->ctxOwner = rmesa->hHWContext;
+      rmesa->dirty = RADEON_UPLOAD_ALL;
+   }
+
+   for ( i = 0 ; i < rmesa->lastTexHeap ; i++ ) {
+      if ( sarea->texAge[i] != rmesa->lastTexAge[i] ) {
+	 radeonAgeTextures( rmesa, i );
+      }
+   }
+}
+@
+
+
+1.1.9.1
+log
+@OpenBSD just has imported exactly this tree into their vendor branch,
+called the same tag, in XF4/xc
+This is, apparently, the last XFree86 snapshot before the licence change
+(ie, addition of the advertising clause)
+
+Since the developers don't see any problems with that, and we would like
+to integrate improvements done by the remaining one or two (or so) XFree86
+developers (j/k), this prepares enabling us to update X-Window in the future.
+@
+text
+@d1 1
+a1 1
+/* $XFree86: xc/lib/GL/mesa/src/drv/radeon/radeon_lock.c,v 1.7 2003/12/02 13:02:39 alanh Exp $ */
+d9 18
+a26 19
+Permission is hereby granted, free of charge, to any person obtaining
+a copy of this software and associated documentation files (the
+"Software"), to deal in the Software without restriction, including
+without limitation the rights to use, copy, modify, merge, publish,
+distribute, sublicense, and/or sell copies of the Software, and to
+permit persons to whom the Software is furnished to do so, subject to
+the following conditions:
+
+The above copyright notice and this permission notice (including the
+next paragraph) shall be included in all copies or substantial
+portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
+IN NO EVENT SHALL THE COPYRIGHT OWNER(S) AND/OR ITS SUPPLIERS BE
+LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
+OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
+WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+d34 1
+a36 1
+#include "glheader.h"
+a39 2
+#include "radeon_state.h"
+#include "radeon_ioctl.h"
+a45 33
+/* Turn on/off page flipping according to the flags in the sarea:
+ */
+static void
+radeonUpdatePageFlipping( radeonContextPtr rmesa )
+{
+   int use_back;
+
+
+   rmesa->doPageFlip = rmesa->sarea->pfAllowPageFlip;
+
+   use_back = (rmesa->glCtx->Color._DrawDestMask == BACK_LEFT_BIT);
+   use_back ^= (rmesa->sarea->pfCurrentPage == 1);
+
+   if ( RADEON_DEBUG & DEBUG_VERBOSE )
+      fprintf(stderr, "%s allow %d current %d\n", __FUNCTION__, 
+	      rmesa->doPageFlip,
+	      rmesa->sarea->pfCurrentPage );
+
+   if ( use_back ) {
+	 rmesa->state.color.drawOffset = rmesa->radeonScreen->backOffset;
+	 rmesa->state.color.drawPitch  = rmesa->radeonScreen->backPitch;
+   } else {
+	 rmesa->state.color.drawOffset = rmesa->radeonScreen->frontOffset;
+	 rmesa->state.color.drawPitch  = rmesa->radeonScreen->frontPitch;
+   }
+
+   RADEON_STATECHANGE( rmesa, ctx );
+   rmesa->hw.ctx.cmd[CTX_RB3D_COLOROFFSET] = rmesa->state.color.drawOffset
+					   + rmesa->radeonScreen->fbLocation;
+   rmesa->hw.ctx.cmd[CTX_RB3D_COLORPITCH]  = rmesa->state.color.drawPitch;
+}
+
+
+d57 2
+a58 2
+   __DRIdrawablePrivate *dPriv = rmesa->dri.drawable;
+   __DRIscreenPrivate *sPriv = rmesa->dri.screen;
+d60 1
+d62 1
+a62 1
+   drmGetLock( rmesa->dri.fd, rmesa->dri.hwContext, flags );
+d72 1
+a72 1
+   DRI_VALIDATE_DRAWABLE_INFO( sPriv, dPriv );
+d74 4
+a77 8
+   if ( rmesa->lastStamp != dPriv->lastStamp ) {
+      radeonUpdatePageFlipping( rmesa );
+      if (rmesa->glCtx->Color._DrawDestMask == BACK_LEFT_BIT)
+         radeonSetCliprects( rmesa, GL_BACK_LEFT );
+      else
+         radeonSetCliprects( rmesa, GL_FRONT_LEFT );
+      radeonUpdateViewportOffset( rmesa->glCtx );
+      rmesa->lastStamp = dPriv->lastStamp;
+d80 9
+a88 3
+   if ( sarea->ctxOwner != rmesa->dri.hwContext ) {
+      int i;
+      sarea->ctxOwner = rmesa->dri.hwContext;
+d90 3
+a92 2
+      for ( i = 0 ; i < rmesa->nr_heaps ; i++ ) {
+	 DRI_AGE_TEXTURES( rmesa->texture_heaps[ i ] );
+@
+
+
+1.1.1.1
+log
+@Import OpenBSD 3.3 XF4 repository from CTM 3132 the first time
+This finalizes starting an OpenBSD-mirabile (aka MirBSD) repository.
+
+### MirBSD is:
+# Copyright (c) 1982-2003 by Thorsten "mirabile" Glaser <x86@@ePost.de>
+# Copyright © 1968-2003  The authors of And contributors to UNIX®, the
+#       C Language, BSD/Berkeley Unix; 386BSD, NetBSD 1.1 and OpenBSD.
+#
+# Anyone who obtained a copy of this work is hereby permitted to freely use,
+# distribute, modify, merge, sublicence, give away or sell it as long as the
+# authors are given due credit and the following notice is retained:
+#
+# This work is provided "as is", with no explicit or implicit warranty what-
+# soever. Use it only at your own risk. In no event may an author or contri-
+# butor be held liable for any damage, directly or indirectly, that origina-
+# ted through or is caused by creation or modification of this work.
+
+MirBSD is my private tree. MirBSD does not differ very much from OpenBSD
+and intentionally tracks OpenBSD. That's why it _is_ OpenBSD, just not the
+official one. It's like with DarrenBSD.
+
+At time of this writing, no advertising for MirBSD must be done,
+because the advertising clause has not yet been sorted out.
+
+http://templeofhate.com/tglaser/MirBSD/index.php
+@
+text
+@@
+
+
+1.1.1.2
+log
+@The X-Windowing System
+
+Import XFree86 4.3 from OpenBSD by CTM, in the hope it's stable
+@
+text
+@d1 1
+a1 1
+/* $XFree86: xc/lib/GL/mesa/src/drv/radeon/radeon_lock.c,v 1.5 2002/10/30 12:51:55 alanh Exp $ */
+a39 2
+#include "radeon_state.h"
+#include "radeon_ioctl.h"
+a45 34
+/* Turn on/off page flipping according to the flags in the sarea:
+ */
+static void
+radeonUpdatePageFlipping( radeonContextPtr rmesa )
+{
+   int use_back;
+
+   if (rmesa->dri.drmMinor < 3)
+      return;
+
+   rmesa->doPageFlip = rmesa->sarea->pfAllowPageFlip;
+
+   use_back = (rmesa->glCtx->Color.DriverDrawBuffer == GL_BACK_LEFT);
+   use_back ^= (rmesa->sarea->pfCurrentPage == 1);
+
+   if ( RADEON_DEBUG & DEBUG_VERBOSE )
+      fprintf(stderr, "%s allow %d current %d\n", __FUNCTION__, 
+	      rmesa->doPageFlip,
+	      rmesa->sarea->pfCurrentPage );
+
+   if ( use_back ) {
+	 rmesa->state.color.drawOffset = rmesa->radeonScreen->backOffset;
+	 rmesa->state.color.drawPitch  = rmesa->radeonScreen->backPitch;
+   } else {
+	 rmesa->state.color.drawOffset = rmesa->radeonScreen->frontOffset;
+	 rmesa->state.color.drawPitch  = rmesa->radeonScreen->frontPitch;
+   }
+
+   RADEON_STATECHANGE( rmesa, ctx );
+   rmesa->hw.ctx.cmd[CTX_RB3D_COLOROFFSET] = rmesa->state.color.drawOffset;
+   rmesa->hw.ctx.cmd[CTX_RB3D_COLORPITCH]  = rmesa->state.color.drawPitch;
+}
+
+
+d57 2
+a58 2
+   __DRIdrawablePrivate *dPriv = rmesa->dri.drawable;
+   __DRIscreenPrivate *sPriv = rmesa->dri.screen;
+d62 1
+a62 1
+   drmGetLock( rmesa->dri.fd, rmesa->dri.hwContext, flags );
+d72 1
+a72 1
+   DRI_VALIDATE_DRAWABLE_INFO( rmesa->dri.display, sPriv, dPriv );
+d74 4
+a77 5
+   if ( rmesa->lastStamp != dPriv->lastStamp ) {
+      radeonUpdatePageFlipping( rmesa );
+      radeonSetCliprects( rmesa, rmesa->glCtx->Color.DriverDrawBuffer );
+      radeonUpdateViewportOffset( rmesa->glCtx );
+      rmesa->lastStamp = dPriv->lastStamp;
+d80 9
+a88 2
+   if ( sarea->ctxOwner != rmesa->dri.hwContext ) {
+      sarea->ctxOwner = rmesa->dri.hwContext;
+d90 3
+a92 4
+      for ( i = 0 ; i < rmesa->texture.numHeaps ; i++ ) {
+	 if ( rmesa->texture.heap[i] && sarea->texAge[i] != rmesa->texture.age[i] ) {
+	    radeonAgeTextures( rmesa, i );
+	 }
+@
+
+
+1.1.1.3
+log
+@That's what OpenBSD will, probably, ship as XF4 in 3.5
+their last sync against XFree86 4.3-current has been
+imported into our vendor branch, too
+@
+text
+@d1 1
+a1 1
+/* $XFree86: xc/lib/GL/mesa/src/drv/radeon/radeon_lock.c,v 1.7 2003/12/02 13:02:39 alanh Exp $ */
+d9 18
+a26 19
+Permission is hereby granted, free of charge, to any person obtaining
+a copy of this software and associated documentation files (the
+"Software"), to deal in the Software without restriction, including
+without limitation the rights to use, copy, modify, merge, publish,
+distribute, sublicense, and/or sell copies of the Software, and to
+permit persons to whom the Software is furnished to do so, subject to
+the following conditions:
+
+The above copyright notice and this permission notice (including the
+next paragraph) shall be included in all copies or substantial
+portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
+IN NO EVENT SHALL THE COPYRIGHT OWNER(S) AND/OR ITS SUPPLIERS BE
+LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
+OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
+WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+d34 1
+a36 1
+#include "glheader.h"
+d55 2
+d60 1
+a60 1
+   use_back = (rmesa->glCtx->Color._DrawDestMask == BACK_LEFT_BIT);
+d77 1
+a77 2
+   rmesa->hw.ctx.cmd[CTX_RB3D_COLOROFFSET] = rmesa->state.color.drawOffset
+					   + rmesa->radeonScreen->fbLocation;
+d96 1
+d108 1
+a108 1
+   DRI_VALIDATE_DRAWABLE_INFO( sPriv, dPriv );
+d112 1
+a112 4
+      if (rmesa->glCtx->Color._DrawDestMask == BACK_LEFT_BIT)
+         radeonSetCliprects( rmesa, GL_BACK_LEFT );
+      else
+         radeonSetCliprects( rmesa, GL_FRONT_LEFT );
+a117 1
+      int i;
+d120 4
+a123 2
+      for ( i = 0 ; i < rmesa->nr_heaps ; i++ ) {
+	 DRI_AGE_TEXTURES( rmesa->texture_heaps[ i ] );
+@
+
+

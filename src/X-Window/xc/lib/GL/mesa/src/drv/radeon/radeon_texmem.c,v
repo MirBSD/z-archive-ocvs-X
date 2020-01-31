@@ -1,0 +1,1609 @@
+head	1.1;
+branch	1.1.1;
+access;
+symbols
+	tg-mergetmp-2:1.1.1.3
+	cvs-200410241530:1.1.1.3
+	cvs-200410012000:1.1.1.3
+	cvs-200407141120:1.1.1.3
+	cvs-200406231010:1.1.1.3
+	MIRBSD_7quater:1.1.1.2
+	cvs-200405271510:1.1.1.3
+	XFree86_4_4_0:1.1.9.1
+	cvs-200403021700:1.1.1.3
+	XFREE86_20040213:1.1.9.1
+	xc:1.1.9
+	cvs-200401291925:1.1.1.2
+	MIRBSD_7_ALPHA:1.1.1.2.0.4
+	MIRBSD_7:1.1.1.2.0.2
+	MIRBSD_7ter:1.1.1.2
+	cvs-20011091815:1.1.1.2
+	cvs-200309162130:1.1.1.2
+	cvs-200308302005:1.1.1.2
+	ctmx-0387:1.1.1.2
+	ctmx-0384:1.1.1.2
+	MIRBSD_5:1.1.1.2
+	ctmx-0375:1.1.1.2
+	ctmx-0373:1.1.1.2
+	ctm-0371:1.1.1.2
+	ctm-0370:1.1.1.2
+	MIRBSD_4:1.1.1.2
+	ctm-0363:1.1.1.2
+	ctm-0359:1.1.1.2
+	ctm-0349:1.1.1.1
+	openbsd:1.1.1;
+locks; strict;
+comment	@ * @;
+
+
+1.1
+date	2003.03.22.20.04.20;	author tg;	state Exp;
+branches
+	1.1.1.1
+	1.1.9.1;
+next	;
+
+1.1.1.1
+date	2003.03.22.20.04.20;	author tg;	state Exp;
+branches;
+next	1.1.1.2;
+
+1.1.1.2
+date	2003.04.08.18.31.36;	author tg;	state Exp;
+branches;
+next	1.1.1.3;
+
+1.1.1.3
+date	2004.03.02.17.59.24;	author tg;	state Stab;
+branches;
+next	;
+
+1.1.9.1
+date	2004.02.14.19.18.10;	author tg;	state Exp;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@/* $XFree86: xc/lib/GL/mesa/src/drv/radeon/radeon_texmem.c,v 1.2 2001/04/10 16:07:53 dawes Exp $ */
+/**************************************************************************
+
+Copyright 2000, 2001 ATI Technologies Inc., Ontario, Canada, and
+                     VA Linux Systems Inc., Fremont, California.
+
+All Rights Reserved.
+
+Permission is hereby granted, free of charge, to any person obtaining a
+copy of this software and associated documentation files (the "Software"),
+to deal in the Software without restriction, including without limitation
+on the rights to use, copy, modify, merge, publish, distribute, sub
+license, and/or sell copies of the Software, and to permit persons to whom
+the Software is furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice (including the next
+paragraph) shall be included in all copies or substantial portions of the
+Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NON-INFRINGEMENT. IN NO EVENT SHALL
+ATI, VA LINUX SYSTEMS AND/OR THEIR SUPPLIERS BE LIABLE FOR ANY CLAIM,
+DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR
+OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE
+USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+**************************************************************************/
+
+/*
+ * Authors:
+ *   Kevin E. Martin <martin@@valinux.com>
+ *   Gareth Hughes <gareth@@valinux.com>
+ *
+ */
+
+#include "radeon_context.h"
+#include "radeon_state.h"
+#include "radeon_ioctl.h"
+#include "radeon_vb.h"
+#include "radeon_tex.h"
+
+#include "mmath.h"
+#include "simple_list.h"
+#include "enums.h"
+#include "mem.h"
+
+
+/* Destroy hardware state associated with texture `t'.
+ */
+void radeonDestroyTexObj( radeonContextPtr rmesa, radeonTexObjPtr t )
+{
+   GLint i;
+#if ENABLE_PERF_BOXES
+   /* Bump the performace counter */
+   rmesa->c_textureSwaps++;
+#endif
+   if ( !t ) return;
+
+   if ( RADEON_DEBUG & DEBUG_VERBOSE_TEXTURE ) {
+      fprintf( stderr, "%s( %p, %p )\n", __FUNCTION__, t, t->tObj );
+   }
+
+   for ( i = 0 ; i < RADEON_MAX_TEXTURE_LEVELS ; i++ ) {
+      if ( t->image[i].data ) FREE( t->image[i].data );
+   }
+
+   if ( t->memBlock ) {
+      mmFreeMem( t->memBlock );
+      t->memBlock = NULL;
+   }
+
+   if ( t->tObj )
+      t->tObj->DriverData = NULL;
+
+   if ( t->bound & TEX_0 ) rmesa->CurrentTexObj[0] = NULL;
+   if ( t->bound & TEX_1 ) rmesa->CurrentTexObj[1] = NULL;
+
+   remove_from_list( t );
+   FREE( t );
+}
+
+/* Keep track of swapped out texture objects.
+ */
+void radeonSwapOutTexObj( radeonContextPtr rmesa, radeonTexObjPtr t )
+{
+   if ( RADEON_DEBUG & DEBUG_VERBOSE_TEXTURE ) {
+      fprintf( stderr, "%s( %p, %p )\n", __FUNCTION__, t, t->tObj );
+   }
+#if ENABLE_PERF_BOXES
+   /* Bump the performace counter */
+   rmesa->c_textureSwaps++;
+#endif
+   if ( t->memBlock ) {
+      mmFreeMem( t->memBlock );
+      t->memBlock = NULL;
+   }
+
+   t->dirty_images = ~0;
+   move_to_tail( &rmesa->SwappedOut, t );
+}
+
+/* Print out debugging information about texture LRU.
+ */
+void radeonPrintLocalLRU( radeonContextPtr rmesa, int heap )
+{
+   radeonTexObjPtr t;
+   int sz = 1 << (rmesa->radeonScreen->logTexGranularity[heap]);
+
+   fprintf( stderr, "\nLocal LRU, heap %d:\n", heap );
+
+   foreach ( t, &rmesa->TexObjList[heap] ) {
+      if (!t->tObj) {
+	 fprintf( stderr, "Placeholder %d at 0x%x sz 0x%x\n",
+		  t->memBlock->ofs / sz,
+		  t->memBlock->ofs,
+		  t->memBlock->size );
+      } else {
+	 fprintf( stderr, "Texture (bound %d) at 0x%x sz 0x%x\n",
+		  t->bound,
+		  t->memBlock->ofs,
+		  t->memBlock->size );
+      }
+   }
+
+   fprintf( stderr, "\n" );
+}
+
+void radeonPrintGlobalLRU( radeonContextPtr rmesa, int heap )
+{
+   radeon_tex_region_t *list = rmesa->sarea->texList[heap];
+   int i, j;
+
+   fprintf( stderr, "\nGlobal LRU, heap %d list %p:\n", heap, list );
+
+   for ( i = 0, j = RADEON_NR_TEX_REGIONS ; i < RADEON_NR_TEX_REGIONS ; i++ ) {
+      fprintf( stderr, "list[%d] age %d next %d prev %d\n",
+	       j, list[j].age, list[j].next, list[j].prev );
+      j = list[j].next;
+      if ( j == RADEON_NR_TEX_REGIONS ) break;
+   }
+
+   if ( j != RADEON_NR_TEX_REGIONS ) {
+      fprintf( stderr, "Loop detected in global LRU\n" );
+      for ( i = 0 ; i < RADEON_NR_TEX_REGIONS ; i++ ) {
+	 fprintf( stderr, "list[%d] age %d next %d prev %d\n",
+		  i, list[i].age, list[i].next, list[i].prev );
+      }
+   }
+
+   fprintf( stderr, "\n" );
+}
+
+/* Reset the global texture LRU.
+ */
+static void radeonResetGlobalLRU( radeonContextPtr rmesa, int heap )
+{
+   radeon_tex_region_t *list = rmesa->sarea->texList[heap];
+   int sz = 1 << rmesa->radeonScreen->logTexGranularity[heap];
+   int i;
+
+   /*
+    * (Re)initialize the global circular LRU list.  The last element in
+    * the array (RADEON_NR_TEX_REGIONS) is the sentinal.  Keeping it at
+    * the end of the array allows it to be addressed rationally when
+    * looking up objects at a particular location in texture memory.
+    */
+   for ( i = 0 ; (i+1) * sz <= rmesa->radeonScreen->texSize[heap] ; i++ ) {
+      list[i].prev = i-1;
+      list[i].next = i+1;
+      list[i].age = 0;
+   }
+
+   i--;
+   list[0].prev = RADEON_NR_TEX_REGIONS;
+   list[i].prev = i-1;
+   list[i].next = RADEON_NR_TEX_REGIONS;
+   list[RADEON_NR_TEX_REGIONS].prev = i;
+   list[RADEON_NR_TEX_REGIONS].next = 0;
+   rmesa->sarea->texAge[heap] = 0;
+}
+
+/* Update the local and glock texture LRUs.
+ */
+void radeonUpdateTexLRU( radeonContextPtr rmesa, radeonTexObjPtr t )
+{
+   int heap = t->heap;
+   radeon_tex_region_t *list = rmesa->sarea->texList[heap];
+   int sz = rmesa->radeonScreen->logTexGranularity[heap];
+   int start = t->memBlock->ofs >> sz;
+   int end = (t->memBlock->ofs + t->memBlock->size-1) >> sz;
+   int i;
+
+   rmesa->lastTexAge[heap] = ++rmesa->sarea->texAge[heap];
+
+   if ( !t->memBlock ) {
+      fprintf( stderr, "no memblock\n\n" );
+      return;
+   }
+
+   /* Update our local LRU */
+   move_to_head( &rmesa->TexObjList[heap], t );
+
+   /* Update the global LRU */
+   for ( i = start ; i <= end ; i++ ) {
+      list[i].in_use = 1;
+      list[i].age = rmesa->lastTexAge[heap];
+
+      /* remove_from_list(i) */
+      list[(CARD32)list[i].next].prev = list[i].prev;
+      list[(CARD32)list[i].prev].next = list[i].next;
+
+      /* insert_at_head(list, i) */
+      list[i].prev = RADEON_NR_TEX_REGIONS;
+      list[i].next = list[RADEON_NR_TEX_REGIONS].next;
+      list[(CARD32)list[RADEON_NR_TEX_REGIONS].next].prev = i;
+      list[RADEON_NR_TEX_REGIONS].next = i;
+   }
+
+   if ( 0 ) {
+      radeonPrintGlobalLRU( rmesa, t->heap );
+      radeonPrintLocalLRU( rmesa, t->heap );
+   }
+}
+
+/* Update our notion of what textures have been changed since we last
+ * held the lock.  This pertains to both our local textures and the
+ * textures belonging to other clients.  Keep track of other client's
+ * textures by pushing a placeholder texture onto the LRU list -- these
+ * are denoted by (tObj == NULL).
+ */
+static void radeonTexturesGone( radeonContextPtr rmesa, int heap,
+				int offset, int size, int in_use )
+{
+   radeonTexObjPtr t, tmp;
+
+   foreach_s ( t, tmp, &rmesa->TexObjList[heap] ) {
+      if ( t->memBlock->ofs >= offset + size ||
+	   t->memBlock->ofs + t->memBlock->size <= offset )
+	 continue;
+
+      /* It overlaps - kick it out.  Need to hold onto the currently
+       * bound objects, however.
+       */
+      radeonSwapOutTexObj( rmesa, t );
+   }
+
+   if ( in_use ) {
+      t = (radeonTexObjPtr) CALLOC( sizeof(*t) );
+      if ( !t ) return;
+
+      t->memBlock = mmAllocMem( rmesa->texHeap[heap], size, 0, offset );
+      if ( !t->memBlock ) {
+	 fprintf( stderr, "Couldn't alloc placeholder sz %x ofs %x\n",
+		  (int)size, (int)offset );
+	 mmDumpMemInfo( rmesa->texHeap[heap] );
+	 return;
+      }
+      insert_at_head( &rmesa->TexObjList[heap], t );
+   }
+}
+
+/* Update our client's shared texture state.  If another client has
+ * modified a region in which we have textures, then we need to figure
+ * out which of our textures has been removed, and update our global
+ * LRU.
+ */
+void radeonAgeTextures( radeonContextPtr rmesa, int heap )
+{
+   RADEONSAREAPrivPtr sarea = rmesa->sarea;
+
+   if ( sarea->texAge[heap] != rmesa->lastTexAge[heap] ) {
+      int sz = 1 << rmesa->radeonScreen->logTexGranularity[heap];
+      int nr = 0;
+      int idx;
+
+      for ( idx = sarea->texList[heap][RADEON_NR_TEX_REGIONS].prev ;
+	    idx != RADEON_NR_TEX_REGIONS && nr < RADEON_NR_TEX_REGIONS ;
+	    idx = sarea->texList[heap][idx].prev, nr++ )
+      {
+	 /* If switching texturing schemes, then the SAREA might not
+	  * have been properly cleared, so we need to reset the
+	  * global texture LRU.
+	  */
+	 if ( idx * sz > rmesa->radeonScreen->texSize[heap] ) {
+	    nr = RADEON_NR_TEX_REGIONS;
+	    break;
+	 }
+
+	 if ( sarea->texList[heap][idx].age > rmesa->lastTexAge[heap] ) {
+	    radeonTexturesGone( rmesa, heap, idx * sz, sz,
+				sarea->texList[heap][idx].in_use );
+	 }
+      }
+
+      if ( nr == RADEON_NR_TEX_REGIONS ) {
+	 radeonTexturesGone( rmesa, heap, 0,
+			     rmesa->radeonScreen->texSize[heap], 0 );
+	 radeonResetGlobalLRU( rmesa, heap );
+      }
+
+      rmesa->dirty |= (RADEON_UPLOAD_CONTEXT |
+		       RADEON_UPLOAD_TEX0IMAGES |
+		       RADEON_UPLOAD_TEX1IMAGES);
+      rmesa->lastTexAge[heap] = sarea->texAge[heap];
+   }
+}
+
+
+/* ================================================================
+ * Texture image uploads
+ */
+
+/* Upload the texture image associated with texture `t' at level `level'
+ * at the address relative to `start'.
+ */
+static void radeonUploadSubImage( radeonContextPtr rmesa,
+				  radeonTexObjPtr t, GLint level,
+				  GLint x, GLint y, GLint width, GLint height )
+{
+   struct gl_texture_image *texImage;
+   const struct gl_texture_format *texFormat;
+   GLint texelsPerDword = 0;
+   GLint imageX, imageY, imageWidth, imageHeight;
+   GLint blitX, blitY, blitWidth, blitHeight;
+   GLuint format, pitch, offset;
+   GLint ret;
+
+   if ( RADEON_DEBUG & DEBUG_VERBOSE_TEXTURE ) {
+      fprintf( stderr, "%s( %p, %p )\n", __FUNCTION__, t, t->tObj );
+   }
+
+   /* Ensure we have a valid texture to upload */
+   texImage = t->tObj->Image[level];
+   if ( !texImage ) {
+      if ( RADEON_DEBUG & DEBUG_VERBOSE_TEXTURE )
+	 fprintf( stderr, __FUNCTION__ ": texImage %d is NULL!\n", level );
+      return;
+   }
+   if ( !t->image[level].data ) {
+      if ( RADEON_DEBUG & DEBUG_VERBOSE_TEXTURE )
+	 fprintf( stderr, __FUNCTION__ ": image data is NULL!\n" );
+      return;
+   }
+
+   texFormat = texImage->TexFormat;
+
+   switch ( texFormat->TexelBytes ) {
+   case 1:
+      texelsPerDword = 4;
+      break;
+   case 2:
+      texelsPerDword = 2;
+      break;
+   case 4:
+      texelsPerDword = 1;
+      break;
+   }
+
+   format = t->pp_txformat & RADEON_TXFORMAT_FORMAT_MASK;
+
+   imageX = 0;
+   imageY = 0;
+   imageWidth = texImage->Width;
+   imageHeight = texImage->Height;
+
+   blitX = t->image[level].x;
+   blitY = t->image[level].y;
+   blitWidth = t->image[level].width;
+   blitHeight = t->image[level].height;
+
+   offset = t->bufAddr;
+   pitch = (t->image[0].width * texFormat->TexelBytes) / 64;
+
+   if ( RADEON_DEBUG & DEBUG_VERBOSE_MSG ) {
+      fprintf( stderr, "   upload image: %d,%d at %d,%d\n",
+	       imageWidth, imageHeight, imageX, imageY );
+      fprintf( stderr, "   upload  blit: %d,%d at %d,%d\n",
+	       blitWidth, blitHeight, blitX, blitY );
+      fprintf( stderr, "       blit ofs: 0x%07x pitch: 0x%x "
+	       "level: %d format: %x\n",
+	       (GLuint)offset, (GLuint)pitch, level, format );
+   }
+
+   ret = drmRadeonLoadTexture( rmesa->driFd, offset, pitch, format,
+			       imageWidth, imageHeight, &t->image[level] );
+
+   if ( ret ) {
+      UNLOCK_HARDWARE( rmesa );
+      fprintf( stderr, "drmRadeonTextureBlit: return = %d\n", ret );
+      fprintf( stderr, "   offset=0x%08x pitch=0x%x format=%d\n",
+	       offset, pitch, format );
+      fprintf( stderr, "   image width=%d height=%d\n",
+	       imageWidth, imageHeight );
+      fprintf( stderr, "    blit width=%d height=%d data=%p\n",
+	       t->image[level].width, t->image[level].height,
+	       t->image[level].data );
+      exit( 1 );
+   }
+
+   rmesa->new_state |= RADEON_NEW_CONTEXT;
+   rmesa->dirty |= RADEON_UPLOAD_CONTEXT | RADEON_UPLOAD_MASKS;
+}
+
+/* Upload the texture images associated with texture `t'.  This might
+ * require removing our own and/or other client's texture objects to
+ * make room for these images.
+ */
+int radeonUploadTexImages( radeonContextPtr rmesa, radeonTexObjPtr t )
+{
+   int i;
+   int heap;
+
+   if ( RADEON_DEBUG & DEBUG_VERBOSE_TEXTURE ) {
+      fprintf( stderr, "%s( %p, %p ) sz=%d\n",
+	       __FUNCTION__, rmesa->glCtx, t->tObj, t->totalSize );
+   }
+
+   if ( !t || t->totalSize == 0 )
+      return 0;
+
+   /* Choose the heap appropriately */
+   heap = t->heap = RADEON_CARD_HEAP;
+#if 0
+   if ( !rmesa->radeonScreen->IsPCI &&
+	t->totalSize > rmesa->radeonScreen->texSize[heap] ) {
+      heap = t->heap = RADEON_AGP_HEAP;
+   }
+#endif
+
+   /* Do we need to eject LRU texture objects? */
+   if ( !t->memBlock ) {
+      /* Allocate a memory block on a 4k boundary (1<<12 == 4096) */
+      t->memBlock = mmAllocMem( rmesa->texHeap[heap],
+				t->totalSize, 12, 0 );
+
+#if 0
+      /* Try AGP before kicking anything out of local mem */
+      if ( !t->memBlock && heap == RADEON_CARD_HEAP ) {
+	 t->memBlock = mmAllocMem( rmesa->texHeap[RADEON_AGP_HEAP],
+				   t->totalSize, 12, 0 );
+
+	 if ( t->memBlock )
+	    heap = t->heap = RADEON_AGP_HEAP;
+      }
+#endif
+
+      /* Kick out textures until the requested texture fits */
+      while ( !t->memBlock ) {
+	 if ( rmesa->TexObjList[heap].prev->bound ) {
+	    fprintf( stderr,
+		     "radeonUploadTexImages: ran into bound texture\n" );
+	    return -1;
+	 }
+	 if ( rmesa->TexObjList[heap].prev == &rmesa->TexObjList[heap] ) {
+	    if ( rmesa->radeonScreen->IsPCI ) {
+	       fprintf( stderr, "radeonUploadTexImages: upload texture "
+			"failure on local texture heaps, sz=%d\n",
+			t->totalSize );
+	       return -1;
+#if 0
+	    } else if ( heap == RADEON_CARD_HEAP ) {
+	       heap = t->heap = RADEON_AGP_HEAP;
+	       continue;
+#endif
+	    } else {
+	       fprintf( stderr, "radeonUploadTexImages: upload texture "
+			"failure on both local and AGP texture heaps, "
+			"sz=%d\n",
+			t->totalSize );
+	       return -1;
+	    }
+	 }
+
+	 radeonSwapOutTexObj( rmesa, rmesa->TexObjList[heap].prev );
+
+	 t->memBlock = mmAllocMem( rmesa->texHeap[heap],
+				   t->totalSize, 12, 0 );
+      }
+
+      /* Set the base offset of the texture image */
+      t->bufAddr = rmesa->radeonScreen->texOffset[heap] + t->memBlock->ofs;
+
+      t->pp_txoffset = t->bufAddr;
+#if 0
+      /* Fix AGP texture offsets */
+      if ( heap == RADEON_AGP_HEAP ) {
+	  t->setup.pp_tx_offset += RADEON_AGP_TEX_OFFSET +
+	      rmesa->radeonScreen->agpTexOffset;
+      }
+#endif
+
+      /* Force loading the new state into the hardware */
+      if ( t->bound & TEX_0 ) {
+	 rmesa->dirty |= RADEON_UPLOAD_CONTEXT | RADEON_UPLOAD_TEX0;
+      }
+      if ( t->bound & TEX_1 ) {
+	 rmesa->dirty |= RADEON_UPLOAD_CONTEXT | RADEON_UPLOAD_TEX1;
+      }
+   }
+
+   /* Let the world know we've used this memory recently */
+   radeonUpdateTexLRU( rmesa, t );
+
+   /* Upload any images that are new */
+   if ( t->dirty_images ) {
+      int levels = ((t->pp_txfilter & RADEON_MAX_MIP_LEVEL_MASK) >>
+		    RADEON_MAX_MIP_LEVEL_SHIFT);
+
+      for ( i = 0 ; i <= levels ; i++ ) {
+	 if ( (t->dirty_images & (1 << i)) && t->image[i].data ) {
+	    radeonUploadSubImage( rmesa, t, i, 0, 0,
+				  t->image[i].width, t->image[i].height );
+	 }
+      }
+
+      rmesa->dirty |= RADEON_UPLOAD_CONTEXT;
+   }
+
+   t->dirty_images = 0;
+   return 0;
+}
+@
+
+
+1.1.9.1
+log
+@OpenBSD just has imported exactly this tree into their vendor branch,
+called the same tag, in XF4/xc
+This is, apparently, the last XFree86 snapshot before the licence change
+(ie, addition of the advertising clause)
+
+Since the developers don't see any problems with that, and we would like
+to integrate improvements done by the remaining one or two (or so) XFree86
+developers (j/k), this prepares enabling us to update X-Window in the future.
+@
+text
+@d1 1
+a1 1
+/* $XFree86: xc/lib/GL/mesa/src/drv/radeon/radeon_texmem.c,v 1.9 2004/01/23 03:57:06 dawes Exp $ */
+d9 18
+a26 20
+Permission is hereby granted, free of charge, to any person obtaining
+a copy of this software and associated documentation files (the
+"Software"), to deal in the Software without restriction, including
+without limitation on the rights to use, copy, modify, merge, publish,
+distribute, sub license, and/or sell copies of the Software, and to
+permit persons to whom the Software is furnished to do so, subject to
+the following conditions:
+
+The above copyright notice and this permission notice (including the
+next paragraph) shall be included in all copies or substantial
+portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
+NON-INFRINGEMENT. IN NO EVENT SHALL ATI, VA LINUX SYSTEMS AND/OR THEIR
+SUPPLIERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
+IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
+IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+a36 6
+#include "glheader.h"
+#include "imports.h"
+#include "context.h"
+#include "macros.h"
+#include "simple_list.h"
+
+d38 1
+d40 1
+d43 32
+d76 8
+a83 3
+/**
+ * Destroy any device-dependent state associated with the texture.  This may
+ * include NULLing out hardware state that points to the texture.
+d85 1
+a85 2
+void
+radeonDestroyTexObj( radeonContextPtr rmesa, radeonTexObjPtr t )
+d87 10
+a96 2
+   if ( RADEON_DEBUG & DEBUG_TEXTURE ) {
+      fprintf( stderr, "%s( %p, %p )\n", __FUNCTION__, (void *)t, (void *)t->base.tObj );
+d99 10
+a108 2
+   if ( rmesa != NULL ) {
+      unsigned   i;
+d110 1
+d112 11
+a122 6
+      for ( i = 0 ; i < rmesa->glCtx->Const.MaxTextureUnits ; i++ ) {
+	 if ( t == rmesa->state.texture.unit[i].texobj ) {
+	    rmesa->state.texture.unit[i].texobj = NULL;
+	    remove_from_list( &rmesa->hw.tex[i] );
+	    make_empty_list( &rmesa->hw.tex[i] );
+	 }
+d125 2
+d129 4
+d134 21
+a154 2
+/* ------------------------------------------------------------
+ * Texture image conversions
+d156 17
+d174 8
+d183 3
+a185 5
+static void radeonUploadRectSubImage( radeonContextPtr rmesa,
+				      radeonTexObjPtr t, 
+				      struct gl_texture_image *texImage,
+				      GLint x, GLint y, 
+				      GLint width, GLint height )
+d187 8
+a194 2
+   const struct gl_texture_format *texFormat = texImage->TexFormat;
+   int blit_format, dstPitch, done;
+d196 2
+a197 13
+   switch ( texFormat->TexelBytes ) {
+   case 1:
+      blit_format = RADEON_GMC_DST_8BPP_CI;
+      break;
+   case 2:
+      blit_format = RADEON_GMC_DST_16BPP;
+      break;
+   case 4:
+      blit_format = RADEON_GMC_DST_32BPP;
+      break;
+   default:
+      fprintf( stderr, "radeonUploadRectSubImage: unknown blit_format (texelbytes=%d)\n", 
+      	       texFormat->TexelBytes);
+d201 2
+a202 1
+   t->image[0][0].data = texImage->Data;
+d204 37
+a240 5
+   /* Currently don't need to cope with small pitches.
+    */
+   width = texImage->Width;
+   height = texImage->Height;
+   dstPitch = t->pp_txpitch + 32;
+d242 2
+a243 2
+   {	/* FIXME: prefer GART-texturing if possible */
+      /* Data not in GART memory, or bad pitch.
+d245 2
+a246 5
+      for (done = 0; done < height ; ) {
+	 struct radeon_dma_region region;
+	 int lines = MIN2( height - done, RADEON_BUFFER_SIZE / dstPitch );
+	 int src_pitch;
+	 char *tex;
+d248 14
+a261 1
+         src_pitch = texImage->RowStride * texFormat->TexelBytes;
+d263 8
+a270 1
+	 tex = (char *)texImage->Data + done * src_pitch;
+d272 12
+a283 4
+	 memset(&region, 0, sizeof(region));
+	 radeonAllocDmaRegion( rmesa, &region, lines * dstPitch, 1024 );
+
+	 /* Copy texdata to dma:
+d285 3
+a287 15
+	 if (0)
+	    fprintf(stderr, "%s: src_pitch %d dst_pitch %d\n",
+		    __FUNCTION__, src_pitch, dstPitch);
+
+	 if (src_pitch == dstPitch) {
+	    memcpy( region.address, tex, lines * src_pitch );
+	 } 
+	 else {
+	    char *buf = region.address;
+	    int i;
+	    for (i = 0 ; i < lines ; i++) {
+	       memcpy( buf, tex, src_pitch );
+	       buf += dstPitch;
+	       tex += src_pitch;
+	    }
+d290 5
+a294 1
+	 radeonEmitWait( rmesa, RADEON_WAIT_3D );
+d296 5
+a300 1
+	 
+d302 4
+a305 15
+	 /* Blit to framebuffer
+	  */
+	 radeonEmitBlit( rmesa, 
+		       blit_format, 
+ 		       dstPitch, GET_START( &region ),    
+ 		       dstPitch, t->bufAddr, 
+		       0, 0, 
+		       0, done, 
+		       width, lines );
+	 
+	 radeonEmitWait( rmesa, RADEON_WAIT_2D );
+
+	 radeonReleaseDmaRegion( rmesa, &region, __FUNCTION__ );
+	 done += lines;
+      }
+d310 10
+a319 8
+/**
+ * Upload the texture image associated with texture \a t at the specified
+ * level at the address relative to \a start.
+ */
+static void uploadSubImage( radeonContextPtr rmesa, radeonTexObjPtr t, 
+			    GLint hwlevel,
+			    GLint x, GLint y, GLint width, GLint height,
+			    GLuint face )
+d321 6
+a326 3
+   struct gl_texture_image *texImage = NULL;
+   GLuint offset;
+   GLint imageWidth, imageHeight;
+a327 3
+   drmRadeonTexture tex;
+   drmRadeonTexImage tmp;
+   const int level = hwlevel + t->base.firstLevel;
+d329 2
+a330 3
+   if ( RADEON_DEBUG & DEBUG_TEXTURE ) {
+      fprintf( stderr, "%s( %p, %p ) level/width/height/face = %d/%d/%d/%u\n", 
+	       __FUNCTION__, (void *)t, (void *)t->base.tObj, level, width, height, face );
+a332 2
+   ASSERT(face < 6);
+
+d334 9
+a342 2
+   if ( ( hwlevel < 0 ) || ( hwlevel >= RADEON_MAX_TEXTURE_LEVELS ) ) {
+      _mesa_problem(NULL, "bad texture level in %s", __FUNCTION__);
+d346 3
+a348 4
+   switch (face) {
+   case 0:
+      texImage = t->base.tObj->Image[level];
+      break;
+d350 1
+a350 1
+      texImage = t->base.tObj->NegX[level];
+d353 1
+a353 4
+      texImage = t->base.tObj->PosY[level];
+      break;
+   case 3:
+      texImage = t->base.tObj->NegY[level];
+d356 1
+a356 1
+      texImage = t->base.tObj->PosZ[level];
+a357 14
+   case 5:
+      texImage = t->base.tObj->NegZ[level];
+      break;
+   }
+
+   if ( !texImage ) {
+      if ( RADEON_DEBUG & DEBUG_TEXTURE )
+	 fprintf( stderr, "%s: texImage %d is NULL!\n", __FUNCTION__, level );
+      return;
+   }
+   if ( !texImage->Data ) {
+      if ( RADEON_DEBUG & DEBUG_TEXTURE )
+	 fprintf( stderr, "%s: image data is NULL!\n", __FUNCTION__ );
+      return;
+d360 1
+d362 2
+a363 9
+   if (t->base.tObj->Target == GL_TEXTURE_RECTANGLE_NV) {
+      assert(level == 0);
+      assert(hwlevel == 0);
+      if ( RADEON_DEBUG & DEBUG_TEXTURE )
+	 fprintf( stderr, "%s: image data is rectangular\n", __FUNCTION__);
+      radeonUploadRectSubImage( rmesa, t, texImage, x, y, width, height );
+      return;
+   }
+
+d367 5
+d373 1
+d375 1
+a375 7
+   if ( RADEON_DEBUG & (DEBUG_TEXTURE|DEBUG_IOCTL) ) {
+      GLint imageX = 0;
+      GLint imageY = 0;
+      GLint blitX = t->image[face][hwlevel].x;
+      GLint blitY = t->image[face][hwlevel].y;
+      GLint blitWidth = t->image[face][hwlevel].width;
+      GLint blitHeight = t->image[face][hwlevel].height;
+d380 3
+a382 2
+      fprintf( stderr, "       blit ofs: 0x%07x level: %d/%d\n",
+	       (GLuint)offset, hwlevel, level );
+d385 2
+a386 33
+   t->image[face][hwlevel].data = texImage->Data;
+
+   /* Init the DRM_RADEON_TEXTURE command / drmRadeonTexture struct.
+    * NOTE: we're always use a 1KB-wide blit and I8 texture format.
+    * We used to use 1, 2 and 4-byte texels and used to use the texture
+    * width to dictate the blit width - but that won't work for compressed
+    * textures. (Brian)
+    */
+   tex.offset = offset;
+   tex.pitch = BLIT_WIDTH_BYTES / 64;
+   tex.format = RADEON_TXFORMAT_I8; /* any 1-byte texel format */
+   if (texImage->TexFormat->TexelBytes) {
+      tex.width = imageWidth * texImage->TexFormat->TexelBytes; /* in bytes */
+      tex.height = imageHeight;
+   }
+   else {
+      tex.width = imageWidth; /* compressed */
+      tex.height = imageHeight;
+      if (tex.height < 4)
+         tex.height = 4;
+   }
+   tex.image = &tmp;
+
+   /* copy (x,y,width,height,data) */
+   memcpy( &tmp, &t->image[face][hwlevel], sizeof(drmRadeonTexImage) );
+
+   LOCK_HARDWARE( rmesa );
+   do {
+      ret = drmCommandWriteRead( rmesa->dri.fd, DRM_RADEON_TEXTURE,
+                                 &tex, sizeof(drmRadeonTexture) );
+   } while ( ret && errno == EAGAIN );
+
+   UNLOCK_HARDWARE( rmesa );
+d389 4
+a392 3
+      fprintf( stderr, "DRM_RADEON_TEXTURE: return = %d\n", ret );
+      fprintf( stderr, "   offset=0x%08x\n",
+	       offset );
+d396 2
+a397 2
+	       t->image[face][hwlevel].width, t->image[face][hwlevel].height,
+	       t->image[face][hwlevel].data );
+d400 3
+d405 3
+a407 8
+
+/**
+ * Upload the texture images associated with texture \a t.  This might
+ * require the allocation of texture memory.
+ * 
+ * \param rmesa Context pointer
+ * \param t Texture to be uploaded
+ * \param face Cube map face to be uploaded.  Zero for non-cube maps.
+d409 1
+a409 2
+
+int radeonUploadTexImages( radeonContextPtr rmesa, radeonTexObjPtr t, GLuint face )
+d411 2
+a412 1
+   const int numLevels = t->base.lastLevel - t->base.firstLevel + 1;
+d414 3
+a416 4
+   if ( RADEON_DEBUG & (DEBUG_TEXTURE|DEBUG_IOCTL) ) {
+      fprintf( stderr, "%s( %p, %p ) sz=%d lvls=%d-%d\n", __FUNCTION__,
+	       (void *)rmesa->glCtx, (void *)t->base.tObj, t->base.totalSize,
+	       t->base.firstLevel, t->base.lastLevel );
+d419 1
+a419 1
+   if ( !t || t->base.totalSize == 0 )
+d422 20
+a441 1
+   LOCK_HARDWARE( rmesa );
+d443 4
+a446 2
+   if ( t->base.memBlock == NULL ) {
+      int heap;
+d448 31
+a478 5
+      heap = driAllocateTexture( rmesa->texture_heaps, rmesa->nr_heaps,
+				 (driTextureObject *) t );
+      if ( heap == -1 ) {
+	 UNLOCK_HARDWARE( rmesa );
+	 return -1;
+d482 2
+a483 2
+      t->bufAddr = rmesa->radeonScreen->texOffset[heap] 
+	   + t->base.memBlock->ofs;
+d485 7
+d493 7
+a499 4
+
+      /* Mark this texobj as dirty on all units:
+       */
+      t->dirty_state = TEX_ALL;
+d502 2
+a503 6
+
+   /* Let the world know we've used this memory recently.
+    */
+   driUpdateTextureLRU( (driTextureObject *) t );
+   UNLOCK_HARDWARE( rmesa );
+
+d506 9
+a514 7
+   if (t->base.dirty_images[face]) {
+      int i;
+      for ( i = 0 ; i < numLevels ; i++ ) {
+         if ( (t->base.dirty_images[face] & (1 << (i+t->base.firstLevel))) != 0 ) {
+            uploadSubImage( rmesa, t, i, 0, 0, t->image[face][i].width,
+			    t->image[face][i].height, face );
+         }
+d516 2
+a517 1
+      t->base.dirty_images[face] = 0;
+d520 1
+@
+
+
+1.1.1.1
+log
+@Import OpenBSD 3.3 XF4 repository from CTM 3132 the first time
+This finalizes starting an OpenBSD-mirabile (aka MirBSD) repository.
+
+### MirBSD is:
+# Copyright (c) 1982-2003 by Thorsten "mirabile" Glaser <x86@@ePost.de>
+# Copyright © 1968-2003  The authors of And contributors to UNIX®, the
+#       C Language, BSD/Berkeley Unix; 386BSD, NetBSD 1.1 and OpenBSD.
+#
+# Anyone who obtained a copy of this work is hereby permitted to freely use,
+# distribute, modify, merge, sublicence, give away or sell it as long as the
+# authors are given due credit and the following notice is retained:
+#
+# This work is provided "as is", with no explicit or implicit warranty what-
+# soever. Use it only at your own risk. In no event may an author or contri-
+# butor be held liable for any damage, directly or indirectly, that origina-
+# ted through or is caused by creation or modification of this work.
+
+MirBSD is my private tree. MirBSD does not differ very much from OpenBSD
+and intentionally tracks OpenBSD. That's why it _is_ OpenBSD, just not the
+official one. It's like with DarrenBSD.
+
+At time of this writing, no advertising for MirBSD must be done,
+because the advertising clause has not yet been sorted out.
+
+http://templeofhate.com/tglaser/MirBSD/index.php
+@
+text
+@@
+
+
+1.1.1.2
+log
+@The X-Windowing System
+
+Import XFree86 4.3 from OpenBSD by CTM, in the hope it's stable
+@
+text
+@d1 1
+a1 1
+/* $XFree86: xc/lib/GL/mesa/src/drv/radeon/radeon_texmem.c,v 1.7 2002/12/16 16:18:59 dawes Exp $ */
+d38 3
+d43 1
+a43 1
+#include "context.h"
+d45 1
+a48 1
+
+d53 6
+a58 2
+   if ( !t )
+      return;
+d60 1
+a60 1
+   if ( RADEON_DEBUG & DEBUG_TEXTURE ) {
+d64 4
+d76 2
+a77 16
+   if ( rmesa ) {
+      /* Bump the performace counter */
+      rmesa->c_textureSwaps++;
+
+      if ( t == rmesa->state.texture.unit[0].texobj ) {
+         rmesa->state.texture.unit[0].texobj = NULL;
+	 remove_from_list( &rmesa->hw.tex[0] );
+	 make_empty_list( &rmesa->hw.tex[0] );
+      }
+
+      if ( t == rmesa->state.texture.unit[1].texobj ) {
+         rmesa->state.texture.unit[1].texobj = NULL;
+	 remove_from_list( &rmesa->hw.tex[1] );
+	 make_empty_list( &rmesa->hw.tex[1] );
+      }
+   }
+a82 1
+
+d87 1
+a87 1
+   if ( RADEON_DEBUG & DEBUG_TEXTURE ) {
+d90 1
+a90 1
+
+d93 1
+a93 1
+
+d100 1
+a100 1
+   move_to_tail( &rmesa->texture.swapped, t );
+d112 1
+a112 1
+   foreach ( t, &rmesa->texture.objects[heap] ) {
+d119 2
+a120 1
+	 fprintf( stderr, "Texture at 0x%x sz 0x%x\n",
+d185 1
+a185 1
+void radeonUpdateTexLRU(radeonContextPtr rmesa, radeonTexObjPtr t )
+d194 1
+a194 1
+   rmesa->texture.age[heap] = ++rmesa->sarea->texAge[heap];
+d202 1
+a202 1
+   move_to_head( &rmesa->texture.objects[heap], t );
+d207 1
+a207 1
+      list[i].age = rmesa->texture.age[heap];
+d237 1
+a237 1
+   foreach_s ( t, tmp, &rmesa->texture.objects[heap] ) {
+d252 1
+a252 1
+      t->memBlock = mmAllocMem( rmesa->texture.heap[heap], size, 0, offset );
+d256 1
+a256 1
+	 mmDumpMemInfo( rmesa->texture.heap[heap] );
+d259 1
+a259 1
+      insert_at_head( &rmesa->texture.objects[heap], t );
+d272 1
+a272 1
+   if ( sarea->texAge[heap] != rmesa->texture.age[heap] ) {
+d290 1
+a290 1
+	 if ( sarea->texList[heap][idx].age > rmesa->texture.age[heap] ) {
+d302 4
+a305 1
+      rmesa->texture.age[heap] = sarea->texAge[heap];
+d310 2
+a311 2
+/* =============================================================
+ * Texture image conversions
+d324 2
+a326 1
+   GLint imageWidth, imageHeight;
+a327 2
+   drmRadeonTexture tex;
+   drmRadeonTexImage tmp;
+d329 1
+a329 1
+   if ( RADEON_DEBUG & DEBUG_TEXTURE ) {
+a333 6
+   level += t->firstLevel;
+   if ( ( level < 0 ) || ( level >= RADEON_MAX_TEXTURE_LEVELS ) ) {
+      _mesa_problem(NULL, "bad texture level in radeonUploadSubimage");
+      return;
+   }
+
+d336 2
+a337 2
+      if ( RADEON_DEBUG & DEBUG_TEXTURE )
+	 fprintf( stderr, "%s: texImage %d is NULL!\n", __FUNCTION__, level );
+d340 3
+a342 3
+   if ( !texImage->Data ) {
+      if ( RADEON_DEBUG & DEBUG_TEXTURE )
+	 fprintf( stderr, "%s: image data is NULL!\n", __FUNCTION__ );
+d362 2
+d367 5
+d375 1
+a375 12
+#if 0
+   /* Bump the performace counter */
+   rmesa->c_textureBytes += (dwords << 2);
+#endif
+
+   if ( RADEON_DEBUG & (DEBUG_TEXTURE|DEBUG_IOCTL) ) {
+      GLint imageX = 0;
+      GLint imageY = 0;
+      GLint blitX = t->image[level].x;
+      GLint blitY = t->image[level].y;
+      GLint blitWidth = t->image[level].width;
+      GLint blitHeight = t->image[level].height;
+d385 2
+a386 15
+   t->image[level].data = texImage->Data;
+
+   tex.offset = offset;
+   tex.pitch = pitch;
+   tex.format = format;
+   tex.width = imageWidth;
+   tex.height = imageHeight;
+   tex.image = &tmp;
+
+   memcpy( &tmp, &t->image[level], sizeof(drmRadeonTexImage) );
+
+   do {
+      ret = drmCommandWriteRead( rmesa->dri.fd, DRM_RADEON_TEXTURE,
+                                 &tex, sizeof(drmRadeonTexture) );
+   } while ( ret && errno == EAGAIN );
+d390 1
+a390 1
+      fprintf( stderr, "DRM_RADEON_TEXTURE: return = %d\n", ret );
+d400 3
+a410 1
+   const int numLevels = t->lastLevel - t->firstLevel + 1;
+a412 2
+   radeonTexObjPtr t0 = rmesa->state.texture.unit[0].texobj;
+   radeonTexObjPtr t1 = rmesa->state.texture.unit[1].texobj;
+d414 3
+a416 4
+   if ( RADEON_DEBUG & (DEBUG_TEXTURE|DEBUG_IOCTL) ) {
+      fprintf( stderr, "%s( %p, %p ) sz=%d lvls=%d-%d\n", __FUNCTION__,
+	       rmesa->glCtx, t->tObj, t->totalSize,
+	       t->firstLevel, t->lastLevel );
+a421 2
+   LOCK_HARDWARE( rmesa );
+
+d434 1
+a434 1
+      t->memBlock = mmAllocMem( rmesa->texture.heap[heap],
+d440 1
+a440 1
+	 t->memBlock = mmAllocMem( rmesa->texture.heap[RADEON_AGP_HEAP],
+d450 1
+a450 2
+	 if ( rmesa->texture.objects[heap].prev == t0 ||
+	      rmesa->texture.objects[heap].prev == t1 ) {
+a452 1
+	    UNLOCK_HARDWARE( rmesa );
+d455 1
+a455 2
+	 if ( rmesa->texture.objects[heap].prev ==
+	      &rmesa->texture.objects[heap] ) {
+a459 1
+	       UNLOCK_HARDWARE( rmesa );
+a470 1
+	       UNLOCK_HARDWARE( rmesa );
+d475 1
+a475 1
+	 radeonSwapOutTexObj( rmesa, rmesa->texture.objects[heap].prev );
+d477 1
+a477 1
+	 t->memBlock = mmAllocMem( rmesa->texture.heap[heap],
+d483 1
+a484 1
+
+d493 7
+a499 3
+      /* Mark this texobj as dirty on all units:
+       */
+      t->dirty_state = TEX_ALL;
+d506 9
+a514 6
+   if (t->dirty_images) {
+      for ( i = 0 ; i < numLevels ; i++ ) {
+         if ( t->dirty_images & (1 << i) ) {
+            radeonUploadSubImage( rmesa, t, i, 0, 0,
+                                  t->image[i].width, t->image[i].height );
+         }
+d516 2
+a517 1
+      t->dirty_images = 0;
+d520 1
+a520 3
+
+   UNLOCK_HARDWARE( rmesa );
+
+@
+
+
+1.1.1.3
+log
+@That's what OpenBSD will, probably, ship as XF4 in 3.5
+their last sync against XFree86 4.3-current has been
+imported into our vendor branch, too
+@
+text
+@d1 1
+a1 1
+/* $XFree86: xc/lib/GL/mesa/src/drv/radeon/radeon_texmem.c,v 1.9 2004/01/23 03:57:06 dawes Exp $ */
+d9 18
+a26 20
+Permission is hereby granted, free of charge, to any person obtaining
+a copy of this software and associated documentation files (the
+"Software"), to deal in the Software without restriction, including
+without limitation on the rights to use, copy, modify, merge, publish,
+distribute, sub license, and/or sell copies of the Software, and to
+permit persons to whom the Software is furnished to do so, subject to
+the following conditions:
+
+The above copyright notice and this permission notice (including the
+next paragraph) shall be included in all copies or substantial
+portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
+NON-INFRINGEMENT. IN NO EVENT SHALL ATI, VA LINUX SYSTEMS AND/OR THEIR
+SUPPLIERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
+IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
+IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+d37 3
+a39 2
+#include "glheader.h"
+#include "imports.h"
+a40 1
+#include "macros.h"
+d42 1
+a43 3
+#include "radeon_context.h"
+#include "radeon_ioctl.h"
+#include "radeon_tex.h"
+d46 1
+a46 3
+/**
+ * Destroy any device-dependent state associated with the texture.  This may
+ * include NULLing out hardware state that points to the texture.
+d48 1
+a48 2
+void
+radeonDestroyTexObj( radeonContextPtr rmesa, radeonTexObjPtr t )
+d50 3
+d54 6
+a59 1
+      fprintf( stderr, "%s( %p, %p )\n", __FUNCTION__, (void *)t, (void *)t->base.tObj );
+d62 6
+a67 2
+   if ( rmesa != NULL ) {
+      unsigned   i;
+d69 5
+d75 4
+a78 6
+      for ( i = 0 ; i < rmesa->glCtx->Const.MaxTextureUnits ; i++ ) {
+	 if ( t == rmesa->state.texture.unit[i].texobj ) {
+	    rmesa->state.texture.unit[i].texobj = NULL;
+	    remove_from_list( &rmesa->hw.tex[i] );
+	    make_empty_list( &rmesa->hw.tex[i] );
+	 }
+d81 3
+d87 21
+a107 2
+/* ------------------------------------------------------------
+ * Texture image conversions
+d109 6
+d116 12
+d129 4
+a132 5
+static void radeonUploadRectSubImage( radeonContextPtr rmesa,
+				      radeonTexObjPtr t, 
+				      struct gl_texture_image *texImage,
+				      GLint x, GLint y, 
+				      GLint width, GLint height )
+d134 4
+a137 2
+   const struct gl_texture_format *texFormat = texImage->TexFormat;
+   int blit_format, dstPitch, done;
+d139 13
+a151 14
+   switch ( texFormat->TexelBytes ) {
+   case 1:
+      blit_format = RADEON_GMC_DST_8BPP_CI;
+      break;
+   case 2:
+      blit_format = RADEON_GMC_DST_16BPP;
+      break;
+   case 4:
+      blit_format = RADEON_GMC_DST_32BPP;
+      break;
+   default:
+      fprintf( stderr, "radeonUploadRectSubImage: unknown blit_format (texelbytes=%d)\n", 
+      	       texFormat->TexelBytes);
+      return;
+d154 2
+a155 1
+   t->image[0][0].data = texImage->Data;
+d157 13
+a169 1
+   /* Currently don't need to cope with small pitches.
+d171 14
+a184 3
+   width = texImage->Width;
+   height = texImage->Height;
+   dstPitch = t->pp_txpitch + 32;
+d186 12
+a197 8
+   {	/* FIXME: prefer GART-texturing if possible */
+      /* Data not in GART memory, or bad pitch.
+       */
+      for (done = 0; done < height ; ) {
+	 struct radeon_dma_region region;
+	 int lines = MIN2( height - done, RADEON_BUFFER_SIZE / dstPitch );
+	 int src_pitch;
+	 char *tex;
+d199 4
+a202 1
+         src_pitch = texImage->RowStride * texFormat->TexelBytes;
+d204 2
+a205 1
+	 tex = (char *)texImage->Data + done * src_pitch;
+d207 21
+a227 2
+	 memset(&region, 0, sizeof(region));
+	 radeonAllocDmaRegion( rmesa, &region, lines * dstPitch, 1024 );
+d229 21
+a249 18
+	 /* Copy texdata to dma:
+	  */
+	 if (0)
+	    fprintf(stderr, "%s: src_pitch %d dst_pitch %d\n",
+		    __FUNCTION__, src_pitch, dstPitch);
+
+	 if (src_pitch == dstPitch) {
+	    memcpy( region.address, tex, lines * src_pitch );
+	 } 
+	 else {
+	    char *buf = region.address;
+	    int i;
+	    for (i = 0 ; i < lines ; i++) {
+	       memcpy( buf, tex, src_pitch );
+	       buf += dstPitch;
+	       tex += src_pitch;
+	    }
+	 }
+d251 14
+a264 1
+	 radeonEmitWait( rmesa, RADEON_WAIT_3D );
+d266 8
+a273 1
+	 
+d275 12
+a286 1
+	 /* Blit to framebuffer
+d288 4
+a291 9
+	 radeonEmitBlit( rmesa, 
+		       blit_format, 
+ 		       dstPitch, GET_START( &region ),    
+ 		       dstPitch, t->bufAddr, 
+		       0, 0, 
+		       0, done, 
+		       width, lines );
+	 
+	 radeonEmitWait( rmesa, RADEON_WAIT_2D );
+d293 10
+a302 2
+	 radeonReleaseDmaRegion( rmesa, &region, __FUNCTION__ );
+	 done += lines;
+d304 2
+d310 10
+a319 8
+/**
+ * Upload the texture image associated with texture \a t at the specified
+ * level at the address relative to \a start.
+ */
+static void uploadSubImage( radeonContextPtr rmesa, radeonTexObjPtr t, 
+			    GLint hwlevel,
+			    GLint x, GLint y, GLint width, GLint height,
+			    GLuint face )
+d321 4
+a324 2
+   struct gl_texture_image *texImage = NULL;
+   GLuint offset;
+a328 1
+   const int level = hwlevel + t->base.firstLevel;
+d331 1
+a331 2
+      fprintf( stderr, "%s( %p, %p ) level/width/height/face = %d/%d/%d/%u\n", 
+	       __FUNCTION__, (void *)t, (void *)t->base.tObj, level, width, height, face );
+a333 2
+   ASSERT(face < 6);
+
+d335 3
+a337 2
+   if ( ( hwlevel < 0 ) || ( hwlevel >= RADEON_MAX_TEXTURE_LEVELS ) ) {
+      _mesa_problem(NULL, "bad texture level in %s", __FUNCTION__);
+d341 1
+a341 21
+   switch (face) {
+   case 0:
+      texImage = t->base.tObj->Image[level];
+      break;
+   case 1:
+      texImage = t->base.tObj->NegX[level];
+      break;
+   case 2:
+      texImage = t->base.tObj->PosY[level];
+      break;
+   case 3:
+      texImage = t->base.tObj->NegY[level];
+      break;
+   case 4:
+      texImage = t->base.tObj->PosZ[level];
+      break;
+   case 5:
+      texImage = t->base.tObj->NegZ[level];
+      break;
+   }
+
+d353 1
+d355 10
+a364 7
+   if (t->base.tObj->Target == GL_TEXTURE_RECTANGLE_NV) {
+      assert(level == 0);
+      assert(hwlevel == 0);
+      if ( RADEON_DEBUG & DEBUG_TEXTURE )
+	 fprintf( stderr, "%s: image data is rectangular\n", __FUNCTION__);
+      radeonUploadRectSubImage( rmesa, t, texImage, x, y, width, height );
+      return;
+d367 2
+d373 6
+d383 4
+a386 4
+      GLint blitX = t->image[face][hwlevel].x;
+      GLint blitY = t->image[face][hwlevel].y;
+      GLint blitWidth = t->image[face][hwlevel].width;
+      GLint blitHeight = t->image[face][hwlevel].height;
+d391 3
+a393 2
+      fprintf( stderr, "       blit ofs: 0x%07x level: %d/%d\n",
+	       (GLuint)offset, hwlevel, level );
+d396 1
+a396 1
+   t->image[face][hwlevel].data = texImage->Data;
+a397 6
+   /* Init the DRM_RADEON_TEXTURE command / drmRadeonTexture struct.
+    * NOTE: we're always use a 1KB-wide blit and I8 texture format.
+    * We used to use 1, 2 and 4-byte texels and used to use the texture
+    * width to dictate the blit width - but that won't work for compressed
+    * textures. (Brian)
+    */
+d399 4
+a402 12
+   tex.pitch = BLIT_WIDTH_BYTES / 64;
+   tex.format = RADEON_TXFORMAT_I8; /* any 1-byte texel format */
+   if (texImage->TexFormat->TexelBytes) {
+      tex.width = imageWidth * texImage->TexFormat->TexelBytes; /* in bytes */
+      tex.height = imageHeight;
+   }
+   else {
+      tex.width = imageWidth; /* compressed */
+      tex.height = imageHeight;
+      if (tex.height < 4)
+         tex.height = 4;
+   }
+d405 1
+a405 2
+   /* copy (x,y,width,height,data) */
+   memcpy( &tmp, &t->image[face][hwlevel], sizeof(drmRadeonTexImage) );
+a406 1
+   LOCK_HARDWARE( rmesa );
+a411 2
+   UNLOCK_HARDWARE( rmesa );
+
+d413 1
+d415 2
+a416 2
+      fprintf( stderr, "   offset=0x%08x\n",
+	       offset );
+d420 2
+a421 2
+	       t->image[face][hwlevel].width, t->image[face][hwlevel].height,
+	       t->image[face][hwlevel].data );
+d426 3
+a428 8
+
+/**
+ * Upload the texture images associated with texture \a t.  This might
+ * require the allocation of texture memory.
+ * 
+ * \param rmesa Context pointer
+ * \param t Texture to be uploaded
+ * \param face Cube map face to be uploaded.  Zero for non-cube maps.
+d430 1
+a430 2
+
+int radeonUploadTexImages( radeonContextPtr rmesa, radeonTexObjPtr t, GLuint face )
+d432 5
+a436 1
+   const int numLevels = t->base.lastLevel - t->base.firstLevel + 1;
+d440 2
+a441 2
+	       (void *)rmesa->glCtx, (void *)t->base.tObj, t->base.totalSize,
+	       t->base.firstLevel, t->base.lastLevel );
+d444 1
+a444 1
+   if ( !t || t->base.totalSize == 0 )
+d449 20
+a468 2
+   if ( t->base.memBlock == NULL ) {
+      int heap;
+d470 41
+a510 5
+      heap = driAllocateTexture( rmesa->texture_heaps, rmesa->nr_heaps,
+				 (driTextureObject *) t );
+      if ( heap == -1 ) {
+	 UNLOCK_HARDWARE( rmesa );
+	 return -1;
+d514 1
+a514 2
+      t->bufAddr = rmesa->radeonScreen->texOffset[heap] 
+	   + t->base.memBlock->ofs;
+d517 7
+d530 2
+a531 6
+
+   /* Let the world know we've used this memory recently.
+    */
+   driUpdateTextureLRU( (driTextureObject *) t );
+   UNLOCK_HARDWARE( rmesa );
+
+d534 1
+a534 2
+   if (t->base.dirty_images[face]) {
+      int i;
+d536 3
+a538 3
+         if ( (t->base.dirty_images[face] & (1 << (i+t->base.firstLevel))) != 0 ) {
+            uploadSubImage( rmesa, t, i, 0, 0, t->image[face][i].width,
+			    t->image[face][i].height, face );
+d541 1
+a541 1
+      t->base.dirty_images[face] = 0;
+d543 3
+@
+
+

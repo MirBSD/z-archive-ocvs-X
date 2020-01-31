@@ -1,0 +1,770 @@
+head	1.1;
+branch	1.1.1;
+access;
+symbols
+	tg-mergetmp-2:1.1.1.3
+	cvs-200410241530:1.1.1.3
+	cvs-200410012000:1.1.1.3
+	cvs-200407141120:1.1.1.3
+	cvs-200406231010:1.1.1.3
+	MIRBSD_7quater:1.1.1.2
+	cvs-200405271510:1.1.1.3
+	XFree86_4_4_0:1.1.9.1
+	cvs-200403021700:1.1.1.3
+	XFREE86_20040213:1.1.9.1
+	xc:1.1.9
+	cvs-200401291925:1.1.1.2
+	MIRBSD_7_ALPHA:1.1.1.2.0.4
+	MIRBSD_7:1.1.1.2.0.2
+	MIRBSD_7ter:1.1.1.2
+	cvs-20011091815:1.1.1.2
+	cvs-200309162130:1.1.1.2
+	cvs-200308302005:1.1.1.2
+	ctmx-0387:1.1.1.2
+	ctmx-0384:1.1.1.2
+	MIRBSD_5:1.1.1.2
+	ctmx-0375:1.1.1.2
+	ctmx-0373:1.1.1.2
+	ctm-0371:1.1.1.2
+	ctm-0370:1.1.1.2
+	MIRBSD_4:1.1.1.2
+	ctm-0363:1.1.1.2
+	ctm-0359:1.1.1.2
+	ctm-0349:1.1.1.1
+	openbsd:1.1.1;
+locks; strict;
+comment	@ * @;
+
+
+1.1
+date	2003.03.22.20.04.20;	author tg;	state Exp;
+branches
+	1.1.1.1
+	1.1.9.1;
+next	;
+
+1.1.1.1
+date	2003.03.22.20.04.20;	author tg;	state Exp;
+branches;
+next	1.1.1.2;
+
+1.1.1.2
+date	2003.04.08.18.31.37;	author tg;	state Exp;
+branches;
+next	1.1.1.3;
+
+1.1.1.3
+date	2004.03.02.17.59.41;	author tg;	state Stab;
+branches;
+next	;
+
+1.1.9.1
+date	2004.02.14.19.18.14;	author tg;	state Exp;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@/* -*- mode: c; c-basic-offset: 3 -*-
+ *
+ * Copyright 2000 VA Linux Systems Inc., Fremont, California.
+ *
+ * All Rights Reserved.
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a
+ * copy of this software and associated documentation files (the "Software"),
+ * to deal in the Software without restriction, including without limitation
+ * the rights to use, copy, modify, merge, publish, distribute, sublicense,
+ * and/or sell copies of the Software, and to permit persons to whom the
+ * Software is furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice (including the next
+ * paragraph) shall be included in all copies or substantial portions of the
+ * Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL
+ * VA LINUX SYSTEMS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY,
+ * WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF
+ * OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+ * SOFTWARE.
+ */
+/* $XFree86: xc/lib/GL/mesa/src/drv/tdfx/tdfx_dd.c,v 1.5 2001/08/18 02:51:06 dawes Exp $ */
+
+/*
+ * Original rewrite:
+ *	Gareth Hughes <gareth@@valinux.com>, 29 Sep - 1 Oct 2000
+ *
+ * Authors:
+ *	Gareth Hughes <gareth@@valinux.com>
+ *	Brian Paul <brianp@@valinux.com>
+ *
+ */
+
+#include "tdfx_context.h"
+#include "tdfx_dd.h"
+#include "tdfx_vb.h"
+#include "tdfx_pipeline.h"
+#include "tdfx_pixels.h"
+
+#include "enums.h"
+#include "pb.h"
+#if defined(USE_X86_ASM) || defined(USE_3DNOW_ASM) || defined(USE_KATMAI_ASM)
+#include "X86/common_x86_asm.h"
+#endif
+
+#define TDFX_DATE	"20010501"
+
+
+/* These are used in calls to FX_grColorMaskv() */
+const GLboolean false4[4] = { GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE };
+const GLboolean true4[4] = { GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE };
+
+
+
+/* KW: Put the word Mesa in the render string because quakeworld
+ * checks for this rather than doing a glGet(GL_MAX_TEXTURE_SIZE).
+ * Why?
+ */
+static const GLubyte *tdfxDDGetString( GLcontext *ctx, GLenum name )
+{
+   tdfxContextPtr fxMesa = (tdfxContextPtr) ctx->DriverCtx;
+
+   switch ( name ) {
+   case GL_VENDOR:
+      return (GLubyte *)"VA Linux Systems, Inc.";
+
+   case GL_RENDERER: {
+      static char buffer[128];
+      char hardware[128];
+
+      strcpy( hardware, FX_grGetString( fxMesa, GR_HARDWARE ) );
+
+      if ( strcmp( hardware, "Voodoo3 (tm)" ) == 0 ) {
+	 strcpy( hardware, "Voodoo3" );
+      }
+      else if ( strcmp( hardware, "Voodoo Banshee (tm)" ) == 0 ) {
+	 strcpy( hardware, "VoodooBanshee" );
+      }
+      else if ( strcmp( hardware, "Voodoo4 (tm)" ) == 0 ) {
+	 strcpy( hardware, "Voodoo4" );
+      }
+      else if ( strcmp( hardware, "Voodoo5 (tm)" ) == 0 ) {
+	 strcpy( hardware, "Voodoo5" );
+      }
+      else {
+	 /* Unexpected result: replace spaces with hyphens */
+	 int i;
+	 for ( i = 0 ; hardware[i] ; i++ ) {
+	    if ( hardware[i] == ' ' || hardware[i] == '\t' )
+	       hardware[i] = '-';
+	 }
+      }
+      /* Now make the GL_RENDERER string */
+      sprintf( buffer, "Mesa DRI %s " TDFX_DATE, hardware );
+
+      /* Append any CPU-specific information.
+       */
+#ifdef USE_X86_ASM
+      if ( gl_x86_cpu_features ) {
+	 strncat( buffer, " x86", 4 );
+      }
+#endif
+#ifdef USE_MMX_ASM
+      if ( cpu_has_mmx ) {
+	 strncat( buffer, "/MMX", 4 );
+      }
+#endif
+#ifdef USE_3DNOW_ASM
+      if ( cpu_has_3dnow ) {
+	 strncat( buffer, "/3DNow!", 7 );
+      }
+#endif
+#ifdef USE_KATMAI_ASM
+      if ( cpu_has_xmm ) {
+	 strncat( buffer, "/SSE", 4 );
+      }
+#endif
+      return (GLubyte *)buffer;
+   }
+
+   default:
+      return NULL;
+   }
+}
+
+
+/* Return buffer size information.
+ */
+static void tdfxDDGetBufferSize( GLcontext *ctx,
+				 GLuint *width, GLuint *height )
+{
+   tdfxContextPtr fxMesa = TDFX_CONTEXT(ctx);
+
+   *width = fxMesa->width;
+   *height = fxMesa->height;
+}
+
+
+static GLint tdfxDDGetParameteri( const GLcontext *ctx, GLint param )
+{
+   switch ( param ) {
+   case DD_HAVE_HARDWARE_FOG:
+      return 1;
+   default:
+      return 0;
+   }
+}
+
+/*
+ * Return the current value of the occlusion test flag and
+ * reset the flag (hardware counters) to false.
+ */
+static GLboolean get_occlusion_result( GLcontext *ctx )
+{
+   tdfxContextPtr fxMesa = TDFX_CONTEXT(ctx);
+   GLboolean result;
+
+   LOCK_HARDWARE( fxMesa );
+
+   if (ctx->Depth.OcclusionTest) {
+      if (ctx->OcclusionResult) {
+	 result = GL_TRUE;  /* result of software rendering */
+      }
+      else {
+	 FxI32 zfail, in;
+         fxMesa->Glide.grGet(GR_STATS_PIXELS_DEPTHFUNC_FAIL, 4, &zfail);
+	 /*zfail = FX_grGetInteger_NoLock(GR_STATS_PIXELS_DEPTHFUNC_FAIL);*/
+         fxMesa->Glide.grGet(GR_STATS_PIXELS_IN, 4, &in);
+	 /*in = FX_grGetInteger_NoLock(GR_STATS_PIXELS_IN);*/
+	 if (in == zfail)
+	    result = GL_FALSE; /* geom was completely occluded */
+	 else
+	    result = GL_TRUE;  /* all or part of geom was visible */
+      }
+   }
+   else {
+      result = ctx->OcclusionResultSaved;
+   }
+
+   /* reset results now */
+   fxMesa->Glide.grReset(GR_STATS_PIXELS);
+   ctx->OcclusionResult = GL_FALSE;
+   ctx->OcclusionResultSaved = GL_FALSE;
+
+   UNLOCK_HARDWARE( fxMesa );
+
+   return result;
+}
+
+
+/*
+ * We're only implementing this function to handle the
+ * GL_OCCLUSTION_TEST_RESULT_HP case.  It's special because it
+ * has a side-effect: resetting the occlustion result flag.
+ */
+static GLboolean tdfxDDGetBooleanv( GLcontext *ctx, GLenum pname,
+				    GLboolean *result )
+{
+   if ( pname == GL_OCCLUSION_TEST_RESULT_HP ) {
+      *result = get_occlusion_result( ctx );
+      return GL_TRUE;
+   }
+   return GL_FALSE;
+}
+
+static GLboolean tdfxDDGetDoublev( GLcontext *ctx, GLenum pname,
+				   GLdouble *result )
+{
+   if ( pname == GL_OCCLUSION_TEST_RESULT_HP ) {
+      *result = (GLdouble) get_occlusion_result( ctx );
+      return GL_TRUE;
+   }
+   return GL_FALSE;
+}
+
+static GLboolean tdfxDDGetFloatv( GLcontext *ctx, GLenum pname,
+				  GLfloat *result )
+{
+   if ( pname == GL_OCCLUSION_TEST_RESULT_HP ) {
+      *result = (GLfloat) get_occlusion_result( ctx );
+      return GL_TRUE;
+   }
+   return GL_FALSE;
+}
+
+static GLboolean tdfxDDGetIntegerv( GLcontext *ctx, GLenum pname,
+				    GLint *result )
+{
+   if ( pname == GL_OCCLUSION_TEST_RESULT_HP ) {
+      *result = (GLint) get_occlusion_result( ctx );
+      return GL_TRUE;
+   }
+   return GL_FALSE;
+}
+
+
+
+#define VISUAL_EQUALS_RGBA(vis, r, g, b, a)        \
+   ((vis->RedBits == r) &&                         \
+    (vis->GreenBits == g) &&                       \
+    (vis->BlueBits == b) &&                        \
+    (vis->AlphaBits == a))
+
+void tdfxDDInitDriverFuncs( GLcontext *ctx )
+{
+   if ( MESA_VERBOSE & VERBOSE_DRIVER ) {
+      fprintf( stderr, "tdfx: %s()\n", __FUNCTION__ );
+   }
+
+   ctx->Driver.GetString		= tdfxDDGetString;
+   ctx->Driver.GetBufferSize		= tdfxDDGetBufferSize;
+   ctx->Driver.Error			= NULL;
+   ctx->Driver.GetParameteri		= tdfxDDGetParameteri;
+
+   if ( VISUAL_EQUALS_RGBA(ctx->Visual, 8, 8, 8, 8) )
+   {
+      ctx->Driver.DrawPixels		= tdfx_drawpixels_R8G8B8A8;
+      ctx->Driver.ReadPixels		= tdfx_readpixels_R8G8B8A8;
+      ctx->Driver.CopyPixels		= NULL;
+      ctx->Driver.Bitmap		= NULL;
+   }
+   else if ( VISUAL_EQUALS_RGBA(ctx->Visual, 5, 6, 5, 0) )
+   {
+      ctx->Driver.DrawPixels		= NULL;
+      ctx->Driver.ReadPixels		= tdfx_readpixels_R5G6B5;
+      ctx->Driver.CopyPixels		= NULL;
+      ctx->Driver.Bitmap		= NULL;
+   }
+   else
+   {
+      ctx->Driver.DrawPixels		= NULL;
+      ctx->Driver.ReadPixels		= NULL;
+      ctx->Driver.CopyPixels		= NULL;
+      ctx->Driver.Bitmap		= NULL;
+   }
+
+   ctx->Driver.RegisterVB		= tdfxDDRegisterVB;
+   ctx->Driver.UnregisterVB		= tdfxDDUnregisterVB;
+   ctx->Driver.ResetVB			= NULL;
+   ctx->Driver.ResetCvaVB		= NULL;
+
+   if ( !getenv( "TDFX_NO_FAST" ) ) {
+      ctx->Driver.BuildPrecalcPipeline	= tdfxDDBuildPrecalcPipeline;
+   } else {
+      ctx->Driver.BuildPrecalcPipeline	= NULL;
+   }
+   ctx->Driver.BuildEltPipeline		= NULL;
+
+   ctx->Driver.OptimizeImmediatePipeline = NULL;
+   ctx->Driver.OptimizePrecalcPipeline	= NULL;
+
+   ctx->Driver.GetBooleanv		= tdfxDDGetBooleanv;
+   ctx->Driver.GetDoublev		= tdfxDDGetDoublev;
+   ctx->Driver.GetFloatv		= tdfxDDGetFloatv;
+   ctx->Driver.GetIntegerv		= tdfxDDGetIntegerv;
+   ctx->Driver.GetPointerv		= NULL;
+}
+@
+
+
+1.1.9.1
+log
+@OpenBSD just has imported exactly this tree into their vendor branch,
+called the same tag, in XF4/xc
+This is, apparently, the last XFree86 snapshot before the licence change
+(ie, addition of the advertising clause)
+
+Since the developers don't see any problems with that, and we would like
+to integrate improvements done by the remaining one or two (or so) XFree86
+developers (j/k), this prepares enabling us to update X-Window in the future.
+@
+text
+@d26 1
+a26 1
+/* $XFree86: xc/lib/GL/mesa/src/drv/tdfx/tdfx_dd.c,v 1.11 2003/09/28 20:15:36 alanh Exp $ */
+a39 1
+#include "tdfx_lock.h"
+d41 1
+a43 1
+#include "context.h"
+d45 2
+a46 2
+#include "swrast/swrast.h"
+#if defined(USE_X86_ASM)
+d50 1
+a50 2
+
+#define TDFX_DATE	"20021125"
+d68 6
+a73 7
+   case GL_RENDERER:
+   {
+      /* The renderer string must be per-context state to handle
+       * multihead correctly.
+       */
+      char *buffer = fxMesa->rendererString;
+      char hardware[100];
+d75 1
+a75 7
+      LOCK_HARDWARE(fxMesa);
+      strcpy( hardware, fxMesa->Glide.grGetString(GR_HARDWARE) );
+      UNLOCK_HARDWARE(fxMesa);
+
+      strcpy( buffer, "Mesa DRI " );
+      strcat( buffer, TDFX_DATE );
+      strcat( buffer, " " );
+d78 1
+a78 1
+	 strcat( buffer, "Voodoo3" );
+d81 1
+a81 1
+	 strcat( buffer, "VoodooBanshee" );
+d84 1
+a84 1
+	 strcat( buffer, "Voodoo4" );
+d87 1
+a87 1
+	 strcat( buffer, "Voodoo5" );
+d90 1
+a90 1
+	 /* unexpected result: replace spaces with hyphens */
+d92 1
+a92 1
+	 for ( i = 0 ; hardware[i] && i < 60 ; i++ ) {
+a95 1
+         strcat( buffer, hardware );
+d97 2
+d103 1
+a103 1
+      if ( _mesa_x86_cpu_features ) {
+d117 1
+a117 1
+#ifdef USE_SSE_ASM
+d122 1
+a122 1
+      return (const GLubyte *) buffer;
+d124 1
+a124 2
+   case GL_VENDOR:
+      return (const GLubyte *)"VA Linux Systems, Inc.";
+d131 1
+a131 1
+/* Return uptodate buffer size information.
+d133 1
+a133 1
+static void tdfxDDGetBufferSize( GLframebuffer *buffer,
+a135 1
+   GET_CURRENT_CONTEXT(ctx);
+a137 1
+   LOCK_HARDWARE( fxMesa );
+a139 1
+   UNLOCK_HARDWARE( fxMesa );
+d143 9
+a162 1
+   fxMesa->Glide.grFinish(); /* required to flush the FIFO - FB 21-01-2002 */ 
+d171 1
+d173 5
+a177 5
+         /* Geometry is occluded if there is no input (in == 0) */
+         /* or if all pixels failed the depth test (zfail == in) */
+         /* The < 1 is there because I have empirically seen cases where */
+         /* zfail > in.... go figure.  FB - 21-01-2002. */
+         result = ((in - zfail) < 1 || in == 0) ? GL_FALSE : GL_TRUE;
+d243 4
+a246 4
+   ((vis.redBits == r) &&                         \
+    (vis.greenBits == g) &&                       \
+    (vis.blueBits == b) &&                        \
+    (vis.alphaBits == a))
+a255 1
+   ctx->Driver.ResizeBuffers            = _swrast_alloc_buffers;
+d257 1
+a258 10
+   /* Pixel path fallbacks.
+    */
+   ctx->Driver.Accum                    = _swrast_Accum;
+   ctx->Driver.Bitmap                   = _swrast_Bitmap;
+   ctx->Driver.CopyPixels               = _swrast_CopyPixels;
+   ctx->Driver.DrawPixels               = _swrast_DrawPixels;
+   ctx->Driver.ReadPixels               = _swrast_ReadPixels;
+
+   /* Accelerated paths
+    */
+d263 2
+d268 1
+d270 2
+d273 22
+a300 43
+}
+
+
+/*
+ * These are here for lack of a better place.
+ */
+
+void
+FX_grColorMaskv(GLcontext *ctx, const GLboolean rgba[4])
+{
+   tdfxContextPtr fxMesa = TDFX_CONTEXT(ctx);
+   LOCK_HARDWARE(fxMesa);
+   if (ctx->Visual.redBits == 8) {
+      /* 32bpp mode */
+      ASSERT( fxMesa->Glide.grColorMaskExt );
+      fxMesa->Glide.grColorMaskExt(rgba[RCOMP], rgba[GCOMP],
+                                   rgba[BCOMP], rgba[ACOMP]);
+   }
+   else {
+      /* 16 bpp mode */
+      /* we never have an alpha buffer */
+      fxMesa->Glide.grColorMask(rgba[RCOMP] || rgba[GCOMP] || rgba[BCOMP],
+                                GL_FALSE);
+   }
+   UNLOCK_HARDWARE(fxMesa);
+}
+
+void
+FX_grColorMaskv_NoLock(GLcontext *ctx, const GLboolean rgba[4])
+{
+   tdfxContextPtr fxMesa = TDFX_CONTEXT(ctx);
+   if (ctx->Visual.redBits == 8) {
+      /* 32bpp mode */
+      ASSERT( fxMesa->Glide.grColorMaskExt );
+      fxMesa->Glide.grColorMaskExt(rgba[RCOMP], rgba[GCOMP],
+                                   rgba[BCOMP], rgba[ACOMP]);
+   }
+   else {
+      /* 16 bpp mode */
+      /* we never have an alpha buffer */
+      fxMesa->Glide.grColorMask(rgba[RCOMP] || rgba[GCOMP] || rgba[BCOMP],
+                                GL_FALSE);
+   }
+@
+
+
+1.1.1.1
+log
+@Import OpenBSD 3.3 XF4 repository from CTM 3132 the first time
+This finalizes starting an OpenBSD-mirabile (aka MirBSD) repository.
+
+### MirBSD is:
+# Copyright (c) 1982-2003 by Thorsten "mirabile" Glaser <x86@@ePost.de>
+# Copyright © 1968-2003  The authors of And contributors to UNIX®, the
+#       C Language, BSD/Berkeley Unix; 386BSD, NetBSD 1.1 and OpenBSD.
+#
+# Anyone who obtained a copy of this work is hereby permitted to freely use,
+# distribute, modify, merge, sublicence, give away or sell it as long as the
+# authors are given due credit and the following notice is retained:
+#
+# This work is provided "as is", with no explicit or implicit warranty what-
+# soever. Use it only at your own risk. In no event may an author or contri-
+# butor be held liable for any damage, directly or indirectly, that origina-
+# ted through or is caused by creation or modification of this work.
+
+MirBSD is my private tree. MirBSD does not differ very much from OpenBSD
+and intentionally tracks OpenBSD. That's why it _is_ OpenBSD, just not the
+official one. It's like with DarrenBSD.
+
+At time of this writing, no advertising for MirBSD must be done,
+because the advertising clause has not yet been sorted out.
+
+http://templeofhate.com/tglaser/MirBSD/index.php
+@
+text
+@@
+
+
+1.1.1.2
+log
+@The X-Windowing System
+
+Import XFree86 4.3 from OpenBSD by CTM, in the hope it's stable
+@
+text
+@d26 1
+a26 1
+/* $XFree86: xc/lib/GL/mesa/src/drv/tdfx/tdfx_dd.c,v 1.10 2002/10/30 12:52:00 alanh Exp $ */
+a39 1
+#include "tdfx_lock.h"
+d41 1
+a43 1
+#include "context.h"
+d45 2
+a46 2
+#include "swrast/swrast.h"
+#if defined(USE_X86_ASM)
+d50 1
+a50 2
+
+#define TDFX_DATE	"20020221"
+d68 6
+a73 7
+   case GL_RENDERER:
+   {
+      /* The renderer string must be per-context state to handle
+       * multihead correctly.
+       */
+      char *buffer = fxMesa->rendererString;
+      char hardware[100];
+d75 1
+a75 7
+      LOCK_HARDWARE(fxMesa);
+      strcpy( hardware, fxMesa->Glide.grGetString(GR_HARDWARE) );
+      UNLOCK_HARDWARE(fxMesa);
+
+      strcpy( buffer, "Mesa DRI " );
+      strcat( buffer, TDFX_DATE );
+      strcat( buffer, " " );
+d78 1
+a78 1
+	 strcat( buffer, "Voodoo3" );
+d81 1
+a81 1
+	 strcat( buffer, "VoodooBanshee" );
+d84 1
+a84 1
+	 strcat( buffer, "Voodoo4" );
+d87 1
+a87 1
+	 strcat( buffer, "Voodoo5" );
+d90 1
+a90 1
+	 /* unexpected result: replace spaces with hyphens */
+d92 1
+a92 1
+	 for ( i = 0 ; hardware[i] && i < 60 ; i++ ) {
+a95 1
+         strcat( buffer, hardware );
+d97 2
+d103 1
+a103 1
+      if ( _mesa_x86_cpu_features ) {
+d117 1
+a117 1
+#ifdef USE_SSE_ASM
+d122 1
+a122 1
+      return (const GLubyte *) buffer;
+d124 1
+a124 2
+   case GL_VENDOR:
+      return (const GLubyte *)"VA Linux Systems, Inc.";
+d131 1
+a131 1
+/* Return uptodate buffer size information.
+d133 1
+a133 1
+static void tdfxDDGetBufferSize( GLframebuffer *buffer,
+a135 1
+   GET_CURRENT_CONTEXT(ctx);
+a137 1
+   LOCK_HARDWARE( fxMesa );
+a139 1
+   UNLOCK_HARDWARE( fxMesa );
+d143 9
+a162 1
+   fxMesa->Glide.grFinish(); /* required to flush the FIFO - FB 21-01-2002 */ 
+d171 1
+d173 5
+a177 5
+         /* Geometry is occluded if there is no input (in == 0) */
+         /* or if all pixels failed the depth test (zfail == in) */
+         /* The < 1 is there because I have empirically seen cases where */
+         /* zfail > in.... go figure.  FB - 21-01-2002. */
+         result = ((in - zfail) < 1 || in == 0) ? GL_FALSE : GL_TRUE;
+d243 4
+a246 4
+   ((vis.redBits == r) &&                         \
+    (vis.greenBits == g) &&                       \
+    (vis.blueBits == b) &&                        \
+    (vis.alphaBits == a))
+a255 1
+   ctx->Driver.ResizeBuffers            = _swrast_alloc_buffers;
+d257 1
+a258 10
+   /* Pixel path fallbacks.
+    */
+   ctx->Driver.Accum                    = _swrast_Accum;
+   ctx->Driver.Bitmap                   = _swrast_Bitmap;
+   ctx->Driver.CopyPixels               = _swrast_CopyPixels;
+   ctx->Driver.DrawPixels               = _swrast_DrawPixels;
+   ctx->Driver.ReadPixels               = _swrast_ReadPixels;
+
+   /* Accelerated paths
+    */
+d263 2
+d268 1
+d270 2
+d273 22
+a300 43
+}
+
+
+/*
+ * These are here for lack of a better place.
+ */
+
+void
+FX_grColorMaskv(GLcontext *ctx, const GLboolean rgba[4])
+{
+   tdfxContextPtr fxMesa = TDFX_CONTEXT(ctx);
+   LOCK_HARDWARE(fxMesa);
+   if (ctx->Visual.redBits == 8) {
+      /* 32bpp mode */
+      ASSERT( fxMesa->Glide.grColorMaskExt );
+      fxMesa->Glide.grColorMaskExt(rgba[RCOMP], rgba[GCOMP],
+                                   rgba[BCOMP], rgba[ACOMP]);
+   }
+   else {
+      /* 16 bpp mode */
+      /* we never have an alpha buffer */
+      fxMesa->Glide.grColorMask(rgba[RCOMP] || rgba[GCOMP] || rgba[BCOMP],
+                                GL_FALSE);
+   }
+   UNLOCK_HARDWARE(fxMesa);
+}
+
+void
+FX_grColorMaskv_NoLock(GLcontext *ctx, const GLboolean rgba[4])
+{
+   tdfxContextPtr fxMesa = TDFX_CONTEXT(ctx);
+   if (ctx->Visual.redBits == 8) {
+      /* 32bpp mode */
+      ASSERT( fxMesa->Glide.grColorMaskExt );
+      fxMesa->Glide.grColorMaskExt(rgba[RCOMP], rgba[GCOMP],
+                                   rgba[BCOMP], rgba[ACOMP]);
+   }
+   else {
+      /* 16 bpp mode */
+      /* we never have an alpha buffer */
+      fxMesa->Glide.grColorMask(rgba[RCOMP] || rgba[GCOMP] || rgba[BCOMP],
+                                GL_FALSE);
+   }
+@
+
+
+1.1.1.3
+log
+@That's what OpenBSD will, probably, ship as XF4 in 3.5
+their last sync against XFree86 4.3-current has been
+imported into our vendor branch, too
+@
+text
+@d26 1
+a26 1
+/* $XFree86: xc/lib/GL/mesa/src/drv/tdfx/tdfx_dd.c,v 1.11 2003/09/28 20:15:36 alanh Exp $ */
+d52 1
+a52 1
+#define TDFX_DATE	"20021125"
+@
+
+

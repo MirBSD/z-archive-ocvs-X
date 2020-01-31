@@ -1,0 +1,1793 @@
+head	1.2;
+branch	1.1.1;
+access;
+symbols
+	tg-mergetmp-2:1.1.1.3
+	cvs-200410241530:1.1.1.3
+	cvs-200410012000:1.1.1.3
+	cvs-200407141120:1.1.1.3
+	cvs-200406231010:1.1.1.3
+	MIRBSD_7quater:1.1.1.2
+	cvs-200405271510:1.1.1.3
+	XFree86_4_4_0:1.1.9.1
+	cvs-200403021700:1.1.1.3
+	XFREE86_20040213:1.1.9.1
+	xc:1.1.9
+	cvs-200401291925:1.1.1.2
+	MIRBSD_7_ALPHA:1.1.1.2.0.4
+	MIRBSD_7:1.1.1.2.0.2
+	MIRBSD_7ter:1.1.1.2
+	cvs-20011091815:1.1.1.2
+	cvs-200309162130:1.1.1.2
+	cvs-200308302005:1.1.1.2
+	ctmx-0387:1.1.1.2
+	ctmx-0384:1.1.1.2
+	MIRBSD_5:1.1.1.2
+	ctmx-0375:1.1.1.2
+	ctmx-0373:1.1.1.2
+	ctm-0371:1.1.1.2
+	ctm-0370:1.1.1.2
+	MIRBSD_4:1.1.1.2
+	ctm-0363:1.1.1.2
+	ctm-0359:1.1.1.2
+	ctm-0349:1.1.1.1
+	openbsd:1.1.1;
+locks; strict;
+comment	@ * @;
+
+
+1.2
+date	2003.05.16.16.29.41;	author tg;	state dead;
+branches;
+next	1.1;
+
+1.1
+date	2003.03.22.20.01.19;	author tg;	state Exp;
+branches
+	1.1.1.1
+	1.1.9.1;
+next	;
+
+1.1.1.1
+date	2003.03.22.20.01.19;	author tg;	state Exp;
+branches;
+next	1.1.1.2;
+
+1.1.1.2
+date	2003.04.08.18.20.54;	author tg;	state Exp;
+branches;
+next	1.1.1.3;
+
+1.1.1.3
+date	2004.03.02.17.37.58;	author tg;	state Stab;
+branches;
+next	;
+
+1.1.9.1
+date	2004.02.14.19.08.50;	author tg;	state Exp;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.2
+log
+@remove a bunch of files not used in MirBSD - clean tree. People who want them got cvs.
+@
+text
+@/***************************************************************************/
+/*                                                                         */
+/*  psaux.h                                                                */
+/*                                                                         */
+/*    Auxiliary functions and data structures related to PostScript fonts  */
+/*    (specification).                                                     */
+/*                                                                         */
+/*  Copyright 1996-2001 by                                                 */
+/*  David Turner, Robert Wilhelm, and Werner Lemberg.                      */
+/*                                                                         */
+/*  This file is part of the FreeType project, and may only be used,       */
+/*  modified, and distributed under the terms of the FreeType project      */
+/*  license, LICENSE.TXT.  By continuing to use, modify, or distribute     */
+/*  this file you indicate that you have read the license and              */
+/*  understand and accept it fully.                                        */
+/*                                                                         */
+/***************************************************************************/
+
+
+#ifndef __PSAUX_H__
+#define __PSAUX_H__
+
+
+#include <ft2build.h>
+#include FT_INTERNAL_OBJECTS_H
+#include FT_INTERNAL_TYPE1_TYPES_H
+
+
+FT_BEGIN_HEADER
+
+
+  /*************************************************************************/
+  /*************************************************************************/
+  /*****                                                               *****/
+  /*****                             T1_TABLE                          *****/
+  /*****                                                               *****/
+  /*************************************************************************/
+  /*************************************************************************/
+
+
+  typedef struct PS_Table_  PS_Table;
+
+
+  /*************************************************************************/
+  /*                                                                       */
+  /* <Struct>                                                              */
+  /*    PS_Table_Funcs                                                     */
+  /*                                                                       */
+  /* <Description>                                                         */
+  /*    A set of function pointers to manage PS_Table objects.             */
+  /*                                                                       */
+  /* <Fields>                                                              */
+  /*    table_init    :: Used to initialize a table.                       */
+  /*                                                                       */
+  /*    table_done    :: Finalizes resp. destroy a given table.            */
+  /*                                                                       */
+  /*    table_add     :: Adds a new object to a table.                     */
+  /*                                                                       */
+  /*    table_release :: Releases table data, then finalizes it.           */
+  /*                                                                       */
+  typedef struct  PS_Table_Funcs_
+  {
+    FT_Error
+    (*init)( PS_Table*  table,
+             FT_Int     count,
+             FT_Memory  memory );
+
+    void
+    (*done)( PS_Table*  table );
+
+    FT_Error
+    (*add)( PS_Table*  table,
+            FT_Int     index,
+            void*      object,
+            FT_Int     length );
+
+    void
+    (*release)( PS_Table*  table );
+
+  } PS_Table_Funcs;
+
+
+  /*************************************************************************/
+  /*                                                                       */
+  /* <Struct>                                                              */
+  /*    PS_Table                                                           */
+  /*                                                                       */
+  /* <Description>                                                         */
+  /*    A PS_Table is a simple object used to store an array of objects in */
+  /*    a single memory block.                                             */
+  /*                                                                       */
+  /* <Fields>                                                              */
+  /*    block     :: The address in memory of the growheap's block.  This  */
+  /*                 can change between two object adds, due to            */
+  /*                 reallocation.                                         */
+  /*                                                                       */
+  /*    cursor    :: The current top of the grow heap within its block.    */
+  /*                                                                       */
+  /*    capacity  :: The current size of the heap block.  Increments by    */
+  /*                 1kByte chunks.                                        */
+  /*                                                                       */
+  /*    max_elems :: The maximum number of elements in table.              */
+  /*                                                                       */
+  /*    num_elems :: The current number of elements in table.              */
+  /*                                                                       */
+  /*    elements  :: A table of element addresses within the block.        */
+  /*                                                                       */
+  /*    lengths   :: A table of element sizes within the block.            */
+  /*                                                                       */
+  /*    memory    :: The object used for memory operations                 */
+  /*                 (alloc/realloc).                                      */
+  /*                                                                       */
+  /*    funcs     :: A table of method pointers for this object.           */
+  /*                                                                       */
+  struct  PS_Table_
+  {
+    FT_Byte*        block;          /* current memory block           */
+    FT_Offset       cursor;         /* current cursor in memory block */
+    FT_Offset       capacity;       /* current size of memory block   */
+    FT_Long         init;
+
+    FT_Int          max_elems;
+    FT_Int          num_elems;
+    FT_Byte**       elements;       /* addresses of table elements */
+    FT_Int*         lengths;        /* lengths of table elements   */
+
+    FT_Memory       memory;
+    PS_Table_Funcs  funcs;
+
+  };
+
+
+  /*************************************************************************/
+  /*************************************************************************/
+  /*****                                                               *****/
+  /*****                       T1 FIELDS & TOKENS                      *****/
+  /*****                                                               *****/
+  /*************************************************************************/
+  /*************************************************************************/
+
+  typedef struct T1_Parser_  T1_Parser;
+
+  /* simple enumeration type used to identify token types */
+  typedef enum  T1_Token_Type_
+  {
+    t1_token_none = 0,
+    t1_token_any,
+    t1_token_string,
+    t1_token_array,
+
+    /* do not remove */
+    t1_token_max
+
+  } T1_Token_Type;
+
+
+  /* a simple structure used to identify tokens */
+  typedef struct  T1_Token_
+  {
+    FT_Byte*       start;   /* first character of token in input stream */
+    FT_Byte*       limit;   /* first character after the token          */
+    T1_Token_Type  type;    /* type of token                            */
+
+  } T1_Token;
+
+
+  /* enumeration type used to identify object fields */
+  typedef enum  T1_Field_Type_
+  {
+    t1_field_none = 0,
+    t1_field_bool,
+    t1_field_integer,
+    t1_field_fixed,
+    t1_field_string,
+    t1_field_integer_array,
+    t1_field_fixed_array,
+    t1_field_callback,
+
+    /* do not remove */
+    t1_field_max
+
+  } T1_Field_Type;
+
+  typedef enum  T1_Field_Location_
+  {
+    t1_field_cid_info,
+    t1_field_font_dict,
+    t1_field_font_info,
+    t1_field_private,
+
+    /* do not remove */
+    t1_field_location_max
+
+  } T1_Field_Location;
+
+
+  typedef void
+  (*T1_Field_Parser)( FT_Face     face,
+                      FT_Pointer  parser );
+
+
+  /* structure type used to model object fields */
+  typedef struct  T1_Field_
+  {
+    const char*        ident;        /* field identifier               */
+    T1_Field_Location  location;
+    T1_Field_Type      type;         /* type of field                  */
+    T1_Field_Parser    reader;
+    FT_UInt            offset;       /* offset of field in object      */
+    FT_Byte            size;         /* size of field in bytes         */
+    FT_UInt            array_max;    /* maximal number of elements for */
+                                     /* array                          */
+    FT_UInt            count_offset; /* offset of element count for    */
+                                     /* arrays                         */
+  } T1_Field;
+
+
+#define T1_NEW_SIMPLE_FIELD( _ident, _type, _fname ) \
+          {                                          \
+            _ident, T1CODE, _type,                   \
+            0,                                       \
+            FT_FIELD_OFFSET( _fname ),               \
+            FT_FIELD_SIZE( _fname ),                 \
+            0, 0                                     \
+          },
+
+#define T1_NEW_CALLBACK_FIELD( _ident, _reader ) \
+          {                                      \
+            _ident, T1CODE, t1_field_callback,   \
+            (T1_Field_Parser)_reader,            \
+            0, 0,                                \
+            0, 0                                 \
+          },
+
+#define T1_NEW_TABLE_FIELD( _ident, _type, _fname, _max ) \
+          {                                               \
+            _ident, T1CODE, _type,                        \
+            0,                                            \
+            FT_FIELD_OFFSET( _fname ),                    \
+            FT_FIELD_SIZE_DELTA( _fname ),                \
+            _max,                                         \
+            FT_FIELD_OFFSET( num_ ## _fname )             \
+          },
+
+#define T1_NEW_TABLE_FIELD2( _ident, _type, _fname, _max ) \
+          {                                                \
+            _ident, T1CODE, _type,                         \
+            0,                                             \
+            FT_FIELD_OFFSET( _fname ),                     \
+            FT_FIELD_SIZE_DELTA( _fname ),                 \
+            _max, 0                                        \
+          },
+
+
+#define T1_FIELD_BOOL( _ident, _fname )                           \
+          T1_NEW_SIMPLE_FIELD( _ident, t1_field_bool, _fname )
+
+#define T1_FIELD_NUM( _ident, _fname )                            \
+          T1_NEW_SIMPLE_FIELD( _ident, t1_field_integer, _fname )
+
+#define T1_FIELD_FIXED( _ident, _fname )                          \
+          T1_NEW_SIMPLE_FIELD( _ident, t1_field_fixed, _fname )
+
+#define T1_FIELD_STRING( _ident, _fname )                         \
+          T1_NEW_SIMPLE_FIELD( _ident, t1_field_string, _fname )
+
+#define T1_FIELD_NUM_TABLE( _ident, _fname, _fmax )               \
+          T1_NEW_TABLE_FIELD( _ident, t1_field_integer_array,     \
+                               _fname, _fmax )
+
+#define T1_FIELD_FIXED_TABLE( _ident, _fname, _fmax )             \
+          T1_NEW_TABLE_FIELD( _ident, t1_field_fixed_array,       \
+                               _fname, _fmax )
+
+#define T1_FIELD_NUM_TABLE2( _ident, _fname, _fmax )              \
+          T1_NEW_TABLE_FIELD2( _ident, t1_field_integer_array,    \
+                                _fname, _fmax )
+
+#define T1_FIELD_FIXED_TABLE2( _ident, _fname, _fmax )            \
+          T1_NEW_TABLE_FIELD2( _ident, t1_field_fixed_array,      \
+                                _fname, _fmax )
+
+#define T1_FIELD_CALLBACK( _ident, _name )                        \
+          T1_NEW_CALLBACK_FIELD( _ident, _name )
+
+
+
+
+  /*************************************************************************/
+  /*************************************************************************/
+  /*****                                                               *****/
+  /*****                            T1 PARSER                          *****/
+  /*****                                                               *****/
+  /*************************************************************************/
+  /*************************************************************************/
+
+  typedef struct  T1_Parser_Funcs_
+  {
+    void
+    (*init)( T1_Parser*  parser,
+             FT_Byte*    base,
+             FT_Byte*    limit,
+             FT_Memory   memory );
+
+    void
+    (*done)( T1_Parser*  parser );
+
+    void
+    (*skip_spaces)( T1_Parser*  parser );
+    void
+    (*skip_alpha)( T1_Parser*  parser );
+
+    FT_Long
+    (*to_int)( T1_Parser*  parser );
+    FT_Fixed
+    (*to_fixed)( T1_Parser*  parser,
+                 FT_Int      power_ten );
+    FT_Int
+    (*to_coord_array)( T1_Parser*  parser,
+                       FT_Int      max_coords,
+                       FT_Short*   coords );
+    FT_Int
+    (*to_fixed_array)( T1_Parser*  parser,
+                       FT_Int      max_values,
+                       FT_Fixed*   values,
+                       FT_Int      power_ten );
+
+    void
+    (*to_token)( T1_Parser*  parser,
+                 T1_Token*   token );
+    void
+    (*to_token_array)( T1_Parser*  parser,
+                       T1_Token*   tokens,
+                       FT_UInt     max_tokens,
+                       FT_Int*     pnum_tokens );
+
+    FT_Error
+    (*load_field)( T1_Parser*       parser,
+                   const T1_Field*  field,
+                   void**           objects,
+                   FT_UInt          max_objects,
+                   FT_ULong*        pflags );
+
+    FT_Error
+    (*load_field_table)( T1_Parser*       parser,
+                         const T1_Field*  field,
+                         void**           objects,
+                         FT_UInt          max_objects,
+                         FT_ULong*        pflags );
+
+  } T1_Parser_Funcs;
+
+
+  /*************************************************************************/
+  /*                                                                       */
+  /* <Struct>                                                              */
+  /*    T1_Parser                                                          */
+  /*                                                                       */
+  /* <Description>                                                         */
+  /*    A T1_Parser is an object used to parse a Type 1 font very quickly. */
+  /*                                                                       */
+  /* <Fields>                                                              */
+  /*    cursor :: The current position in the text.                        */
+  /*                                                                       */
+  /*    base   :: Start of the processed text.                             */
+  /*                                                                       */
+  /*    limit  :: End of the processed text.                               */
+  /*                                                                       */
+  /*    error  :: The last error returned.                                 */
+  /*                                                                       */
+  /*    memory :: The object used for memory operations (alloc/realloc).   */
+  /*                                                                       */
+  /*    funcs  :: A table of functions for the parser.                     */
+  /*                                                                       */
+  struct T1_Parser_
+  {
+    FT_Byte*         cursor;
+    FT_Byte*         base;
+    FT_Byte*         limit;
+    FT_Error         error;
+    FT_Memory        memory;
+
+    T1_Parser_Funcs  funcs;
+  };
+
+
+
+  /*************************************************************************/
+  /*************************************************************************/
+  /*****                                                               *****/
+  /*****                         T1 BUILDER                            *****/
+  /*****                                                               *****/
+  /*************************************************************************/
+  /*************************************************************************/
+
+
+  typedef struct T1_Builder_  T1_Builder;
+
+
+  typedef FT_Error
+  (*T1_Builder_Check_Points_Func)( T1_Builder*  builder,
+                                  FT_Int       count );
+
+  typedef void
+  (*T1_Builder_Add_Point_Func)( T1_Builder*  builder,
+                                FT_Pos       x,
+                                FT_Pos       y,
+                                FT_Byte      flag );
+
+  typedef FT_Error
+  (*T1_Builder_Add_Point1_Func)( T1_Builder*  builder,
+                                 FT_Pos       x,
+                                 FT_Pos       y );
+
+  typedef FT_Error
+  (*T1_Builder_Add_Contour_Func)( T1_Builder*  builder );
+
+  typedef FT_Error
+  (*T1_Builder_Start_Point_Func)( T1_Builder*  builder,
+                                  FT_Pos       x,
+                                  FT_Pos       y );
+
+  typedef void
+  (*T1_Builder_Close_Contour_Func)( T1_Builder*  builder );
+
+
+  typedef struct  T1_Builder_Funcs_
+  {
+    void
+    (*init)( T1_Builder*   builder,
+             FT_Face       face,
+             FT_Size       size,
+             FT_GlyphSlot  slot,
+             FT_Bool       hinting );
+
+    void
+    (*done)( T1_Builder*   builder );
+
+    T1_Builder_Check_Points_Func   check_points;
+    T1_Builder_Add_Point_Func      add_point;
+    T1_Builder_Add_Point1_Func     add_point1;
+    T1_Builder_Add_Contour_Func    add_contour;
+    T1_Builder_Start_Point_Func    start_point;
+    T1_Builder_Close_Contour_Func  close_contour;
+
+  } T1_Builder_Funcs;
+
+
+
+  /*************************************************************************/
+  /*                                                                       */
+  /* <Structure>                                                           */
+  /*    T1_Builder                                                         */
+  /*                                                                       */
+  /* <Description>                                                         */
+  /*     A structure used during glyph loading to store its outline.       */
+  /*                                                                       */
+  /* <Fields>                                                              */
+  /*    memory       :: The current memory object.                         */
+  /*                                                                       */
+  /*    face         :: The current face object.                           */
+  /*                                                                       */
+  /*    glyph        :: The current glyph slot.                            */
+  /*                                                                       */
+  /*    loader       :: XXX                                                */
+  /*                                                                       */
+  /*    base         :: The base glyph outline.                            */
+  /*                                                                       */
+  /*    current      :: The current glyph outline.                         */
+  /*                                                                       */
+  /*    max_points   :: maximum points in builder outline                  */
+  /*                                                                       */
+  /*    max_contours :: Maximal number of contours in builder outline.     */
+  /*                                                                       */
+  /*    last         :: The last point position.                           */
+  /*                                                                       */
+  /*    scale_x      :: The horizontal scale (FUnits to sub-pixels).       */
+  /*                                                                       */
+  /*    scale_y      :: The vertical scale (FUnits to sub-pixels).         */
+  /*                                                                       */
+  /*    pos_x        :: The horizontal translation (if composite glyph).   */
+  /*                                                                       */
+  /*    pos_y        :: The vertical translation (if composite glyph).     */
+  /*                                                                       */
+  /*    left_bearing :: The left side bearing point.                       */
+  /*                                                                       */
+  /*    advance      :: The horizontal advance vector.                     */
+  /*                                                                       */
+  /*    bbox         :: Unused.                                            */
+  /*                                                                       */
+  /*    path_begun   :: A flag which indicates that a new path has begun.  */
+  /*                                                                       */
+  /*    load_points  :: If this flag is not set, no points are loaded.     */
+  /*                                                                       */
+  /*    no_recurse   :: Set but not used.                                  */
+  /*                                                                       */
+  /*    error        :: An error code that is only used to report memory   */
+  /*                    allocation problems.                               */
+  /*                                                                       */
+  /*    metrics_only :: A boolean indicating that we only want to compute  */
+  /*                    the metrics of a given glyph, not load all of its  */
+  /*                    points.                                            */
+  /*                                                                       */
+  /*    funcs        :: An array of function pointers for the builder.     */
+  /*                                                                       */
+  struct  T1_Builder_
+  {
+    FT_Memory         memory;
+    FT_Face           face;
+    FT_GlyphSlot      glyph;
+    FT_GlyphLoader*   loader;
+    FT_Outline*       base;
+    FT_Outline*       current;
+
+    FT_Vector         last;
+
+    FT_Fixed          scale_x;
+    FT_Fixed          scale_y;
+
+    FT_Pos            pos_x;
+    FT_Pos            pos_y;
+
+    FT_Vector         left_bearing;
+    FT_Vector         advance;
+
+    FT_BBox           bbox;          /* bounding box */
+    FT_Bool           path_begun;
+    FT_Bool           load_points;
+    FT_Bool           no_recurse;
+    FT_Bool           shift;
+
+    FT_Error          error;         /* only used for memory errors */
+    FT_Bool           metrics_only;
+
+    void*             hints_funcs;    /* hinter-specific */
+    void*             hints_globals;  /* hinter-specific */
+
+    T1_Builder_Funcs  funcs;      
+  };
+
+
+  /*************************************************************************/
+  /*************************************************************************/
+  /*****                                                               *****/
+  /*****                         T1 DECODER                            *****/
+  /*****                                                               *****/
+  /*************************************************************************/
+  /*************************************************************************/
+
+#if 0
+
+  /*************************************************************************/
+  /*                                                                       */
+  /* T1_MAX_SUBRS_CALLS details the maximum number of nested sub-routine   */
+  /* calls during glyph loading.                                           */
+  /*                                                                       */
+#define T1_MAX_SUBRS_CALLS  8
+
+
+  /*************************************************************************/
+  /*                                                                       */
+  /* T1_MAX_CHARSTRING_OPERANDS is the charstring stack's capacity.  A     */
+  /* minimum of 16 is required.                                            */
+  /*                                                                       */
+#define T1_MAX_CHARSTRINGS_OPERANDS  32
+
+#endif /* 0 */
+
+
+  typedef struct  T1_Decoder_Zone_
+  {
+    FT_Byte*  cursor;
+    FT_Byte*  base;
+    FT_Byte*  limit;
+
+  } T1_Decoder_Zone;
+
+
+  typedef struct T1_Decoder_        T1_Decoder;
+  typedef struct T1_Decoder_Funcs_  T1_Decoder_Funcs;
+
+
+  typedef FT_Error
+  (*T1_Decoder_Callback)( T1_Decoder*  decoder,
+                          FT_UInt      glyph_index );
+
+
+  struct  T1_Decoder_Funcs_
+  {
+    FT_Error
+    (*init) ( T1_Decoder*          decoder,
+              FT_Face              face,
+              FT_Size              size,
+              FT_GlyphSlot         slot,
+              FT_Byte**            glyph_names,
+              T1_Blend*            blend,
+              FT_Bool              hinting,
+              T1_Decoder_Callback  callback );
+
+    void
+    (*done) ( T1_Decoder*  decoder );
+
+    FT_Error
+    (*parse_charstrings)( T1_Decoder*  decoder,
+                          FT_Byte*     base,
+                          FT_UInt      len );
+  };
+
+
+  struct  T1_Decoder_
+  {
+    T1_Builder           builder;
+
+    FT_Long              stack[T1_MAX_CHARSTRINGS_OPERANDS];
+    FT_Long*             top;
+
+    T1_Decoder_Zone      zones[T1_MAX_SUBRS_CALLS + 1];
+    T1_Decoder_Zone*     zone;
+
+    PSNames_Interface*   psnames;      /* for seac */
+    FT_UInt              num_glyphs;
+    FT_Byte**            glyph_names;
+
+    FT_Int               lenIV;        /* internal for sub routine calls */
+    FT_UInt              num_subrs;
+    FT_Byte**            subrs;
+    FT_Int*              subrs_len;    /* array of subrs length (optional) */
+
+    FT_Matrix            font_matrix;
+    FT_Vector            font_offset;
+
+    FT_Int               flex_state;
+    FT_Int               num_flex_vectors;
+    FT_Vector            flex_vectors[7];
+
+    T1_Blend*            blend;       /* for multiple master support */
+
+    T1_Decoder_Callback  parse_callback;
+    T1_Decoder_Funcs     funcs;
+  };
+
+
+  /*************************************************************************/
+  /*************************************************************************/
+  /*****                                                               *****/
+  /*****                        PSAux Module Interface                 *****/
+  /*****                                                               *****/
+  /*************************************************************************/
+  /*************************************************************************/
+
+  typedef struct  PSAux_Interface_
+  {
+    const PS_Table_Funcs*    ps_table_funcs;
+    const T1_Parser_Funcs*   t1_parser_funcs;
+    const T1_Builder_Funcs*  t1_builder_funcs;
+    const T1_Decoder_Funcs*  t1_decoder_funcs;
+
+    void
+    (*t1_decrypt)( FT_Byte*   buffer,
+                   FT_Offset  length,
+                   FT_UShort  seed );
+
+  } PSAux_Interface;
+
+
+FT_END_HEADER
+
+#endif /* __PSAUX_H__ */
+
+
+/* END */
+@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@@
+
+
+1.1.9.1
+log
+@OpenBSD just has imported exactly this tree into their vendor branch,
+called the same tag, in XF4/xc
+This is, apparently, the last XFree86 snapshot before the licence change
+(ie, addition of the advertising clause)
+
+Since the developers don't see any problems with that, and we would like
+to integrate improvements done by the remaining one or two (or so) XFree86
+developers (j/k), this prepares enabling us to update X-Window in the future.
+@
+text
+@d8 1
+a8 1
+/*  Copyright 1996-2001, 2002 by                                           */
+d41 1
+a41 2
+  typedef struct PS_TableRec_*              PS_Table;
+  typedef const struct PS_Table_FuncsRec_*  PS_Table_Funcs;
+d47 1
+a47 1
+  /*    PS_Table_FuncsRec                                                  */
+d61 1
+a61 1
+  typedef struct  PS_Table_FuncsRec_
+d64 1
+a64 1
+    (*init)( PS_Table   table,
+d69 1
+a69 1
+    (*done)( PS_Table  table );
+d72 1
+a72 1
+    (*add)( PS_Table   table,
+d78 1
+a78 1
+    (*release)( PS_Table  table );
+d80 1
+a80 1
+  } PS_Table_FuncsRec;
+d86 1
+a86 1
+  /*    PS_TableRec                                                        */
+d115 1
+a115 1
+  typedef struct  PS_TableRec_
+d117 9
+a125 9
+    FT_Byte*           block;          /* current memory block           */
+    FT_Offset          cursor;         /* current cursor in memory block */
+    FT_Offset          capacity;       /* current size of memory block   */
+    FT_Long            init;
+
+    FT_Int             max_elems;
+    FT_Int             num_elems;
+    FT_Byte**          elements;       /* addresses of table elements */
+    FT_Int*            lengths;        /* lengths of table elements   */
+d127 2
+a128 2
+    FT_Memory          memory;
+    PS_Table_FuncsRec  funcs;
+d130 1
+a130 1
+  } PS_TableRec;
+d141 1
+a141 6
+  typedef struct PS_ParserRec_*  PS_Parser;
+
+  typedef struct T1_TokenRec_*   T1_Token;
+
+  typedef struct T1_FieldRec_*   T1_Field;
+
+d144 1
+a144 1
+  typedef enum  T1_TokenType_
+d146 4
+a149 4
+    T1_TOKEN_TYPE_NONE = 0,
+    T1_TOKEN_TYPE_ANY,
+    T1_TOKEN_TYPE_STRING,
+    T1_TOKEN_TYPE_ARRAY,
+d152 1
+a152 1
+    T1_TOKEN_TYPE_MAX
+d154 1
+a154 1
+  } T1_TokenType;
+d158 1
+a158 1
+  typedef struct  T1_TokenRec_
+d160 3
+a162 3
+    FT_Byte*      start;   /* first character of token in input stream */
+    FT_Byte*      limit;   /* first character after the token          */
+    T1_TokenType  type;    /* type of token                            */
+d164 1
+a164 1
+  } T1_TokenRec;
+d168 1
+a168 1
+  typedef enum  T1_FieldType_
+d170 8
+a177 9
+    T1_FIELD_TYPE_NONE = 0,
+    T1_FIELD_TYPE_BOOL,
+    T1_FIELD_TYPE_INTEGER,
+    T1_FIELD_TYPE_FIXED,
+    T1_FIELD_TYPE_STRING,
+    T1_FIELD_TYPE_BBOX,
+    T1_FIELD_TYPE_INTEGER_ARRAY,
+    T1_FIELD_TYPE_FIXED_ARRAY,
+    T1_FIELD_TYPE_CALLBACK,
+d180 1
+a180 3
+    T1_FIELD_TYPE_MAX
+
+  } T1_FieldType;
+d182 1
+d184 1
+a184 1
+  typedef enum  T1_FieldLocation_
+d186 4
+a189 5
+    T1_FIELD_LOCATION_CID_INFO,
+    T1_FIELD_LOCATION_FONT_DICT,
+    T1_FIELD_LOCATION_FONT_INFO,
+    T1_FIELD_LOCATION_PRIVATE,
+    T1_FIELD_LOCATION_BBOX,
+d192 1
+a192 1
+    T1_FIELD_LOCATION_MAX
+d194 1
+a194 1
+  } T1_FieldLocation;
+d198 2
+a199 2
+  (*T1_Field_ParseFunc)( FT_Face     face,
+                         FT_Pointer  parser );
+d203 1
+a203 1
+  typedef struct  T1_FieldRec_
+d205 11
+a215 11
+    const char*         ident;        /* field identifier               */
+    T1_FieldLocation    location;
+    T1_FieldType        type;         /* type of field                  */
+    T1_Field_ParseFunc  reader;
+    FT_UInt             offset;       /* offset of field in object      */
+    FT_Byte             size;         /* size of field in bytes         */
+    FT_UInt             array_max;    /* maximal number of elements for */
+                                      /* array                          */
+    FT_UInt             count_offset; /* offset of element count for    */
+                                      /* arrays                         */
+  } T1_FieldRec;
+d227 6
+a232 6
+#define T1_NEW_CALLBACK_FIELD( _ident, _reader )    \
+          {                                         \
+            _ident, T1CODE, T1_FIELD_TYPE_CALLBACK, \
+            (T1_Field_ParseFunc)_reader,            \
+            0, 0,                                   \
+            0, 0                                    \
+d255 2
+a256 2
+#define T1_FIELD_TYPE_BOOL( _ident, _fname )                        \
+          T1_NEW_SIMPLE_FIELD( _ident, T1_FIELD_TYPE_BOOL, _fname )
+d258 2
+a259 2
+#define T1_FIELD_NUM( _ident, _fname )                                 \
+          T1_NEW_SIMPLE_FIELD( _ident, T1_FIELD_TYPE_INTEGER, _fname )
+d261 2
+a262 2
+#define T1_FIELD_FIXED( _ident, _fname )                             \
+          T1_NEW_SIMPLE_FIELD( _ident, T1_FIELD_TYPE_FIXED, _fname )
+d264 2
+a265 2
+#define T1_FIELD_STRING( _ident, _fname )                             \
+          T1_NEW_SIMPLE_FIELD( _ident, T1_FIELD_TYPE_STRING, _fname )
+d267 3
+a269 2
+#define T1_FIELD_BBOX( _ident, _fname )                             \
+          T1_NEW_SIMPLE_FIELD( _ident, T1_FIELD_TYPE_BBOX, _fname )
+d271 3
+d275 3
+a277 3
+#define T1_FIELD_NUM_TABLE( _ident, _fname, _fmax )                \
+          T1_NEW_TABLE_FIELD( _ident, T1_FIELD_TYPE_INTEGER_ARRAY, \
+                              _fname, _fmax )
+d279 3
+a281 3
+#define T1_FIELD_FIXED_TABLE( _ident, _fname, _fmax )            \
+          T1_NEW_TABLE_FIELD( _ident, T1_FIELD_TYPE_FIXED_ARRAY, \
+                              _fname, _fmax )
+d283 2
+a284 3
+#define T1_FIELD_NUM_TABLE2( _ident, _fname, _fmax )                \
+          T1_NEW_TABLE_FIELD2( _ident, T1_FIELD_TYPE_INTEGER_ARRAY, \
+                               _fname, _fmax )
+a285 3
+#define T1_FIELD_FIXED_TABLE2( _ident, _fname, _fmax )            \
+          T1_NEW_TABLE_FIELD2( _ident, T1_FIELD_TYPE_FIXED_ARRAY, \
+                               _fname, _fmax )
+a286 2
+#define T1_FIELD_CALLBACK( _ident, _name )       \
+          T1_NEW_CALLBACK_FIELD( _ident, _name )
+d297 1
+a297 3
+  typedef const struct PS_Parser_FuncsRec_*  PS_Parser_Funcs;
+
+  typedef struct  PS_Parser_FuncsRec_
+d300 4
+a303 4
+    (*init)( PS_Parser  parser,
+             FT_Byte*   base,
+             FT_Byte*   limit,
+             FT_Memory  memory );
+d306 1
+a306 1
+    (*done)( PS_Parser  parser );
+d309 1
+a309 1
+    (*skip_spaces)( PS_Parser  parser );
+d311 1
+a311 1
+    (*skip_alpha)( PS_Parser  parser );
+d314 1
+a314 1
+    (*to_int)( PS_Parser  parser );
+d316 2
+a317 2
+    (*to_fixed)( PS_Parser  parser,
+                 FT_Int     power_ten );
+d319 3
+a321 3
+    (*to_coord_array)( PS_Parser  parser,
+                       FT_Int     max_coords,
+                       FT_Short*  coords );
+d323 4
+a326 4
+    (*to_fixed_array)( PS_Parser  parser,
+                       FT_Int     max_values,
+                       FT_Fixed*  values,
+                       FT_Int     power_ten );
+d329 7
+a335 7
+    (*to_token)( PS_Parser  parser,
+                 T1_Token   token );
+    void
+    (*to_token_array)( PS_Parser  parser,
+                       T1_Token   tokens,
+                       FT_UInt    max_tokens,
+                       FT_Int*    pnum_tokens );
+d338 5
+a342 5
+    (*load_field)( PS_Parser       parser,
+                   const T1_Field  field,
+                   void**          objects,
+                   FT_UInt         max_objects,
+                   FT_ULong*       pflags );
+d345 5
+a349 5
+    (*load_field_table)( PS_Parser       parser,
+                         const T1_Field  field,
+                         void**          objects,
+                         FT_UInt         max_objects,
+                         FT_ULong*       pflags );
+d351 1
+a351 1
+  } PS_Parser_FuncsRec;
+d357 1
+a357 1
+  /*    PS_ParserRec                                                       */
+d360 1
+a360 1
+  /*    A PS_Parser is an object used to parse a Type 1 font very quickly. */
+d375 1
+a375 1
+  typedef struct  PS_ParserRec_
+d377 5
+a381 5
+    FT_Byte*   cursor;
+    FT_Byte*   base;
+    FT_Byte*   limit;
+    FT_Error   error;
+    FT_Memory  memory;
+d383 2
+a384 1
+    PS_Parser_FuncsRec  funcs;
+a385 1
+  } PS_ParserRec;
+d397 1
+a397 1
+  typedef struct T1_BuilderRec_*  T1_Builder;
+d401 2
+a402 2
+  (*T1_Builder_Check_Points_Func)( T1_Builder  builder,
+                                   FT_Int      count );
+d405 4
+a408 4
+  (*T1_Builder_Add_Point_Func)( T1_Builder  builder,
+                                FT_Pos      x,
+                                FT_Pos      y,
+                                FT_Byte     flag );
+d411 3
+a413 3
+  (*T1_Builder_Add_Point1_Func)( T1_Builder  builder,
+                                 FT_Pos      x,
+                                 FT_Pos      y );
+d416 1
+a416 1
+  (*T1_Builder_Add_Contour_Func)( T1_Builder  builder );
+d419 3
+a421 3
+  (*T1_Builder_Start_Point_Func)( T1_Builder  builder,
+                                  FT_Pos      x,
+                                  FT_Pos      y );
+d424 1
+a424 2
+  (*T1_Builder_Close_Contour_Func)( T1_Builder  builder );
+
+a425 1
+  typedef const struct T1_Builder_FuncsRec_*  T1_Builder_Funcs;
+d427 1
+a427 1
+  typedef struct  T1_Builder_FuncsRec_
+d430 1
+a430 1
+    (*init)( T1_Builder    builder,
+d437 1
+a437 1
+    (*done)( T1_Builder   builder );
+d446 2
+a447 1
+  } T1_Builder_FuncsRec;
+d453 1
+a453 1
+  /*    T1_BuilderRec                                                      */
+d506 1
+a506 1
+  typedef struct  T1_BuilderRec_
+d508 6
+a513 6
+    FT_Memory       memory;
+    FT_Face         face;
+    FT_GlyphSlot    glyph;
+    FT_GlyphLoader  loader;
+    FT_Outline*     base;
+    FT_Outline*     current;
+d515 1
+a515 1
+    FT_Vector       last;
+d517 2
+a518 2
+    FT_Fixed        scale_x;
+    FT_Fixed        scale_y;
+d520 2
+a521 2
+    FT_Pos          pos_x;
+    FT_Pos          pos_y;
+d523 2
+a524 2
+    FT_Vector       left_bearing;
+    FT_Vector       advance;
+d526 5
+a530 5
+    FT_BBox         bbox;          /* bounding box */
+    FT_Bool         path_begun;
+    FT_Bool         load_points;
+    FT_Bool         no_recurse;
+    FT_Bool         shift;
+d532 2
+a533 2
+    FT_Error        error;         /* only used for memory errors */
+    FT_Bool         metrics_only;
+d535 2
+a536 2
+    void*           hints_funcs;    /* hinter-specific */
+    void*           hints_globals;  /* hinter-specific */
+d538 2
+a539 3
+    T1_Builder_FuncsRec  funcs;
+
+  } T1_BuilderRec;
+d570 1
+a570 1
+  typedef struct  T1_Decoder_ZoneRec_
+d576 1
+a576 1
+  } T1_Decoder_ZoneRec, *T1_Decoder_Zone;
+d579 2
+a580 2
+  typedef struct T1_DecoderRec_*              T1_Decoder;
+  typedef const struct T1_Decoder_FuncsRec_*  T1_Decoder_Funcs;
+d584 2
+a585 2
+  (*T1_Decoder_Callback)( T1_Decoder  decoder,
+                          FT_UInt     glyph_index );
+d588 1
+a588 1
+  typedef struct  T1_Decoder_FuncsRec_
+d591 8
+a598 9
+    (*init)( T1_Decoder           decoder,
+             FT_Face              face,
+             FT_Size              size,
+             FT_GlyphSlot         slot,
+             FT_Byte**            glyph_names,
+             PS_Blend             blend,
+             FT_Bool              hinting,
+             FT_Render_Mode       hint_mode,
+             T1_Decoder_Callback  callback );
+d601 1
+a601 1
+    (*done)( T1_Decoder  decoder );
+d604 4
+a607 5
+    (*parse_charstrings)( T1_Decoder  decoder,
+                          FT_Byte*    base,
+                          FT_UInt     len );
+
+  } T1_Decoder_FuncsRec;
+d610 1
+a610 1
+  typedef struct  T1_DecoderRec_
+d612 1
+a612 1
+    T1_BuilderRec        builder;
+d617 2
+a618 2
+    T1_Decoder_ZoneRec   zones[T1_MAX_SUBRS_CALLS + 1];
+    T1_Decoder_Zone      zone;
+d620 1
+a620 1
+    PSNames_Service      psnames;      /* for seac */
+d636 1
+a636 4
+    PS_Blend             blend;       /* for multiple master support */
+
+    FT_UInt32            hint_flags;
+    FT_Render_Mode       hint_mode;
+d639 2
+a640 23
+    T1_Decoder_FuncsRec  funcs;
+
+  } T1_DecoderRec;
+
+
+  /*************************************************************************/
+  /*************************************************************************/
+  /*****                                                               *****/
+  /*****                     TYPE1 CHARMAPS                            *****/
+  /*****                                                               *****/
+  /*************************************************************************/
+  /*************************************************************************/
+
+  typedef const struct T1_CMap_ClassesRec_*  T1_CMap_Classes;
+
+  typedef struct T1_CMap_ClassesRec_
+  {
+    FT_CMap_Class  standard;
+    FT_CMap_Class  expert;
+    FT_CMap_Class  custom;
+    FT_CMap_Class  unicode;
+
+  } T1_CMap_ClassesRec;
+d651 1
+a651 1
+  typedef struct  PSAux_ServiceRec_
+d653 4
+a656 5
+    /* don't use `PS_Table_Funcs' and friends to avoid compiler warnings */
+    const PS_Table_FuncsRec*    ps_table_funcs;
+    const PS_Parser_FuncsRec*   ps_parser_funcs;
+    const T1_Builder_FuncsRec*  t1_builder_funcs;
+    const T1_Decoder_FuncsRec*  t1_decoder_funcs;
+d663 1
+a663 3
+    T1_CMap_Classes  t1_cmap_classes;
+
+  } PSAux_ServiceRec, *PSAux_Service;
+a664 2
+  /* backwards-compatible type definition */
+  typedef PSAux_ServiceRec   PSAux_Interface;
+@
+
+
+1.1.1.1
+log
+@Import OpenBSD 3.3 XF4 repository from CTM 3132 the first time
+This finalizes starting an OpenBSD-mirabile (aka MirBSD) repository.
+
+### MirBSD is:
+# Copyright (c) 1982-2003 by Thorsten "mirabile" Glaser <x86@@ePost.de>
+# Copyright © 1968-2003  The authors of And contributors to UNIX®, the
+#       C Language, BSD/Berkeley Unix; 386BSD, NetBSD 1.1 and OpenBSD.
+#
+# Anyone who obtained a copy of this work is hereby permitted to freely use,
+# distribute, modify, merge, sublicence, give away or sell it as long as the
+# authors are given due credit and the following notice is retained:
+#
+# This work is provided "as is", with no explicit or implicit warranty what-
+# soever. Use it only at your own risk. In no event may an author or contri-
+# butor be held liable for any damage, directly or indirectly, that origina-
+# ted through or is caused by creation or modification of this work.
+
+MirBSD is my private tree. MirBSD does not differ very much from OpenBSD
+and intentionally tracks OpenBSD. That's why it _is_ OpenBSD, just not the
+official one. It's like with DarrenBSD.
+
+At time of this writing, no advertising for MirBSD must be done,
+because the advertising clause has not yet been sorted out.
+
+http://templeofhate.com/tglaser/MirBSD/index.php
+@
+text
+@@
+
+
+1.1.1.2
+log
+@The X-Windowing System
+
+Import XFree86 4.3 from OpenBSD by CTM, in the hope it's stable
+@
+text
+@d8 1
+a8 1
+/*  Copyright 1996-2001, 2002 by                                           */
+d41 1
+a41 2
+  typedef struct PS_TableRec_*              PS_Table;
+  typedef const struct PS_Table_FuncsRec_*  PS_Table_Funcs;
+d47 1
+a47 1
+  /*    PS_Table_FuncsRec                                                  */
+d61 1
+a61 1
+  typedef struct  PS_Table_FuncsRec_
+d64 1
+a64 1
+    (*init)( PS_Table   table,
+d69 1
+a69 1
+    (*done)( PS_Table  table );
+d72 1
+a72 1
+    (*add)( PS_Table   table,
+d78 1
+a78 1
+    (*release)( PS_Table  table );
+d80 1
+a80 1
+  } PS_Table_FuncsRec;
+d86 1
+a86 1
+  /*    PS_TableRec                                                        */
+d115 1
+a115 1
+  typedef struct  PS_TableRec_
+d117 9
+a125 9
+    FT_Byte*           block;          /* current memory block           */
+    FT_Offset          cursor;         /* current cursor in memory block */
+    FT_Offset          capacity;       /* current size of memory block   */
+    FT_Long            init;
+
+    FT_Int             max_elems;
+    FT_Int             num_elems;
+    FT_Byte**          elements;       /* addresses of table elements */
+    FT_Int*            lengths;        /* lengths of table elements   */
+d127 2
+a128 2
+    FT_Memory          memory;
+    PS_Table_FuncsRec  funcs;
+d130 1
+a130 1
+  } PS_TableRec;
+d141 1
+a141 5
+  typedef struct PS_ParserRec_*  PS_Parser;
+
+  typedef struct T1_TokenRec_*   T1_Token;
+  
+  typedef struct T1_FieldRec_*   T1_Field;
+a142 1
+  
+d144 1
+a144 1
+  typedef enum  T1_TokenType_
+d146 4
+a149 4
+    T1_TOKEN_TYPE_NONE = 0,
+    T1_TOKEN_TYPE_ANY,
+    T1_TOKEN_TYPE_STRING,
+    T1_TOKEN_TYPE_ARRAY,
+d152 1
+a152 1
+    T1_TOKEN_TYPE_MAX
+d154 1
+a154 1
+  } T1_TokenType;
+d158 1
+a158 1
+  typedef struct  T1_TokenRec_
+d160 3
+a162 3
+    FT_Byte*      start;   /* first character of token in input stream */
+    FT_Byte*      limit;   /* first character after the token          */
+    T1_TokenType  type;    /* type of token                            */
+d164 1
+a164 1
+  } T1_TokenRec;
+d168 1
+a168 1
+  typedef enum  T1_FieldType_
+d170 8
+a177 8
+    T1_FIELD_TYPE_NONE = 0,
+    T1_FIELD_TYPE_BOOL,
+    T1_FIELD_TYPE_INTEGER,
+    T1_FIELD_TYPE_FIXED,
+    T1_FIELD_TYPE_STRING,
+    T1_FIELD_TYPE_INTEGER_ARRAY,
+    T1_FIELD_TYPE_FIXED_ARRAY,
+    T1_FIELD_TYPE_CALLBACK,
+d180 1
+a180 3
+    T1_FIELD_TYPE_MAX
+
+  } T1_FieldType;
+d182 1
+d184 1
+a184 1
+  typedef enum  T1_FieldLocation_
+d186 4
+a189 4
+    T1_FIELD_LOCATION_CID_INFO,
+    T1_FIELD_LOCATION_FONT_DICT,
+    T1_FIELD_LOCATION_FONT_INFO,
+    T1_FIELD_LOCATION_PRIVATE,
+d192 1
+a192 1
+    T1_FIELD_LOCATION_MAX
+d194 1
+a194 1
+  } T1_FieldLocation;
+d198 2
+a199 2
+  (*T1_Field_ParseFunc)( FT_Face     face,
+                         FT_Pointer  parser );
+d203 1
+a203 1
+  typedef struct  T1_FieldRec_
+d205 11
+a215 11
+    const char*         ident;        /* field identifier               */
+    T1_FieldLocation    location;
+    T1_FieldType        type;         /* type of field                  */
+    T1_Field_ParseFunc  reader;
+    FT_UInt             offset;       /* offset of field in object      */
+    FT_Byte             size;         /* size of field in bytes         */
+    FT_UInt             array_max;    /* maximal number of elements for */
+                                      /* array                          */
+    FT_UInt             count_offset; /* offset of element count for    */
+                                      /* arrays                         */
+  } T1_FieldRec;
+d227 6
+a232 6
+#define T1_NEW_CALLBACK_FIELD( _ident, _reader )    \
+          {                                         \
+            _ident, T1CODE, T1_FIELD_TYPE_CALLBACK, \
+            (T1_Field_ParseFunc)_reader,            \
+            0, 0,                                   \
+            0, 0                                    \
+d255 2
+a256 2
+#define T1_FIELD_TYPE_BOOL( _ident, _fname )                        \
+          T1_NEW_SIMPLE_FIELD( _ident, T1_FIELD_TYPE_BOOL, _fname )
+d258 2
+a259 2
+#define T1_FIELD_NUM( _ident, _fname )                                 \
+          T1_NEW_SIMPLE_FIELD( _ident, T1_FIELD_TYPE_INTEGER, _fname )
+d261 2
+a262 2
+#define T1_FIELD_FIXED( _ident, _fname )                             \
+          T1_NEW_SIMPLE_FIELD( _ident, T1_FIELD_TYPE_FIXED, _fname )
+d264 2
+a265 2
+#define T1_FIELD_STRING( _ident, _fname )                             \
+          T1_NEW_SIMPLE_FIELD( _ident, T1_FIELD_TYPE_STRING, _fname )
+d267 3
+a269 3
+#define T1_FIELD_NUM_TABLE( _ident, _fname, _fmax )                \
+          T1_NEW_TABLE_FIELD( _ident, T1_FIELD_TYPE_INTEGER_ARRAY, \
+                              _fname, _fmax )
+d271 3
+a273 3
+#define T1_FIELD_FIXED_TABLE( _ident, _fname, _fmax )            \
+          T1_NEW_TABLE_FIELD( _ident, T1_FIELD_TYPE_FIXED_ARRAY, \
+                              _fname, _fmax )
+d275 3
+a277 3
+#define T1_FIELD_NUM_TABLE2( _ident, _fname, _fmax )                \
+          T1_NEW_TABLE_FIELD2( _ident, T1_FIELD_TYPE_INTEGER_ARRAY, \
+                               _fname, _fmax )
+d280 2
+a281 2
+          T1_NEW_TABLE_FIELD2( _ident, T1_FIELD_TYPE_FIXED_ARRAY, \
+                               _fname, _fmax )
+d283 1
+a283 1
+#define T1_FIELD_CALLBACK( _ident, _name )       \
+d287 2
+d297 1
+a297 3
+  typedef const struct PS_Parser_FuncsRec_*  PS_Parser_Funcs;
+
+  typedef struct  PS_Parser_FuncsRec_
+d300 4
+a303 4
+    (*init)( PS_Parser  parser,
+             FT_Byte*   base,
+             FT_Byte*   limit,
+             FT_Memory  memory );
+d306 1
+a306 1
+    (*done)( PS_Parser  parser );
+d309 1
+a309 1
+    (*skip_spaces)( PS_Parser  parser );
+d311 1
+a311 1
+    (*skip_alpha)( PS_Parser  parser );
+d314 1
+a314 1
+    (*to_int)( PS_Parser  parser );
+d316 2
+a317 2
+    (*to_fixed)( PS_Parser  parser,
+                 FT_Int     power_ten );
+d319 3
+a321 3
+    (*to_coord_array)( PS_Parser  parser,
+                       FT_Int     max_coords,
+                       FT_Short*  coords );
+d323 4
+a326 4
+    (*to_fixed_array)( PS_Parser  parser,
+                       FT_Int     max_values,
+                       FT_Fixed*  values,
+                       FT_Int     power_ten );
+d329 7
+a335 7
+    (*to_token)( PS_Parser  parser,
+                 T1_Token   token );
+    void
+    (*to_token_array)( PS_Parser  parser,
+                       T1_Token   tokens,
+                       FT_UInt    max_tokens,
+                       FT_Int*    pnum_tokens );
+d338 5
+a342 5
+    (*load_field)( PS_Parser       parser,
+                   const T1_Field  field,
+                   void**          objects,
+                   FT_UInt         max_objects,
+                   FT_ULong*       pflags );
+d345 5
+a349 5
+    (*load_field_table)( PS_Parser       parser,
+                         const T1_Field  field,
+                         void**          objects,
+                         FT_UInt         max_objects,
+                         FT_ULong*       pflags );
+d351 1
+a351 1
+  } PS_Parser_FuncsRec;
+d357 1
+a357 1
+  /*    PS_ParserRec                                                       */
+d360 1
+a360 1
+  /*    A PS_Parser is an object used to parse a Type 1 font very quickly. */
+d375 1
+a375 1
+  typedef struct  PS_ParserRec_
+d377 9
+a385 9
+    FT_Byte*   cursor;
+    FT_Byte*   base;
+    FT_Byte*   limit;
+    FT_Error   error;
+    FT_Memory  memory;
+
+    PS_Parser_FuncsRec  funcs;
+    
+  } PS_ParserRec;
+d397 1
+a397 1
+  typedef struct T1_BuilderRec_*  T1_Builder;
+d401 2
+a402 2
+  (*T1_Builder_Check_Points_Func)( T1_Builder  builder,
+                                   FT_Int      count );
+d405 4
+a408 4
+  (*T1_Builder_Add_Point_Func)( T1_Builder  builder,
+                                FT_Pos      x,
+                                FT_Pos      y,
+                                FT_Byte     flag );
+d411 3
+a413 3
+  (*T1_Builder_Add_Point1_Func)( T1_Builder  builder,
+                                 FT_Pos      x,
+                                 FT_Pos      y );
+d416 1
+a416 1
+  (*T1_Builder_Add_Contour_Func)( T1_Builder  builder );
+d419 3
+a421 3
+  (*T1_Builder_Start_Point_Func)( T1_Builder  builder,
+                                  FT_Pos      x,
+                                  FT_Pos      y );
+d424 1
+a424 2
+  (*T1_Builder_Close_Contour_Func)( T1_Builder  builder );
+
+a425 1
+  typedef const struct T1_Builder_FuncsRec_*  T1_Builder_Funcs;
+d427 1
+a427 1
+  typedef struct  T1_Builder_FuncsRec_
+d430 1
+a430 1
+    (*init)( T1_Builder    builder,
+d437 1
+a437 1
+    (*done)( T1_Builder   builder );
+d446 2
+a447 1
+  } T1_Builder_FuncsRec;
+d453 1
+a453 1
+  /*    T1_BuilderRec                                                      */
+d506 1
+a506 1
+  typedef struct  T1_BuilderRec_
+d508 32
+a539 33
+    FT_Memory       memory;
+    FT_Face         face;
+    FT_GlyphSlot    glyph;
+    FT_GlyphLoader  loader;
+    FT_Outline*     base;
+    FT_Outline*     current;
+
+    FT_Vector       last;
+
+    FT_Fixed        scale_x;
+    FT_Fixed        scale_y;
+
+    FT_Pos          pos_x;
+    FT_Pos          pos_y;
+
+    FT_Vector       left_bearing;
+    FT_Vector       advance;
+
+    FT_BBox         bbox;          /* bounding box */
+    FT_Bool         path_begun;
+    FT_Bool         load_points;
+    FT_Bool         no_recurse;
+    FT_Bool         shift;
+
+    FT_Error        error;         /* only used for memory errors */
+    FT_Bool         metrics_only;
+
+    void*           hints_funcs;    /* hinter-specific */
+    void*           hints_globals;  /* hinter-specific */
+
+    T1_Builder_FuncsRec  funcs;
+    
+  } T1_BuilderRec;
+d570 1
+a570 1
+  typedef struct  T1_Decoder_ZoneRec_
+d576 1
+a576 1
+  } T1_Decoder_ZoneRec, *T1_Decoder_Zone;
+d579 2
+a580 2
+  typedef struct T1_DecoderRec_*              T1_Decoder;
+  typedef const struct T1_Decoder_FuncsRec_*  T1_Decoder_Funcs;
+d584 2
+a585 2
+  (*T1_Decoder_Callback)( T1_Decoder  decoder,
+                          FT_UInt     glyph_index );
+d588 1
+a588 1
+  typedef struct  T1_Decoder_FuncsRec_
+d591 8
+a598 8
+    (*init)( T1_Decoder           decoder,
+             FT_Face              face,
+             FT_Size              size,
+             FT_GlyphSlot         slot,
+             FT_Byte**            glyph_names,
+             PS_Blend             blend,
+             FT_Bool              hinting,
+             T1_Decoder_Callback  callback );
+d601 1
+a601 1
+    (*done)( T1_Decoder  decoder );
+d604 4
+a607 5
+    (*parse_charstrings)( T1_Decoder  decoder,
+                          FT_Byte*    base,
+                          FT_UInt     len );
+                          
+  } T1_Decoder_FuncsRec;
+d610 1
+a610 1
+  typedef struct  T1_DecoderRec_
+d612 1
+a612 1
+    T1_BuilderRec        builder;
+d617 2
+a618 2
+    T1_Decoder_ZoneRec   zones[T1_MAX_SUBRS_CALLS + 1];
+    T1_Decoder_Zone      zone;
+d620 1
+a620 1
+    PSNames_Service      psnames;      /* for seac */
+d636 1
+a636 1
+    PS_Blend             blend;       /* for multiple master support */
+d639 2
+a640 3
+    T1_Decoder_FuncsRec  funcs;
+    
+  } T1_DecoderRec;
+a645 20
+  /*****                     TYPE1 CHARMAPS                            *****/
+  /*****                                                               *****/
+  /*************************************************************************/
+  /*************************************************************************/
+
+  typedef const struct T1_CMap_ClassesRec_*  T1_CMap_Classes;
+
+  typedef struct T1_CMap_ClassesRec_
+  {
+    FT_CMap_Class  standard;
+    FT_CMap_Class  expert;
+    FT_CMap_Class  custom;
+    FT_CMap_Class  unicode;
+  
+  } T1_CMap_ClassesRec;
+  
+
+  /*************************************************************************/
+  /*************************************************************************/
+  /*****                                                               *****/
+d651 1
+a651 1
+  typedef struct  PSAux_ServiceRec_
+d653 4
+a656 5
+    /* don't use `PS_Table_Funcs' and friends to avoid compiler warnings */
+    const PS_Table_FuncsRec*    ps_table_funcs;
+    const PS_Parser_FuncsRec*   ps_parser_funcs;
+    const T1_Builder_FuncsRec*  t1_builder_funcs;
+    const T1_Decoder_FuncsRec*  t1_decoder_funcs;
+d663 1
+a663 3
+    T1_CMap_Classes  t1_cmap_classes;
+
+  } PSAux_ServiceRec, *PSAux_Service;
+a664 2
+  /* backwards-compatible type definition */
+  typedef PSAux_ServiceRec   PSAux_Interface;
+@
+
+
+1.1.1.3
+log
+@That's what OpenBSD will, probably, ship as XF4 in 3.5
+their last sync against XFree86 4.3-current has been
+imported into our vendor branch, too
+@
+text
+@d145 1
+a145 1
+
+d148 1
+a148 1
+
+a180 1
+    T1_FIELD_TYPE_BBOX,
+a196 1
+    T1_FIELD_LOCATION_BBOX,
+a273 4
+#define T1_FIELD_BBOX( _ident, _fname )                             \
+          T1_NEW_SIMPLE_FIELD( _ident, T1_FIELD_TYPE_BBOX, _fname )
+
+
+d391 1
+a391 1
+
+d547 1
+a547 1
+
+a606 1
+             FT_Render_Mode       hint_mode,
+d616 1
+a616 1
+
+a647 3
+    FT_UInt32            hint_flags;
+    FT_Render_Mode       hint_mode;
+
+d650 1
+a650 1
+
+d670 1
+a670 1
+
+d672 1
+a672 1
+
+@
+
+

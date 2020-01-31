@@ -1,0 +1,547 @@
+head	1.2;
+branch	1.1.1;
+access;
+symbols
+	tg-mergetmp-2:1.1.1.2
+	cvs-200410241530:1.1.1.2
+	cvs-200410012000:1.1.1.2
+	cvs-200407141120:1.1.1.2
+	cvs-200406231010:1.1.1.2
+	MIRBSD_7quater:1.1.1.2
+	cvs-200405271510:1.1.1.2
+	XFree86_4_4_0:1.1.9.1
+	cvs-200403021700:1.1.1.2
+	XFREE86_20040213:1.1.9.1
+	xc:1.1.9
+	cvs-200401291925:1.1.1.2
+	MIRBSD_7_ALPHA:1.1.1.2.0.4
+	MIRBSD_7:1.1.1.2.0.2
+	MIRBSD_7ter:1.1.1.2
+	cvs-20011091815:1.1.1.2
+	cvs-200309162130:1.1.1.2
+	cvs-200308302005:1.1.1.2
+	ctmx-0387:1.1.1.2
+	ctmx-0384:1.1.1.2
+	MIRBSD_5:1.1.1.2
+	ctmx-0375:1.1.1.2
+	ctmx-0373:1.1.1.2
+	ctm-0371:1.1.1.2
+	ctm-0370:1.1.1.2
+	MIRBSD_4:1.1.1.2
+	ctm-0363:1.1.1.2
+	ctm-0359:1.1.1.2
+	ctm-0349:1.1.1.1
+	openbsd:1.1.1;
+locks; strict;
+comment	@ * @;
+
+
+1.2
+date	2003.05.16.16.29.32;	author tg;	state dead;
+branches;
+next	1.1;
+
+1.1
+date	2003.03.22.20.01.15;	author tg;	state Exp;
+branches
+	1.1.1.1
+	1.1.9.1;
+next	;
+
+1.1.1.1
+date	2003.03.22.20.01.15;	author tg;	state Exp;
+branches;
+next	1.1.1.2;
+
+1.1.1.2
+date	2003.04.08.18.20.47;	author tg;	state Stab;
+branches;
+next	;
+
+1.1.9.1
+date	2004.02.14.19.08.40;	author tg;	state Exp;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.2
+log
+@remove a bunch of files not used in MirBSD - clean tree. People who want them got cvs.
+@
+text
+@/***************************************************************************/
+/*                                                                         */
+/*  ftsystem.c                                                             */
+/*                                                                         */
+/*    Unix-specific FreeType low-level system interface (body).            */
+/*                                                                         */
+/*  Copyright 1996-2001 by                                                 */
+/*  David Turner, Robert Wilhelm, and Werner Lemberg.                      */
+/*                                                                         */
+/*  This file is part of the FreeType project, and may only be used,       */
+/*  modified, and distributed under the terms of the FreeType project      */
+/*  license, LICENSE.TXT.  By continuing to use, modify, or distribute     */
+/*  this file you indicate that you have read the license and              */
+/*  understand and accept it fully.                                        */
+/*                                                                         */
+/***************************************************************************/
+
+
+#include <ft2build.h>
+  /* we use our special ftconfig.h file, not the standard one */
+#include <ftconfig.h>
+#include FT_INTERNAL_DEBUG_H
+#include FT_SYSTEM_H
+#include FT_ERRORS_H
+#include FT_TYPES_H
+#include FT_INTERNAL_OBJECTS_H
+
+  /* memory-mapping includes and definitions */
+#ifdef HAVE_UNISTD_H
+#include <unistd.h>
+#endif
+
+#include <sys/mman.h>
+#ifndef MAP_FILE
+#define MAP_FILE  0x00
+#endif
+
+#ifdef MUNMAP_USES_VOIDP
+#define MUNMAP_ARG_CAST  void *
+#else
+#define MUNMAP_ARG_CAST  char *
+#endif
+
+#ifdef NEED_MUNMAP_DECL
+
+#ifdef __cplusplus
+  extern "C"
+#else
+  extern
+#endif
+  int
+  munmap( char*  addr,
+          int    len );
+
+#define MUNMAP_ARG_CAST  char *
+
+#endif /* NEED_DECLARATION_MUNMAP */
+
+
+#include <sys/types.h>
+#include <sys/stat.h>
+
+#ifdef HAVE_FCNTL_H
+#include <fcntl.h>
+#endif
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+
+  /*************************************************************************/
+  /*                                                                       */
+  /*                       MEMORY MANAGEMENT INTERFACE                     */
+  /*                                                                       */
+  /*************************************************************************/
+
+
+  /*************************************************************************/
+  /*                                                                       */
+  /* <Function>                                                            */
+  /*    ft_alloc                                                           */
+  /*                                                                       */
+  /* <Description>                                                         */
+  /*    The memory allocation function.                                    */
+  /*                                                                       */
+  /* <Input>                                                               */
+  /*    memory :: A pointer to the memory object.                          */
+  /*                                                                       */
+  /*    size   :: The requested size in bytes.                             */
+  /*                                                                       */
+  /* <Return>                                                              */
+  /*    The address of newly allocated block.                              */
+  /*                                                                       */
+  FT_CALLBACK_DEF( void* )
+  ft_alloc( FT_Memory  memory,
+            long       size )
+  {
+    FT_UNUSED( memory );
+
+    return malloc( size );
+  }
+
+
+  /*************************************************************************/
+  /*                                                                       */
+  /* <Function>                                                            */
+  /*    ft_realloc                                                         */
+  /*                                                                       */
+  /* <Description>                                                         */
+  /*    The memory reallocation function.                                  */
+  /*                                                                       */
+  /* <Input>                                                               */
+  /*    memory   :: A pointer to the memory object.                        */
+  /*                                                                       */
+  /*    cur_size :: The current size of the allocated memory block.        */
+  /*                                                                       */
+  /*    new_size :: The newly requested size in bytes.                     */
+  /*                                                                       */
+  /*    block    :: The current address of the block in memory.            */
+  /*                                                                       */
+  /* <Return>                                                              */
+  /*    The address of the reallocated memory block.                       */
+  /*                                                                       */
+  FT_CALLBACK_DEF( void* )
+  ft_realloc( FT_Memory  memory,
+              long       cur_size,
+              long       new_size,
+              void*      block )
+  {
+    FT_UNUSED( memory );
+    FT_UNUSED( cur_size );
+
+    return realloc( block, new_size );
+  }
+
+
+  /*************************************************************************/
+  /*                                                                       */
+  /* <Function>                                                            */
+  /*    ft_free                                                            */
+  /*                                                                       */
+  /* <Description>                                                         */
+  /*    The memory release function.                                       */
+  /*                                                                       */
+  /* <Input>                                                               */
+  /*    memory  :: A pointer to the memory object.                         */
+  /*                                                                       */
+  /*    block   :: The address of block in memory to be freed.             */
+  /*                                                                       */
+  FT_CALLBACK_DEF( void )
+  ft_free( FT_Memory  memory,
+           void*      block )
+  {
+    FT_UNUSED( memory );
+
+    free( block );
+  }
+
+
+  /*************************************************************************/
+  /*                                                                       */
+  /*                     RESOURCE MANAGEMENT INTERFACE                     */
+  /*                                                                       */
+  /*************************************************************************/
+
+
+  /*************************************************************************/
+  /*                                                                       */
+  /* The macro FT_COMPONENT is used in trace mode.  It is an implicit      */
+  /* parameter of the FT_TRACE() and FT_ERROR() macros, used to print/log  */
+  /* messages during execution.                                            */
+  /*                                                                       */
+#undef  FT_COMPONENT
+#define FT_COMPONENT  trace_io
+
+  /* We use the macro STREAM_FILE for convenience to extract the       */
+  /* system-specific stream handle from a given FreeType stream object */
+#define STREAM_FILE( stream )  ( (FILE*)stream->descriptor.pointer )
+
+
+  /*************************************************************************/
+  /*                                                                       */
+  /* <Function>                                                            */
+  /*    ft_close_stream                                                    */
+  /*                                                                       */
+  /* <Description>                                                         */
+  /*    The function to close a stream.                                    */
+  /*                                                                       */
+  /* <Input>                                                               */
+  /*    stream :: A pointer to the stream object.                          */
+  /*                                                                       */
+  FT_CALLBACK_DEF( void )
+  ft_close_stream( FT_Stream  stream )
+  {
+    munmap( (MUNMAP_ARG_CAST)stream->descriptor.pointer, stream->size );
+
+    stream->descriptor.pointer = NULL;
+    stream->size               = 0;
+    stream->base               = 0;
+  }
+
+
+  /* documentation is in ftobjs.h */
+
+  FT_EXPORT_DEF( FT_Error )
+  FT_New_Stream( const char*  filepathname,
+                 FT_Stream    stream )
+  {
+    int          file;
+    struct stat  stat_buf;
+
+
+    if ( !stream )
+      return FT_Err_Invalid_Stream_Handle;
+
+    /* open the file */
+    file = open( filepathname, O_RDONLY );
+    if ( file < 0 )
+    {
+      FT_ERROR(( "FT_New_Stream:" ));
+      FT_ERROR(( " could not open `%s'\n", filepathname ));
+      return FT_Err_Cannot_Open_Resource;
+    }
+
+    if ( fstat( file, &stat_buf ) < 0 )
+    {
+      FT_ERROR(( "FT_New_Stream:" ));
+      FT_ERROR(( " could not `fstat' file `%s'\n", filepathname ));
+      goto Fail_Map;
+    }
+
+    stream->size = stat_buf.st_size;
+    stream->pos  = 0;
+    stream->base = (unsigned char *)mmap( NULL,
+                                          stream->size,
+                                          PROT_READ,
+                                          MAP_FILE | MAP_PRIVATE,
+                                          file,
+                                          0 );
+
+    if ( (long)stream->base == -1 )
+    {
+      FT_ERROR(( "FT_New_Stream:" ));
+      FT_ERROR(( " could not `mmap' file `%s'\n", filepathname ));
+      goto Fail_Map;
+    }
+
+    close( file );
+
+    stream->descriptor.pointer = stream->base;
+    stream->pathname.pointer   = (char*)filepathname;
+
+    stream->close = ft_close_stream;
+    stream->read  = 0;
+
+    FT_TRACE1(( "FT_New_Stream:" ));
+    FT_TRACE1(( " opened `%s' (%d bytes) successfully\n",
+                filepathname, stream->size ));
+
+    return FT_Err_Ok;
+
+  Fail_Map:
+    close( file );
+
+    stream->base = NULL;
+    stream->size = 0;
+    stream->pos  = 0;
+
+    return FT_Err_Cannot_Open_Stream;
+  }
+
+
+#ifdef FT_DEBUG_MEMORY
+
+  extern FT_Int
+  ft_mem_debug_init( FT_Memory  memory );
+  
+  extern void
+  ft_mem_debug_done( FT_Memory  memory );
+  
+#endif  
+      
+
+  /* documentation is in ftobjs.h */
+
+  FT_EXPORT_DEF( FT_Memory )
+  FT_New_Memory( void )
+  {
+    FT_Memory  memory;
+
+
+    memory = (FT_Memory)malloc( sizeof ( *memory ) );
+    if ( memory )
+    {
+      memory->user    = 0;
+      memory->alloc   = ft_alloc;
+      memory->realloc = ft_realloc;
+      memory->free    = ft_free;
+#ifdef FT_DEBUG_MEMORY
+      ft_mem_debug_init( memory );
+#endif    
+    }
+
+    return memory;
+  }
+
+
+  /* documentation is in ftobjs.h */
+
+  FT_EXPORT_DEF( void )
+  FT_Done_Memory( FT_Memory  memory )
+  {
+#ifdef FT_DEBUG_MEMORY
+    ft_mem_debug_done( memory );
+#endif  
+    memory->free( memory, memory );
+  }
+
+
+/* END */
+@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@@
+
+
+1.1.9.1
+log
+@OpenBSD just has imported exactly this tree into their vendor branch,
+called the same tag, in XF4/xc
+This is, apparently, the last XFree86 snapshot before the licence change
+(ie, addition of the advertising clause)
+
+Since the developers don't see any problems with that, and we would like
+to integrate improvements done by the remaining one or two (or so) XFree86
+developers (j/k), this prepares enabling us to update X-Window in the future.
+@
+text
+@d5 1
+a5 1
+/*    VMS-specific FreeType low-level system interface (body).             */
+d7 1
+a7 1
+/*  Copyright 1996-2001, 2002 by                                           */
+d147 1
+a147 1
+  /*    memory :: A pointer to the memory object.                          */
+d149 1
+a149 1
+  /*    block  :: The address of block in memory to be freed.              */
+d207 2
+a208 2
+  FT_Stream_Open( FT_Stream    stream,
+                  const char*  filepathname )
+d221 1
+a221 1
+      FT_ERROR(( "FT_Stream_Open:" ));
+d228 1
+a228 1
+      FT_ERROR(( "FT_Stream_Open:" ));
+d244 1
+a244 1
+      FT_ERROR(( "FT_Stream_Open:" ));
+d257 1
+a257 1
+    FT_TRACE1(( "FT_Stream_Open:" ));
+d278 1
+a278 1
+
+d281 3
+a283 3
+
+#endif
+
+d302 1
+a302 1
+#endif
+d316 1
+a316 1
+#endif
+@
+
+
+1.1.1.1
+log
+@Import OpenBSD 3.3 XF4 repository from CTM 3132 the first time
+This finalizes starting an OpenBSD-mirabile (aka MirBSD) repository.
+
+### MirBSD is:
+# Copyright (c) 1982-2003 by Thorsten "mirabile" Glaser <x86@@ePost.de>
+# Copyright © 1968-2003  The authors of And contributors to UNIX®, the
+#       C Language, BSD/Berkeley Unix; 386BSD, NetBSD 1.1 and OpenBSD.
+#
+# Anyone who obtained a copy of this work is hereby permitted to freely use,
+# distribute, modify, merge, sublicence, give away or sell it as long as the
+# authors are given due credit and the following notice is retained:
+#
+# This work is provided "as is", with no explicit or implicit warranty what-
+# soever. Use it only at your own risk. In no event may an author or contri-
+# butor be held liable for any damage, directly or indirectly, that origina-
+# ted through or is caused by creation or modification of this work.
+
+MirBSD is my private tree. MirBSD does not differ very much from OpenBSD
+and intentionally tracks OpenBSD. That's why it _is_ OpenBSD, just not the
+official one. It's like with DarrenBSD.
+
+At time of this writing, no advertising for MirBSD must be done,
+because the advertising clause has not yet been sorted out.
+
+http://templeofhate.com/tglaser/MirBSD/index.php
+@
+text
+@@
+
+
+1.1.1.2
+log
+@The X-Windowing System
+
+Import XFree86 4.3 from OpenBSD by CTM, in the hope it's stable
+@
+text
+@d5 1
+a5 1
+/*    VMS-specific FreeType low-level system interface (body).             */
+d7 1
+a7 1
+/*  Copyright 1996-2001, 2002 by                                           */
+d147 1
+a147 1
+  /*    memory :: A pointer to the memory object.                          */
+d149 1
+a149 1
+  /*    block  :: The address of block in memory to be freed.              */
+d207 2
+a208 2
+  FT_Stream_Open( FT_Stream    stream,
+                  const char*  filepathname )
+d221 1
+a221 1
+      FT_ERROR(( "FT_Stream_Open:" ));
+d228 1
+a228 1
+      FT_ERROR(( "FT_Stream_Open:" ));
+d244 1
+a244 1
+      FT_ERROR(( "FT_Stream_Open:" ));
+d257 1
+a257 1
+    FT_TRACE1(( "FT_Stream_Open:" ));
+d278 1
+a278 1
+
+d281 3
+a283 3
+
+#endif
+
+d302 1
+a302 1
+#endif
+d316 1
+a316 1
+#endif
+@
+

@@ -1,0 +1,350 @@
+head	1.1;
+branch	1.1.1;
+access;
+symbols
+	tg-mergetmp-2:1.1.1.1
+	cvs-200410241530:1.1.1.1
+	cvs-200410012000:1.1.1.1
+	cvs-200407221130:1.1.1.1
+	cvs-200407141120:1.1.1.1
+	cvs-200406231010:1.1.1.1
+	MIRBSD_7quater:1.1.1.1
+	cvs-200405271510:1.1.1.1
+	XFree86_4_4_0:1.1.9.1
+	cvs-200403021700:1.1.1.1
+	XFREE86_20040213:1.1.9.1
+	xc:1.1.9
+	cvs-200401291925:1.1.1.1
+	MIRBSD_7_ALPHA:1.1.1.1.0.4
+	MIRBSD_7:1.1.1.1.0.2
+	MIRBSD_7ter:1.1.1.1
+	cvs-20011091815:1.1.1.1
+	cvs-200309162130:1.1.1.1
+	cvs-200308302005:1.1.1.1
+	ctmx-0387:1.1.1.1
+	ctmx-0384:1.1.1.1
+	MIRBSD_5:1.1.1.1
+	ctmx-0375:1.1.1.1
+	ctmx-0373:1.1.1.1
+	ctm-0371:1.1.1.1
+	ctm-0370:1.1.1.1
+	MIRBSD_4:1.1.1.1
+	ctm-0363:1.1.1.1
+	ctm-0359:1.1.1.1
+	ctm-0349:1.1.1.1
+	openbsd:1.1.1;
+locks; strict;
+comment	@ * @;
+
+
+1.1
+date	2003.03.22.20.09.10;	author tg;	state Exp;
+branches
+	1.1.1.1
+	1.1.9.1;
+next	;
+
+1.1.1.1
+date	2003.03.22.20.09.10;	author tg;	state Stab;
+branches;
+next	;
+
+1.1.9.1
+date	2004.02.14.19.25.51;	author tg;	state Exp;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@/* $XFree86: xc/programs/Xserver/hw/xfree86/xf4bpp/ppcCReduce.c,v 1.3 1999/06/06 08:48:58 dawes Exp $ */
+/*
+ * Copyright IBM Corporation 1987,1988,1989
+ *
+ * All Rights Reserved
+ *
+ * Permission to use, copy, modify, and distribute this software and its
+ * documentation for any purpose and without fee is hereby granted,
+ * provided that the above copyright notice appear in all copies and that 
+ * both that copyright notice and this permission notice appear in
+ * supporting documentation, and that the name of IBM not be
+ * used in advertising or publicity pertaining to distribution of the
+ * software without specific, written prior permission.
+ *
+ * IBM DISCLAIMS ALL WARRANTIES WITH REGARD TO THIS SOFTWARE, INCLUDING
+ * ALL IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS, IN NO EVENT SHALL
+ * IBM BE LIABLE FOR ANY SPECIAL, INDIRECT OR CONSEQUENTIAL DAMAGES OR
+ * ANY DAMAGES WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS,
+ * WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION,
+ * ARISING OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS
+ * SOFTWARE.
+ *
+*/
+
+/* $XConsortium: ppcCReduce.c /main/3 1996/02/21 17:57:17 kaleb $ */
+
+#include "xf4bpp.h"
+#include "ppcGCstr.h"
+
+/* xf4bppGetReducedColorRrop( pGC, drawableDepth, returnLoc )
+ * An attempt to do "strength reduction" on color raster-ops
+ * P. Shupak 1/88
+ */
+
+static void 
+ppcReduceGeneral
+(
+	register int		alu,
+	register unsigned long	pm,
+	register unsigned long	fg,
+	register unsigned long	bg,
+	register int		fillStyle,
+	int			drawableDepth,
+	ppcReducedRrop		*returnLoc
+)
+{
+
+if ( ( alu == GXnoop )
+  || !( pm &= ( ( 1 << drawableDepth ) - 1 ) ) ) {
+	returnLoc->alu = GXnoop ;
+	return ;
+}
+
+#ifdef DELETE_THIS
+switch ( fillStyle ) {
+	case FillTiled:
+		switch ( alu ) {
+			case GXclear:		/* 0x0 Zero 0 */
+			case GXinvert:		/* 0xa NOT dst */
+			case GXset:		/* 0xf 1 */
+				fillStyle = FillSolid ;
+			default: /* We Can't Do Much Here */
+				break ;
+		}
+		break ;
+	case FillOpaqueStippled:
+		if ( ( fg & pm ) != ( bg & pm ) ) { /* else FillSolid */
+			switch ( alu ) {
+				case GXclear:	/* 0x0 Zero 0 */
+				case GXset:	/* 0xf 1 */
+				case GXinvert:	/* 0xa NOT dst */
+					fillStyle = FillSolid ;
+					break ;
+				case GXnor:	/* 0x8 NOT src AND NOT dst */
+				case GXnand:	/* 0xe NOT src OR NOT dst */
+				case GXcopy:	/* 0x3 src */
+					break ;
+				case GXandReverse: /* 0x2 src AND NOT dst */
+					fg = ~fg ;
+					bg = ~bg ;
+					alu = GXnor ;
+					break ;
+				case GXandInverted: /* 0x4 NOT src AND dst */
+					fg = ~fg ;
+					bg = ~bg ;
+					alu = GXand ; /* Fall Through */
+				case GXand:	/* 0x1 src AND dst */
+					pm &= ~( fg & bg ) ;
+					if ( ( bg & pm ) == pm ) {
+						fillStyle = FillStippled ;
+						alu = GXclear ;
+					}
+					break ;
+				case GXequiv:	/* 0x9 NOT src XOR dst */
+					fg = ~fg ;
+					bg = ~bg ;
+					alu = GXxor ; /* Fall Through */
+				case GXxor:	/* 0x6 src XOR dst */
+					pm &= ( fg | bg ) ;
+					if ( !( bg & pm ) ) {
+						fillStyle = FillStippled ;
+						alu = GXinvert ;
+					}
+					break ;
+				case GXorReverse:	/* 0xb src OR NOT dst */
+					fg = ~fg ;
+					bg = ~bg ;
+					alu = GXnand ;
+					break ;
+				case GXcopyInverted:	/* 0xc NOT src */
+					fg = ~fg ;
+					bg = ~bg ;
+					alu = GXcopy ;
+					break ;
+				case GXorInverted:	/* 0xd NOT src OR dst */
+					fg = ~fg ;
+					bg = ~bg ;
+					alu = GXor ; /* Fall Through */
+				case GXor:	/* 0x7 src OR dst */
+					pm &= ( fg | bg ) ;
+					if ( !( bg & pm ) ) {
+						fillStyle = FillStippled ;
+						alu = GXset ;
+					}
+					break ;
+				default:
+					ErrorF(
+			 "xf4bppGetReducedColorRrop: Unknown Alu Raster-Op" ) ;
+					break ;
+			}
+			break ; /* Don't Fall Through */
+		}
+		else
+			fillStyle = FillSolid ;
+			/* Fall Through */
+	case FillStippled:
+	case FillSolid:
+		switch ( alu ) {
+			case GXclear:		/* 0x0 Zero 0 */
+			case GXset:		/* 0xf 1 */
+			case GXinvert:		/* 0xa NOT dst */
+				break ;
+			case GXand:		/* 0x1 src AND dst */
+				pm &= ~fg ;
+				alu = GXclear ;
+				break ;
+			case GXandReverse:	/* 0x2 src AND NOT dst */
+				fg = ~fg ;
+				alu = GXnor ; /* Fall Through */
+			case GXnor:		/* 0x8 NOT src AND NOT dst */
+				if ( !( fg & pm ) )
+					alu = GXclear ;
+				else if ( ( fg & pm ) == pm )
+					alu = GXinvert ;
+				break ;
+			case GXandInverted:	/* 0x4 NOT src AND dst */
+				pm &= fg ;
+				alu = GXclear ;
+				break ;
+			case GXxor:		/* 0x6 src XOR dst */
+				pm &= fg ;
+				alu = GXinvert ;
+				break ;
+			case GXor:		/* 0x7 src OR dst */
+				pm &= fg ;
+				alu = GXset ;
+				break ;
+			case GXequiv:		/* 0x9 NOT src XOR dst */
+				pm &= ~fg ;
+				alu = GXinvert ;
+				break ;
+			case GXorReverse:	/* 0xb src OR NOT dst */
+				fg = ~fg ;
+				alu = GXnand ; /* Fall Through */
+			case GXnand:		/* 0xe NOT src OR NOT dst */
+				if ( !( fg & pm ) )
+					alu = GXset ;
+				else if ( ( fg & pm ) == pm )
+					alu = GXinvert ;
+				break ;
+			case GXcopyInverted:	/* 0xc NOT src */
+				fg = ~fg ;
+				alu = GXcopy ; /* Fall Through */
+			case GXcopy:		/* 0x3 src */
+				if ( !( fg & pm ) )
+					alu = GXclear ;
+				else if ( ( fg & pm ) == pm )
+					alu = GXset ;
+				break ;
+			case GXorInverted:	/* 0xd NOT src OR dst */
+				pm &= ~fg ;
+				alu = GXset ;
+				break ;
+			default:
+				ErrorF(
+			 "xf4bppGetReducedColorRrop: Unknown Alu Raster-Op" ) ;
+				break ;
+		}
+		break;
+	default:
+		ErrorF("xf4bppGetReducedColorRrop: Bad Fillstyle\n");
+		break;
+}
+#endif
+
+/* Final Test On Restricted Plane Mask */
+if ( !pm )
+	alu = GXnoop ;
+
+/* Set Actual Returned Values */
+returnLoc->planemask = pm ;
+returnLoc->fgPixel   = fg ;
+returnLoc->bgPixel   = bg ;
+returnLoc->alu       = alu ;
+returnLoc->fillStyle = fillStyle ;
+
+return ;
+}
+
+void 
+xf4bppGetReducedColorRrop( pGC, drawableDepth, returnLoc )
+GC		*pGC ;
+int		drawableDepth ;
+ppcReducedRrop	*returnLoc ;
+{
+
+ppcReduceGeneral( pGC->alu,
+		  pGC->planemask,
+		  pGC->fgPixel,
+		  pGC->bgPixel,
+ 		  pGC->fillStyle,
+		  drawableDepth,
+		  returnLoc ) ;
+
+return ;
+}
+@
+
+
+1.1.9.1
+log
+@OpenBSD just has imported exactly this tree into their vendor branch,
+called the same tag, in XF4/xc
+This is, apparently, the last XFree86 snapshot before the licence change
+(ie, addition of the advertising clause)
+
+Since the developers don't see any problems with that, and we would like
+to integrate improvements done by the remaining one or two (or so) XFree86
+developers (j/k), this prepares enabling us to update X-Window in the future.
+@
+text
+@@
+
+
+1.1.1.1
+log
+@Import OpenBSD 3.3 XF4 repository from CTM 3132 the first time
+This finalizes starting an OpenBSD-mirabile (aka MirBSD) repository.
+
+### MirBSD is:
+# Copyright (c) 1982-2003 by Thorsten "mirabile" Glaser <x86@@ePost.de>
+# Copyright © 1968-2003  The authors of And contributors to UNIX®, the
+#       C Language, BSD/Berkeley Unix; 386BSD, NetBSD 1.1 and OpenBSD.
+#
+# Anyone who obtained a copy of this work is hereby permitted to freely use,
+# distribute, modify, merge, sublicence, give away or sell it as long as the
+# authors are given due credit and the following notice is retained:
+#
+# This work is provided "as is", with no explicit or implicit warranty what-
+# soever. Use it only at your own risk. In no event may an author or contri-
+# butor be held liable for any damage, directly or indirectly, that origina-
+# ted through or is caused by creation or modification of this work.
+
+MirBSD is my private tree. MirBSD does not differ very much from OpenBSD
+and intentionally tracks OpenBSD. That's why it _is_ OpenBSD, just not the
+official one. It's like with DarrenBSD.
+
+At time of this writing, no advertising for MirBSD must be done,
+because the advertising clause has not yet been sorted out.
+
+http://templeofhate.com/tglaser/MirBSD/index.php
+@
+text
+@@

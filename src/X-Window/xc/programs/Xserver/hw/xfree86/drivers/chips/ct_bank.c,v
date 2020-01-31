@@ -1,0 +1,967 @@
+head	1.1;
+branch	1.1.1;
+access;
+symbols
+	tg-mergetmp-2:1.1.1.3
+	cvs-200410241530:1.1.1.3
+	cvs-200410012000:1.1.1.3
+	cvs-200407221130:1.1.1.3
+	cvs-200407141120:1.1.1.3
+	cvs-200406231010:1.1.1.3
+	MIRBSD_7quater:1.1.1.2
+	cvs-200405271510:1.1.1.3
+	XFree86_4_4_0:1.1.9.1
+	cvs-200403021700:1.1.1.3
+	XFREE86_20040213:1.1.9.1
+	xc:1.1.9
+	cvs-200401291925:1.1.1.2
+	MIRBSD_7_ALPHA:1.1.1.2.0.4
+	MIRBSD_7:1.1.1.2.0.2
+	MIRBSD_7ter:1.1.1.2
+	cvs-20011091815:1.1.1.2
+	cvs-200309162130:1.1.1.2
+	cvs-200308302005:1.1.1.2
+	ctmx-0387:1.1.1.2
+	ctmx-0384:1.1.1.2
+	MIRBSD_5:1.1.1.2
+	ctmx-0375:1.1.1.2
+	ctmx-0373:1.1.1.2
+	ctm-0371:1.1.1.2
+	ctm-0370:1.1.1.2
+	MIRBSD_4:1.1.1.2
+	ctm-0363:1.1.1.2
+	ctm-0359:1.1.1.2
+	ctm-0349:1.1.1.1
+	openbsd:1.1.1;
+locks; strict;
+comment	@ * @;
+
+
+1.1
+date	2003.03.22.20.07.02;	author tg;	state Exp;
+branches
+	1.1.1.1
+	1.1.9.1;
+next	;
+
+1.1.1.1
+date	2003.03.22.20.07.02;	author tg;	state Exp;
+branches;
+next	1.1.1.2;
+
+1.1.1.2
+date	2003.04.08.18.36.05;	author tg;	state Exp;
+branches;
+next	1.1.1.3;
+
+1.1.1.3
+date	2004.03.02.18.16.54;	author tg;	state Stab;
+branches;
+next	;
+
+1.1.9.1
+date	2004.02.14.19.23.01;	author tg;	state Exp;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@/* $XFree86: xc/programs/Xserver/hw/xfree86/drivers/chips/ct_bank.c,v 1.5 2000/04/04 19:25:05 dawes Exp $ */
+
+/*
+ * Copyright 1997
+ * Digital Equipment Corporation. All rights reserved.
+ * This software is furnished under license and may be used and copied only in 
+ * accordance with the following terms and conditions.  Subject to these 
+ * conditions, you may download, copy, install, use, modify and distribute 
+ * this software in source and/or binary form. No title or ownership is 
+ * transferred hereby.
+ * 1) Any source code used, modified or distributed must reproduce and retain 
+ *    this copyright notice and list of conditions as they appear in the 
+ *    source file.
+ *
+ * 2) No right is granted to use any trade name, trademark, or logo of Digital 
+ *    Equipment Corporation. Neither the "Digital Equipment Corporation" name 
+ *    nor any trademark or logo of Digital Equipment Corporation may be used 
+ *    to endorse or promote products derived from this software without the 
+ *    prior written permission of Digital Equipment Corporation.
+ *
+ * 3) This software is provided "AS-IS" and any express or implied warranties,
+ *    including but not limited to, any implied warranties of merchantability,
+ *    fitness for a particular purpose, or non-infringement are disclaimed. In
+ *    no event shall DIGITAL be liable for any damages whatsoever, and in 
+ *    particular, DIGITAL shall not be liable for special, indirect, 
+ *    consequential, or incidental damages or damages for lost profits, loss 
+ *    of revenue or loss of use, whether such damages arise in contract, 
+ *    negligence, tort, under statute, in equity, at law or otherwise, even if
+ *    advised of the possibility of such damage. 
+ */
+#define PSZ 8
+
+/*
+ * Define DIRECT_REGISTER_ACCESS if you want to bypass the wrapped register
+ * access functions
+ */
+/* #define DIRECT_REGISTER_ACCESS */
+
+/* All drivers should typically include these */
+#include "xf86.h"
+#include "xf86_OSproc.h"
+#include "xf86_ansic.h"
+
+/* Everything using inb/outb, etc needs "compiler.h" */
+#include "compiler.h"
+
+/* Drivers for PCI hardware need this */
+#include "xf86PciInfo.h"
+
+/* Drivers that need to access the PCI config space directly need this */
+#include "xf86Pci.h"
+
+/* Driver specific headers */
+#include "ct_driver.h"
+
+#ifdef	__arm32__
+/*#include <machine/sysarch.h>*/
+#define	arm32_drain_writebuf()	sysarch(1, 0)
+#define ChipsBank(pScreen) CHIPSPTR(xf86Screens[pScreen->myNum])->Bank
+#endif
+
+#ifdef DIRECT_REGISTER_ACCESS
+int
+CHIPSSetRead(ScreenPtr pScreen, int bank)
+{ 
+    outw(0x3D6, ((((bank << 3) & 0xFF) << 8) | 0x10));
+
+#ifdef	__arm32__
+    /* Must drain StrongARM write buffer on bank switch! */
+    if (bank != ChipsBank(pScreen)) {
+	arm32_drain_writebuf();
+	ChipsBank(pScreen) = bank;
+    }
+#endif
+
+    return 0;
+}
+
+
+int
+CHIPSSetWrite(ScreenPtr pScreen, int bank)
+{
+    outw(0x3D6, ((((bank << 3) & 0xFF) << 8) | 0x11));
+
+#ifdef	__arm32__
+    /* Must drain StrongARM write buffer on bank switch! */
+    if (bank != ChipsBank(pScreen)) {
+	arm32_drain_writebuf();
+	ChipsBank(pScreen) = bank;
+    }
+#endif
+
+    return 0;
+}
+
+
+int
+CHIPSSetReadWrite(ScreenPtr pScreen, int bank)
+{
+    outw(0x3D6, ((((bank << 3) & 0xFF) << 8) | 0x10));
+    outw(0x3D6, ((((bank << 3) & 0xFF) << 8) | 0x11));
+
+#ifdef	__arm32__
+    /* Must drain StrongARM write buffer on bank switch! */
+    if (bank != ChipsBank(pScreen)) {
+	arm32_drain_writebuf();
+	ChipsBank(pScreen) = bank;
+    }
+#endif
+
+    return 0;
+}
+
+int
+CHIPSSetReadPlanar(ScreenPtr pScreen, int bank)
+{
+    outw(0x3D6, ((((bank << 5) & 0xFF) << 8) | 0x10));
+
+#ifdef	__arm32__
+    /* Must drain StrongARM write buffer on bank switch! */
+    if (bank != ChipsBank(pScreen)) {
+	arm32_drain_writebuf();
+	ChipsBank(pScreen) = bank;
+    }
+#endif
+
+    return 0;
+}
+
+int
+CHIPSSetWritePlanar(ScreenPtr pScreen, int bank)
+{
+    outw(0x3D6, ((((bank << 5) & 0xFF) << 8) | 0x11));
+
+#ifdef	__arm32__
+    /* Must drain StrongARM write buffer on bank switch! */
+    if (bank != ChipsBank(pScreen)) {
+	arm32_drain_writebuf();
+	ChipsBank(pScreen) = bank;
+    }
+#endif
+
+    return 0;
+}
+
+int
+CHIPSSetReadWritePlanar(ScreenPtr pScreen, int bank)
+{
+    outw(0x3D6, ((((bank << 5) & 0xFF) << 8) | 0x10));
+    outw(0x3D6, ((((bank << 5) & 0xFF) << 8) | 0x11));
+
+#ifdef	__arm32__
+    /* Must drain StrongARM write buffer on bank switch! */
+    if (bank != ChipsBank(pScreen)) {
+	arm32_drain_writebuf();
+	ChipsBank(pScreen) = bank;
+    }
+#endif
+
+    return 0;
+}
+
+int
+CHIPSWINSetRead(ScreenPtr pScreen, int bank)
+{
+    register unsigned char tmp;
+
+    outw(0x3D6, ((((bank << 3) & 0xFF) << 8) | 0x10));
+    outb(0x3D6, 0x0C);
+    tmp = inb(0x3D7) & 0xEF;
+    outw(0x3D6, (((((bank >> 1) & 0x10) | tmp) << 8) | 0x0C));
+
+#ifdef	__arm32__
+    /* Must drain StrongARM write buffer on bank switch! */
+    if (bank != ChipsBank(pScreen)) {
+	arm32_drain_writebuf();
+	ChipsBank(pScreen) = bank;
+    }
+#endif
+
+    return 0;
+}
+
+
+int
+CHIPSWINSetWrite(ScreenPtr pScreen, int bank)
+{
+    register unsigned char tmp;
+
+    outw(0x3D6, ((((bank << 3) & 0xFF) << 8) | 0x11));
+    outb(0x3D6, 0x0C);
+    tmp = inb(0x3D7) & 0xBF;
+    outw(0x3D6, (((((bank << 1) & 0x40) | tmp) << 8) | 0x0C));
+
+#ifdef	__arm32__
+    /* Must drain StrongARM write buffer on bank switch! */
+    if (bank != ChipsBank(pScreen)) {
+	arm32_drain_writebuf();
+	ChipsBank(pScreen) = bank;
+    }
+#endif
+
+    return 0;
+}
+
+int
+CHIPSWINSetReadWrite(ScreenPtr pScreen, int bank)
+{
+    register unsigned char tmp;
+
+    outw(0x3D6, ((((bank << 3) & 0xFF) << 8) | 0x10));
+    outw(0x3D6, ((((bank << 3) & 0xFF) << 8) | 0x11));
+    outb(0x3D6, 0x0C);
+    tmp = inb(0x3D7) & 0xAF;
+    outw(0x3D6, (((((bank << 1) & 0x40) | ((bank >> 1) & 0x10) | tmp) << 8) | 0x0C));
+
+#ifdef	__arm32__
+    /* Must drain StrongARM write buffer on bank switch! */
+    if (bank != ChipsBank(pScreen)) {
+	arm32_drain_writebuf();
+	ChipsBank(pScreen) = bank;
+    }
+#endif
+
+    return 0;
+}
+
+int
+CHIPSWINSetReadPlanar(ScreenPtr pScreen, int bank)
+{
+    register unsigned char tmp;
+
+    outw(0x3D6, ((((bank << 5) & 0xFF) << 8) | 0x10));
+    outb(0x3D6, 0x0C);
+    tmp = inb(0x3D7) & 0xEF;
+    outw(0x3D6, (((((bank << 1) & 0x10) | tmp) << 8) | 0x0C));
+
+#ifdef	__arm32__
+    /* Must drain StrongARM write buffer on bank switch! */
+    if (bank != ChipsBank(pScreen)) {
+	arm32_drain_writebuf();
+	ChipsBank(pScreen) = bank;
+    }
+#endif
+
+    return 0;
+}
+
+int
+CHIPSWINSetWritePlanar(ScreenPtr pScreen, int bank)
+{
+    register unsigned char tmp;
+
+    outw(0x3D6, ((((bank << 5) & 0xFF) << 8) | 0x11));
+    outb(0x3D6, 0x0C);
+    tmp = inb(0x3D7) & 0xBF;
+    outw(0x3D6, (((((bank << 3) & 0x40) | tmp) << 8) | 0x0C));
+
+#ifdef	__arm32__
+    /* Must drain StrongARM write buffer on bank switch! */
+    if (bank != ChipsBank(pScreen)) {
+	arm32_drain_writebuf();
+	ChipsBank(pScreen) = bank;
+    }
+#endif
+
+    return 0;
+}
+
+int
+CHIPSWINSetReadWritePlanar(ScreenPtr pScreen, int bank)
+{
+    register unsigned char tmp;
+
+    outw(0x3D6, ((((bank << 5) & 0xFF) << 8) | 0x10));
+    outw(0x3D6, ((((bank << 5) & 0xFF) << 8) | 0x11));
+    outb(0x3D6, 0x0C);
+    tmp = inb(0x3D7) & 0xAF;
+    outw(0x3D6, (((((bank << 3) & 0x40) | ((bank << 1) & 0x10) | tmp) << 8) | 0x0C));
+
+#ifdef	__arm32__
+    /* Must drain StrongARM write buffer on bank switch! */
+    if (bank != ChipsBank(pScreen)) {
+	arm32_drain_writebuf();
+	ChipsBank(pScreen) = bank;
+    }
+#endif
+
+    return 0;
+}
+
+int
+CHIPSHiQVSetReadWrite(ScreenPtr pScreen, int bank)
+{
+    outw(0x3D6, (((bank & 0x7F) << 8) | 0x0E));
+
+#ifdef	__arm32__
+    /* Must drain StrongARM write buffer on bank switch! */
+    if (bank != ChipsBank(pScreen)) {
+	arm32_drain_writebuf();
+	ChipsBank(pScreen) = bank;
+    }
+#endif
+
+    return 0;
+}
+
+int
+CHIPSHiQVSetReadWritePlanar(ScreenPtr pScreen, int bank)
+{
+    outw(0x3D6, ((((bank << 2) & 0x7F) << 8) | 0x0E));
+
+#ifdef	__arm32__
+    /* Must drain StrongARM write buffer on bank switch! */
+    if (bank != ChipsBank(pScreen)) {
+	arm32_drain_writebuf();
+	ChipsBank(pScreen) = bank;
+    }
+#endif
+
+    return 0;
+}
+
+#else /* DIRECT_REGISTER_ACCESS */
+
+int
+CHIPSSetRead(ScreenPtr pScreen, int bank)
+{ 
+    CHIPSPtr cPtr = CHIPSPTR(xf86Screens[pScreen->myNum]);
+  
+    cPtr->writeXR(cPtr, 0x10, ((bank << 3) & 0xFF));
+
+#ifdef	__arm32__
+    /* Must drain StrongARM write buffer on bank switch! */
+    if (bank != cPtr->Bank) {
+	arm32_drain_writebuf();
+	cPtr->Bank = bank;
+    }
+#endif
+
+    return 0;
+}
+
+
+int
+CHIPSSetWrite(ScreenPtr pScreen, int bank)
+{
+    CHIPSPtr cPtr = CHIPSPTR(xf86Screens[pScreen->myNum]);
+  
+    cPtr->writeXR(cPtr, 0x11, ((bank << 3) & 0xFF));
+
+#ifdef	__arm32__
+    /* Must drain StrongARM write buffer on bank switch! */
+    if (bank != cPtr->Bank) {
+	arm32_drain_writebuf();
+	cPtr->Bank = bank;
+    }
+#endif
+
+    return 0;
+}
+
+
+int
+CHIPSSetReadWrite(ScreenPtr pScreen, int bank)
+{
+    CHIPSPtr cPtr = CHIPSPTR(xf86Screens[pScreen->myNum]);
+  
+    cPtr->writeXR(cPtr, 0x10, ((bank << 3) & 0xFF));
+    cPtr->writeXR(cPtr, 0x11, ((bank << 3) & 0xFF));
+
+#ifdef	__arm32__
+    /* Must drain StrongARM write buffer on bank switch! */
+    if (bank != cPtr->Bank) {
+	arm32_drain_writebuf();
+	cPtr->Bank = bank;
+    }
+#endif
+
+    return 0;
+}
+
+int
+CHIPSSetReadPlanar(ScreenPtr pScreen, int bank)
+{
+    CHIPSPtr cPtr = CHIPSPTR(xf86Screens[pScreen->myNum]);
+  
+    cPtr->writeXR(cPtr, 0x10, ((bank << 5) & 0xFF));
+
+#ifdef	__arm32__
+    /* Must drain StrongARM write buffer on bank switch! */
+    if (bank != cPtr->Bank) {
+	arm32_drain_writebuf();
+	cPtr->Bank = bank;
+    }
+#endif
+
+    return 0;
+}
+
+int
+CHIPSSetWritePlanar(ScreenPtr pScreen, int bank)
+{
+    CHIPSPtr cPtr = CHIPSPTR(xf86Screens[pScreen->myNum]);
+  
+    cPtr->writeXR(cPtr, 0x11, ((bank << 5) & 0xFF));
+
+#ifdef	__arm32__
+    /* Must drain StrongARM write buffer on bank switch! */
+    if (bank != cPtr->Bank) {
+	arm32_drain_writebuf();
+	cPtr->Bank = bank;
+    }
+#endif
+
+    return 0;
+}
+
+int
+CHIPSSetReadWritePlanar(ScreenPtr pScreen, int bank)
+{
+    CHIPSPtr cPtr = CHIPSPTR(xf86Screens[pScreen->myNum]);
+  
+    cPtr->writeXR(cPtr, 0x10, ((bank << 5) & 0xFF));
+    cPtr->writeXR(cPtr, 0x11, ((bank << 5) & 0xFF));
+
+#ifdef	__arm32__
+    /* Must drain StrongARM write buffer on bank switch! */
+    if (bank != cPtr->Bank) {
+	arm32_drain_writebuf();
+	cPtr->Bank = bank;
+    }
+#endif
+
+    return 0;
+}
+
+int
+CHIPSWINSetRead(ScreenPtr pScreen, int bank)
+{
+    CHIPSPtr cPtr = CHIPSPTR(xf86Screens[pScreen->myNum]);
+    register unsigned char tmp;
+  
+    cPtr->writeXR(cPtr, 0x10, ((bank << 3) & 0xFF));
+    tmp = cPtr->readXR(cPtr, 0x0C) & 0xEF;
+    cPtr->writeXR(cPtr, 0x0C, ((bank >> 1) & 0x10) | tmp);
+
+#ifdef	__arm32__
+    /* Must drain StrongARM write buffer on bank switch! */
+    if (bank != cPtr->Bank) {
+	arm32_drain_writebuf();
+	cPtr->Bank = bank;
+    }
+#endif
+
+    return 0;
+}
+
+
+int
+CHIPSWINSetWrite(ScreenPtr pScreen, int bank)
+{
+    CHIPSPtr cPtr = CHIPSPTR(xf86Screens[pScreen->myNum]);
+    register unsigned char tmp;
+
+    cPtr->writeXR(cPtr, 0x11, ((bank << 3) & 0xFF));
+    tmp = cPtr->readXR(cPtr, 0x0C) & 0xBF;
+    cPtr->writeXR(cPtr, 0x0C, ((bank << 1) & 0x40) | tmp);
+
+#ifdef	__arm32__
+    /* Must drain StrongARM write buffer on bank switch! */
+    if (bank != cPtr->Bank) {
+	arm32_drain_writebuf();
+	cPtr->Bank = bank;
+    }
+#endif
+
+    return 0;
+}
+
+int
+CHIPSWINSetReadWrite(ScreenPtr pScreen, int bank)
+{
+    CHIPSPtr cPtr = CHIPSPTR(xf86Screens[pScreen->myNum]);
+    register unsigned char tmp;
+
+    cPtr->writeXR(cPtr, 0x10, ((bank << 3) & 0xFF));
+    cPtr->writeXR(cPtr, 0x11, ((bank << 3) & 0xFF));
+    tmp = cPtr->readXR(cPtr, 0x0C) & 0xAF;
+    cPtr->writeXR(cPtr, 0x0C, ((bank << 1) & 0x40) | ((bank >> 1) & 0x10) | tmp);
+
+#ifdef	__arm32__
+    /* Must drain StrongARM write buffer on bank switch! */
+    if (bank != cPtr->Bank) {
+	arm32_drain_writebuf();
+	cPtr->Bank = bank;
+    }
+#endif
+
+    return 0;
+}
+
+int
+CHIPSWINSetReadPlanar(ScreenPtr pScreen, int bank)
+{
+    CHIPSPtr cPtr = CHIPSPTR(xf86Screens[pScreen->myNum]);
+    register unsigned char tmp;
+
+    cPtr->writeXR(cPtr, 0x10, ((bank << 5) & 0xFF));
+    tmp = cPtr->readXR(cPtr, 0x0C) & 0xEF;
+    cPtr->writeXR(cPtr, 0x0C, ((bank << 1) & 0x10) | tmp);
+
+#ifdef	__arm32__
+    /* Must drain StrongARM write buffer on bank switch! */
+    if (bank != cPtr->Bank) {
+	arm32_drain_writebuf();
+	cPtr->Bank = bank;
+    }
+#endif
+
+    return 0;
+}
+
+int
+CHIPSWINSetWritePlanar(ScreenPtr pScreen, int bank)
+{
+    CHIPSPtr cPtr = CHIPSPTR(xf86Screens[pScreen->myNum]);
+    register unsigned char tmp;
+
+    cPtr->writeXR(cPtr, 0x11, ((bank << 5) & 0xFF));
+    tmp = cPtr->readXR(cPtr, 0x0C) & 0xBF;
+    cPtr->writeXR(cPtr, 0x0C, ((bank << 3) & 0x40) | tmp);
+
+#ifdef	__arm32__
+    /* Must drain StrongARM write buffer on bank switch! */
+    if (bank != cPtr->Bank) {
+	arm32_drain_writebuf();
+	cPtr->Bank = bank;
+    }
+#endif
+
+    return 0;
+}
+
+int
+CHIPSWINSetReadWritePlanar(ScreenPtr pScreen, int bank)
+{
+    CHIPSPtr cPtr = CHIPSPTR(xf86Screens[pScreen->myNum]);
+    register unsigned char tmp;
+
+    cPtr->writeXR(cPtr, 0x10, ((bank << 5) & 0xFF));
+    cPtr->writeXR(cPtr, 0x11, ((bank << 5) & 0xFF));
+    tmp = cPtr->readXR(cPtr, 0x0C) & 0xAF;
+    cPtr->writeXR(cPtr, 0x0C, ((bank << 3) & 0x40) | ((bank << 1) & 0x10) | tmp);
+
+#ifdef	__arm32__
+    /* Must drain StrongARM write buffer on bank switch! */
+    if (bank != cPtr->Bank) {
+	arm32_drain_writebuf();
+	cPtr->Bank = bank;
+    }
+#endif
+
+    return 0;
+}
+
+int
+CHIPSHiQVSetReadWrite(ScreenPtr pScreen, int bank)
+{
+    CHIPSPtr cPtr = CHIPSPTR(xf86Screens[pScreen->myNum]);
+
+    cPtr->writeXR(cPtr, 0x0E, bank & 0x7F);
+
+#ifdef	__arm32__
+    /* Must drain StrongARM write buffer on bank switch! */
+    if (bank != cPtr->Bank) {
+	arm32_drain_writebuf();
+	cPtr->Bank = bank;
+    }
+#endif
+
+    return 0;
+}
+
+int
+CHIPSHiQVSetReadWritePlanar(ScreenPtr pScreen, int bank)
+{
+    CHIPSPtr cPtr = CHIPSPTR(xf86Screens[pScreen->myNum]);
+
+    cPtr->writeXR(cPtr, 0x0E, (bank << 2) & 0x7F);
+
+#ifdef	__arm32__
+    /* Must drain StrongARM write buffer on bank switch! */
+    if (bank != cPtr->Bank) {
+	arm32_drain_writebuf();
+	cPtr->Bank = bank;
+    }
+#endif
+
+    return 0;
+}
+#endif
+@
+
+
+1.1.9.1
+log
+@OpenBSD just has imported exactly this tree into their vendor branch,
+called the same tag, in XF4/xc
+This is, apparently, the last XFree86 snapshot before the licence change
+(ie, addition of the advertising clause)
+
+Since the developers don't see any problems with that, and we would like
+to integrate improvements done by the remaining one or two (or so) XFree86
+developers (j/k), this prepares enabling us to update X-Window in the future.
+@
+text
+@d1 1
+a1 1
+/* $XFree86: xc/programs/Xserver/hw/xfree86/drivers/chips/ct_bank.c,v 1.7 2003/12/31 06:14:36 dawes Exp $ */
+d56 2
+a57 2
+#if defined(__arm32__) && defined(__NetBSD__)
+#include <machine/sysarch.h>
+d59 1
+a59 2
+#elif defined(__arm32__)
+#define arm32_drain_writebuf()
+a61 2
+#define ChipsBank(pScreen) CHIPSPTR(xf86Screens[pScreen->myNum])->Bank
+
+d66 1
+a66 3
+    CHIPSPtr cPtr = CHIPSPTR(xf86Screens[pScreen->myNum]);
+
+    outw(cPtr->PIOBase + 0x3D6, ((((bank << 3) & 0xFF) << 8) | 0x10));
+d83 1
+a83 3
+    CHIPSPtr cPtr = CHIPSPTR(xf86Screens[pScreen->myNum]);
+
+    outw(cPtr->PIOBase + 0x3D6, ((((bank << 3) & 0xFF) << 8) | 0x11));
+d100 2
+a101 4
+    CHIPSPtr cPtr = CHIPSPTR(xf86Screens[pScreen->myNum]);
+
+    outw(cPtr->PIOBase + 0x3D6, ((((bank << 3) & 0xFF) << 8) | 0x10));
+    outw(cPtr->PIOBase + 0x3D6, ((((bank << 3) & 0xFF) << 8) | 0x11));
+d117 1
+a117 3
+    CHIPSPtr cPtr = CHIPSPTR(xf86Screens[pScreen->myNum]);
+
+    outw(cPtr->PIOBase + 0x3D6, ((((bank << 5) & 0xFF) << 8) | 0x10));
+d133 1
+a133 3
+    CHIPSPtr cPtr = CHIPSPTR(xf86Screens[pScreen->myNum]);
+
+    outw(cPtr->PIOBase + 0x3D6, ((((bank << 5) & 0xFF) << 8) | 0x11));
+d149 2
+a150 4
+    CHIPSPtr cPtr = CHIPSPTR(xf86Screens[pScreen->myNum]);
+
+    outw(cPtr->PIOBase + 0x3D6, ((((bank << 5) & 0xFF) << 8) | 0x10));
+    outw(cPtr->PIOBase + 0x3D6, ((((bank << 5) & 0xFF) << 8) | 0x11));
+a165 1
+    CHIPSPtr cPtr = CHIPSPTR(xf86Screens[pScreen->myNum]);
+d168 4
+a171 4
+    outw(cPtr->PIOBase + 0x3D6, ((((bank << 3) & 0xFF) << 8) | 0x10));
+    outb(cPtr->PIOBase + 0x3D6, 0x0C);
+    tmp = inb(cPtr->PIOBase + 0x3D7) & 0xEF;
+    outw(cPtr->PIOBase + 0x3D6, (((((bank >> 1) & 0x10) | tmp) << 8) | 0x0C));
+a187 1
+    CHIPSPtr cPtr = CHIPSPTR(xf86Screens[pScreen->myNum]);
+d190 4
+a193 4
+    outw(cPtr->PIOBase + 0x3D6, ((((bank << 3) & 0xFF) << 8) | 0x11));
+    outb(cPtr->PIOBase + 0x3D6, 0x0C);
+    tmp = inb(cPtr->PIOBase + 0x3D7) & 0xBF;
+    outw(cPtr->PIOBase + 0x3D6, (((((bank << 1) & 0x40) | tmp) << 8) | 0x0C));
+a208 1
+    CHIPSPtr cPtr = CHIPSPTR(xf86Screens[pScreen->myNum]);
+d211 5
+a215 6
+    outw(cPtr->PIOBase + 0x3D6, ((((bank << 3) & 0xFF) << 8) | 0x10));
+    outw(cPtr->PIOBase + 0x3D6, ((((bank << 3) & 0xFF) << 8) | 0x11));
+    outb(cPtr->PIOBase + 0x3D6, 0x0C);
+    tmp = inb(cPtr->PIOBase + 0x3D7) & 0xAF;
+    outw(cPtr->PIOBase + 0x3D6,
+	(((((bank << 1) & 0x40) | ((bank >> 1) & 0x10) | tmp) << 8) | 0x0C));
+a230 1
+    CHIPSPtr cPtr = CHIPSPTR(xf86Screens[pScreen->myNum]);
+d233 4
+a236 4
+    outw(cPtr->PIOBase + 0x3D6, ((((bank << 5) & 0xFF) << 8) | 0x10));
+    outb(cPtr->PIOBase + 0x3D6, 0x0C);
+    tmp = inb(cPtr->PIOBase + 0x3D7) & 0xEF;
+    outw(cPtr->PIOBase + 0x3D6, (((((bank << 1) & 0x10) | tmp) << 8) | 0x0C));
+a251 1
+    CHIPSPtr cPtr = CHIPSPTR(xf86Screens[pScreen->myNum]);
+d254 4
+a257 4
+    outw(cPtr->PIOBase + 0x3D6, ((((bank << 5) & 0xFF) << 8) | 0x11));
+    outb(cPtr->PIOBase + 0x3D6, 0x0C);
+    tmp = inb(cPtr->PIOBase + 0x3D7) & 0xBF;
+    outw(cPtr->PIOBase + 0x3D6, (((((bank << 3) & 0x40) | tmp) << 8) | 0x0C));
+a272 1
+    CHIPSPtr cPtr = CHIPSPTR(xf86Screens[pScreen->myNum]);
+d275 5
+a279 6
+    outw(cPtr->PIOBase + 0x3D6, ((((bank << 5) & 0xFF) << 8) | 0x10));
+    outw(cPtr->PIOBase + 0x3D6, ((((bank << 5) & 0xFF) << 8) | 0x11));
+    outb(cPtr->PIOBase + 0x3D6, 0x0C);
+    tmp = inb(cPtr->PIOBase + 0x3D7) & 0xAF;
+    outw(cPtr->PIOBase + 0x3D6,
+	(((((bank << 3) & 0x40) | ((bank << 1) & 0x10) | tmp) << 8) | 0x0C));
+d295 1
+a295 3
+    CHIPSPtr cPtr = CHIPSPTR(xf86Screens[pScreen->myNum]);
+
+    outw(cPtr->PIOBase + 0x3D6, (((bank & 0x7F) << 8) | 0x0E));
+d311 1
+a311 3
+    CHIPSPtr cPtr = CHIPSPTR(xf86Screens[pScreen->myNum]);
+
+    outw(cPtr->PIOBase + 0x3D6, ((((bank << 2) & 0x7F) << 8) | 0x0E));
+@
+
+
+1.1.1.1
+log
+@Import OpenBSD 3.3 XF4 repository from CTM 3132 the first time
+This finalizes starting an OpenBSD-mirabile (aka MirBSD) repository.
+
+### MirBSD is:
+# Copyright (c) 1982-2003 by Thorsten "mirabile" Glaser <x86@@ePost.de>
+# Copyright © 1968-2003  The authors of And contributors to UNIX®, the
+#       C Language, BSD/Berkeley Unix; 386BSD, NetBSD 1.1 and OpenBSD.
+#
+# Anyone who obtained a copy of this work is hereby permitted to freely use,
+# distribute, modify, merge, sublicence, give away or sell it as long as the
+# authors are given due credit and the following notice is retained:
+#
+# This work is provided "as is", with no explicit or implicit warranty what-
+# soever. Use it only at your own risk. In no event may an author or contri-
+# butor be held liable for any damage, directly or indirectly, that origina-
+# ted through or is caused by creation or modification of this work.
+
+MirBSD is my private tree. MirBSD does not differ very much from OpenBSD
+and intentionally tracks OpenBSD. That's why it _is_ OpenBSD, just not the
+official one. It's like with DarrenBSD.
+
+At time of this writing, no advertising for MirBSD must be done,
+because the advertising clause has not yet been sorted out.
+
+http://templeofhate.com/tglaser/MirBSD/index.php
+@
+text
+@@
+
+
+1.1.1.2
+log
+@The X-Windowing System
+
+Import XFree86 4.3 from OpenBSD by CTM, in the hope it's stable
+@
+text
+@d1 1
+a1 1
+/* $XFree86: xc/programs/Xserver/hw/xfree86/drivers/chips/ct_bank.c,v 1.6 2002/01/25 21:55:58 tsi Exp $ */
+d66 1
+a66 3
+    CHIPSPtr cPtr = CHIPSPTR(xf86Screens[pScreen->myNum]);
+
+    outw(cPtr->PIOBase + 0x3D6, ((((bank << 3) & 0xFF) << 8) | 0x10));
+d83 1
+a83 3
+    CHIPSPtr cPtr = CHIPSPTR(xf86Screens[pScreen->myNum]);
+
+    outw(cPtr->PIOBase + 0x3D6, ((((bank << 3) & 0xFF) << 8) | 0x11));
+d100 2
+a101 4
+    CHIPSPtr cPtr = CHIPSPTR(xf86Screens[pScreen->myNum]);
+
+    outw(cPtr->PIOBase + 0x3D6, ((((bank << 3) & 0xFF) << 8) | 0x10));
+    outw(cPtr->PIOBase + 0x3D6, ((((bank << 3) & 0xFF) << 8) | 0x11));
+d117 1
+a117 3
+    CHIPSPtr cPtr = CHIPSPTR(xf86Screens[pScreen->myNum]);
+
+    outw(cPtr->PIOBase + 0x3D6, ((((bank << 5) & 0xFF) << 8) | 0x10));
+d133 1
+a133 3
+    CHIPSPtr cPtr = CHIPSPTR(xf86Screens[pScreen->myNum]);
+
+    outw(cPtr->PIOBase + 0x3D6, ((((bank << 5) & 0xFF) << 8) | 0x11));
+d149 2
+a150 4
+    CHIPSPtr cPtr = CHIPSPTR(xf86Screens[pScreen->myNum]);
+
+    outw(cPtr->PIOBase + 0x3D6, ((((bank << 5) & 0xFF) << 8) | 0x10));
+    outw(cPtr->PIOBase + 0x3D6, ((((bank << 5) & 0xFF) << 8) | 0x11));
+a165 1
+    CHIPSPtr cPtr = CHIPSPTR(xf86Screens[pScreen->myNum]);
+d168 4
+a171 4
+    outw(cPtr->PIOBase + 0x3D6, ((((bank << 3) & 0xFF) << 8) | 0x10));
+    outb(cPtr->PIOBase + 0x3D6, 0x0C);
+    tmp = inb(cPtr->PIOBase + 0x3D7) & 0xEF;
+    outw(cPtr->PIOBase + 0x3D6, (((((bank >> 1) & 0x10) | tmp) << 8) | 0x0C));
+a187 1
+    CHIPSPtr cPtr = CHIPSPTR(xf86Screens[pScreen->myNum]);
+d190 4
+a193 4
+    outw(cPtr->PIOBase + 0x3D6, ((((bank << 3) & 0xFF) << 8) | 0x11));
+    outb(cPtr->PIOBase + 0x3D6, 0x0C);
+    tmp = inb(cPtr->PIOBase + 0x3D7) & 0xBF;
+    outw(cPtr->PIOBase + 0x3D6, (((((bank << 1) & 0x40) | tmp) << 8) | 0x0C));
+a208 1
+    CHIPSPtr cPtr = CHIPSPTR(xf86Screens[pScreen->myNum]);
+d211 5
+a215 6
+    outw(cPtr->PIOBase + 0x3D6, ((((bank << 3) & 0xFF) << 8) | 0x10));
+    outw(cPtr->PIOBase + 0x3D6, ((((bank << 3) & 0xFF) << 8) | 0x11));
+    outb(cPtr->PIOBase + 0x3D6, 0x0C);
+    tmp = inb(cPtr->PIOBase + 0x3D7) & 0xAF;
+    outw(cPtr->PIOBase + 0x3D6,
+	(((((bank << 1) & 0x40) | ((bank >> 1) & 0x10) | tmp) << 8) | 0x0C));
+a230 1
+    CHIPSPtr cPtr = CHIPSPTR(xf86Screens[pScreen->myNum]);
+d233 4
+a236 4
+    outw(cPtr->PIOBase + 0x3D6, ((((bank << 5) & 0xFF) << 8) | 0x10));
+    outb(cPtr->PIOBase + 0x3D6, 0x0C);
+    tmp = inb(cPtr->PIOBase + 0x3D7) & 0xEF;
+    outw(cPtr->PIOBase + 0x3D6, (((((bank << 1) & 0x10) | tmp) << 8) | 0x0C));
+a251 1
+    CHIPSPtr cPtr = CHIPSPTR(xf86Screens[pScreen->myNum]);
+d254 4
+a257 4
+    outw(cPtr->PIOBase + 0x3D6, ((((bank << 5) & 0xFF) << 8) | 0x11));
+    outb(cPtr->PIOBase + 0x3D6, 0x0C);
+    tmp = inb(cPtr->PIOBase + 0x3D7) & 0xBF;
+    outw(cPtr->PIOBase + 0x3D6, (((((bank << 3) & 0x40) | tmp) << 8) | 0x0C));
+a272 1
+    CHIPSPtr cPtr = CHIPSPTR(xf86Screens[pScreen->myNum]);
+d275 5
+a279 6
+    outw(cPtr->PIOBase + 0x3D6, ((((bank << 5) & 0xFF) << 8) | 0x10));
+    outw(cPtr->PIOBase + 0x3D6, ((((bank << 5) & 0xFF) << 8) | 0x11));
+    outb(cPtr->PIOBase + 0x3D6, 0x0C);
+    tmp = inb(cPtr->PIOBase + 0x3D7) & 0xAF;
+    outw(cPtr->PIOBase + 0x3D6,
+	(((((bank << 3) & 0x40) | ((bank << 1) & 0x10) | tmp) << 8) | 0x0C));
+d295 1
+a295 3
+    CHIPSPtr cPtr = CHIPSPTR(xf86Screens[pScreen->myNum]);
+
+    outw(cPtr->PIOBase + 0x3D6, (((bank & 0x7F) << 8) | 0x0E));
+d311 1
+a311 3
+    CHIPSPtr cPtr = CHIPSPTR(xf86Screens[pScreen->myNum]);
+
+    outw(cPtr->PIOBase + 0x3D6, ((((bank << 2) & 0x7F) << 8) | 0x0E));
+@
+
+
+1.1.1.3
+log
+@That's what OpenBSD will, probably, ship as XF4 in 3.5
+their last sync against XFree86 4.3-current has been
+imported into our vendor branch, too
+@
+text
+@d1 1
+a1 1
+/* $XFree86: xc/programs/Xserver/hw/xfree86/drivers/chips/ct_bank.c,v 1.7 2003/12/31 06:14:36 dawes Exp $ */
+d56 2
+a57 2
+#if defined(__arm32__) && defined(__NetBSD__)
+#include <machine/sysarch.h>
+d59 1
+a59 2
+#elif defined(__arm32__)
+#define arm32_drain_writebuf()
+a60 2
+
+#define ChipsBank(pScreen) CHIPSPTR(xf86Screens[pScreen->myNum])->Bank
+@
+
+

@@ -1,0 +1,311 @@
+head	1.1;
+branch	1.1.1;
+access;
+symbols
+	tg-mergetmp-2:1.1.1.1
+	cvs-200410241530:1.1.1.1
+	cvs-200410012000:1.1.1.1
+	cvs-200407141120:1.1.1.1
+	cvs-200406231010:1.1.1.1
+	MIRBSD_7quater:1.1.1.1
+	cvs-200405271510:1.1.1.1
+	cvs-200403021700:1.1.1.1
+	cvs-200401291925:1.1.1.1
+	MIRBSD_7_ALPHA:1.1.1.1.0.4
+	MIRBSD_7:1.1.1.1.0.2
+	MIRBSD_7ter:1.1.1.1
+	cvs-20011091815:1.1.1.1
+	cvs-200309162130:1.1.1.1
+	cvs-200308302005:1.1.1.1
+	ctmx-0387:1.1.1.1
+	ctmx-0384:1.1.1.1
+	MIRBSD_5:1.1.1.1
+	ctmx-0375:1.1.1.1
+	ctmx-0373:1.1.1.1
+	ctm-0371:1.1.1.1
+	ctm-0370:1.1.1.1
+	MIRBSD_4:1.1.1.1
+	ctm-0363:1.1.1.1
+	ctm-0359:1.1.1.1
+	ctm-0349:1.1.1.1
+	openbsd:1.1.1;
+locks; strict;
+comment	@ * @;
+
+
+1.1
+date	2003.03.22.20.10.49;	author tg;	state Exp;
+branches
+	1.1.1.1;
+next	;
+
+1.1.1.1
+date	2003.03.22.20.10.49;	author tg;	state Stab;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@/* -*- Mode: C; tab-width: 4 -*- */
+/* sierpinski --- Sierpinski's triangle fractal */
+
+#if !defined( lint ) && !defined( SABER )
+static const char sccsid[] = "@@(#)sierpinski.c	5.00 2000/11/01 xlockmore";
+
+#endif
+
+/*-
+ * Copyright (c) 1996 by Desmond Daignault
+ *
+ * Permission to use, copy, modify, and distribute this software and its
+ * documentation for any purpose and without fee is hereby granted,
+ * provided that the above copyright notice appear in all copies and that
+ * both that copyright notice and this permission notice appear in
+ * supporting documentation.
+ *
+ * This file is provided AS IS with no warranties of any kind.  The author
+ * shall have no liability with respect to the infringement of copyrights,
+ * trade secrets or any patents by this file or any part thereof.  In no
+ * event will the author be liable for any lost revenue or profits or
+ * other special, indirect and consequential damages.
+ *
+ * Dots initially appear where they "should not".  Later they get
+ * "focused".  This is correct behavior.
+ *
+ * Revision History:
+ * 01-Nov-2000: Allocation checks
+ * 18-Sep-1997: 3D version Antti Kuntsi <kuntsi@@iki.fi>.
+ * 20-May-1997: Changed the name tri to sierpinski for more compatiblity
+ * 10-May-1997: Jamie Zawinski <jwz@@jwz.org> compatible with xscreensaver
+ * 05-Sep-1996: Desmond Daignault Datatimes Incorporated
+ *            <tekdd@@dtol.datatimes.com> .
+ */
+
+#ifdef STANDALONE
+#define PROGCLASS "Sierpinski"
+#define HACK_INIT init_sierpinski
+#define HACK_DRAW draw_sierpinski
+#define sierpinski_opts xlockmore_opts
+#define DEFAULTS "*delay: 400000 \n" \
+ "*count: 2000 \n" \
+ "*cycles: 100 \n" \
+ "*ncolors: 64 \n"
+#define BRIGHT_COLORS
+#include "xlockmore.h"		/* in xscreensaver distribution */
+#else /* STANDALONE */
+#include "xlock.h"		/* in xlockmore distribution */
+#endif /* STANDALONE */
+
+#ifdef MODE_sierpinski
+
+ModeSpecOpt sierpinski_opts =
+{0, (XrmOptionDescRec *) NULL, 0, (argtype *) NULL, (OptionStruct *) NULL};
+
+#ifdef USE_MODULES
+ModStruct   sierpinski_description =
+{"sierpinski", "init_sierpinski", "draw_sierpinski", "release_sierpinski",
+ "refresh_sierpinski", "init_sierpinski", NULL, &sierpinski_opts,
+ 400000, 2000, 100, 1, 64, 1.0, "",
+ "Shows Sierpinski's triangle", 0, NULL};
+
+#endif
+
+#define MAXCORNERS 4
+
+typedef struct {
+	int         width, height;
+	int         time;
+	int         px, py;
+	int         total_npoints;
+	int         corners;
+	int         npoints[MAXCORNERS];
+	unsigned long colors[MAXCORNERS];
+	XPoint     *pointBuffer[MAXCORNERS];
+	XPoint      vertex[MAXCORNERS];
+} sierpinskistruct;
+
+static sierpinskistruct *tris = NULL;
+
+static void
+startover(ModeInfo * mi)
+{
+	int         j;
+	sierpinskistruct *sp = &tris[MI_SCREEN(mi)];
+
+	if (MI_NPIXELS(mi) > 2) {
+		if (sp->corners == 3) {
+			sp->colors[0] = (NRAND(MI_NPIXELS(mi)));
+			sp->colors[1] = (sp->colors[0] + MI_NPIXELS(mi) / 7 +
+			 NRAND(2 * MI_NPIXELS(mi) / 7 + 1)) % MI_NPIXELS(mi);
+			sp->colors[2] = (sp->colors[0] + 4 * MI_NPIXELS(mi) / 7 +
+			 NRAND(2 * MI_NPIXELS(mi) / 7 + 1)) % MI_NPIXELS(mi);
+		} else if (sp->corners == 4) {
+			sp->colors[0] = (NRAND(MI_NPIXELS(mi)));
+			sp->colors[1] = (sp->colors[0] + MI_NPIXELS(mi) / 7 +
+			     NRAND(MI_NPIXELS(mi) / 7 + 1)) % MI_NPIXELS(mi);
+			sp->colors[2] = (sp->colors[0] + 3 * MI_NPIXELS(mi) / 7 +
+			     NRAND(MI_NPIXELS(mi) / 7 + 1)) % MI_NPIXELS(mi);
+			sp->colors[3] = (sp->colors[0] + 5 * MI_NPIXELS(mi) / 7 +
+			     NRAND(MI_NPIXELS(mi) / 7 + 1)) % MI_NPIXELS(mi);
+		} else {
+			(void) fprintf(stderr, "colors not set for %d corners\n", sp->corners);
+		}
+	}
+	for (j = 0; j < sp->corners; j++) {
+		sp->vertex[j].x = NRAND(sp->width);
+		sp->vertex[j].y = NRAND(sp->height);
+	}
+	sp->px = NRAND(sp->width);
+	sp->py = NRAND(sp->height);
+	sp->time = 0;
+
+	MI_CLEARWINDOW(mi);
+}
+
+static void
+free_sierpinski(sierpinskistruct *sp)
+{
+	int corner;
+
+	for (corner = 0; corner < MAXCORNERS; corner++)
+		if (sp->pointBuffer[corner] != NULL) {
+			(void) free((void *) sp->pointBuffer[corner]);
+			sp->pointBuffer[corner] = NULL;
+		}
+}
+
+void
+init_sierpinski(ModeInfo * mi)
+{
+	int         i;
+	sierpinskistruct *sp;
+
+	if (tris == NULL) {
+		if ((tris = (sierpinskistruct *) calloc(MI_NUM_SCREENS(mi),
+					 sizeof (sierpinskistruct))) == NULL)
+			return;
+	}
+	sp = &tris[MI_SCREEN(mi)];
+
+	sp->width = MI_WIDTH(mi);
+	sp->height = MI_HEIGHT(mi);
+
+	sp->total_npoints = MI_COUNT(mi);
+	if (sp->total_npoints < 1)
+		sp->total_npoints = 1;
+	sp->corners = MI_SIZE(mi);
+	if (sp->corners < 3 || sp->corners > 4) {
+		sp->corners = (int) (LRAND() & 1) + 3;
+	}
+	for (i = 0; i < sp->corners; i++) {
+		if (!sp->pointBuffer[i])
+			if ((sp->pointBuffer[i] = (XPoint *) malloc(sp->total_npoints *
+					sizeof (XPoint))) == NULL) {
+				free_sierpinski(sp);
+				return;
+			}
+	}
+	startover(mi);
+}
+
+void
+draw_sierpinski(ModeInfo * mi)
+{
+	Display    *display = MI_DISPLAY(mi);
+	GC          gc = MI_GC(mi);
+	XPoint     *xp[MAXCORNERS];
+	int         i, v;
+	sierpinskistruct *sp;
+
+	if (tris == NULL)
+		return;
+	sp = &tris[MI_SCREEN(mi)];
+	if (sp->pointBuffer[0] == NULL)
+		return;
+
+	MI_IS_DRAWN(mi) = True;
+	if (MI_NPIXELS(mi) <= 2)
+		XSetForeground(display, gc, MI_WHITE_PIXEL(mi));
+	for (i = 0; i < sp->corners; i++)
+		xp[i] = sp->pointBuffer[i];
+	for (i = 0; i < sp->total_npoints; i++) {
+		v = NRAND(sp->corners);
+		sp->px = (sp->px + sp->vertex[v].x) / 2;
+		sp->py = (sp->py + sp->vertex[v].y) / 2;
+		xp[v]->x = sp->px;
+		xp[v]->y = sp->py;
+		xp[v]++;
+		sp->npoints[v]++;
+	}
+	for (i = 0; i < sp->corners; i++) {
+		if (MI_NPIXELS(mi) > 2)
+			XSetForeground(display, gc, MI_PIXEL(mi, sp->colors[i]));
+		XDrawPoints(display, MI_WINDOW(mi), gc, sp->pointBuffer[i], sp->npoints[i],
+			    CoordModeOrigin);
+		sp->npoints[i] = 0;
+	}
+	if (++sp->time >= MI_CYCLES(mi))
+		startover(mi);
+}
+
+void
+release_sierpinski(ModeInfo * mi)
+{
+	if (tris != NULL) {
+		int         screen;
+
+		for (screen = 0; screen < MI_NUM_SCREENS(mi); screen++)
+			free_sierpinski(&tris[screen]);
+		(void) free((void *) tris);
+		tris = NULL;
+	}
+}
+
+void
+refresh_sierpinski(ModeInfo * mi)
+{
+	MI_CLEARWINDOW(mi);
+}
+
+#endif /* MODE_sierpinski */
+@
+
+
+1.1.1.1
+log
+@Import OpenBSD 3.3 XF4 repository from CTM 3132 the first time
+This finalizes starting an OpenBSD-mirabile (aka MirBSD) repository.
+
+### MirBSD is:
+# Copyright (c) 1982-2003 by Thorsten "mirabile" Glaser <x86@@ePost.de>
+# Copyright © 1968-2003  The authors of And contributors to UNIX®, the
+#       C Language, BSD/Berkeley Unix; 386BSD, NetBSD 1.1 and OpenBSD.
+#
+# Anyone who obtained a copy of this work is hereby permitted to freely use,
+# distribute, modify, merge, sublicence, give away or sell it as long as the
+# authors are given due credit and the following notice is retained:
+#
+# This work is provided "as is", with no explicit or implicit warranty what-
+# soever. Use it only at your own risk. In no event may an author or contri-
+# butor be held liable for any damage, directly or indirectly, that origina-
+# ted through or is caused by creation or modification of this work.
+
+MirBSD is my private tree. MirBSD does not differ very much from OpenBSD
+and intentionally tracks OpenBSD. That's why it _is_ OpenBSD, just not the
+official one. It's like with DarrenBSD.
+
+At time of this writing, no advertising for MirBSD must be done,
+because the advertising clause has not yet been sorted out.
+
+http://templeofhate.com/tglaser/MirBSD/index.php
+@
+text
+@@

@@ -1,0 +1,699 @@
+head	1.1;
+branch	1.1.1;
+access;
+symbols
+	tg-mergetmp-2:1.1.1.2
+	cvs-200410241530:1.1.1.2
+	cvs-200410012000:1.1.1.2
+	cvs-200407141120:1.1.1.2
+	cvs-200406231010:1.1.1.2
+	MIRBSD_7quater:1.1.1.1
+	cvs-200405271510:1.1.1.2
+	XFree86_4_4_0:1.1.9.1
+	cvs-200403021700:1.1.1.2
+	XFREE86_20040213:1.1.9.1
+	xc:1.1.9
+	cvs-200401291925:1.1.1.1
+	MIRBSD_7_ALPHA:1.1.1.1.0.4
+	MIRBSD_7:1.1.1.1.0.2
+	MIRBSD_7ter:1.1.1.1
+	cvs-20011091815:1.1.1.1
+	cvs-200309162130:1.1.1.1
+	cvs-200308302005:1.1.1.1
+	ctmx-0387:1.1.1.1
+	ctmx-0384:1.1.1.1
+	MIRBSD_5:1.1.1.1
+	ctmx-0375:1.1.1.1
+	ctmx-0373:1.1.1.1
+	ctm-0371:1.1.1.1
+	ctm-0370:1.1.1.1
+	MIRBSD_4:1.1.1.1
+	ctm-0363:1.1.1.1
+	ctm-0359:1.1.1.1
+	ctm-0349:1.1.1.1
+	openbsd:1.1.1;
+locks; strict;
+comment	@ * @;
+
+
+1.1
+date	2003.03.22.20.09.26;	author tg;	state Exp;
+branches
+	1.1.1.1
+	1.1.9.1;
+next	;
+
+1.1.1.1
+date	2003.03.22.20.09.26;	author tg;	state Exp;
+branches;
+next	1.1.1.2;
+
+1.1.1.2
+date	2004.03.02.18.29.01;	author tg;	state Stab;
+branches;
+next	;
+
+1.1.9.1
+date	2004.02.14.19.26.11;	author tg;	state Exp;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@/*
+ *Copyright (C) 1994-2000 The XFree86 Project, Inc. All Rights Reserved.
+ *
+ *Permission is hereby granted, free of charge, to any person obtaining
+ * a copy of this software and associated documentation files (the
+ *"Software"), to deal in the Software without restriction, including
+ *without limitation the rights to use, copy, modify, merge, publish,
+ *distribute, sublicense, and/or sell copies of the Software, and to
+ *permit persons to whom the Software is furnished to do so, subject to
+ *the following conditions:
+ *
+ *The above copyright notice and this permission notice shall be
+ *included in all copies or substantial portions of the Software.
+ *
+ *THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+ *EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+ *MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
+ *NONINFRINGEMENT. IN NO EVENT SHALL THE XFREE86 PROJECT BE LIABLE FOR
+ *ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF
+ *CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
+ *WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+ *
+ *Except as contained in this notice, the name of the XFree86 Project
+ *shall not be used in advertising or otherwise to promote the sale, use
+ *or other dealings in this Software without prior written authorization
+ *from the XFree86 Project.
+ *
+ * Authors:	Harold L Hunt II
+ */
+/* $XFree86: xc/programs/Xserver/hw/xwin/winsetsp.c,v 1.7 2001/11/01 12:19:42 alanh Exp $ */
+
+#include "win.h"
+
+/* See Porting Layer Definition - p. 55 */
+void
+winSetSpansNativeGDI (DrawablePtr	pDrawable,
+		      GCPtr		pGC,
+		      char		*pSrcs,
+		      DDXPointPtr	pPoints,
+		      int		*piWidths,
+		      int		iSpans,
+		      int		fSorted)
+{
+  winGCPriv(pGC);
+  PixmapPtr		pPixmap = NULL;
+  winPrivPixmapPtr	pPixmapPriv = NULL;
+  int			iSpan;
+  int			*piWidth = NULL;
+  DDXPointPtr		pPoint = NULL;
+  char			*pSrc = pSrcs;
+  HDC			hdcMem;
+  BITMAPINFOHEADER	*pbmih;
+  HBITMAP		hBitmap = NULL;
+  HBITMAP		hbmpOrig = NULL;
+  DEBUG_FN_NAME("winSetSpans");
+  DEBUGVARS;
+  DEBUGPROC_MSG;
+
+  /* Branch on the drawable type */
+  switch (pDrawable->type)
+    {
+    case DRAWABLE_PIXMAP:
+      pPixmap = (PixmapPtr) pDrawable;
+      pPixmapPriv = winGetPixmapPriv (pPixmap);
+      
+      /* Select the drawable pixmap into a DC */
+      hbmpOrig = SelectObject (pGCPriv->hdcMem, pPixmapPriv->hBitmap);
+      if (hbmpOrig == NULL)
+	FatalError ("winSetSpans - DRAWABLE_PIXMAP - SelectObject () "
+		    "failed on pPixmapPriv->hBitmap\n");
+
+      /* Branch on the raster operation type */
+      switch (pGC->alu)
+	{
+	case GXclear:
+	  FatalError ("winSetSpans - DRAWABLE_PIXMAP - GXclear\n");
+	  break;
+
+	case GXand:
+	  FatalError ("winSetSpans - DRAWABLE_PIXMAP - GXand\n");
+	  break;
+
+	case GXandReverse:
+	  FatalError ("winSetSpans - DRAWABLE_PIXMAP - GXandReverse\n");
+	  break;
+
+	case GXcopy:
+	  ErrorF ("winSetSpans - DRAWABLE_PIXMAP - GXcopy %08x\n",
+		  pDrawable);
+
+	  /* Loop through spans */
+	  for (iSpan = 0; iSpan < iSpans; ++iSpan)
+	    {
+	      piWidth = piWidths + iSpan;
+	      pPoint = pPoints + iSpan;
+	  
+	      /* Blast the bits to the drawable */
+	      SetDIBits (pGCPriv->hdcMem,
+			 pPixmapPriv->hBitmap,
+			 pPoint->y, 1, 
+			 pSrc,
+			 (BITMAPINFO *) pPixmapPriv->pbmih,
+			 0);
+	  
+	      /* Display some useful information */
+	      ErrorF ("(%dx%dx%d) (%d,%d) w: %d ps: %08x\n",
+		      pDrawable->width, pDrawable->height, pDrawable->depth,
+		      pPoint->x, pPoint->y, *piWidth, pSrc);
+
+	      /* Calculate offset of next bit source */
+	      pSrc += 4 * ((*piWidth  + 31) / 32);
+	    }
+
+	  /*
+	   * REMOVE - Visual verification only.
+	   */
+	  BitBlt (pGCPriv->hdc, 
+		  pDrawable->width * 2, pDrawable->height,
+		  pDrawable->width, pDrawable->height,
+		  pGCPriv->hdcMem,
+		  0, 0, 
+		  SRCCOPY);
+	  DEBUG_MSG ("DRAWABLE_PIXMAP - GXcopy");
+	  break;
+
+	case GXandInverted:
+	  FatalError ("winSetSpans - DRAWABLE_PIXMAP - GXandInverted\n");
+	  break;
+
+	case GXnoop:
+	  FatalError ("winSetSpans - DRAWABLE_PIXMAP - GXnoop\n");
+	  break;
+
+	case GXxor:
+	  FatalError ("winSetSpans - DRAWABLE_PIXMAP - GXxor\n");
+	  break;
+
+	case GXor:
+	  FatalError ("winSetSpans - DRAWABLE_PIXMAP - GXor\n");
+	  break;
+
+	case GXnor:
+	  FatalError ("winSetSpans - DRAWABLE_PIXMAP - GXnor\n");
+	  break;
+
+	case GXequiv:
+	  FatalError ("winSetSpans - DRAWABLE_PIXMAP - GXequiv\n");
+	  break;
+
+	case GXinvert:
+	  ErrorF ("winSetSpans - DRAWABLE_PIXMAP - GXinvert %08x\n",
+		  pDrawable);
+
+	  /* Create a temporary DC */
+	  hdcMem = CreateCompatibleDC (NULL);
+ 
+	  /* Loop through spans */
+	  for (iSpan = 0; iSpan < iSpans; ++iSpan)
+	    {
+	      piWidth = piWidths + iSpan;
+	      pPoint = pPoints + iSpan;
+
+	      /* Create a one-line DIB for the bit data */
+	      hBitmap = winCreateDIBNativeGDI (*piWidth, 1, pDrawable->depth,
+					       NULL, (BITMAPINFO **) &pbmih);
+
+	      /* Select the span line line bitmap into the temporary DC */
+	      hbmpOrig = SelectObject (hdcMem, hBitmap);
+	      
+	      /* Blast bit data to the one-line DIB */
+	      SetDIBits (hdcMem, hBitmap,
+			 0, 1,
+			 pSrc,
+			 (BITMAPINFO *) pbmih,
+			 DIB_RGB_COLORS);
+
+	      /* Blit the span line to the drawable */
+	      BitBlt (pGCPriv->hdcMem,
+		      pPoint->x, pPoint->y,
+		      *piWidth, 1,
+		      hdcMem,
+		      0, 0, 
+		      NOTSRCCOPY);
+
+	      /*
+	       * REMOVE - Visual verification only.
+	       */
+	      BitBlt (pGCPriv->hdc,
+		      pDrawable->width, pDrawable->height + pPoint->y,
+		      *piWidth, 1,
+		      hdcMem,
+		      0, 0, 
+		      SRCCOPY);
+
+	      /* Display some useful information */
+	      ErrorF ("(%dx%dx%d) (%d,%d) w: %d ps: %08x\n",
+		      pDrawable->width, pDrawable->height, pDrawable->depth,
+		      pPoint->x, pPoint->y, *piWidth, pSrc);
+
+	      /* Calculate offset of next bit source */
+	      pSrc += 4 * ((*piWidth + 31) / 32);
+
+	      /* Pop the span line bitmap out of the memory DC */
+	      SelectObject (hdcMem, hbmpOrig);
+
+	      /* Free the temporary bitmap */
+	      DeleteObject (hBitmap);
+	      hBitmap = NULL;
+	    }
+
+	  /*
+	   * REMOVE - Visual verification only.
+	   */
+	  DEBUG_MSG ("DRAWABLE_PIXMAP - GXinvert - Prior to invert");
+	  BitBlt (pGCPriv->hdc, 
+		  pDrawable->width * 2, pDrawable->height,
+		  pDrawable->width, pDrawable->height,
+		  pGCPriv->hdcMem,
+		  0, 0, 
+		  SRCCOPY);
+	  DEBUG_MSG ("DRAWABLE_PIXMAP - GXinvert - Finished invert");
+
+	  /* Release the scratch DC */
+	  DeleteDC (hdcMem);
+	  break;
+
+	case GXorReverse:
+	  FatalError ("winSetSpans - DRAWABLE_PIXMAP - GXorReverse\n");
+	  break;
+
+	case GXcopyInverted:
+	  FatalError ("winSetSpans - DRAWABLE_PIXMAP - GXcopyInverted\n");
+	  break;
+
+	case GXorInverted:
+	  FatalError ("winSetSpans - DRAWABLE_PIXMAP - GXorInverted\n");
+	  break;
+
+	case GXnand:
+	  FatalError ("winSetSpans - DRAWABLE_PIXMAP - GXnand\n");
+	  break;
+
+	case GXset:
+	  FatalError ("winSetSpans - DRAWABLE_PIXMAP - GXset\n");
+	  break;
+
+	default:
+	  FatalError ("winSetSpans - DRAWABLE_PIXMAP - Unknown ROP\n");
+	  break;
+	}
+
+      /* Push the drawable pixmap out of the GC HDC */
+      SelectObject (pGCPriv->hdcMem, hbmpOrig);
+      break;
+
+    case DRAWABLE_WINDOW:
+      FatalError ("\nwinSetSpansNativeGDI - DRAWABLE_WINDOW\n\n");
+
+      /* Branch on the raster operation type */
+      switch (pGC->alu)
+	{
+	case GXclear:
+	  ErrorF ("winSetSpans () - DRAWABLE_WINDOW - GXclear\n");
+	  break;
+
+	case GXand:
+	  ErrorF ("winSetSpans () - DRAWABLE_WINDOW - GXand\n");
+	  break;
+
+	case GXandReverse:
+	  ErrorF ("winSetSpans () - DRAWABLE_WINDOW - GXandReverse\n");
+	  break;
+
+	case GXcopy:
+	  ErrorF ("winSetSpans () - DRAWABLE_WINDOW - GXcopy\n");
+	  break;
+
+	case GXandInverted:
+	  ErrorF ("winSetSpans () - DRAWABLE_WINDOW - GXandInverted\n");
+	  break;
+
+	case GXnoop:
+	  ErrorF ("winSetSpans () - DRAWABLE_WINDOW - GXnoop\n");
+	  break;
+
+	case GXxor:
+	  ErrorF ("winSetSpans () - DRAWABLE_WINDOW - GXxor\n");
+	  break;
+
+	case GXor:
+	  ErrorF ("winSetSpans () - DRAWABLE_WINDOW - GXor\n");
+	  break;
+
+	case GXnor:
+	  ErrorF ("winSetSpans () - DRAWABLE_WINDOW - GXnor\n");
+	  break;
+
+	case GXequiv:
+	  ErrorF ("winSetSpans () - DRAWABLE_WINDOW - GXequiv\n");
+	  break;
+
+	case GXinvert:
+	  ErrorF ("winSetSpans () - DRAWABLE_WINDOW - GXinvert\n");
+	  break;
+
+	case GXorReverse:
+	  ErrorF ("winSetSpans () - DRAWABLE_WINDOW - GXorReverse\n");
+	  break;
+
+	case GXcopyInverted:
+	  ErrorF ("winSetSpans () - DRAWABLE_WINDOW - GXcopyInverted\n");
+	  break;
+
+	case GXorInverted:
+	  ErrorF ("winSetSpans () - DRAWABLE_WINDOW - GXorInverted\n");
+	  break;
+
+	case GXnand:
+	  ErrorF ("winSetSpans () - DRAWABLE_WINDOW - GXnand\n");
+	  break;
+
+	case GXset:
+	  ErrorF ("winSetSpans () - DRAWABLE_WINDOW - GXset\n");
+	  break;
+
+	default:
+	  ErrorF ("winSetSpans () - DRAWABLE_WINDOW - Unknown ROP\n");
+	  break;
+	}
+      break;
+
+    case UNDRAWABLE_WINDOW:
+      FatalError ("\nwinSetSpansNativeGDI - UNDRAWABLE_WINDOW\n\n");
+      break;
+
+    case DRAWABLE_BUFFER:
+      FatalError ("\nwinSetSpansNativeGDI - DRAWABLE_BUFFER\n\n");
+      break;
+      
+    default:
+      FatalError ("\nwinSetSpansNativeGDI - Unknown drawable type\n\n");
+      break;
+    }
+}
+@
+
+
+1.1.9.1
+log
+@OpenBSD just has imported exactly this tree into their vendor branch,
+called the same tag, in XF4/xc
+This is, apparently, the last XFree86 snapshot before the licence change
+(ie, addition of the advertising clause)
+
+Since the developers don't see any problems with that, and we would like
+to integrate improvements done by the remaining one or two (or so) XFree86
+developers (j/k), this prepares enabling us to update X-Window in the future.
+@
+text
+@a28 1
+ * 		Alan Hourihane <alanh@@fairlite.demon.co.uk>
+d30 1
+a30 1
+/* $XFree86: xc/programs/Xserver/hw/xwin/winsetsp.c,v 1.8 2003/08/07 23:47:58 alanh Exp $ */
+d47 7
+d55 3
+a57 20
+  BITMAPINFO		bmi;
+  HRGN			hrgn = NULL, combined = NULL;
+  int			nbox;
+  BoxPtr	 	pbox;
+
+  nbox = REGION_NUM_RECTS (pGC->pCompositeClip);
+  pbox = REGION_RECTS (pGC->pCompositeClip);
+
+  if (!nbox) return;
+
+  combined = CreateRectRgn (pbox->x1, pbox->y1, pbox->x2, pbox->y2);
+  nbox--; pbox++;
+  while (nbox--)
+    {
+      hrgn = CreateRectRgn (pbox->x1, pbox->y1, pbox->x2, pbox->y2);
+      CombineRgn (combined, combined, hrgn, RGN_OR);
+      DeleteObject (hrgn);
+      hrgn = NULL;
+      pbox++;
+    }
+a62 5
+
+      SelectClipRgn (pGCPriv->hdcMem, combined);
+      DeleteObject (combined);
+      combined = NULL;
+
+d72 179
+a250 35
+      while (iSpans--)
+        {
+	  ZeroMemory (&bmi, sizeof (BITMAPINFO));
+	  bmi.bmiHeader.biSize = sizeof (BITMAPINFOHEADER);
+	  bmi.bmiHeader.biWidth = *piWidths;
+	  bmi.bmiHeader.biHeight = 1;
+	  bmi.bmiHeader.biPlanes = 1;
+	  bmi.bmiHeader.biBitCount = pDrawable->depth;
+	  bmi.bmiHeader.biCompression = BI_RGB;
+
+  	  /* Setup color table for mono DIBs */
+  	  if (pDrawable->depth == 1)
+    	    {
+      	      bmi.bmiColors[1].rgbBlue = 255;
+      	      bmi.bmiColors[1].rgbGreen = 255;
+      	      bmi.bmiColors[1].rgbRed = 255;
+    	    }
+
+	  StretchDIBits (pGCPriv->hdcMem, 
+			 pPoints->x, pPoints->y,
+			 *piWidths, 1,
+			 0, 0,
+			 *piWidths, 1,
+			 pSrcs,
+			 (BITMAPINFO *) &bmi,
+			 DIB_RGB_COLORS,
+			 g_copyROP[pGC->alu]);
+
+	  pSrcs += PixmapBytePad (*piWidths, pDrawable->depth);
+	  pPoints++;
+	  piWidths++;
+        }
+      
+      /* Reset the clip region */
+      SelectClipRgn (pGCPriv->hdcMem, NULL);
+d257 1
+d259 71
+a329 39
+      SelectClipRgn (pGCPriv->hdc, combined);
+      DeleteObject (combined);
+      combined = NULL;
+
+      while (iSpans--)
+        {
+	  ZeroMemory (&bmi, sizeof (BITMAPINFO));
+	  bmi.bmiHeader.biSize = sizeof (BITMAPINFOHEADER);
+	  bmi.bmiHeader.biWidth = *piWidths;
+	  bmi.bmiHeader.biHeight = 1;
+	  bmi.bmiHeader.biPlanes = 1;
+	  bmi.bmiHeader.biBitCount = pDrawable->depth;
+	  bmi.bmiHeader.biCompression = BI_RGB;
+
+  	  /* Setup color table for mono DIBs */
+  	  if (pDrawable->depth == 1)
+    	    {
+      	      bmi.bmiColors[1].rgbBlue = 255;
+      	      bmi.bmiColors[1].rgbGreen = 255;
+      	      bmi.bmiColors[1].rgbRed = 255;
+    	    }
+
+	  StretchDIBits (pGCPriv->hdc, 
+			 pPoints->x, pPoints->y,
+			 *piWidths, 1,
+			 0, 0,
+			 *piWidths, 1,
+			 pSrcs,
+			 (BITMAPINFO *) &bmi,
+			 DIB_RGB_COLORS,
+			 g_copyROP[pGC->alu]);
+
+	  pSrcs += PixmapBytePad (*piWidths, pDrawable->depth);
+	  pPoints++;
+	  piWidths++;
+        }
+
+      /* Reset the clip region */
+      SelectClipRgn (pGCPriv->hdc, NULL);
+@
+
+
+1.1.1.1
+log
+@Import OpenBSD 3.3 XF4 repository from CTM 3132 the first time
+This finalizes starting an OpenBSD-mirabile (aka MirBSD) repository.
+
+### MirBSD is:
+# Copyright (c) 1982-2003 by Thorsten "mirabile" Glaser <x86@@ePost.de>
+# Copyright © 1968-2003  The authors of And contributors to UNIX®, the
+#       C Language, BSD/Berkeley Unix; 386BSD, NetBSD 1.1 and OpenBSD.
+#
+# Anyone who obtained a copy of this work is hereby permitted to freely use,
+# distribute, modify, merge, sublicence, give away or sell it as long as the
+# authors are given due credit and the following notice is retained:
+#
+# This work is provided "as is", with no explicit or implicit warranty what-
+# soever. Use it only at your own risk. In no event may an author or contri-
+# butor be held liable for any damage, directly or indirectly, that origina-
+# ted through or is caused by creation or modification of this work.
+
+MirBSD is my private tree. MirBSD does not differ very much from OpenBSD
+and intentionally tracks OpenBSD. That's why it _is_ OpenBSD, just not the
+official one. It's like with DarrenBSD.
+
+At time of this writing, no advertising for MirBSD must be done,
+because the advertising clause has not yet been sorted out.
+
+http://templeofhate.com/tglaser/MirBSD/index.php
+@
+text
+@@
+
+
+1.1.1.2
+log
+@That's what OpenBSD will, probably, ship as XF4 in 3.5
+their last sync against XFree86 4.3-current has been
+imported into our vendor branch, too
+@
+text
+@a28 1
+ * 		Alan Hourihane <alanh@@fairlite.demon.co.uk>
+d30 1
+a30 1
+/* $XFree86: xc/programs/Xserver/hw/xwin/winsetsp.c,v 1.8 2003/08/07 23:47:58 alanh Exp $ */
+d47 7
+d55 3
+a57 20
+  BITMAPINFO		bmi;
+  HRGN			hrgn = NULL, combined = NULL;
+  int			nbox;
+  BoxPtr	 	pbox;
+
+  nbox = REGION_NUM_RECTS (pGC->pCompositeClip);
+  pbox = REGION_RECTS (pGC->pCompositeClip);
+
+  if (!nbox) return;
+
+  combined = CreateRectRgn (pbox->x1, pbox->y1, pbox->x2, pbox->y2);
+  nbox--; pbox++;
+  while (nbox--)
+    {
+      hrgn = CreateRectRgn (pbox->x1, pbox->y1, pbox->x2, pbox->y2);
+      CombineRgn (combined, combined, hrgn, RGN_OR);
+      DeleteObject (hrgn);
+      hrgn = NULL;
+      pbox++;
+    }
+a62 5
+
+      SelectClipRgn (pGCPriv->hdcMem, combined);
+      DeleteObject (combined);
+      combined = NULL;
+
+d72 179
+a250 35
+      while (iSpans--)
+        {
+	  ZeroMemory (&bmi, sizeof (BITMAPINFO));
+	  bmi.bmiHeader.biSize = sizeof (BITMAPINFOHEADER);
+	  bmi.bmiHeader.biWidth = *piWidths;
+	  bmi.bmiHeader.biHeight = 1;
+	  bmi.bmiHeader.biPlanes = 1;
+	  bmi.bmiHeader.biBitCount = pDrawable->depth;
+	  bmi.bmiHeader.biCompression = BI_RGB;
+
+  	  /* Setup color table for mono DIBs */
+  	  if (pDrawable->depth == 1)
+    	    {
+      	      bmi.bmiColors[1].rgbBlue = 255;
+      	      bmi.bmiColors[1].rgbGreen = 255;
+      	      bmi.bmiColors[1].rgbRed = 255;
+    	    }
+
+	  StretchDIBits (pGCPriv->hdcMem, 
+			 pPoints->x, pPoints->y,
+			 *piWidths, 1,
+			 0, 0,
+			 *piWidths, 1,
+			 pSrcs,
+			 (BITMAPINFO *) &bmi,
+			 DIB_RGB_COLORS,
+			 g_copyROP[pGC->alu]);
+
+	  pSrcs += PixmapBytePad (*piWidths, pDrawable->depth);
+	  pPoints++;
+	  piWidths++;
+        }
+      
+      /* Reset the clip region */
+      SelectClipRgn (pGCPriv->hdcMem, NULL);
+d257 1
+d259 71
+a329 39
+      SelectClipRgn (pGCPriv->hdc, combined);
+      DeleteObject (combined);
+      combined = NULL;
+
+      while (iSpans--)
+        {
+	  ZeroMemory (&bmi, sizeof (BITMAPINFO));
+	  bmi.bmiHeader.biSize = sizeof (BITMAPINFOHEADER);
+	  bmi.bmiHeader.biWidth = *piWidths;
+	  bmi.bmiHeader.biHeight = 1;
+	  bmi.bmiHeader.biPlanes = 1;
+	  bmi.bmiHeader.biBitCount = pDrawable->depth;
+	  bmi.bmiHeader.biCompression = BI_RGB;
+
+  	  /* Setup color table for mono DIBs */
+  	  if (pDrawable->depth == 1)
+    	    {
+      	      bmi.bmiColors[1].rgbBlue = 255;
+      	      bmi.bmiColors[1].rgbGreen = 255;
+      	      bmi.bmiColors[1].rgbRed = 255;
+    	    }
+
+	  StretchDIBits (pGCPriv->hdc, 
+			 pPoints->x, pPoints->y,
+			 *piWidths, 1,
+			 0, 0,
+			 *piWidths, 1,
+			 pSrcs,
+			 (BITMAPINFO *) &bmi,
+			 DIB_RGB_COLORS,
+			 g_copyROP[pGC->alu]);
+
+	  pSrcs += PixmapBytePad (*piWidths, pDrawable->depth);
+	  pPoints++;
+	  piWidths++;
+        }
+
+      /* Reset the clip region */
+      SelectClipRgn (pGCPriv->hdc, NULL);
+@
+

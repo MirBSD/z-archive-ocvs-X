@@ -1,0 +1,2640 @@
+head	1.1;
+branch	1.1.1;
+access;
+symbols
+	tg-mergetmp-2:1.1.1.3
+	cvs-200410241530:1.1.1.3
+	cvs-200410012000:1.1.1.3
+	cvs-200407141120:1.1.1.3
+	cvs-200406231010:1.1.1.3
+	MIRBSD_7quater:1.1.1.2
+	cvs-200405271510:1.1.1.3
+	XFree86_4_4_0:1.1.9.1
+	cvs-200403021700:1.1.1.3
+	XFREE86_20040213:1.1.9.1
+	xc:1.1.9
+	cvs-200401291925:1.1.1.2
+	MIRBSD_7_ALPHA:1.1.1.2.0.4
+	MIRBSD_7:1.1.1.2.0.2
+	MIRBSD_7ter:1.1.1.2
+	cvs-20011091815:1.1.1.2
+	cvs-200309162130:1.1.1.2
+	cvs-200308302005:1.1.1.2
+	ctmx-0387:1.1.1.2
+	ctmx-0384:1.1.1.2
+	MIRBSD_5:1.1.1.2
+	ctmx-0375:1.1.1.2
+	ctmx-0373:1.1.1.2
+	ctm-0371:1.1.1.2
+	ctm-0370:1.1.1.2
+	MIRBSD_4:1.1.1.2
+	ctm-0363:1.1.1.2
+	ctm-0359:1.1.1.2
+	ctm-0349:1.1.1.1
+	openbsd:1.1.1;
+locks; strict;
+comment	@ * @;
+
+
+1.1
+date	2003.03.22.20.09.38;	author tg;	state Exp;
+branches
+	1.1.1.1
+	1.1.9.1;
+next	;
+
+1.1.1.1
+date	2003.03.22.20.09.38;	author tg;	state Exp;
+branches;
+next	1.1.1.2;
+
+1.1.1.2
+date	2003.04.08.18.38.22;	author tg;	state Exp;
+branches;
+next	1.1.1.3;
+
+1.1.1.3
+date	2004.03.02.18.30.47;	author tg;	state Stab;
+branches;
+next	;
+
+1.1.9.1
+date	2004.02.14.19.26.38;	author tg;	state Exp;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@/*
+ * $XFree86: xc/programs/Xserver/randr/randr.c,v 1.12 2001/07/20 19:30:11 keithp Exp $
+ *
+ * Copyright © 2000 Compaq Computer Corporation, Inc.
+ *
+ * Permission to use, copy, modify, distribute, and sell this software and its
+ * documentation for any purpose is hereby granted without fee, provided that
+ * the above copyright notice appear in all copies and that both that
+ * copyright notice and this permission notice appear in supporting
+ * documentation, and that the name of Compaq not be used in advertising or
+ * publicity pertaining to distribution of the software without specific,
+ * written prior permission.  Compaq makes no representations about the
+ * suitability of this software for any purpose.  It is provided "as is"
+ * without express or implied warranty.
+ *
+ * COMPAQ DISCLAIMS ALL WARRANTIES WITH REGARD TO THIS SOFTWARE, INCLUDING ALL
+ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS, IN NO EVENT SHALL COMPAQ
+ * BE LIABLE FOR ANY SPECIAL, INDIRECT OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
+ * WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN ACTION
+ * OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF OR IN 
+ * CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+ *
+ * Author:  Jim Gettys, Compaq Computer Corporation, Inc.
+ */
+
+#define NEED_REPLIES
+#define NEED_EVENTS
+#include "X.h"
+#include "Xproto.h"
+#include "misc.h"
+#include "os.h"
+#include "dixstruct.h"
+#include "resource.h"
+#include "scrnintstr.h"
+#include "windowstr.h"
+#include "pixmapstr.h"
+#include "extnsionst.h"
+#include "servermd.h"
+#include "randr.h"
+#include "randrproto.h"
+#include "randrstr.h"
+#include "Xfuncproto.h"
+#ifdef EXTMODULE
+#include "xf86_ansic.h"
+#endif
+
+#define RR_VALIDATE
+int	RRGeneration;
+int	RRNScreens;
+
+static int ProcRRQueryVersion (ClientPtr pClient);
+static int ProcRRDispatch (ClientPtr pClient);
+static int SProcRRDispatch (ClientPtr pClient);
+static int SProcRRQueryVersion (ClientPtr pClient);
+
+#define wrap(priv,real,mem,func) {\
+    priv->mem = real->mem; \
+    real->mem = func; \
+}
+
+#define unwrap(priv,real,mem) {\
+    real->mem = priv->mem; \
+}
+
+static CARD8	RRReqCode;
+static int	RRErrBase;
+static int	RREventBase;
+static RESTYPE ClientType, EventType; /* resource types for event masks */
+
+/*
+ * each window has a list of clients requesting
+ * RRNotify events.  Each client has a resource
+ * for each window it selects RRNotify input for,
+ * this resource is used to delete the RRNotifyRec
+ * entry from the per-window queue.
+ */
+
+typedef struct _RREvent *RREventPtr;
+
+typedef struct _RREvent {
+    RREventPtr  next;
+    ClientPtr	client;
+    WindowPtr	window;
+    XID		clientResource;
+} RREventRec;
+
+int	rrPrivIndex = -1;
+
+static void
+RRResetProc (ExtensionEntry *extEntry)
+{
+}
+
+    
+static Bool
+RRCloseScreen (int i, ScreenPtr pScreen)
+{
+    rrScrPriv(pScreen);
+
+    unwrap (pScrPriv, pScreen, CloseScreen);
+    if (pScrPriv->pSizes)
+	xfree (pScrPriv->pSizes);
+    if (pScrPriv->pGroupsOfVisualGroups)
+	xfree (pScrPriv->pGroupsOfVisualGroups);
+    if (pScrPriv->pVisualGroups)
+	xfree (pScrPriv->pVisualGroups);
+    xfree (pScrPriv);
+    RRNScreens -= 1;	/* ok, one fewer screen with RandR running */
+    return (*pScreen->CloseScreen) (i, pScreen);    
+}
+
+static void
+SRRScreenChangeNotifyEvent(from, to)
+    xRRScreenChangeNotifyEvent *from, *to;
+{
+    to->type = from->type;
+    to->rotation = from->rotation;
+    cpswaps(from->sequenceNumber, to->sequenceNumber);
+    cpswapl(from->timestamp, to->timestamp);
+    cpswapl(from->configTimestamp, to->configTimestamp);
+    cpswapl(from->root, to->root);
+    cpswapl(from->window, to->window);
+    cpswaps(from->sizeID, to->sizeID);
+    cpswaps(from->visualGroupID, to->visualGroupID);
+    cpswaps(from->widthInPixels, to->widthInPixels);
+    cpswaps(from->heightInPixels, to->heightInPixels);
+    cpswaps(from->widthInMillimeters, to->widthInMillimeters);
+    cpswaps(from->heightInMillimeters, to->heightInMillimeters);
+}
+
+Bool RRScreenInit(ScreenPtr pScreen)
+{
+    rrScrPrivPtr   pScrPriv;
+
+    if (RRGeneration != serverGeneration)
+    {
+	if ((rrPrivIndex = AllocateScreenPrivateIndex()) < 0)
+	    return FALSE;
+	RRGeneration = serverGeneration;
+    }
+
+    pScrPriv = (rrScrPrivPtr) xalloc (sizeof (rrScrPrivRec));
+    if (!pScrPriv)
+	return FALSE;
+
+    SetRRScreen(pScreen, pScrPriv);
+
+    /*
+     * Calling function best set these function vectors
+     */
+    pScrPriv->rrSetConfig = 0;
+    pScrPriv->rrGetInfo = 0;
+    /*
+     * This value doesn't really matter -- any client must call
+     * GetScreenInfo before reading it which will automatically update
+     * the time
+     */
+    pScrPriv->lastSetTime = currentTime;
+    pScrPriv->lastConfigTime = currentTime;
+    
+    wrap (pScrPriv, pScreen, CloseScreen, RRCloseScreen);
+
+    pScrPriv->rotations = RR_Rotate_0;
+    pScrPriv->swaps = 0;
+    pScrPriv->nVisualGroups = 0;
+    pScrPriv->nVisualGroupsInUse = 0;
+    pScrPriv->pVisualGroups = 0;
+    
+    pScrPriv->nGroupsOfVisualGroups = 0;
+    pScrPriv->nGroupsOfVisualGroupsInUse = 0;
+    pScrPriv->pGroupsOfVisualGroups = 0;
+    
+    pScrPriv->nSizes = 0;
+    pScrPriv->nSizesInUse = 0;
+    pScrPriv->pSizes = 0;
+    
+    pScrPriv->rotation = RR_Rotate_0;
+    pScrPriv->pSize = 0;
+    pScrPriv->pVisualGroup = 0;
+    
+    RRNScreens += 1;	/* keep count of screens that implement randr */
+    return TRUE;
+}
+
+/*ARGSUSED*/
+static int
+RRFreeClient (pointer data, XID id)
+{
+    RREventPtr   pRREvent;
+    WindowPtr	    pWin;
+    RREventPtr   *pHead, pCur, pPrev;
+
+    pRREvent = (RREventPtr) data;
+    pWin = pRREvent->window;
+    pHead = (RREventPtr *) LookupIDByType(pWin->drawable.id, EventType);
+    if (pHead) {
+	pPrev = 0;
+	for (pCur = *pHead; pCur && pCur != pRREvent; pCur=pCur->next)
+	    pPrev = pCur;
+	if (pCur)
+	{
+	    if (pPrev)
+	    	pPrev->next = pRREvent->next;
+	    else
+	    	*pHead = pRREvent->next;
+	}
+    }
+    xfree ((pointer) pRREvent);
+    return 1;
+}
+
+/*ARGSUSED*/
+static int
+RRFreeEvents (pointer data, XID id)
+{
+    RREventPtr   *pHead, pCur, pNext;
+
+    pHead = (RREventPtr *) data;
+    for (pCur = *pHead; pCur; pCur = pNext) {
+	pNext = pCur->next;
+	FreeResource (pCur->clientResource, ClientType);
+	xfree ((pointer) pCur);
+    }
+    xfree ((pointer) pHead);
+    return 1;
+}
+
+void
+RRExtensionInit (void)
+{
+    ExtensionEntry *extEntry;
+
+    if (RRNScreens == 0) return;
+
+    ClientType = CreateNewResourceType(RRFreeClient);
+    if (!ClientType)
+	return;
+    EventType = CreateNewResourceType(RRFreeEvents);
+    if (!EventType)
+	return;
+    extEntry = AddExtension (RANDR_NAME, RRNumberEvents, RRNumberErrors,
+			     ProcRRDispatch, SProcRRDispatch,
+			     RRResetProc, StandardMinorOpcode);
+    if (!extEntry)
+	return;
+    RRReqCode = (CARD8) extEntry->base;
+    RRErrBase = extEntry->errorBase;
+    RREventBase = extEntry->eventBase;
+    EventSwapVector[RREventBase + RRScreenChangeNotify] = (EventSwapPtr) 
+      SRRScreenChangeNotifyEvent;
+
+    return;
+}
+		
+static int
+TellChanged (WindowPtr pWin, pointer value)
+{
+    RREventPtr			*pHead, pRREvent;
+    ClientPtr			client;
+    xRRScreenChangeNotifyEvent	se;
+    ScreenPtr			pScreen = pWin->drawable.pScreen;
+    rrScrPriv(pScreen);
+    RRScreenSizePtr		pSize = pScrPriv->pSize;
+    WindowPtr			pRoot = WindowTable[pScreen->myNum];
+
+    pHead = (RREventPtr *) LookupIDByType (pWin->drawable.id, EventType);
+    if (!pHead)
+	return WT_WALKCHILDREN;
+
+    se.type = RRScreenChangeNotify + RREventBase;
+    se.rotation = (CARD8) pScrPriv->rotation;
+    se.timestamp = pScrPriv->lastSetTime.milliseconds;
+    se.configTimestamp = pScrPriv->lastConfigTime.milliseconds;
+    se.root = pRoot->drawable.id;
+    se.window = pWin->drawable.id;
+    if (pSize)
+    {
+	se.sizeID = pSize->id;
+	se.visualGroupID = pScrPriv->pVisualGroup->id;
+	se.widthInPixels = pSize->width;
+	se.heightInPixels = pSize->height;
+	se.widthInMillimeters = pSize->mmWidth;
+	se.heightInMillimeters = pSize->mmHeight;
+    }
+    else
+    {
+	/*
+	 * This "shouldn't happen", but a broken DDX can
+	 * forget to set the current configuration on GetInfo
+	 */
+	se.sizeID = 0xffff;
+	se.visualGroupID = 0xffff;
+	se.widthInPixels = 0;
+	se.heightInPixels = 0;
+	se.widthInMillimeters = 0;
+	se.heightInMillimeters = 0;
+    }    
+
+    for (pRREvent = *pHead; pRREvent; pRREvent = pRREvent->next) 
+    {
+	client = pRREvent->client;
+	if (client == serverClient || client->clientGone)
+	    continue;
+	se.sequenceNumber = client->sequence;
+	WriteEventsToClient (client, 1, (xEvent *) &se);
+    }
+    return WT_WALKCHILDREN;
+}
+
+static Bool
+RRGetInfo (ScreenPtr pScreen)
+{
+    rrScrPriv (pScreen);
+    int		    i, j;
+    Bool	    changed;
+    Rotation	    rotations;
+
+    for (i = 0; i < pScrPriv->nVisualGroups; i++)
+    {
+	pScrPriv->pVisualGroups[i].oldReferenced = pScrPriv->pVisualGroups[i].referenced;
+	pScrPriv->pVisualGroups[i].referenced = FALSE;
+    }
+    for (i = 0; i < pScrPriv->nGroupsOfVisualGroups; i++)
+    {
+	pScrPriv->pGroupsOfVisualGroups[i].oldReferenced = pScrPriv->pGroupsOfVisualGroups[i].referenced;
+	pScrPriv->pGroupsOfVisualGroups[i].referenced = FALSE;
+    }
+    for (i = 0; i < pScrPriv->nSizes; i++)
+    {
+	pScrPriv->pSizes[i].oldReferenced = pScrPriv->pSizes[i].referenced;
+	pScrPriv->pSizes[i].referenced = FALSE;
+    }
+    if (!(*pScrPriv->rrGetInfo) (pScreen, &rotations))
+	return FALSE;
+
+    changed = FALSE;
+
+    /*
+     * Check whether anything changed and simultaneously generate
+     * the protocol id values for the objects
+     */
+    if (rotations != pScrPriv->rotations)
+    {
+	pScrPriv->rotations = rotations;
+	changed = TRUE;
+    }
+
+    j = 0;
+    for (i = 0; i < pScrPriv->nVisualGroups; i++)
+    {
+	if (pScrPriv->pVisualGroups[i].oldReferenced != pScrPriv->pVisualGroups[i].referenced)
+	    changed = TRUE;
+	if (pScrPriv->pVisualGroups[i].referenced)
+	    pScrPriv->pVisualGroups[i].id = j++;
+    }
+    pScrPriv->nVisualGroupsInUse = j;
+    j = 0;
+    for (i = 0; i < pScrPriv->nGroupsOfVisualGroups; i++)
+    {
+	if (pScrPriv->pGroupsOfVisualGroups[i].oldReferenced != pScrPriv->pGroupsOfVisualGroups[i].referenced)
+	    changed = TRUE;
+	if (pScrPriv->pGroupsOfVisualGroups[i].referenced)
+	    pScrPriv->pGroupsOfVisualGroups[i].id = j++;
+    }
+    pScrPriv->nGroupsOfVisualGroupsInUse = j;
+    j = 0;
+    for (i = 0; i < pScrPriv->nSizes; i++)
+    {
+	if (pScrPriv->pSizes[i].oldReferenced != pScrPriv->pSizes[i].referenced)
+	    changed = TRUE;
+	if (pScrPriv->pSizes[i].referenced)
+	    pScrPriv->pSizes[i].id = j++;
+    }
+    pScrPriv->nSizesInUse = j;
+    if (changed)
+    {
+	UpdateCurrentTime ();
+	pScrPriv->lastConfigTime = currentTime;
+	WalkTree (pScreen, TellChanged, (pointer) pScreen);
+    }
+    return TRUE;
+}
+
+static void
+RRSendConfigNotify (ScreenPtr pScreen)
+{
+    WindowPtr	pWin = WindowTable[pScreen->myNum];
+    xEvent	event;
+
+    event.u.u.type = ConfigureNotify;
+    event.u.configureNotify.window = pWin->drawable.id;
+    event.u.configureNotify.aboveSibling = None;
+    event.u.configureNotify.x = 0;
+    event.u.configureNotify.y = 0;
+
+    /* XXX xinerama stuff ? */
+    
+    event.u.configureNotify.width = pWin->drawable.width;
+    event.u.configureNotify.height = pWin->drawable.height;
+    event.u.configureNotify.borderWidth = wBorderWidth (pWin);
+    event.u.configureNotify.override = pWin->overrideRedirect;
+    DeliverEvents(pWin, &event, 1, NullWindow);
+}
+
+static int
+ProcRRQueryVersion (ClientPtr client)
+{
+    xRRQueryVersionReply rep;
+    register int n;
+    REQUEST(xRRQueryVersionReq);
+
+    REQUEST_SIZE_MATCH(xRRQueryVersionReq);
+    rep.type = X_Reply;
+    rep.length = 0;
+    rep.sequenceNumber = client->sequence;
+    rep.majorVersion = RANDR_MAJOR;
+    rep.minorVersion = RANDR_MINOR;
+    if (client->swapped) {
+    	swaps(&rep.sequenceNumber, n);
+    	swapl(&rep.length, n);
+	swapl(&rep.majorVersion, n);
+	swapl(&rep.minorVersion, n);
+    }
+    WriteToClient(client, sizeof(xRRQueryVersionReply), (char *)&rep);
+    return (client->noClientException);
+}
+
+static Bool
+RRVisualGroupContains (RRVisualGroupPtr pVisualGroup,
+		     VisualID	    visual)
+{
+    int	    i;
+
+    for (i = 0; i < pVisualGroup->nvisuals; i++)
+	if (pVisualGroup->visuals[i]->vid == visual)
+	    return TRUE;
+    return FALSE;
+}
+
+static CARD16
+RRNumMatchingVisualGroups (ScreenPtr  pScreen,
+			 VisualID   visual)
+{
+    rrScrPriv(pScreen);
+    int		    i;
+    CARD16	    n = 0;
+    RRVisualGroupPtr  pVisualGroup;
+
+    for (i = 0; i < pScrPriv->nVisualGroups; i++)
+    {
+	pVisualGroup = &pScrPriv->pVisualGroups[i];
+	if (pVisualGroup->referenced && RRVisualGroupContains (pVisualGroup, visual))
+	    n++;
+    }
+    return n;
+}
+
+static void
+RRGetMatchingVisualGroups (ScreenPtr	pScreen,
+			 VisualID	visual,
+			 VisualGroupID	*pVisualGroupIDs)
+{
+    rrScrPriv(pScreen);
+    int		    i;
+    CARD16	    n = 0;
+    RRVisualGroupPtr  pVisualGroup;
+
+    for (i = 0; i < pScrPriv->nVisualGroups; i++)
+    {
+	pVisualGroup = &pScrPriv->pVisualGroups[i];
+	if (pVisualGroup->referenced && RRVisualGroupContains (pVisualGroup, visual))
+	    *pVisualGroupIDs++ = pVisualGroup->id;
+    }
+}
+
+extern char	*ConnectionInfo;
+
+static int padlength[4] = {0, 3, 2, 1};
+
+static void
+RREditConnectionInfo (ScreenPtr pScreen)
+{
+    xConnSetup	    *connSetup;
+    char	    *vendor;
+    xPixmapFormat   *formats;
+    xWindowRoot	    *root;
+    xDepth	    *depth;
+    xVisualType	    *visual;
+    int		    screen = 0;
+    int		    d;
+
+    connSetup = (xConnSetup *) ConnectionInfo;
+    vendor = (char *) connSetup + sizeof (xConnSetup);
+    formats = (xPixmapFormat *) ((char *) vendor +
+				 connSetup->nbytesVendor +
+				 padlength[connSetup->nbytesVendor & 3]);
+    root = (xWindowRoot *) ((char *) formats +
+			    sizeof (xPixmapFormat) * screenInfo.numPixmapFormats);
+    while (screen != pScreen->myNum)
+    {
+	depth = (xDepth *) ((char *) root + 
+			    sizeof (xWindowRoot));
+	for (d = 0; d < root->nDepths; d++)
+	{
+	    visual = (xVisualType *) ((char *) depth +
+				      sizeof (xDepth));
+	    depth = (xDepth *) ((char *) visual +
+				depth->nVisuals * sizeof (xVisualType));
+	}
+	root = (xWindowRoot *) ((char *) depth);
+	screen++;
+    }
+    root->pixWidth = pScreen->width;
+    root->pixHeight = pScreen->height;
+    root->mmWidth = pScreen->mmWidth;
+    root->mmHeight = pScreen->mmHeight;
+}
+
+static int
+ProcRRGetScreenInfo (ClientPtr client)
+{
+    REQUEST(xRRGetScreenInfoReq);
+    xRRGetScreenInfoReply   rep;
+    WindowPtr	    	    pWin;
+    int			    n;
+    ScreenPtr		    pScreen;
+    rrScrPrivPtr	    pScrPriv;
+    CARD8		    *extra;
+    int			    extraLen;
+
+    REQUEST_SIZE_MATCH(xRRGetScreenInfoReq);
+    pWin = (WindowPtr)SecurityLookupWindow(stuff->window, client,
+					   SecurityReadAccess);
+
+    if (!pWin)
+	return BadWindow;
+
+    pScreen = pWin->drawable.pScreen;
+    pScrPriv = rrGetScrPriv(pScreen);
+    if (!pScrPriv)
+    {
+	rep.type = X_Reply;
+	rep.setOfRotations = RR_Rotate_0;;
+	rep.sequenceNumber = client->sequence;
+	rep.length = 0;
+	rep.root = WindowTable[pWin->drawable.pScreen->myNum]->drawable.id;
+	rep.timestamp = currentTime.milliseconds;
+	rep.configTimestamp = currentTime.milliseconds;
+	rep.nVisualGroups = 0;
+	rep.nGroupsOfVisualGroups = 0;
+	rep.nSizes = 0;
+	rep.sizeID = 0;
+	rep.visualGroupID = 0;
+	rep.rotation = RR_Rotate_0;
+	extra = 0;
+	extraLen = 0;
+    }
+    else
+    {
+	int			i, j;
+	int			nGroupsOfVisualGroupsElements;
+	RRGroupOfVisualGroupPtr pGroupsOfVisualGroups;
+	int			nVisualGroupElements;
+	RRVisualGroupPtr	pVisualGroup;
+	xScreenSizes		*size;
+	CARD16			*data16;
+	CARD32			*data32;
+    
+	RRGetInfo (pScreen);
+
+	rep.type = X_Reply;
+	rep.setOfRotations = pScrPriv->rotations;
+	rep.sequenceNumber = client->sequence;
+	rep.length = 0;
+	rep.root = WindowTable[pWin->drawable.pScreen->myNum]->drawable.id;
+	rep.timestamp = pScrPriv->lastSetTime.milliseconds;
+	rep.configTimestamp = pScrPriv->lastConfigTime.milliseconds;
+	
+	rep.nVisualGroups = pScrPriv->nVisualGroupsInUse;
+	rep.rotation = pScrPriv->rotation;
+	rep.nSizes = pScrPriv->nSizesInUse;
+	rep.nGroupsOfVisualGroups = pScrPriv->nGroupsOfVisualGroupsInUse;
+	if (pScrPriv->pSize)
+	    rep.sizeID = pScrPriv->pSize->id;
+	else
+	    return BadImplementation;
+	if (pScrPriv->pVisualGroup)
+	    rep.visualGroupID = pScrPriv->pVisualGroup->id;
+	else
+	    return BadImplementation;
+	/*
+	 * Count up the total number of spaces needed to transmit
+	 * the groups of visual groups
+	 */
+	nGroupsOfVisualGroupsElements = 0;
+	for (i = 0; i < pScrPriv->nGroupsOfVisualGroups; i++)
+	{
+	    pGroupsOfVisualGroups = &pScrPriv->pGroupsOfVisualGroups[i];
+	    if (pGroupsOfVisualGroups->referenced)
+		nGroupsOfVisualGroupsElements += pGroupsOfVisualGroups->ngroups + 1;
+	}
+	/*
+	 * Count up the total number of spaces needed to transmit
+	 * the visual groups
+	 */
+	nVisualGroupElements = 0;
+	for (i = 0; i < pScrPriv->nVisualGroups; i++)
+	{
+	    pVisualGroup = &pScrPriv->pVisualGroups[i];
+	    if (pVisualGroup->referenced)
+		nVisualGroupElements += pVisualGroup->nvisuals + 1;
+	}
+	/*
+	 * Allocate space for the extra information
+	 */
+	extraLen = (rep.nSizes * sizeof (xScreenSizes) +
+		    nVisualGroupElements * sizeof (CARD32) +
+		    nGroupsOfVisualGroupsElements * sizeof (CARD16));
+	extra = (CARD8 *) xalloc (extraLen);
+	if (!extra)
+	    return BadAlloc;
+	/*
+	 * First comes the size information
+	 */
+	size = (xScreenSizes *) extra;
+	for (i = 0; i < pScrPriv->nSizes; i++)
+	{
+	    if (pScrPriv->pSizes[i].referenced)
+	    {
+		size->widthInPixels = pScrPriv->pSizes[i].width;
+		size->heightInPixels = pScrPriv->pSizes[i].height;
+		size->widthInMillimeters = pScrPriv->pSizes[i].mmWidth;
+		size->heightInMillimeters = pScrPriv->pSizes[i].mmHeight;
+		size->visualGroup = pScrPriv->pGroupsOfVisualGroups[pScrPriv->pSizes[i].groupOfVisualGroups].id;
+		if (client->swapped)
+		{
+		    swaps (&size->widthInPixels, n);
+		    swaps (&size->heightInPixels, n);
+		    swaps (&size->widthInMillimeters, n);
+		    swaps (&size->heightInMillimeters, n);
+		    swaps (&size->visualGroup, n);
+		}
+		size++;
+	    }
+	}
+	data32 = (CARD32 *) size;
+	/*
+	 * Next comes the visual groups
+	 */
+	for (i = 0; i < pScrPriv->nVisualGroups; i++)
+	{
+	    pVisualGroup = &pScrPriv->pVisualGroups[i];
+	    if (pVisualGroup->referenced)
+	    {
+		*data32++ = pVisualGroup->nvisuals;
+		for (j = 0; j < pVisualGroup->nvisuals; j++)
+		    *data32++ = pVisualGroup->visuals[j]->vid;
+	    }
+	}
+	if (client->swapped)
+	    SwapLongs (data32 - nVisualGroupElements, nVisualGroupElements);
+	/*
+	 * Next comes the groups of visual groups
+	 */
+	data16 = (CARD16 *) data32;
+	for (i = 0; i < pScrPriv->nGroupsOfVisualGroups; i++)
+	{
+	    pGroupsOfVisualGroups = &pScrPriv->pGroupsOfVisualGroups[i];
+	    if (pGroupsOfVisualGroups->referenced)
+	    {
+		*data16++ = (CARD16) pGroupsOfVisualGroups->ngroups;
+		for (j = 0; j < pGroupsOfVisualGroups->ngroups; j++)
+		{
+		    pVisualGroup = &pScrPriv->pVisualGroups[pGroupsOfVisualGroups->groups[j]];
+		    *data16++ = (CARD16) pVisualGroup->id;
+		}
+	    }
+	}
+	
+	if (client->swapped)
+	    SwapShorts ((CARD16 *) data32, data16 - (CARD16 *) data32);
+	
+	if ((CARD8 *) data16 - (CARD8 *) extra != extraLen)
+	    FatalError ("RRGetScreenInfo bad extra len %d != %d\n",
+			(CARD8 *) data16 - (CARD8 *) extra, extraLen);
+	rep.length = extraLen >> 2;
+    }
+    if (client->swapped) {
+	swaps(&rep.sequenceNumber, n);
+	swapl(&rep.length, n);
+	swapl(&rep.timestamp, n);
+	swaps(&rep.rotation, n);
+	swaps(&rep.nSizes, n);
+	swaps(&rep.nVisualGroups, n);
+	swaps(&rep.sizeID, n);
+	swaps(&rep.visualGroupID, n);
+    }
+    WriteToClient(client, sizeof(xRRGetScreenInfoReply), (char *)&rep);
+    if (extraLen)
+    {
+	WriteToClient (client, extraLen, extra);
+	xfree (extra);
+    }
+    return (client->noClientException);
+}
+
+static int
+ProcRRSetScreenConfig (ClientPtr client)
+{
+    REQUEST(xRRSetScreenConfigReq);
+    xRRSetScreenConfigReply rep;
+    DrawablePtr		    pDraw;
+    int			    n;
+    ScreenPtr		    pScreen;
+    rrScrPrivPtr	    pScrPriv;
+    TimeStamp		    configTime;
+    TimeStamp		    time;
+    RRScreenSizePtr	    pSize;
+    RRVisualGroupPtr	    pVisualGroup;
+    RRGroupOfVisualGroupPtr pGroupsOfVisualGroups;
+    int			    i;
+    Rotation		    rotation;
+    short		    oldWidth, oldHeight;
+
+    UpdateCurrentTime ();
+
+    REQUEST_SIZE_MATCH(xRRSetScreenConfigReq);
+    SECURITY_VERIFY_DRAWABLE(pDraw, stuff->drawable, client,
+			     SecurityWriteAccess);
+
+    pScreen = pDraw->pScreen;
+
+    pScrPriv= rrGetScrPriv(pScreen);
+    
+    time = ClientTimeToServerTime(stuff->timestamp);
+    configTime = ClientTimeToServerTime(stuff->configTimestamp);
+    
+    oldWidth = pScreen->width;
+    oldHeight = pScreen->height;
+    
+    if (!pScrPriv)
+    {
+	time = currentTime;
+	rep.status = RRSetConfigFailed;
+	goto sendReply;
+    }
+    if (!RRGetInfo (pScreen))
+	return BadAlloc;
+    
+    /*
+     * if the client's config timestamp is not the same as the last config
+     * timestamp, then the config information isn't up-to-date and
+     * can't even be validated
+     */
+    if (CompareTimeStamps (configTime, pScrPriv->lastConfigTime) != 0)
+    {
+	rep.status = RRSetConfigInvalidConfigTime;
+	goto sendReply;
+    }
+    
+    /*
+     * Search for the requested size
+     */
+    for (i = 0; i < pScrPriv->nSizes; i++)
+    {
+	pSize = &pScrPriv->pSizes[i];
+	if (pSize->referenced && pSize->id == stuff->sizeID)
+	    break;
+    }
+    if (i == pScrPriv->nSizes)
+    {
+	/*
+	 * Invalid size ID
+	 */
+	client->errorValue = stuff->sizeID;
+	return BadValue;
+    }
+    
+    /*
+     * Search for the requested visual group
+     */
+    for (i = 0; i < pScrPriv->nVisualGroups; i++)
+    {
+	pVisualGroup = &pScrPriv->pVisualGroups[i];
+	if (pVisualGroup->referenced && pVisualGroup->id == stuff->visualGroupID)
+	    break;
+    }
+    if (i == pScrPriv->nVisualGroups)
+    {
+	/*
+	 * Invalid group ID
+	 */
+	client->errorValue = stuff->visualGroupID;
+	return BadValue;
+    }
+    
+    /*
+     * Make sure visualgroup is supported by size
+     */
+    pGroupsOfVisualGroups = &pScrPriv->pGroupsOfVisualGroups[pSize->groupOfVisualGroups];
+    for (i = 0; i < pGroupsOfVisualGroups->ngroups; i++)
+    {
+	if (pGroupsOfVisualGroups->groups[i] == pVisualGroup - pScrPriv->pVisualGroups)
+	    break;
+    }
+    if (i == pGroupsOfVisualGroups->ngroups)
+    {
+	/*
+	 * requested group not supported by requested size
+	 */
+	return BadMatch;
+    }
+
+    /*
+     * Validate requested rotation
+     */
+    rotation = (Rotation) stuff->rotation;
+    switch (rotation) {
+    case RR_Rotate_0:
+    case RR_Rotate_90:
+    case RR_Rotate_180:
+    case RR_Rotate_270:
+	break;
+    default:
+	/*
+	 * Invalid rotation
+	 */
+	client->errorValue = stuff->rotation;
+	return BadValue;
+    }
+    if (!(pScrPriv->rotations & rotation))
+    {
+	/*
+	 * requested rotation not supported by screen
+	 */
+	return BadMatch;
+    }
+    
+    /*
+     * Make sure the requested set-time is not older than
+     * the last set-time
+     */
+    if (CompareTimeStamps (time, pScrPriv->lastSetTime) < 0)
+    {
+	rep.status = RRSetConfigInvalidTime;
+	goto sendReply;
+    }
+
+    /*
+     * call out to ddx routine to effect the change
+     */
+    if (!(*pScrPriv->rrSetConfig) (pScreen, rotation, 
+					pSize, pVisualGroup))
+    {
+	/*
+	 * unknown DDX failure, report to client
+	 */
+	rep.status = RRSetConfigFailed;
+	goto sendReply;
+    }
+    
+    /*
+     * set current extension configuration pointers
+     */
+    RRSetCurrentConfig (pScreen, rotation, pSize, pVisualGroup);
+    
+    /*
+     * Deliver ScreenChangeNotify events whenever
+     * the configuration is updated
+     */
+    WalkTree (pScreen, TellChanged, (pointer) pScreen);
+    
+    /*
+     * Deliver ConfigureNotify events when root changes
+     * pixel size
+     */
+    if (oldWidth != pScreen->width || oldHeight != pScreen->height)
+	RRSendConfigNotify (pScreen);
+    RREditConnectionInfo (pScreen);
+    
+    /*
+     * Fix pointer bounds and location
+     */
+    ScreenRestructured (pScreen);
+    pScrPriv->lastSetTime = time;
+    
+    /*
+     * Report Success
+     */
+    rep.status = RRSetConfigSuccess;
+    
+sendReply:
+    
+    rep.type = X_Reply;
+    /* rep.status has already been filled in */
+    rep.length = 0;
+    rep.sequenceNumber = client->sequence;
+
+    rep.newTimestamp = pScrPriv->lastSetTime.milliseconds;
+    rep.newConfigTimestamp = pScrPriv->lastConfigTime.milliseconds;
+    rep.root = WindowTable[pDraw->pScreen->myNum]->drawable.id;
+    
+    if (client->swapped) 
+    {
+    	swaps(&rep.sequenceNumber, n);
+    	swapl(&rep.length, n);
+	swapl(&rep.newTimestamp, n);
+	swapl(&rep.newConfigTimestamp, n);
+	swapl(&rep.root, n);
+    }
+    WriteToClient(client, sizeof(xRRSetScreenConfigReply), (char *)&rep);
+
+    return (client->noClientException);
+}
+
+static int
+ProcRRScreenChangeSelectInput (ClientPtr client)
+{
+    REQUEST(xRRScreenChangeSelectInputReq);
+    WindowPtr	pWin;
+    RREventPtr	pRREvent, pNewRREvent, *pHead;
+    XID		clientResource;
+
+    REQUEST_SIZE_MATCH(xRRScreenChangeSelectInputReq);
+    pWin = SecurityLookupWindow (stuff->window, client, SecurityWriteAccess);
+    if (!pWin)
+	return BadWindow;
+    pHead = (RREventPtr *)SecurityLookupIDByType(client,
+			pWin->drawable.id, EventType, SecurityWriteAccess);
+    switch (stuff->enable) {
+    case xTrue:
+	if (pHead) {
+
+	    /* check for existing entry. */
+	    for (pRREvent = *pHead;
+		 pRREvent;
+ 		 pRREvent = pRREvent->next)
+	    {
+		if (pRREvent->client == client)
+		    return Success;
+	    }
+	}
+
+	/* build the entry */
+    	pNewRREvent = (RREventPtr)
+			    xalloc (sizeof (RREventRec));
+    	if (!pNewRREvent)
+	    return BadAlloc;
+    	pNewRREvent->next = 0;
+    	pNewRREvent->client = client;
+    	pNewRREvent->window = pWin;
+    	/*
+ 	 * add a resource that will be deleted when
+     	 * the client goes away
+     	 */
+   	clientResource = FakeClientID (client->index);
+    	pNewRREvent->clientResource = clientResource;
+    	if (!AddResource (clientResource, ClientType, (pointer)pNewRREvent))
+	    return BadAlloc;
+    	/*
+     	 * create a resource to contain a pointer to the list
+     	 * of clients selecting input.  This must be indirect as
+     	 * the list may be arbitrarily rearranged which cannot be
+     	 * done through the resource database.
+     	 */
+    	if (!pHead)
+    	{
+	    pHead = (RREventPtr *) xalloc (sizeof (RREventPtr));
+	    if (!pHead ||
+	    	!AddResource (pWin->drawable.id, EventType, (pointer)pHead))
+	    {
+	    	FreeResource (clientResource, RT_NONE);
+	    	return BadAlloc;
+	    }
+	    *pHead = 0;
+    	}
+    	pNewRREvent->next = *pHead;
+    	*pHead = pNewRREvent;
+	break;
+    case xFalse:
+	/* delete the interest */
+	if (pHead) {
+	    pNewRREvent = 0;
+	    for (pRREvent = *pHead; pRREvent; pRREvent = pRREvent->next) {
+		if (pRREvent->client == client)
+		    break;
+		pNewRREvent = pRREvent;
+	    }
+	    if (pRREvent) {
+		FreeResource (pRREvent->clientResource, ClientType);
+		if (pNewRREvent)
+		    pNewRREvent->next = pRREvent->next;
+		else
+		    *pHead = pRREvent->next;
+		xfree (pRREvent);
+	    }
+	}
+	break;
+    default:
+	client->errorValue = stuff->enable;
+	return BadValue;
+    }
+    return Success;
+}
+
+static int
+ProcRRDispatch (ClientPtr client)
+{
+    REQUEST(xReq);
+    switch (stuff->data)
+    {
+    case X_RRQueryVersion:
+	return ProcRRQueryVersion(client);
+    case X_RRGetScreenInfo:
+        return ProcRRGetScreenInfo(client);
+    case X_RRSetScreenConfig:
+        return ProcRRSetScreenConfig(client);
+    case X_RRScreenChangeSelectInput:
+        return ProcRRScreenChangeSelectInput(client);
+    default:
+	return BadRequest;
+    }
+}
+
+static int
+SProcRRQueryVersion (ClientPtr client)
+{
+    register int n;
+    REQUEST(xRRQueryVersionReq);
+
+    swaps(&stuff->length, n);
+    swapl(&stuff->majorVersion, n);
+    swapl(&stuff->minorVersion, n);
+    return ProcRRQueryVersion(client);
+}
+
+static int
+SProcRRGetScreenInfo (ClientPtr client)
+{
+    register int n;
+    REQUEST(xRRGetScreenInfoReq);
+
+    swaps(&stuff->length, n);
+    swapl(&stuff->window, n);
+    return ProcRRGetScreenInfo(client);
+}
+
+static int
+SProcRRSetScreenConfig (ClientPtr client)
+{
+    register int n;
+    REQUEST(xRRSetScreenConfigReq);
+
+    swaps(&stuff->length, n);
+    swapl(&stuff->drawable, n);
+    swapl(&stuff->timestamp, n);
+    swaps(&stuff->sizeID, n);
+    swaps(&stuff->visualGroupID, n);
+    swaps(&stuff->rotation, n);
+    return ProcRRSetScreenConfig(client);
+}
+
+static int
+SProcRRScreenChangeSelectInput (ClientPtr client)
+{
+    register int n;
+    REQUEST(xRRScreenChangeSelectInputReq);
+
+    swaps(&stuff->length, n);
+    swapl(&stuff->window, n);
+    return ProcRRScreenChangeSelectInput(client);
+}
+
+static int
+SProcRRDispatch (ClientPtr client)
+{
+    REQUEST(xReq);
+    switch (stuff->data)
+    {
+    case X_RRQueryVersion:
+	return SProcRRQueryVersion(client);
+    case X_RRGetScreenInfo:
+        return SProcRRGetScreenInfo(client);
+    case X_RRSetScreenConfig:
+        return SProcRRSetScreenConfig(client);
+    case X_RRScreenChangeSelectInput:
+        return SProcRRScreenChangeSelectInput(client);
+    default:
+	return BadRequest;
+    }
+}
+
+/*
+ * Utility functions for creating the group of possible
+ * configurations
+ */
+
+RRVisualGroupPtr
+RRCreateVisualGroup (ScreenPtr pScreen)
+{
+    RRVisualGroupPtr  pVisualGroup;
+    
+    pVisualGroup = (RRVisualGroupPtr) xalloc (sizeof (RRVisualGroup));
+    pVisualGroup->nvisuals = 0;
+    pVisualGroup->visuals = 0;
+    pVisualGroup->referenced = TRUE;
+    pVisualGroup->oldReferenced = FALSE;
+    return pVisualGroup;
+}
+
+void
+RRDestroyVisualGroup (ScreenPtr	    pScreen,
+		    RRVisualGroupPtr  pVisualGroup)
+{
+#ifdef RR_VALIDATE
+    int	i;
+    rrScrPriv(pScreen);
+
+    for (i = 0; i < pScrPriv->nVisualGroups; i++)
+	if (pVisualGroup == &pScrPriv->pVisualGroups[i])
+	    FatalError ("Freeing registered visual group");
+#endif
+    xfree (pVisualGroup->visuals);
+    xfree (pVisualGroup);
+}
+
+Bool
+RRAddVisualToVisualGroup (ScreenPtr	pScreen,
+			RRVisualGroupPtr	pVisualGroup,
+			VisualPtr	pVisual)
+{
+    VisualPtr	*new;
+
+    new = xrealloc (pVisualGroup->visuals, 
+		    (pVisualGroup->nvisuals + 1) * sizeof (VisualPtr));
+    if (!new)
+	return FALSE;
+    (pVisualGroup->visuals = new)[pVisualGroup->nvisuals++] = pVisual;
+    return TRUE;
+}
+
+Bool
+RRAddDepthToVisualGroup (ScreenPtr	pScreen,
+		       RRVisualGroupPtr	pVisualGroup,
+		       DepthPtr		pDepth)
+{
+    int		i;
+    int		v;
+
+    for (i = 0; i < pDepth->numVids; i++)
+	for (v = 0; v < pScreen->numVisuals; v++)
+	    if (pScreen->visuals[v].vid == pDepth->vids[i])
+		if (!RRAddVisualToVisualGroup (pScreen, pVisualGroup,
+					     &pScreen->visuals[v]))
+		    return FALSE;
+    return TRUE;
+}
+
+/*
+ * Return true if a and b reference the same group of visuals
+ */
+
+static Bool
+RRVisualGroupMatches (RRVisualGroupPtr  a,
+		    RRVisualGroupPtr  b)
+{
+    int	ai, bi;
+    
+    if (a->nvisuals != b->nvisuals)
+	return FALSE;
+    for (ai = 0; ai < a->nvisuals; ai++)
+    {
+	for (bi = 0; bi < b->nvisuals; bi++)
+	    if (a->visuals[ai] == b->visuals[bi])
+		break;
+	if (bi == b->nvisuals)
+	    return FALSE;
+    }
+    return TRUE;
+}
+
+RRVisualGroupPtr
+RRRegisterVisualGroup (ScreenPtr	    pScreen,
+		     RRVisualGroupPtr pVisualGroup)
+{
+    rrScrPriv (pScreen);
+    int	    i;
+    RRVisualGroupPtr  pNew;
+
+    if (!pScrPriv)
+    {
+	RRDestroyVisualGroup (pScreen, pVisualGroup);
+	return 0;
+    }
+    for (i = 0; i < pScrPriv->nVisualGroups; i++)
+	if (RRVisualGroupMatches (pVisualGroup,
+				&pScrPriv->pVisualGroups[i]))
+	{
+	    RRDestroyVisualGroup (pScreen, pVisualGroup);
+	    pScrPriv->pVisualGroups[i].referenced = TRUE;
+	    return &pScrPriv->pVisualGroups[i];
+	}
+    pNew = xrealloc (pScrPriv->pVisualGroups,
+		     (pScrPriv->nVisualGroups + 1) * sizeof (RRVisualGroup));
+    if (!pNew)
+    {
+	RRDestroyVisualGroup (pScreen, pVisualGroup);
+	return 0;
+    }
+    pNew[pScrPriv->nVisualGroups++] = *pVisualGroup;
+    xfree (pVisualGroup);
+    pScrPriv->pVisualGroups = pNew;
+    return &pNew[pScrPriv->nVisualGroups-1];
+}
+
+RRGroupOfVisualGroupPtr
+RRCreateGroupOfVisualGroup (ScreenPtr pScreen)
+{
+    RRGroupOfVisualGroupPtr  pGroupOfVisualGroup;
+    
+    pGroupOfVisualGroup = (RRGroupOfVisualGroupPtr) xalloc (sizeof (RRGroupOfVisualGroup));
+    pGroupOfVisualGroup->ngroups = 0;
+    pGroupOfVisualGroup->groups = 0;
+    pGroupOfVisualGroup->referenced = TRUE;
+    pGroupOfVisualGroup->oldReferenced = FALSE;
+    return pGroupOfVisualGroup;
+}
+
+void
+RRDestroyGroupOfVisualGroup (ScreenPtr		pScreen,
+			 RRGroupOfVisualGroupPtr	pGroupOfVisualGroup)
+{
+#ifdef RR_VALIDATE
+    int	i;
+    rrScrPriv(pScreen);
+
+    for (i = 0; i < pScrPriv->nGroupsOfVisualGroups; i++)
+	if (pGroupOfVisualGroup == &pScrPriv->pGroupsOfVisualGroups[i])
+	    FatalError ("Freeing registered visual group");
+#endif
+    xfree (pGroupOfVisualGroup->groups);
+    xfree (pGroupOfVisualGroup);
+}
+
+Bool
+RRAddVisualGroupToGroupOfVisualGroup (ScreenPtr	    pScreen,
+				RRGroupOfVisualGroupPtr pGroupOfVisualGroup,
+				RRVisualGroupPtr	    pVisualGroup)
+{
+    rrScrPriv(pScreen);
+    int		*new;
+
+#ifdef RR_VALIDATE
+    int	i;
+    for (i = 0; i < pScrPriv->nVisualGroups; i++)
+	if (pVisualGroup == &pScrPriv->pVisualGroups[i])
+	    break;
+
+    if (i == pScrPriv->nVisualGroups)
+	FatalError ("Adding unregistered visual group");
+#endif
+    new = (int*) xrealloc (pGroupOfVisualGroup->groups, 
+			   (pGroupOfVisualGroup->ngroups + 1) * sizeof (int *));
+    if (!new)
+	return FALSE;
+    (pGroupOfVisualGroup->groups = new)[pGroupOfVisualGroup->ngroups++] = pVisualGroup - pScrPriv->pVisualGroups;
+    return TRUE;
+}
+
+/*
+ * Return true if a and b reference the same group of groups
+ */
+
+static Bool
+RRGroupOfVisualGroupMatches (RRGroupOfVisualGroupPtr  a,
+			 RRGroupOfVisualGroupPtr  b)
+{
+    int	ai, bi;
+    
+    if (a->ngroups != b->ngroups)
+	return FALSE;
+    for (ai = 0; ai < a->ngroups; ai++)
+    {
+	for (bi = 0; bi < b->ngroups; bi++)
+	    if (a->groups[ai] == b->groups[bi])
+		break;
+	if (bi == b->ngroups)
+	    return FALSE;
+    }
+    return TRUE;
+}
+
+RRGroupOfVisualGroupPtr
+RRRegisterGroupOfVisualGroup (ScreenPtr		pScreen,
+			  RRGroupOfVisualGroupPtr	pGroupOfVisualGroup)
+{
+    rrScrPriv (pScreen);
+    int			i;
+    RRGroupOfVisualGroupPtr pNew;
+
+    if (!pScrPriv)
+    {
+	RRDestroyGroupOfVisualGroup (pScreen, pGroupOfVisualGroup);
+	return 0;
+    }
+    for (i = 0; i < pScrPriv->nGroupsOfVisualGroups; i++)
+	if (RRGroupOfVisualGroupMatches (pGroupOfVisualGroup,
+				     &pScrPriv->pGroupsOfVisualGroups[i]))
+	{
+	    RRDestroyGroupOfVisualGroup (pScreen, pGroupOfVisualGroup);
+	    pScrPriv->pGroupsOfVisualGroups[i].referenced = TRUE;
+	    return &pScrPriv->pGroupsOfVisualGroups[i];
+	}
+    pNew = xrealloc (pScrPriv->pGroupsOfVisualGroups,
+		     (pScrPriv->nGroupsOfVisualGroups + 1) * sizeof (RRGroupOfVisualGroup));
+    if (!pNew)
+    {
+	RRDestroyGroupOfVisualGroup (pScreen, pGroupOfVisualGroup);
+	return 0;
+    }
+    pNew[pScrPriv->nGroupsOfVisualGroups++] = *pGroupOfVisualGroup;
+    xfree (pGroupOfVisualGroup);
+    pScrPriv->pGroupsOfVisualGroups = pNew;
+    return &pNew[pScrPriv->nGroupsOfVisualGroups-1];
+}
+
+static Bool
+RRScreenSizeMatches (RRScreenSizePtr  a,
+		   RRScreenSizePtr  b)
+{
+    if (a->width != b->width)
+	return FALSE;
+    if (a->height != b->height)
+	return FALSE;
+    if (a->mmWidth != b->mmWidth)
+	return FALSE;
+    if (a->mmHeight != b->mmHeight)
+	return FALSE;
+    if (a->groupOfVisualGroups != b->groupOfVisualGroups)
+	return FALSE;
+    return TRUE;
+}
+
+RRScreenSizePtr
+RRRegisterSize (ScreenPtr	    pScreen,
+		short		    width, 
+		short		    height,
+		short		    mmWidth,
+		short		    mmHeight,
+		RRGroupOfVisualGroup    *pGroupsOfVisualGroups)
+{
+    rrScrPriv (pScreen);
+    int		    i;
+    RRScreenSize	    tmp;
+    RRScreenSizePtr   pNew;
+
+    if (!pScrPriv)
+	return 0;
+    
+#ifdef RR_VALIDATE
+    for (i = 0; i < pScrPriv->nGroupsOfVisualGroups; i++)
+	if (pGroupsOfVisualGroups == &pScrPriv->pGroupsOfVisualGroups[i])
+	    break;
+
+    if (i == pScrPriv->nGroupsOfVisualGroups)
+	FatalError ("Adding unregistered group of visual groups");
+#endif
+    
+    tmp.width = width;
+    tmp.height= height;
+    tmp.mmWidth = mmWidth;
+    tmp.mmHeight = mmHeight;
+    tmp.groupOfVisualGroups = pGroupsOfVisualGroups - pScrPriv->pGroupsOfVisualGroups;
+    tmp.referenced = TRUE;
+    tmp.oldReferenced = FALSE;
+    for (i = 0; i < pScrPriv->nSizes; i++)
+	if (RRScreenSizeMatches (&tmp, &pScrPriv->pSizes[i]))
+	{
+	    pScrPriv->pSizes[i].referenced = TRUE;
+	    return &pScrPriv->pSizes[i];
+	}
+    pNew = xrealloc (pScrPriv->pSizes,
+		     (pScrPriv->nSizes + 1) * sizeof (RRScreenSize));
+    if (!pNew)
+	return 0;
+    pNew[pScrPriv->nSizes++] = tmp;
+    pScrPriv->pSizes = pNew;
+    return &pNew[pScrPriv->nSizes-1];
+}
+
+void
+RRSetCurrentConfig (ScreenPtr		pScreen,
+		    Rotation		rotation,
+		    RRScreenSizePtr	pSize,
+		    RRVisualGroupPtr	pVisualGroup)
+{
+    rrScrPriv (pScreen);
+
+    if (!pScrPriv)
+	return;
+
+    pScrPriv->rotation = rotation;
+    pScrPriv->pSize = pSize;
+    pScrPriv->pVisualGroup = pVisualGroup;
+}
+@
+
+
+1.1.9.1
+log
+@OpenBSD just has imported exactly this tree into their vendor branch,
+called the same tag, in XF4/xc
+This is, apparently, the last XFree86 snapshot before the licence change
+(ie, addition of the advertising clause)
+
+Since the developers don't see any problems with that, and we would like
+to integrate improvements done by the remaining one or two (or so) XFree86
+developers (j/k), this prepares enabling us to update X-Window in the future.
+@
+text
+@d2 1
+a2 1
+ * $XFree86: xc/programs/Xserver/randr/randr.c,v 1.22 2003/11/06 18:38:15 tsi Exp $
+d4 1
+a4 2
+ * Copyright © 2000, Compaq Computer Corporation, 
+ * Copyright © 2002, Hewlett Packard, Inc.
+d10 3
+a12 3
+ * documentation, and that the name of Compaq or HP not be used in advertising
+ * or publicity pertaining to distribution of the software without specific,
+ * written prior permission.  HP makes no representations about the
+d16 2
+a17 2
+ * HP DISCLAIMS ALL WARRANTIES WITH REGARD TO THIS SOFTWARE, INCLUDING ALL
+ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS, IN NO EVENT SHALL HP
+d23 1
+a23 1
+ * Author:  Jim Gettys, HP Labs, Hewlett-Packard, Inc.
+a25 1
+
+a41 4
+#ifdef RENDER
+#include "render.h" 	/* we share subpixel order information */
+#include "picturestr.h"
+#endif
+a46 5
+/* From render.h */
+#ifndef SubPixelUnknown
+#define SubPixelUnknown 0
+#endif
+
+a64 1
+#if 0
+a66 1
+#endif
+a68 12
+static int	RRClientPrivateIndex;
+
+typedef struct _RRTimes {
+    TimeStamp	setTime;
+    TimeStamp	configTime;
+} RRTimesRec, *RRTimesPtr;
+
+typedef struct _RRClient {
+    int		major_version;
+    int		minor_version;
+/*  RRTimesRec	times[0]; */
+} RRClientRec, *RRClientPtr;
+a84 1
+    int		mask;
+a88 38
+#define GetRRClient(pClient)    ((RRClientPtr) (pClient)->devPrivates[RRClientPrivateIndex].ptr)
+#define rrClientPriv(pClient)	RRClientPtr pRRClient = GetRRClient(pClient)
+
+static Bool
+RRClientKnowsRates (ClientPtr	pClient)
+{
+    rrClientPriv(pClient);
+
+    return (pRRClient->major_version > 1 ||
+	    (pRRClient->major_version == 1 && pRRClient->minor_version >= 1));
+}
+
+static void
+RRClientCallback (CallbackListPtr	*list,
+		  pointer		closure,
+		  pointer		data)
+{
+    NewClientInfoRec	*clientinfo = (NewClientInfoRec *) data;
+    ClientPtr		pClient = clientinfo->client;
+    rrClientPriv(pClient);
+    RRTimesPtr		pTimes = (RRTimesPtr) (pRRClient + 1);
+    int			i;
+
+    pRRClient->major_version = 0;
+    pRRClient->minor_version = 0;
+    for (i = 0; i < screenInfo.numScreens; i++)
+    {
+	ScreenPtr   pScreen = screenInfo.screens[i];
+	rrScrPriv(pScreen);
+
+	if (pScrPriv)
+	{
+	    pTimes[i].setTime = pScrPriv->lastSetTime;
+	    pTimes[i].configTime = pScrPriv->lastConfigTime;
+	}
+    }
+}
+
+d93 1
+d103 4
+d113 2
+a114 2
+SRRScreenChangeNotifyEvent(xRRScreenChangeNotifyEvent *from,
+			   xRRScreenChangeNotifyEvent *to)
+d124 1
+a128 1
+    cpswaps(from->subpixelOrder, to->subpixelOrder);
+d164 8
+d178 2
+a179 1
+    pScrPriv->size = -1;
+a234 8
+    RRClientPrivateIndex = AllocateClientPrivateIndex ();
+    if (!AllocateClientPrivate (RRClientPrivateIndex,
+				sizeof (RRClientRec) +
+				screenInfo.numScreens * sizeof (RRTimesRec)))
+	return;
+    if (!AddCallback (&ClientStateCallback, RRClientCallback, 0))
+	return;
+
+a245 1
+#if 0
+a247 1
+#endif
+d263 1
+a263 1
+    RRScreenSizePtr		pSize;
+d274 1
+a274 1
+    se.root =  pRoot->drawable.id;
+d276 1
+a276 6
+#ifdef RENDER
+    se.subpixelOrder = PictureGetSubpixelOrder (pScreen);
+#else
+    se.subpixelOrder = SubPixelUnknown;
+#endif
+    if (pScrPriv->size >= 0)
+a277 1
+	pSize = &pScrPriv->pSizes[pScrPriv->size];
+d279 1
+d292 1
+d298 1
+d305 1
+a305 2
+	if(pRREvent->mask & RRScreenChangeNotifyMask)
+	  WriteEventsToClient (client, 1, (xEvent *) &se);
+d314 1
+a314 1
+    int		    i, j, k, l;
+a316 2
+    RRScreenSizePtr pSize;
+    RRScreenRatePtr pRate;
+d318 10
+d330 2
+a331 9
+	pSize = &pScrPriv->pSizes[i];
+	pSize->oldReferenced = pSize->referenced;
+	pSize->referenced = FALSE;
+	for (k = 0; k < pSize->nRates; k++)
+	{
+	    pRate = &pSize->pRates[k];
+	    pRate->oldReferenced = pRate->referenced;
+	    pRate->referenced = FALSE;
+	}
+d349 18
+d369 1
+a369 2
+	pSize = &pScrPriv->pSizes[i];
+	if (pSize->oldReferenced != pSize->referenced)
+d371 2
+a372 12
+	if (pSize->referenced)
+	    pSize->id = j++;
+	l = 0;
+	for (k = 0; k < pSize->nRates; k++)
+	{
+	    pRate = &pSize->pRates[k];
+	    if (pRate->oldReferenced != pRate->referenced)
+		changed = TRUE;
+	    if (pRate->referenced)
+		l++;
+	}
+	pSize->nRatesInUse = l;
+a410 1
+    rrClientPriv(client);
+a412 2
+    pRRClient->major_version = stuff->majorVersion;
+    pRRClient->minor_version = stuff->minorVersion;
+d428 47
+d529 1
+a529 1
+    unsigned long	    extraLen;
+a539 1
+    rep.pad = 0;
+d549 2
+d553 1
+a554 2
+	rep.rate = 0;
+	rep.nrateEnts = 0;
+d561 4
+d566 2
+a567 3
+	CARD16			*rates;
+	CARD8			*data8;
+	Bool			has_rate = RRClientKnowsRates (client);
+d578 2
+d582 26
+a607 3
+	rep.rate = pScrPriv->rate;
+        rep.nrateEnts = 0;
+	if (has_rate)
+d609 3
+a611 8
+	    for (i = 0; i < pScrPriv->nSizes; i++)
+	    {
+		RRScreenSizePtr pSize = &pScrPriv->pSizes[i];
+		if (pSize->referenced)
+		{
+		    rep.nrateEnts += (1 + pSize->nRatesInUse);
+		}
+	    }
+d613 3
+a615 6
+
+	if (pScrPriv->size >= 0)
+	    rep.sizeID = pScrPriv->pSizes[pScrPriv->size].id;
+	else
+	    return BadImplementation;
+
+d617 2
+a618 2
+		    rep.nrateEnts * sizeof (CARD16));
+
+a625 1
+	rates = (CARD16 *) (size + rep.nSizes);
+d628 1
+a628 2
+	    RRScreenSizePtr pSize = &pScrPriv->pSizes[i];
+	    if (pSize->referenced)
+d630 5
+a634 4
+		size->widthInPixels = pSize->width;
+		size->heightInPixels = pSize->height;
+		size->widthInMillimeters = pSize->mmWidth;
+		size->heightInMillimeters = pSize->mmHeight;
+d641 1
+d644 29
+a672 1
+		if (has_rate)
+d674 2
+a675 19
+		    *rates = pSize->nRatesInUse;
+		    if (client->swapped)
+		    {
+			swaps (rates, n);
+		    }
+		    rates++;
+		    for (j = 0; j < pSize->nRates; j++)
+		    {
+			RRScreenRatePtr	pRate = &pSize->pRates[j];
+			if (pRate->referenced)
+			{
+			    *rates = pRate->rate;
+			    if (client->swapped)
+			    {
+				swaps (rates, n);
+			    }
+			    rates++;
+			}
+		    }
+d679 8
+a686 6
+	data8 = (CARD8 *) rates;
+
+	if (data8 - (CARD8 *) extra != extraLen)
+	    FatalError ("RRGetScreenInfo bad extra len %ld != %ld\n",
+			(unsigned long)(data8 - (CARD8 *) extra), extraLen);
+	rep.length =  (extraLen + 3) >> 2;
+d694 1
+d696 1
+a696 2
+	swaps(&rep.rate, n);
+	swaps(&rep.nrateEnts, n);
+d701 1
+a701 1
+	WriteToClient (client, extraLen, (char *) extra);
+d719 2
+a722 1
+    int			    rate;
+a723 1
+    Bool		    has_rate;
+d727 1
+a727 11
+    if (RRClientKnowsRates (client))
+    {
+	REQUEST_SIZE_MATCH (xRRSetScreenConfigReq);
+	has_rate = TRUE;
+    }
+    else
+    {
+	REQUEST_SIZE_MATCH (xRR1_0SetScreenConfigReq);
+	has_rate = FALSE;
+    }
+    
+a763 1
+    pSize = 0;
+a767 1
+	{
+a768 1
+	}
+d780 35
+d818 1
+a818 3
+
+    /* test the rotation bits only! */
+    switch (rotation & 0xf) {
+d831 1
+a831 2
+
+    if ((~pScrPriv->rotations) & rotation)
+d834 1
+a834 1
+	 * requested rotation or reflection not supported by screen
+a835 1
+	client->errorValue = stuff->rotation;
+a837 26
+
+    /*
+     * Validate requested refresh
+     */
+    if (has_rate)
+	rate = (int) stuff->rate;
+    else
+	rate = 0;
+
+    if (rate)
+    {
+	for (i = 0; i < pSize->nRates; i++)
+	{
+	    RRScreenRatePtr pRate = &pSize->pRates[i];
+	    if (pRate->referenced && pRate->rate == rate)
+		break;
+	}
+	if (i == pSize->nRates)
+	{
+	    /*
+	     * Invalid rate
+	     */
+	    client->errorValue = rate;
+	    return BadValue;
+	}
+    }
+d852 2
+a853 2
+    if (!(*pScrPriv->rrSetConfig) (pScreen, rotation, rate,
+				   pSize))
+d865 1
+a865 1
+    RRSetCurrentConfig (pScreen, rotation, rate, pSize);
+d902 1
+a902 1
+
+d917 1
+a917 1
+ProcRRSelectInput (ClientPtr client)
+d919 1
+a919 3
+    REQUEST(xRRSelectInputReq);
+    rrClientPriv(client);
+    RRTimesPtr	pTimes;
+d924 1
+a924 1
+    REQUEST_SIZE_MATCH(xRRSelectInputReq);
+d929 4
+a932 2
+						 pWin->drawable.id, EventType,
+						 SecurityWriteAccess);
+a933 7
+    if (stuff->enable & (RRScreenChangeNotifyMask)) 
+    {
+	ScreenPtr	pScreen = pWin->drawable.pScreen;
+	rrScrPriv	(pScreen);
+
+	if (pHead) 
+	{
+d935 4
+a938 1
+	    for (pRREvent = *pHead; pRREvent; pRREvent = pRREvent->next)
+d941 1
+d945 3
+a947 2
+	pNewRREvent = (RREventPtr) xalloc (sizeof (RREventRec));
+	if (!pNewRREvent)
+d949 10
+a958 11
+	pNewRREvent->next = 0;
+	pNewRREvent->client = client;
+	pNewRREvent->window = pWin;
+	pNewRREvent->mask = stuff->enable;
+	/*
+	 * add a resource that will be deleted when
+	 * the client goes away
+	 */
+	clientResource = FakeClientID (client->index);
+	pNewRREvent->clientResource = clientResource;
+	if (!AddResource (clientResource, ClientType, (pointer)pNewRREvent))
+d960 8
+a967 8
+	/*
+	 * create a resource to contain a pointer to the list
+	 * of clients selecting input.  This must be indirect as
+	 * the list may be arbitrarily rearranged which cannot be
+	 * done through the resource database.
+	 */
+	if (!pHead)
+	{
+d970 1
+a970 1
+		!AddResource (pWin->drawable.id, EventType, (pointer)pHead))
+d972 2
+a973 2
+		FreeResource (clientResource, RT_NONE);
+		return BadAlloc;
+d976 5
+a980 20
+	}
+	pNewRREvent->next = *pHead;
+	*pHead = pNewRREvent;
+	/*
+	 * Now see if the client needs an event
+	 */
+	if (pScrPriv)
+	{
+	    pTimes = &((RRTimesPtr) (pRRClient + 1))[pScreen->myNum];
+	    if (CompareTimeStamps (pTimes->setTime, 
+				   pScrPriv->lastSetTime) != 0 ||
+		CompareTimeStamps (pTimes->configTime, 
+				   pScrPriv->lastConfigTime) != 0)
+	    {
+		TellChanged (pWin, (pointer) pScreen);
+	    }
+	}
+    }
+    else if (stuff->enable == xFalse) 
+    {
+d998 2
+a999 3
+    }
+    else 
+    {
+a1005 1
+
+d1014 2
+d1018 2
+a1019 4
+    case X_RRSelectInput:
+        return ProcRRSelectInput(client);
+    case X_RRGetScreenInfo:
+        return ProcRRGetScreenInfo(client);
+a1053 10
+    if (RRClientKnowsRates (client))
+    {
+	REQUEST_SIZE_MATCH (xRRSetScreenConfigReq);
+	swaps (&stuff->rate, n);
+    }
+    else
+    {
+	REQUEST_SIZE_MATCH (xRR1_0SetScreenConfigReq);
+    }
+    
+d1058 1
+d1064 1
+a1064 1
+SProcRRSelectInput (ClientPtr client)
+d1067 1
+a1067 1
+    REQUEST(xRRSelectInputReq);
+d1071 1
+a1071 1
+    return ProcRRSelectInput(client);
+a1073 1
+
+d1082 2
+d1086 2
+a1087 4
+    case X_RRSelectInput:
+        return SProcRRSelectInput(client);
+    case X_RRGetScreenInfo:
+        return SProcRRGetScreenInfo(client);
+d1093 233
+d1339 2
+d1349 2
+a1350 1
+		short		    mmHeight)
+d1354 2
+a1355 2
+    RRScreenSize    tmp;
+    RRScreenSizePtr pNew;
+d1360 9
+d1373 1
+a1373 3
+    tmp.pRates = 0;
+    tmp.nRates = 0;
+    tmp.nRatesInUse = 0;
+a1390 33
+Bool RRRegisterRate (ScreenPtr		pScreen,
+		     RRScreenSizePtr	pSize,
+		     int		rate)
+{
+    rrScrPriv(pScreen);
+    int		    i;
+    RRScreenRatePtr pNew, pRate;
+
+    if (!pScrPriv)
+	return FALSE;
+    
+    for (i = 0; i < pSize->nRates; i++)
+    {
+	pRate = &pSize->pRates[i];
+	if (pRate->rate == rate)
+	{
+	    pRate->referenced = TRUE;
+	    return TRUE;
+	}
+    }
+
+    pNew = xrealloc (pSize->pRates,
+		     (pSize->nRates + 1) * sizeof (RRScreenRate));
+    if (!pNew)
+	return FALSE;
+    pRate = &pNew[pSize->nRates++];
+    pRate->rate = rate;
+    pRate->referenced = TRUE;
+    pRate->oldReferenced = FALSE;
+    pSize->pRates = pNew;
+    return TRUE;
+}
+
+d1394 2
+a1395 2
+		    int			rate,
+		    RRScreenSizePtr	pSize)
+d1403 2
+a1404 2
+    pScrPriv->size = pSize - pScrPriv->pSizes;
+    pScrPriv->rate = rate;
+@
+
+
+1.1.1.1
+log
+@Import OpenBSD 3.3 XF4 repository from CTM 3132 the first time
+This finalizes starting an OpenBSD-mirabile (aka MirBSD) repository.
+
+### MirBSD is:
+# Copyright (c) 1982-2003 by Thorsten "mirabile" Glaser <x86@@ePost.de>
+# Copyright © 1968-2003  The authors of And contributors to UNIX®, the
+#       C Language, BSD/Berkeley Unix; 386BSD, NetBSD 1.1 and OpenBSD.
+#
+# Anyone who obtained a copy of this work is hereby permitted to freely use,
+# distribute, modify, merge, sublicence, give away or sell it as long as the
+# authors are given due credit and the following notice is retained:
+#
+# This work is provided "as is", with no explicit or implicit warranty what-
+# soever. Use it only at your own risk. In no event may an author or contri-
+# butor be held liable for any damage, directly or indirectly, that origina-
+# ted through or is caused by creation or modification of this work.
+
+MirBSD is my private tree. MirBSD does not differ very much from OpenBSD
+and intentionally tracks OpenBSD. That's why it _is_ OpenBSD, just not the
+official one. It's like with DarrenBSD.
+
+At time of this writing, no advertising for MirBSD must be done,
+because the advertising clause has not yet been sorted out.
+
+http://templeofhate.com/tglaser/MirBSD/index.php
+@
+text
+@@
+
+
+1.1.1.2
+log
+@The X-Windowing System
+
+Import XFree86 4.3 from OpenBSD by CTM, in the hope it's stable
+@
+text
+@d2 1
+a2 1
+ * $XFree86: xc/programs/Xserver/randr/randr.c,v 1.19 2003/02/08 03:52:30 dawes Exp $
+d4 1
+a4 2
+ * Copyright © 2000, Compaq Computer Corporation, 
+ * Copyright © 2002, Hewlett Packard, Inc.
+d10 3
+a12 3
+ * documentation, and that the name of Compaq or HP not be used in advertising
+ * or publicity pertaining to distribution of the software without specific,
+ * written prior permission.  HP makes no representations about the
+d16 2
+a17 2
+ * HP DISCLAIMS ALL WARRANTIES WITH REGARD TO THIS SOFTWARE, INCLUDING ALL
+ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS, IN NO EVENT SHALL HP
+d23 1
+a23 1
+ * Author:  Jim Gettys, HP Labs, Hewlett-Packard, Inc.
+a25 1
+
+a41 2
+#include "render.h" 	/* we share subpixel order information */
+#include "picturestr.h"
+a68 12
+static int	RRClientPrivateIndex;
+
+typedef struct _RRTimes {
+    TimeStamp	setTime;
+    TimeStamp	configTime;
+} RRTimesRec, *RRTimesPtr;
+
+typedef struct _RRClient {
+    int		major_version;
+    int		minor_version;
+/*  RRTimesRec	times[0]; */
+} RRClientRec, *RRClientPtr;
+a84 1
+    int		mask;
+a88 38
+#define GetRRClient(pClient)    ((RRClientPtr) (pClient)->devPrivates[RRClientPrivateIndex].ptr)
+#define rrClientPriv(pClient)	RRClientPtr pRRClient = GetRRClient(pClient)
+
+static Bool
+RRClientKnowsRates (ClientPtr	pClient)
+{
+    rrClientPriv(pClient);
+
+    return (pRRClient->major_version > 1 ||
+	    (pRRClient->major_version == 1 && pRRClient->minor_version >= 1));
+}
+
+static void
+RRClientCallback (CallbackListPtr	*list,
+		  pointer		closure,
+		  pointer		data)
+{
+    NewClientInfoRec	*clientinfo = (NewClientInfoRec *) data;
+    ClientPtr		pClient = clientinfo->client;
+    rrClientPriv(pClient);
+    RRTimesPtr		pTimes = (RRTimesPtr) (pRRClient + 1);
+    int			i;
+
+    pRRClient->major_version = 0;
+    pRRClient->minor_version = 0;
+    for (i = 0; i < screenInfo.numScreens; i++)
+    {
+	ScreenPtr   pScreen = screenInfo.screens[i];
+	rrScrPriv(pScreen);
+
+	if (pScrPriv)
+	{
+	    pTimes[i].setTime = pScrPriv->lastSetTime;
+	    pTimes[i].configTime = pScrPriv->lastConfigTime;
+	}
+    }
+}
+
+d93 1
+d103 4
+d113 2
+a114 2
+SRRScreenChangeNotifyEvent(xRRScreenChangeNotifyEvent *from,
+			   xRRScreenChangeNotifyEvent *to)
+d124 1
+a128 1
+    cpswaps(from->subpixelOrder, to->subpixelOrder);
+d164 8
+d178 2
+a179 1
+    pScrPriv->size = -1;
+a234 8
+    RRClientPrivateIndex = AllocateClientPrivateIndex ();
+    if (!AllocateClientPrivate (RRClientPrivateIndex,
+				sizeof (RRClientRec) +
+				screenInfo.numScreens * sizeof (RRTimesRec)))
+	return;
+    if (!AddCallback (&ClientStateCallback, RRClientCallback, 0))
+	return;
+
+d263 1
+a263 1
+    RRScreenSizePtr		pSize;
+d274 1
+a274 1
+    se.root =  pRoot->drawable.id;
+d276 1
+a276 2
+    se.subpixelOrder = PictureGetSubpixelOrder (pScreen);
+    if (pScrPriv->size >= 0)
+a277 1
+	pSize = &pScrPriv->pSizes[pScrPriv->size];
+d279 1
+d292 1
+d298 1
+d305 1
+a305 2
+	if(pRREvent->mask & RRScreenChangeNotifyMask)
+	  WriteEventsToClient (client, 1, (xEvent *) &se);
+d314 1
+a314 1
+    int		    i, j, k, l;
+a316 2
+    RRScreenSizePtr pSize;
+    RRScreenRatePtr pRate;
+d318 10
+d330 2
+a331 9
+	pSize = &pScrPriv->pSizes[i];
+	pSize->oldReferenced = pSize->referenced;
+	pSize->referenced = FALSE;
+	for (k = 0; k < pSize->nRates; k++)
+	{
+	    pRate = &pSize->pRates[k];
+	    pRate->oldReferenced = pRate->referenced;
+	    pRate->referenced = FALSE;
+	}
+d349 18
+d369 1
+a369 2
+	pSize = &pScrPriv->pSizes[i];
+	if (pSize->oldReferenced != pSize->referenced)
+d371 2
+a372 12
+	if (pSize->referenced)
+	    pSize->id = j++;
+	l = 0;
+	for (k = 0; k < pSize->nRates; k++)
+	{
+	    pRate = &pSize->pRates[k];
+	    if (pRate->oldReferenced != pRate->referenced)
+		changed = TRUE;
+	    if (pRate->referenced)
+		l++;
+	}
+	pSize->nRatesInUse = l;
+a410 1
+    rrClientPriv(client);
+a412 2
+    pRRClient->major_version = stuff->majorVersion;
+    pRRClient->minor_version = stuff->minorVersion;
+d428 47
+a539 1
+    rep.pad = 0;
+d549 2
+d553 1
+a554 2
+	rep.rate = 0;
+	rep.nrateEnts = 0;
+d561 4
+d566 2
+a567 3
+	CARD16			*rates;
+	CARD8			*data8;
+	Bool			has_rate = RRClientKnowsRates (client);
+d578 2
+d582 26
+a607 3
+	rep.rate = pScrPriv->rate;
+        rep.nrateEnts = 0;
+	if (has_rate)
+d609 3
+a611 8
+	    for (i = 0; i < pScrPriv->nSizes; i++)
+	    {
+		RRScreenSizePtr pSize = &pScrPriv->pSizes[i];
+		if (pSize->referenced)
+		{
+		    rep.nrateEnts += (1 + pSize->nRatesInUse);
+		}
+	    }
+d613 3
+a615 6
+
+	if (pScrPriv->size >= 0)
+	    rep.sizeID = pScrPriv->pSizes[pScrPriv->size].id;
+	else
+	    return BadImplementation;
+
+d617 2
+a618 2
+		    rep.nrateEnts * sizeof (CARD16));
+
+a625 1
+	rates = (CARD16 *) (size + rep.nSizes);
+d628 1
+a628 2
+	    RRScreenSizePtr pSize = &pScrPriv->pSizes[i];
+	    if (pSize->referenced)
+d630 5
+a634 4
+		size->widthInPixels = pSize->width;
+		size->heightInPixels = pSize->height;
+		size->widthInMillimeters = pSize->mmWidth;
+		size->heightInMillimeters = pSize->mmHeight;
+d641 1
+d644 29
+a672 1
+		if (has_rate)
+d674 2
+a675 19
+		    *rates = pSize->nRatesInUse;
+		    if (client->swapped)
+		    {
+			swaps (rates, n);
+		    }
+		    rates++;
+		    for (j = 0; j < pSize->nRates; j++)
+		    {
+			RRScreenRatePtr	pRate = &pSize->pRates[j];
+			if (pRate->referenced)
+			{
+			    *rates = pRate->rate;
+			    if (client->swapped)
+			    {
+				swaps (rates, n);
+			    }
+			    rates++;
+			}
+		    }
+d679 5
+a683 3
+	data8 = (CARD8 *) rates;
+
+	if (data8 - (CARD8 *) extra != extraLen)
+d685 2
+a686 2
+			data8 - (CARD8 *) extra, extraLen);
+	rep.length =  (extraLen + 3) >> 2;
+d694 1
+d696 1
+a696 2
+	swaps(&rep.rate, n);
+	swaps(&rep.nrateEnts, n);
+d701 1
+a701 1
+	WriteToClient (client, extraLen, (char *) extra);
+d719 2
+a722 1
+    int			    rate;
+a723 1
+    Bool		    has_rate;
+d727 1
+a727 11
+    if (RRClientKnowsRates (client))
+    {
+	REQUEST_SIZE_MATCH (xRRSetScreenConfigReq);
+	has_rate = TRUE;
+    }
+    else
+    {
+	REQUEST_SIZE_MATCH (xRR1_0SetScreenConfigReq);
+	has_rate = FALSE;
+    }
+    
+a763 1
+    pSize = 0;
+a767 1
+	{
+a768 1
+	}
+d780 35
+d818 1
+a818 3
+
+    /* test the rotation bits only! */
+    switch (rotation & 0xf) {
+d831 1
+a831 2
+
+    if ((~pScrPriv->rotations) & rotation)
+d834 1
+a834 1
+	 * requested rotation or reflection not supported by screen
+a835 1
+	client->errorValue = stuff->rotation;
+a837 26
+
+    /*
+     * Validate requested refresh
+     */
+    if (has_rate)
+	rate = (int) stuff->rate;
+    else
+	rate = 0;
+
+    if (rate)
+    {
+	for (i = 0; i < pSize->nRates; i++)
+	{
+	    RRScreenRatePtr pRate = &pSize->pRates[i];
+	    if (pRate->referenced && pRate->rate == rate)
+		break;
+	}
+	if (i == pSize->nRates)
+	{
+	    /*
+	     * Invalid rate
+	     */
+	    client->errorValue = rate;
+	    return BadValue;
+	}
+    }
+d852 2
+a853 2
+    if (!(*pScrPriv->rrSetConfig) (pScreen, rotation, rate,
+				   pSize))
+d865 1
+a865 1
+    RRSetCurrentConfig (pScreen, rotation, rate, pSize);
+d902 1
+a902 1
+
+d917 1
+a917 1
+ProcRRSelectInput (ClientPtr client)
+d919 1
+a919 3
+    REQUEST(xRRSelectInputReq);
+    rrClientPriv(client);
+    RRTimesPtr	pTimes;
+d924 1
+a924 1
+    REQUEST_SIZE_MATCH(xRRSelectInputReq);
+d929 4
+a932 7
+						 pWin->drawable.id, EventType,
+						 SecurityWriteAccess);
+
+    if (stuff->enable & (RRScreenChangeNotifyMask)) 
+    {
+	ScreenPtr	pScreen = pWin->drawable.pScreen;
+	rrScrPriv	(pScreen);
+a933 2
+	if (pHead) 
+	{
+d935 4
+a938 1
+	    for (pRREvent = *pHead; pRREvent; pRREvent = pRREvent->next)
+d941 1
+d945 3
+a947 2
+	pNewRREvent = (RREventPtr) xalloc (sizeof (RREventRec));
+	if (!pNewRREvent)
+d949 10
+a958 11
+	pNewRREvent->next = 0;
+	pNewRREvent->client = client;
+	pNewRREvent->window = pWin;
+	pNewRREvent->mask = stuff->enable;
+	/*
+	 * add a resource that will be deleted when
+	 * the client goes away
+	 */
+	clientResource = FakeClientID (client->index);
+	pNewRREvent->clientResource = clientResource;
+	if (!AddResource (clientResource, ClientType, (pointer)pNewRREvent))
+d960 8
+a967 8
+	/*
+	 * create a resource to contain a pointer to the list
+	 * of clients selecting input.  This must be indirect as
+	 * the list may be arbitrarily rearranged which cannot be
+	 * done through the resource database.
+	 */
+	if (!pHead)
+	{
+d970 1
+a970 1
+		!AddResource (pWin->drawable.id, EventType, (pointer)pHead))
+d972 2
+a973 2
+		FreeResource (clientResource, RT_NONE);
+		return BadAlloc;
+d976 5
+a980 20
+	}
+	pNewRREvent->next = *pHead;
+	*pHead = pNewRREvent;
+	/*
+	 * Now see if the client needs an event
+	 */
+	if (pScrPriv)
+	{
+	    pTimes = &((RRTimesPtr) (pRRClient + 1))[pScreen->myNum];
+	    if (CompareTimeStamps (pTimes->setTime, 
+				   pScrPriv->lastSetTime) != 0 ||
+		CompareTimeStamps (pTimes->configTime, 
+				   pScrPriv->lastConfigTime) != 0)
+	    {
+		TellChanged (pWin, (pointer) pScreen);
+	    }
+	}
+    }
+    else if (stuff->enable == xFalse) 
+    {
+d998 2
+a999 3
+    }
+    else 
+    {
+a1005 1
+
+d1014 2
+d1018 2
+a1019 4
+    case X_RRSelectInput:
+        return ProcRRSelectInput(client);
+    case X_RRGetScreenInfo:
+        return ProcRRGetScreenInfo(client);
+a1053 10
+    if (RRClientKnowsRates (client))
+    {
+	REQUEST_SIZE_MATCH (xRRSetScreenConfigReq);
+	swaps (&stuff->rate, n);
+    }
+    else
+    {
+	REQUEST_SIZE_MATCH (xRR1_0SetScreenConfigReq);
+    }
+    
+d1058 1
+d1064 1
+a1064 1
+SProcRRSelectInput (ClientPtr client)
+d1067 1
+a1067 1
+    REQUEST(xRRSelectInputReq);
+d1071 1
+a1071 1
+    return ProcRRSelectInput(client);
+a1073 1
+
+d1082 2
+d1086 2
+a1087 4
+    case X_RRSelectInput:
+        return SProcRRSelectInput(client);
+    case X_RRGetScreenInfo:
+        return SProcRRGetScreenInfo(client);
+d1093 233
+d1339 2
+d1349 2
+a1350 1
+		short		    mmHeight)
+d1354 2
+a1355 2
+    RRScreenSize    tmp;
+    RRScreenSizePtr pNew;
+d1360 9
+d1373 1
+a1373 3
+    tmp.pRates = 0;
+    tmp.nRates = 0;
+    tmp.nRatesInUse = 0;
+a1390 33
+Bool RRRegisterRate (ScreenPtr		pScreen,
+		     RRScreenSizePtr	pSize,
+		     int		rate)
+{
+    rrScrPriv(pScreen);
+    int		    i;
+    RRScreenRatePtr pNew, pRate;
+
+    if (!pScrPriv)
+	return FALSE;
+    
+    for (i = 0; i < pSize->nRates; i++)
+    {
+	pRate = &pSize->pRates[i];
+	if (pRate->rate == rate)
+	{
+	    pRate->referenced = TRUE;
+	    return TRUE;
+	}
+    }
+
+    pNew = xrealloc (pSize->pRates,
+		     (pSize->nRates + 1) * sizeof (RRScreenRate));
+    if (!pNew)
+	return FALSE;
+    pRate = &pNew[pSize->nRates++];
+    pRate->rate = rate;
+    pRate->referenced = TRUE;
+    pRate->oldReferenced = FALSE;
+    pSize->pRates = pNew;
+    return TRUE;
+}
+
+d1394 2
+a1395 2
+		    int			rate,
+		    RRScreenSizePtr	pSize)
+d1403 2
+a1404 2
+    pScrPriv->size = pSize - pScrPriv->pSizes;
+    pScrPriv->rate = rate;
+@
+
+
+1.1.1.3
+log
+@That's what OpenBSD will, probably, ship as XF4 in 3.5
+their last sync against XFree86 4.3-current has been
+imported into our vendor branch, too
+@
+text
+@d2 1
+a2 1
+ * $XFree86: xc/programs/Xserver/randr/randr.c,v 1.22 2003/11/06 18:38:15 tsi Exp $
+a43 1
+#ifdef RENDER
+a45 1
+#endif
+a50 5
+/* From render.h */
+#ifndef SubPixelUnknown
+#define SubPixelUnknown 0
+#endif
+
+a68 1
+#if 0
+a70 1
+#endif
+a294 1
+#if 0
+a296 1
+#endif
+a324 1
+#ifdef RENDER
+a325 3
+#else
+    se.subpixelOrder = SubPixelUnknown;
+#endif
+d526 1
+a526 1
+    unsigned long	    extraLen;
+d648 2
+a649 2
+	    FatalError ("RRGetScreenInfo bad extra len %ld != %ld\n",
+			(unsigned long)(data8 - (CARD8 *) extra), extraLen);
+@
+
+

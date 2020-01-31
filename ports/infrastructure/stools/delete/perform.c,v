@@ -1,0 +1,541 @@
+head	1.7;
+access;
+symbols
+	cvs-200408271520:1.1.3.1 tg:1.1.3;
+locks; strict;
+comment	@ * @;
+
+
+1.7
+date	2005.03.12.19.23.55;	author tg;	state Exp;
+branches;
+next	1.6;
+
+1.6
+date	2005.03.12.18.40.25;	author tg;	state Exp;
+branches;
+next	1.5;
+
+1.5
+date	2005.03.12.17.25.04;	author tg;	state Exp;
+branches;
+next	1.4;
+
+1.4
+date	2005.03.12.17.20.34;	author tg;	state Exp;
+branches;
+next	1.3;
+
+1.3
+date	2004.11.12.21.24.05;	author bsiegert;	state Exp;
+branches;
+next	1.2;
+
+1.2
+date	2004.10.10.16.46.19;	author tg;	state Exp;
+branches;
+next	1.1;
+
+1.1
+date	2004.08.27.15.27.01;	author tg;	state Exp;
+branches
+	1.1.3.1;
+next	;
+
+1.1.3.1
+date	2004.08.27.15.27.01;	author tg;	state Stab;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.7
+log
+@now all of stools build with
+ -Wall -Wextra -Wunused -Wdeclaration-after-statement -Wundef
+ --Wendif-labels -Wshadow -Wpointer-arith -Wbad-function-cast
+ --Wcast-qual -Wcast-align -Wwrite-strings -Wstrict-prototypes
+ --Wold-style-definition -Wmissing-prototypes -Wmissing-declarations
+ --Wmissing-noreturn -Wmissing-format-attribute -Wredundant-decls
+ --Wno-unreachable-code -Winline -pedantic -std=c99
+
+didn't look at octools yet, since I don't have XCode(R)
+@
+text
+@/**	$MirBSD: ports/infrastructure/stools/delete/perform.c,v 1.6 2005/03/12 18:40:25 tg Exp $ */
+/*	$OpenBSD: perform.c,v 1.16 2003/08/21 20:24:56 espie Exp $	*/
+
+/*
+ * FreeBSD install - a package for the installation and maintainance
+ * of non-core utilities.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ *
+ * Jordan K. Hubbard
+ * 18 July 1993
+ *
+ * This is the main body of the delete module.
+ */
+
+#include <sys/param.h>
+#include <sys/mount.h>
+#include <err.h>
+#include "lib.h"
+#include "delete.h"
+
+__RCSID("$MirBSD: ports/infrastructure/stools/delete/perform.c,v 1.6 2005/03/12 18:40:25 tg Exp $");
+
+static int pkg_do(char *);
+static void sanity_check(char *);
+static int undepend(const char *, char *, int);
+static char LogDir[FILENAME_MAX];
+
+int
+pkg_perform(char **pkgs)
+{
+    int i, err_cnt = 0;
+
+    for (i = 0; pkgs[i]; i++)
+	err_cnt += pkg_do(pkgs[i]);
+    return err_cnt;
+}
+
+static package_t Plist;
+
+static int
+trim_end(char *name)
+{
+   size_t n, m;
+   n = strlen(name);
+   m = strlen(".tgz");
+   if (n > m && strcmp(name+n-m, ".tgz") == 0) {
+	name[n-m] = 0;
+	return 1;
+   }
+   m = strlen(".tar.gz");
+   if (n > m && strcmp(name+n-m, ".tar.gz") == 0) {
+	name[n-m] = 0;
+	return 1;
+   }
+   m = strlen(".cgz");
+   if (n > m && strcmp(name+n-m, ".cgz") == 0) {
+	name[n-m] = 0;
+	return 1;
+   }
+   m = strlen(".tar");
+   if (n > m && strcmp(name+n-m, ".tar") == 0) {
+	name[n-m] = 0;
+	return 1;
+   }
+   return 0;
+}
+
+/* remove all links to the package as well */
+static void
+delete_pkg_links(const char *dir, const char *pkg)
+{
+    int base;
+    int len;
+    DIR *d;
+    struct dirent *dp;
+    struct stat sb;
+    char name[FILENAME_MAX+1];
+
+    base = open(".", O_RDONLY);
+    if (base == -1)
+    	return;
+    if (chdir(dir) == -1) {
+    	close(base);
+	return;
+    }
+    d = opendir(".");
+    if (d == NULL) {
+    	fchdir(base);
+	close(base);
+	return;
+    }
+    while ((dp = readdir(d)) != NULL) {
+    	if (lstat(dp->d_name, &sb) == -1 || !S_ISLNK(sb.st_mode))
+	    continue;
+	len = readlink(dp->d_name, name, FILENAME_MAX);
+	if (len == -1)
+	    continue;
+	name[len] = 0;
+	if (strcmp(name, pkg))
+	    continue;
+	unlink(dp->d_name);
+    }
+    closedir(d);
+    fchdir(base);
+    close(base);
+}
+
+/* This is seriously ugly code following.  Written very fast! */
+static int
+pkg_do(char *pkg)
+{
+    FILE *cfile;
+    char home[FILENAME_MAX];
+    plist_t *p;
+    const char *dbdir;
+
+    set_pkg(pkg);
+    /* Reset some state */
+    if (Plist.head)
+	free_plist(&Plist);
+
+    dbdir = getenv(PKG_DBDIR);
+    if (!dbdir)
+	dbdir = DEF_LOG_DIR;
+try_again:
+    (void) snprintf(LogDir, sizeof(LogDir), "%s/%s", dbdir, pkg);
+    if (!fexists(LogDir)) {
+	if (trim_end(pkg))
+	    goto try_again;
+	else {
+	    pwarnx("no such package installed");
+	    return 1;
+	}
+    }
+    if (!getcwd(home, FILENAME_MAX)) {
+	cleanup(0);
+	errx(2, "unable to get current working directory!");
+    }
+    if (chdir(LogDir) == -1) {
+	pwarnx("unable to change directory to %s! deinstall failed", LogDir);
+	return 1;
+    }
+    if (!isemptyfile(REQUIRED_BY_FNAME)) {
+	char buf[512];
+	pwarnx("package `%s' is required by these other packages\n"
+		"and may not be deinstalled%s:",
+		pkg, Force ? " (but I'll delete it anyway)" : "" );
+	cfile = fopen(REQUIRED_BY_FNAME, "r");
+	if (cfile) {
+	    while (fgets(buf, sizeof(buf), cfile))
+		fprintf(stderr, "%s", buf);
+	    fclose(cfile);
+	} else
+	    pwarnx("cannot open requirements file `%s'", REQUIRED_BY_FNAME);
+	if (!Force)
+	    return 1;
+    }
+    sanity_check(LogDir);
+    cfile = fopen(CONTENTS_FNAME, "r");
+    if (!cfile) {
+	pwarnx("unable to open '%s' file", CONTENTS_FNAME);
+	return 1;
+    }
+    /* If we have a prefix, add it now */
+    if (Prefix)
+	add_plist(&Plist, PLIST_CWD, Prefix);
+    read_plist(&Plist, cfile);
+    fclose(cfile);
+    p = find_plist(&Plist, PLIST_CWD, NULL);
+    if (!p) {
+	pwarnx("package '%s' doesn't have a prefix", pkg);
+	return 1;
+    }
+    {
+	struct statfs buffer;
+
+	if (statfs(p->name, &buffer) == -1) {
+	    pwarnx("package '%s' prefix (%s) does not exist", pkg, p->name);
+	    return 1;
+	}
+	if (buffer.f_flags & MNT_RDONLY) {
+	    pwarnx("package'%s' mount point %s is read-only", pkg,
+		buffer.f_mntonname);
+	    return 1;
+	}
+    }
+
+    setenv(PKG_PREFIX_VNAME, p->name, 1);
+    setenv("PKG_DELETE_EXTRA", (CleanConf ? "Yes" : "No"), 1);
+    if (fexists(REQUIRE_FNAME)) {
+	if (Verbose)
+	    printf("Executing 'require' script.\n");
+	vsystem("chmod +x %s", REQUIRE_FNAME);	/* be sure */
+	if (vsystem("./%s %s DEINSTALL", REQUIRE_FNAME, pkg)) {
+	    pwarnx("package %s fails requirements %s", pkg,
+		   Force ? "" : "- not deleted");
+	    if (!Force)
+		return 1;
+	}
+    }
+    if (!NoDeInstall && fexists(DEINSTALL_FNAME)) {
+	if (Fake)
+	    printf("Would execute de-install script at this point.\n");
+	else {
+	    vsystem("chmod +x %s", DEINSTALL_FNAME);	/* make sure */
+	    if (vsystem("./%s %s DEINSTALL", DEINSTALL_FNAME, pkg)) {
+		pwarnx("deinstall script returned error status");
+		if (!Force)
+		    return 1;
+	    }
+	}
+    }
+    if (chdir(home) == -1) {
+	cleanup(0);
+	errx(2, "Toto! This doesn't look like Kansas anymore!");
+    }
+    if (!Fake) {
+	/* Some packages aren't packed right, so we need to just ignore delete_package()'s status.  Ugh! :-( */
+	if (delete_package(false, CleanDirs, CleanConf, CheckMD5, &Plist) == -1)
+	    pwarnx(
+	"couldn't entirely delete package (perhaps the packing list is\n"
+	"incorrectly specified?)");
+	if (vsystem("%s -r %s", REMOVE_CMD, LogDir)) {
+	    pwarnx("couldn't remove log entry in %s, deinstall failed", LogDir);
+	    if (!Force)
+		return 1;
+	}
+	delete_pkg_links(dbdir, pkg);
+    }
+    for (p = Plist.head; p ; p = p->next) {
+	if (p->type != PLIST_PKGDEP)
+	    continue;
+	if (Verbose)
+	    printf("Attempting to remove dependency on package `%s'\n", p->name);
+	if (!Fake)
+	    findmatchingname(dbdir, p->name, undepend, pkg, 0);
+    }
+    return 0;
+}
+
+static void
+sanity_check(char *pkg)
+{
+    if (!fexists(CONTENTS_FNAME)) {
+	cleanup(0);
+	errx(2, "installed package %s has no %s file!", pkg, CONTENTS_FNAME);
+    }
+}
+
+void
+cleanup(int sig __attribute__((unused)))
+{
+	/* return here, for errx(3) calls to succeed */
+}
+
+/* deppkgname is the pkg from which's +REQUIRED_BY file we are
+ * about to remove pkg2delname. This function is called from
+ * findmatchingname(), deppkgname is expanded from a (possible) pattern.
+ */
+int
+undepend(const char *deppkgname, char *pkg2delname,
+    int unused __attribute__((unused)))
+{
+     char fname[FILENAME_MAX], ftmp[FILENAME_MAX];
+     char fbuf[FILENAME_MAX];
+     FILE *fp, *fpwr;
+     char *tmp;
+     int s;
+
+     (void) snprintf(fname, sizeof(fname), "%s/%s/%s",
+	     (tmp = getenv(PKG_DBDIR)) ? tmp : DEF_LOG_DIR,
+	     deppkgname, REQUIRED_BY_FNAME);
+     fp = fopen(fname, "r");
+     if (fp == NULL) {
+	 pwarnx("couldn't open dependency file `%s'", fname);
+	 return 0;
+     }
+     (void) snprintf(ftmp, sizeof(ftmp), "%s.XXXXXXXXXX", fname);
+     s = mkstemp(ftmp);
+     if (s == -1) {
+	 fclose(fp);
+	 pwarnx("couldn't open temp file `%s'", ftmp);
+	 return 0;
+     }
+     fpwr = fdopen(s, "w");
+     if (fpwr == NULL) {
+	 close(s);
+	 fclose(fp);
+	 pwarnx("couldn't fdopen temp file `%s'", ftmp);
+	 remove(ftmp);
+	 return 0;
+     }
+     while (fgets(fbuf, sizeof(fbuf), fp) != NULL) {
+	 if (fbuf[strlen(fbuf)-1] == '\n')
+	     fbuf[strlen(fbuf)-1] = '\0';
+	 if (strcmp(fbuf, pkg2delname))		/* no match */
+	     fputs(fbuf, fpwr), putc('\n', fpwr);
+     }
+     (void) fclose(fp);
+     if (fchmod(s, 0644) == -1) {
+	 pwarnx("error changing permission of temp file `%s'", ftmp);
+	 fclose(fpwr);
+	 remove(ftmp);
+	 return 0;
+     }
+     if (fclose(fpwr) == EOF) {
+	 pwarnx("error closing temp file `%s'", ftmp);
+	 remove(ftmp);
+	 return 0;
+     }
+     if (rename(ftmp, fname) == -1)
+	 pwarnx("error renaming `%s' to `%s'", ftmp, fname);
+     remove(ftmp);			/* just in case */
+
+     return 0;
+}
+@
+
+
+1.6
+log
+@some cleanup:
+* more const
+* less redundant decls
+* no shadowing variables with wider scope
+* declare functions or static them
+
+goal: to pass
+  -Wall -Wextra -Wunused -Wdeclaration-after-statement -Wundef
+  -Wendif-labels -Wshadow -Wpointer-arith -Wbad-function-cast
+  -Wcast-qual -Wcast-align -Wwrite-strings -Wstrict-prototypes
+  -Wold-style-definition -Wmissing-prototypes -Wmissing-declarations
+  -Wmissing-noreturn -Wmissing-format-attribute -Wredundant-decls
+  -Wno-unreachable-code -Winline -pedantic -std=c99
+
+end goal:
+  -Wreachable-code -Wconversion
+
+the former is broken in my very gcc 3.4.4 snapshot,
+and the latter is broken for all <stdbool.h> types
+due to integer promotion rules
+
+thanks to waldi (the mirbsd.de sponsor) for helping with C a bit
+@
+text
+@d1 1
+a1 1
+/**	$MirBSD: ports/infrastructure/stools/delete/perform.c,v 1.5 2005/03/12 17:25:04 tg Exp $ */
+d29 1
+a29 1
+__RCSID("$MirBSD: ports/infrastructure/stools/delete/perform.c,v 1.5 2005/03/12 17:25:04 tg Exp $");
+a34 2
+extern bool CleanConf;
+
+d123 1
+a123 1
+    char *dbdir;
+d261 1
+a261 1
+    exit(1);
+@
+
+
+1.5
+log
+@first round of "oops, missed"
+
+bsiegert@@: please take more care of whitespace issues;
+you seem to have used spaces instead of tabs when fixing
+the MD5 problems
+@
+text
+@d1 1
+a1 1
+/**	$MirBSD$ */
+d29 1
+a29 1
+__RCSID("$MirBSD: ports/infrastructure/stools/delete/perform.c,v 1.4 2005/03/12 17:20:34 tg Exp $");
+d261 1
+a261 1
+cleanup(int sig)
+d271 2
+a272 1
+undepend(const char *deppkgname, char *pkg2delname, int unused)
+@
+
+
+1.4
+log
+@* Boolean/TRUE/FALSE -> bool/true/false
+* SUCCESS/FAIL -> 0/-1
+* no /usr/tmp (it violates hier(7))
+@
+text
+@d1 1
+d29 1
+a29 1
+__RCSID("$MirBSD: ports/infrastructure/stools/delete/perform.c,v 1.3 2004/11/12 21:24:05 bsiegert Exp $");
+d35 1
+a35 1
+extern Boolean CleanConf;
+d229 1
+a229 1
+	if (delete_package(FALSE, CleanDirs, CleanConf, CheckMD5, &Plist) == -1)
+@
+
+
+1.3
+log
+@Change find_plist() to accept a string to search for.
+@
+text
+@d28 1
+a28 1
+__RCSID("$MirBSD: ports/infrastructure/stools/delete/perform.c,v 1.2 2004/10/10 16:46:19 tg Exp $");
+d148 1
+a148 1
+    if (chdir(LogDir) == FAIL) {
+d222 1
+a222 1
+    if (chdir(home) == FAIL) {
+d228 1
+a228 1
+	if (delete_package(FALSE, CleanDirs, CleanConf, CheckMD5, &Plist) == FAIL)
+d308 1
+a308 1
+     if (fchmod(s, 0644) == FAIL) {
+@
+
+
+1.2
+log
+@* sync pkg tools with what's currently in src/
+  idea by bsiegert@@
+* -Wall -Werror only ifndef PORTABLE
+  (so it's still in for native development)
+* let setup.sh define PORTABLE
+@
+text
+@d28 1
+a28 1
+__RCSID("$MirBSD: src/usr.sbin/pkg_install/delete/perform.c,v 1.4 2004/09/20 16:35:52 tg Exp $");
+d178 1
+a178 1
+    p = find_plist(&Plist, PLIST_CWD);
+@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@d28 1
+a28 1
+__RCSID("$MirBSD: src/usr.sbin/pkg_install/delete/perform.c,v 1.3 2004/07/21 10:24:34 tg Exp $");
+d61 5
+@
+
+
+1.1.3.1
+log
+@src/usr.sbin/pkg_install comes into ports/infrastructure
+@
+text
+@@

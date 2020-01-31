@@ -1,0 +1,1398 @@
+head	1.19;
+access;
+symbols
+	cvs-200408271520:1.1.3.1 tg:1.1.3;
+locks; strict;
+comment	@ * @;
+
+
+1.19
+date	2005.03.12.19.02.20;	author tg;	state Exp;
+branches;
+next	1.18;
+
+1.18
+date	2005.03.12.18.40.25;	author tg;	state Exp;
+branches;
+next	1.17;
+
+1.17
+date	2005.03.12.17.20.35;	author tg;	state Exp;
+branches;
+next	1.16;
+
+1.16
+date	2005.03.06.21.53.42;	author bsiegert;	state Exp;
+branches;
+next	1.15;
+
+1.15
+date	2005.03.06.16.43.11;	author bsiegert;	state Exp;
+branches;
+next	1.14;
+
+1.14
+date	2005.03.02.22.17.48;	author tg;	state Exp;
+branches;
+next	1.13;
+
+1.13
+date	2005.02.28.18.05.09;	author tg;	state Exp;
+branches;
+next	1.12;
+
+1.12
+date	2005.02.07.16.30.59;	author bsiegert;	state Exp;
+branches;
+next	1.11;
+
+1.11
+date	2005.02.06.23.48.33;	author bsiegert;	state Exp;
+branches;
+next	1.10;
+
+1.10
+date	2005.02.06.22.11.31;	author bsiegert;	state Exp;
+branches;
+next	1.9;
+
+1.9
+date	2004.12.21.19.06.06;	author bsiegert;	state Exp;
+branches;
+next	1.8;
+
+1.8
+date	2004.12.21.00.05.44;	author tg;	state Exp;
+branches;
+next	1.7;
+
+1.7
+date	2004.12.16.20.44.20;	author tg;	state Exp;
+branches;
+next	1.6;
+
+1.6
+date	2004.12.15.19.01.13;	author bsiegert;	state Exp;
+branches;
+next	1.5;
+
+1.5
+date	2004.12.12.14.45.29;	author bsiegert;	state Exp;
+branches;
+next	1.4;
+
+1.4
+date	2004.11.12.21.24.05;	author bsiegert;	state Exp;
+branches;
+next	1.3;
+
+1.3
+date	2004.10.12.21.35.08;	author bsiegert;	state Exp;
+branches;
+next	1.2;
+
+1.2
+date	2004.10.10.16.46.21;	author tg;	state Exp;
+branches;
+next	1.1;
+
+1.1
+date	2004.08.27.15.27.01;	author tg;	state Exp;
+branches
+	1.1.3.1;
+next	;
+
+1.1.3.1
+date	2004.08.27.15.27.01;	author tg;	state Stab;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.19
+log
+@now less warnings: lib, add, create
+@
+text
+@/**	$MirBSD: ports/infrastructure/stools/lib/plist.c,v 1.18 2005/03/12 18:40:25 tg Exp $ */
+/*	$OpenBSD: plist.c,v 1.17 2003/08/21 20:24:57 espie Exp $	*/
+
+/*
+ * FreeBSD install - a package for the installation and maintainance
+ * of non-core utilities.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ *
+ * Jordan K. Hubbard
+ * 18 July 1993
+ *
+ * General packing list routines.
+ */
+
+#include "lib.h"
+#include <glob.h>
+#include <err.h>
+#include <md5.h>
+#include "rcdb.h"
+
+__RCSID("$MirBSD: ports/infrastructure/stools/lib/plist.c,v 1.18 2005/03/12 18:40:25 tg Exp $");
+
+#define NULLMD5 "d41d8cd98f00b204e9800998ecf8427e"
+
+/* this struct defines a plist command type */
+typedef struct cmd_t {
+	const char	*c_s;		/* string to recognise */
+	pl_ent_t	c_type;		/* type of command */
+	int		c_argc;		/* # of arguments */
+} cmd_t;
+
+/* commands to recognise */
+static cmd_t	cmdv[] = {
+	{	"cwd",		PLIST_CWD,		1	},
+	{	"src",		PLIST_SRC,		1	},
+	{	"cd",		PLIST_CWD,		1	},
+	{	"exec",		PLIST_CMD,		1	},
+	{	"unexec",	PLIST_UNEXEC,		1	},
+	{	"mode",		PLIST_CHMOD,		1	},
+	{	"owner",	PLIST_CHOWN,		1	},
+	{	"group",	PLIST_CHGRP,		1	},
+	{	"comment",	PLIST_COMMENT,		1	},
+	{	"ignore",	PLIST_IGNORE,		0	},
+	{	"name",		PLIST_NAME,		1	},
+	{	"display",	PLIST_DISPLAY,		1	},
+	{	"pkgdep",	PLIST_PKGDEP,		1	},
+	{	"pkgcfl",	PLIST_PKGCFL,		1	},
+	{	"mtree",	PLIST_MTREE,		1	},
+	{	"dirrm",	PLIST_DIR_RM,		1	},
+	{	"option",	PLIST_OPTION,		1	},
+	{	"newdepend",	PLIST_NEWDEP,		1	},
+	{	"libdepend",	PLIST_LIBDEP,		1	},
+	{	"extra",	PLIST_EXTRA,		1	},
+	{	"extraunexec",	PLIST_EXTRAUNEXEC,	1	},
+	{	"info",		PLIST_INFO,		1	},
+	{	"man",		PLIST_MAN,		1	},
+	{	"sample",	PLIST_SAMPLE,		1	},
+	{	"lib",		PLIST_LIB,		1	},
+	{	"shell",	PLIST_SHELL,		1	},
+	{	"endfake",	PLIST_ENDFAKE,		0	},
+	{	"ldcache",	PLIST_LDCACHE,		1	},
+	{	NULL,		-1,			0	}
+};
+
+/* Add an item to the end of a packing list */
+void
+add_plist(package_t *p, pl_ent_t type, const char *arg)
+{
+	plist_t *tmp;
+
+	tmp = new_plist_entry();
+	tmp->name = copy_string(arg);
+	tmp->type = type;
+	if (!p->head) {
+		p->head = p->tail = tmp;
+	} else {
+		tmp->prev = p->tail;
+		p->tail->next = tmp;
+		p->tail = tmp;
+	}
+}
+
+/* add an item to the start of a packing list */
+void
+add_plist_top(package_t *p, pl_ent_t type, const char *arg)
+{
+	plist_t *tmp;
+
+	tmp = new_plist_entry();
+	tmp->name = copy_string(arg);
+	tmp->type = type;
+	if (!p->head) {
+		p->head = p->tail = tmp;
+	} else {
+		tmp->next = p->head;
+		p->head->prev = tmp;
+		p->head = tmp;
+	}
+}
+
+/* add an item after a certain entry of a packing list */
+void add_plist_at(package_t *p, plist_t *after, pl_ent_t type, const char *arg)
+{
+	plist_t *tmp;
+
+	tmp = new_plist_entry();
+	tmp->name = copy_string(arg);
+	tmp->type = type;
+	tmp->prev = after;
+	tmp->next = after->next;
+	after->next = tmp;
+	if (tmp->next)
+		tmp->next->prev = tmp;
+	if (p->tail == after)
+		p->tail = tmp;
+}
+
+/* glob for files and add them to the packing list */
+void add_plist_glob(package_t *pkg, plist_t *after, const char *dir, const char *pattern)
+{
+	glob_t pglob;
+	int fd, i;
+
+	memset(&pglob, 0, sizeof(pglob));
+	fd = open(".", O_RDONLY, 0);
+	chdir(dir);
+	glob(pattern, 0, NULL, &pglob);
+	fchdir(fd);
+	close(fd);
+	for (i = 0; i < pglob.gl_pathc; i++)
+		add_plist_at(pkg, after, PLIST_FILE,
+		    strdup(pglob.gl_pathv[i]));
+	globfree(&pglob);
+
+}
+
+/* Return the last (most recent) entry in a packing list */
+plist_t *
+last_plist(package_t *p)
+{
+	return p->tail;
+}
+
+/* Mark all items in a packing list to prevent iteration over them */
+void
+mark_plist(package_t *pkg)
+{
+	plist_t	*pp;
+
+	for (pp = pkg->head ; pp ; pp = pp->next) {
+		pp->marked = true;
+	}
+}
+
+/* Find a given item in a packing list and, if so, return it (else NULL) */
+plist_t *
+find_plist(package_t *pkg, pl_ent_t type, const char *name)
+{
+	plist_t	*pp;
+
+	for (pp = pkg->head;
+	    pp && (pp->type != type || (name && strcmp(name,pp->name)));
+	    pp = pp->next)
+		; /* nothing */
+	return pp;
+}
+
+/* Look for a specific boolean option argument in the list */
+char *
+find_plist_option(package_t *pkg, const char *name)
+{
+	plist_t	*p;
+
+	for (p = pkg->head ; p ; p = p->next) {
+		if (p->type == PLIST_OPTION && strcmp(p->name, name) == 0) {
+			return p->name;
+		}
+	}
+	return NULL;
+}
+
+/*
+ * Delete plist item 'type' in the list (if 'name' is non-null, match it
+ * too.)  If 'all' is set, delete all items, not just the first occurance.
+ */
+void
+delete_plist(package_t *pkg, bool all, pl_ent_t type, char *name)
+{
+    plist_t *p = pkg->head;
+
+    while (p) {
+	plist_t *pnext = p->next;
+
+	if (p->type == type && (!name || !strcmp(name, p->name))) {
+	    free(p->name);
+	    if (p->prev)
+		p->prev->next = pnext;
+	    else
+		pkg->head = pnext;
+	    if (pnext)
+		pnext->prev = p->prev;
+	    else
+		pkg->tail = p->prev;
+	    free(p);
+	    if (!all)
+		return;
+	    p = pnext;
+	}
+	else
+	    p = p->next;
+    }
+}
+
+/* Allocate a new packing list entry */
+plist_t *
+new_plist_entry(void)
+{
+	plist_t *ret;
+
+	if ((ret = (plist_t *)malloc(sizeof(plist_t))) == NULL) {
+		err(1, "can't allocate %d bytes", sizeof(plist_t));
+	}
+	memset(ret, 0, sizeof(plist_t));
+	return ret;
+}
+
+/* Free an entire packing list */
+void
+free_plist(package_t *pkg)
+{
+    plist_t *p = pkg->head;
+
+    while (p) {
+	plist_t *p1 = p->next;
+
+	free(p->name);
+	free(p);
+	p = p1;
+    }
+    pkg->head = pkg->tail = NULL;
+}
+
+/*
+ * For an ascii string denoting a plist command, return its code and
+ * optionally its argument(s)
+ */
+int
+plist_cmd(char *s, char **arg)
+{
+	cmd_t	*cmdp;
+	char	cmd[FILENAME_MAX + 20];	/* 20 == fudge for max cmd len */
+	char	*cp;
+	char	*sp;
+
+	(void) strlcpy(cmd, s, sizeof(cmd));
+	str_lowercase(cmd);
+	for (cp = cmd, sp = s ; *cp ; cp++, sp++) {
+		if (isspace(*cp)) {
+			for (*cp = '\0'; isspace(*sp) ; sp++) {
+			}
+			break;
+		}
+	}
+	if (arg) {
+		*arg = sp;
+	}
+	for (cmdp = cmdv ; cmdp->c_s && strcmp(cmdp->c_s, cmd) != 0 ; cmdp++) {
+	}
+	return cmdp->c_type;
+}
+
+/* Read a packing list from a file */
+void
+read_plist(package_t *pkg, FILE *fp)
+{
+    char *cp, pline[FILENAME_MAX];
+    int cmd;
+
+    while (fgets(pline, FILENAME_MAX, fp)) {
+	int len = strlen(pline);
+
+	while (len && isspace(pline[len - 1]))
+	    pline[--len] = '\0';
+	if (!len)
+	    continue;
+	cp = pline;
+	if (pline[0] == CMD_CHAR) {
+	    cmd = plist_cmd(pline + 1, &cp);
+	    if (cmd == -1) {
+		pwarnx("Unrecognised PLIST command `%s'", pline);
+		continue;
+	    }
+	    if (*cp == '\0')
+		cp = NULL;
+	}
+	else
+	    cmd = PLIST_FILE;
+	add_plist(pkg, cmd, cp);
+    }
+}
+
+/* Write a packing list to a file, converting commands to ascii equivs */
+void
+write_plist(package_t *pkg, FILE *fp)
+{
+	plist_t	*p;
+	cmd_t	*cmdp;
+
+	for (p = pkg->head ; p ; p = p->next) {
+		if (p->type == PLIST_FILE) {
+			/* Fast-track files - these are the most common */
+			(void) fprintf(fp, "%s\n", p->name);
+			continue;
+		}
+		for (cmdp = cmdv ; cmdp->c_type != -1 && cmdp->c_type != p->type ; cmdp++) {
+		}
+		if (cmdp->c_type == -1) {
+			pwarnx("Unknown PLIST command type %d (%s)", p->type, p->name);
+		} else if (cmdp->c_argc == 0) {
+			(void) fprintf(fp, "%c%s\n", CMD_CHAR, cmdp->c_s);
+		} else {
+			(void) fprintf(fp, "%c%s %s\n", CMD_CHAR, cmdp->c_s,
+					(p->name) ? p->name : "");
+		}
+	}
+}
+
+/*
+ * Delete the results of a package installation.
+ *
+ * This is here rather than in the pkg_delete code because pkg_add needs to
+ * run it too in cases of failure.
+ */
+int
+delete_package(bool ign_err, bool nukedirs, bool remove_config,
+    bool check_md5, package_t *pkg)
+{
+    plist_t *p, *pp;
+    const char *Where = ".", *last_file = "";
+    int fail = 0;
+    int len;
+    char tmp[FILENAME_MAX], *name = NULL;
+    static int usedb = 1;
+    RCDB *ourdb;
+
+    if ((ourdb = rcdb_open(_PATH_REFCNTDB)) == NULL) {
+	warn("rcdb_open - not using db!");
+	usedb = 0;
+    }
+
+    for (p = pkg->head; p; p = p->next) {
+	switch (p->type)  {
+	case PLIST_NAME:
+	    name = p->name;
+	    break;
+
+	case PLIST_IGNORE:
+	    p = p->next;
+	    break;
+
+	case PLIST_CWD:
+	    Where = p->name;
+	    if (Verbose)
+		printf("Change working directory to %s\n", Where);
+	    break;
+
+	case PLIST_EXTRAUNEXEC:
+	    if (!remove_config)
+	    	break;
+	    /*FALLTHRU*/
+	case PLIST_UNEXEC:
+	    if (!format_cmd(tmp, sizeof(tmp), p->name, Where, last_file)) {
+	    	pwarnx("unexec command `%s' could not expand", p->name);
+		fail = -1;
+	    } else {
+		if (Verbose)
+		    printf("Execute `%s'\n", tmp);
+		if (!Fake && system(tmp)) {
+		    pwarnx("unexec command for `%s' failed", tmp);
+		    fail = -1;
+		}
+	    }
+	    break;
+
+	case PLIST_LIB:
+	case PLIST_SHELL:
+	case PLIST_FILE:
+	    if (p->name[strlen(p->name) - 1] == '/')
+		break;
+	    last_file = p->name;
+	    (void) snprintf(tmp, sizeof(tmp), "%s/%s", Where, p->name);
+	    if (isdir(tmp)) {
+		pwarnx("attempting to delete directory `%s' as a file\n"
+	   "this packing list is incorrect - ignoring delete request", tmp);
+	    }
+	    else {
+		if (check_md5 && p->next && p->next->type == PLIST_COMMENT && !strncmp(p->next->name, "MD5:", 4)) {
+		    char *cp, buf[LegibleChecksumLen];
+
+		    if (!strcmp(p->next->name + 4, NULLMD5))
+			printf("Not checking MD5 sum for %s\n", tmp);
+		    else if ((cp = MD5File(tmp, buf)) != NULL) {
+			/* Mismatch? */
+			if (strcmp(cp, p->next->name + 4)) {
+			    printf("%s fails original MD5 checksum - %s\n",
+				       tmp, Force ? "deleted anyway." : "not deleted.");
+			    if (!Force) {
+				fail = -1;
+				continue;
+			    }
+			}
+		    }
+		}
+		if (Verbose)
+		    printf("Delete file %s\n", tmp);
+		if (!Fake) {
+		    if (delete_hierarchy(tmp, ign_err, nukedirs))
+		    fail = -1;
+		}
+	    }
+	    break;
+
+	case PLIST_SAMPLE:
+	case PLIST_EXTRA:
+	    if (!remove_config)
+	    	break;
+	    if (!p->name)
+	    	break;
+	    delete_extra(toabs(p->name, Where), false);
+	    break;
+	case PLIST_DIR_RM:
+	    last_file = p->name;
+	    fail = fail | process_dirrm(p, ign_err, &usedb, ourdb, Where);
+	    break;
+	default:
+	    break;
+	}
+    }
+
+    /* reversely traverse list for dir/ entries */
+    for (p = pkg->tail; p; p = p->prev) {
+	if (p->type == PLIST_FILE || (remove_config &&
+		(p->type == PLIST_SAMPLE || p->type == PLIST_EXTRA))) {
+	    len = strlen(p->name);
+	    if (p->name[len - 1] == '/') {
+		/* cwd might have changed, hunt for a @@cwd entry */
+		for (pp = p; pp && pp->type != PLIST_CWD; pp = pp->prev) {
+		}
+		if (pp) {
+		    Where = pp->name;
+		}
+		if (p->type == PLIST_FILE) {
+		    p->name[--len] = '\0';
+		    fail = fail | process_dirrm(p, ign_err, &usedb, ourdb, Where);
+		} else
+		    delete_extra(toabs(p->name, Where), true);
+	    }
+	}
+    }
+
+    if (usedb && rcdb_close(ourdb))
+	warn("rcdb_close: not synched correctly");
+    return fail;
+}
+
+int
+process_dirrm(plist_t *p, bool ign_err, int *usedb, RCDB *ourdb,
+    const char *Where)
+{
+    recno_t rr;
+    char tmp[FILENAME_MAX];
+    int64_t rcount = 0;
+
+    if (*usedb) {
+	if ((rr = rcdb_lookup(ourdb, p->name)) == (recno_t)-1) {
+	    warn("rcdb_lookup");
+	    *usedb = 0;
+	    rcdb_close(ourdb);
+	}
+	if (rr) {
+	    /* found record; will reduce number by one
+	     * and delete record and dir if zero */
+	    if (rcdb_read(ourdb, rr, &rcount) == -1) {
+		warn("rcdb_read");
+		*usedb = 0;
+		rcdb_close(ourdb);
+	    }
+	    if (!rcount)	/* wrong entry */
+		rcount = 1;
+	    if (rcount--) {
+		if (!Fake && rcount && rcdb_modify(ourdb, rr, rcount,
+			p->name) == -1) {
+		    warn("rcdb_modify");
+		    *usedb = 0;
+		    rcdb_close(ourdb);
+		} else if (!Fake && !rcount && rcdb_delete(ourdb, rr) == -1) {
+		    warn("rcdb_delete");
+		    *usedb = 0;
+		    rcdb_close(ourdb);
+		}
+	    }
+	} /* else record not in database, go on */
+    }
+    if (rcount)
+	return 0;
+
+    (void) snprintf(tmp, sizeof(tmp), "%s/%s", Where, p->name);
+    if (!isdir(tmp)) {
+	if (fexists(tmp)) {
+	    pwarnx("attempting to delete file `%s' as a directory\n"
+	       "this packing list is incorrect - ignoring delete request", tmp);
+	} else {
+	    pwarnx("attempting to delete non-existent directory `%s'\n"
+	       "this packing list is incorrect - ignoring delete request", tmp);
+	}
+    } else {
+	if (Verbose)
+	    printf("Delete directory %s\n", tmp);
+	if (!Fake && delete_hierarchy(tmp, ign_err, false)) {
+	    pwarnx("unable to completely remove directory '%s'", tmp);
+	    return -1;
+	}
+    }
+    return 0;
+}
+
+#ifdef DEBUG
+#define RMDIR(dir) vsystem("%s %s", RMDIR_CMD, dir)
+#define REMOVE(dir,ie) vsystem("%s %s%s", REMOVE_CMD, (ie ? "-f " : ""), dir)
+#else
+#define RMDIR rmdir
+#define	REMOVE(file,ie) (remove(file) && !(ie))
+#endif
+
+/* Selectively delete a hierarchy */
+int
+delete_hierarchy(char *dir, bool ign_err, bool nukedirs)
+{
+    char *cp1, *cp2;
+
+    cp1 = cp2 = dir;
+    if (!fexists(dir)) {
+	if (!ign_err)
+	    pwarnx("%s `%s' doesn't really exist",
+		isdir(dir) ? "directory" : "file", dir);
+	return !ign_err;
+    }
+    else if (nukedirs) {
+	if (vsystem("%s -r%s %s", REMOVE_CMD, (ign_err ? "f" : ""), dir))
+	    return 1;
+    }
+    else if (isdir(dir)) {
+	if (RMDIR(dir) && !ign_err)
+	    return 1;
+    }
+    else {
+	if (REMOVE(dir, ign_err))
+	    return 1;
+    }
+
+    if (!nukedirs)
+	return 0;
+    while (cp2) {
+	if ((cp2 = strrchr(cp1, '/')) != NULL)
+	    *cp2 = '\0';
+	if (!isemptydir(dir))
+	    return 0;
+	if (RMDIR(dir) && !ign_err) {
+	    if (!fexists(dir))
+		pwarnx("directory `%s' doesn't really exist", dir);
+	    else
+		return 1;
+	}
+	/* back up the pathname one component */
+	if (cp2) {
+	    cp1 = dir;
+	}
+    }
+    return 0;
+}
+
+/* Delete extra files and directories (@@extra, @@sample).
+ * the 'dir' parameter defines whether only files or only directories
+ * will be deleted. Rationale: dirs will be removed in a second pass
+ * after the files.
+ */ 
+void
+delete_extra(const char *fname, bool dir)
+{
+    size_t len;
+    bool b;
+
+    len = strlen(fname);
+    if (len == 0) {
+	pwarnx("empty extra filename");
+	return;
+    }
+    /* don't warn if stuff does not exist */
+    if (!fexists(fname))
+	return;
+
+    b = isdir(fname);
+    if (dir) {
+	if (b) {
+	    if (Verbose)
+		printf("Delete extra directory %s\n", fname);
+	    if (!Fake && rmdir(fname) == -1)
+		pwarn("problem removing directory %s",
+		    fname);
+	} else {
+	    pwarnx("extra directory %s is not a directory",
+		fname);
+	}
+    } else if (fname[len - 1] != '/') {
+	if (b) {
+	    pwarnx("extra file %s is a directory", fname);
+	} else {
+	    if (Verbose)
+		printf("Delete extra file %s\n", fname);
+	    if (!Fake && unlink(fname) == -1)
+		pwarn("problem removing %s", fname);
+	}
+    }
+}
+@
+
+
+1.18
+log
+@some cleanup:
+* more const
+* less redundant decls
+* no shadowing variables with wider scope
+* declare functions or static them
+
+goal: to pass
+  -Wall -Wextra -Wunused -Wdeclaration-after-statement -Wundef
+  -Wendif-labels -Wshadow -Wpointer-arith -Wbad-function-cast
+  -Wcast-qual -Wcast-align -Wwrite-strings -Wstrict-prototypes
+  -Wold-style-definition -Wmissing-prototypes -Wmissing-declarations
+  -Wmissing-noreturn -Wmissing-format-attribute -Wredundant-decls
+  -Wno-unreachable-code -Winline -pedantic -std=c99
+
+end goal:
+  -Wreachable-code -Wconversion
+
+the former is broken in my very gcc 3.4.4 snapshot,
+and the latter is broken for all <stdbool.h> types
+due to integer promotion rules
+
+thanks to waldi (the mirbsd.de sponsor) for helping with C a bit
+@
+text
+@d1 1
+a1 1
+/**	$MirBSD: ports/infrastructure/stools/lib/plist.c,v 1.17 2005/03/12 17:20:35 tg Exp $ */
+d29 1
+a29 1
+__RCSID("$MirBSD: ports/infrastructure/stools/lib/plist.c,v 1.17 2005/03/12 17:20:35 tg Exp $");
+d75 1
+a75 1
+add_plist(package_t *p, pl_ent_t type, char *arg)
+d93 1
+a93 1
+add_plist_top(package_t *p, pl_ent_t type, char *arg)
+d110 1
+a110 1
+void add_plist_at(package_t *p, plist_t *after, pl_ent_t type, char *arg)
+d165 1
+a165 1
+find_plist(package_t *pkg, pl_ent_t type, char *name)
+d169 4
+a172 2
+	for (pp = pkg->head ; pp && (pp->type != type || (name && strcmp(name,pp->name))) ; pp = pp->next) {
+	}
+@
+
+
+1.17
+log
+@* Boolean/TRUE/FALSE -> bool/true/false
+* SUCCESS/FAIL -> 0/-1
+* no /usr/tmp (it violates hier(7))
+@
+text
+@d1 1
+a1 1
+/**	$MirBSD: ports/infrastructure/stools/lib/plist.c,v 1.16 2005/03/06 21:53:42 bsiegert Exp $ */
+d29 1
+a29 1
+__RCSID("$MirBSD: ports/infrastructure/stools/lib/plist.c,v 1.16 2005/03/06 21:53:42 bsiegert Exp $");
+d35 1
+a35 1
+	char		*c_s;		/* string to recognise */
+d176 1
+a176 1
+find_plist_option(package_t *pkg, char *name)
+d345 1
+a345 1
+    char *Where = ".", *last_file = "";
+d473 2
+a474 1
+process_dirrm(plist_t *p, bool ign_err, int *usedb, RCDB *ourdb, char *Where)
+@
+
+
+1.16
+log
+@Add dylib support for Mac OS X.
+
+Mac OS users, please test this. To test:
+
+# Do a "env SHELL=/bin/mksh mmake setup" in /usr/mirports (assuming you have
+  already installed MirPorts)
+# Install a library without a PFRAG.dylib file and a dependent package
+# Test if the library is there and the dependent package works
+@
+text
+@d1 1
+a1 1
+/**	$MirBSD: ports/infrastructure/stools/lib/plist.c,v 1.15 2005/03/06 16:43:11 bsiegert Exp $ */
+d29 1
+a29 1
+__RCSID("$MirBSD: ports/infrastructure/stools/lib/plist.c,v 1.15 2005/03/06 16:43:11 bsiegert Exp $");
+d70 1
+a70 1
+	{	NULL,		FAIL,			0	}
+d159 1
+a159 1
+		pp->marked = TRUE;
+d193 1
+a193 1
+delete_plist(package_t *pkg, Boolean all, pl_ent_t type, char *name)
+d295 1
+a295 1
+	    if (cmd == FAIL) {
+d321 1
+a321 1
+		for (cmdp = cmdv ; cmdp->c_type != FAIL && cmdp->c_type != p->type ; cmdp++) {
+d323 1
+a323 1
+		if (cmdp->c_type == FAIL) {
+d341 2
+a342 2
+delete_package(Boolean ign_err, Boolean nukedirs, Boolean remove_config,
+    Boolean check_md5, package_t *pkg)
+d346 1
+a346 1
+    int fail = SUCCESS;
+d380 1
+a380 1
+		fail = FAIL;
+d386 1
+a386 1
+		    fail = FAIL;
+d414 1
+a414 1
+				fail = FAIL;
+d424 1
+a424 1
+		    fail = FAIL;
+d435 1
+a435 1
+	    delete_extra(toabs(p->name, Where), FALSE);
+d462 1
+a462 1
+		    delete_extra(toabs(p->name, Where), TRUE);
+d473 1
+a473 1
+process_dirrm(plist_t *p, Boolean ign_err, int *usedb, RCDB *ourdb, char *Where)
+d510 1
+a510 1
+	return SUCCESS;
+d524 1
+a524 1
+	if (!Fake && delete_hierarchy(tmp, ign_err, FALSE)) {
+d526 1
+a526 1
+	    return FAIL;
+d529 1
+a529 1
+    return SUCCESS;
+d542 1
+a542 1
+delete_hierarchy(char *dir, Boolean ign_err, Boolean nukedirs)
+d593 1
+a593 1
+delete_extra(const char *fname, Boolean dir)
+d596 1
+a596 1
+    Boolean b;
+@
+
+
+1.15
+log
+@Replace the @@dylib token in PLISTs with @@option dylib. Also document this
+in pkg_create(1).
+
+agreed tg@@
+@
+text
+@d1 1
+a1 1
+/**	$MirBSD: ports/infrastructure/stools/lib/plist.c,v 1.14 2005/03/02 22:17:48 tg Exp $ */
+d24 1
+d29 1
+a29 1
+__RCSID("$MirBSD: ports/infrastructure/stools/lib/plist.c,v 1.14 2005/03/02 22:17:48 tg Exp $");
+d124 19
+@
+
+
+1.14
+log
+@experimental lib*.dylib support using PFRAG.dylib,
+including an untested perl hack (I don't know perl
+and still got to do this, aww) to create them
+
+I wonder why I have to do this - on a PC notebook!
+@
+text
+@d1 1
+a1 1
+/**	$MirBSD: ports/infrastructure/stools/lib/plist.c,v 1.13 2005/02/28 18:05:09 tg Exp $ */
+d28 1
+a28 1
+__RCSID("$MirBSD: ports/infrastructure/stools/lib/plist.c,v 1.13 2005/02/28 18:05:09 tg Exp $");
+a68 1
+	{	"dylib",	PLIST_DYLIB,		0	},
+@
+
+
+1.13
+log
+@don't cast NULL
+@
+text
+@d1 1
+a1 1
+/**	$MirBSD: ports/infrastructure/stools/lib/plist.c,v 1.12 2005/02/07 16:30:59 bsiegert Exp $ */
+d28 1
+a28 1
+__RCSID("$MirBSD: ports/infrastructure/stools/lib/plist.c,v 1.12 2005/02/07 16:30:59 bsiegert Exp $");
+d69 1
+@
+
+
+1.12
+log
+@Lots of bug and reliability fixes for package deletion:
+
+ * -v shows _all_ removals, extra too
+ * make deleting extra dirs actually work
+ * -nc leaves config files in place (this bug was actually introduced by espie)
+ * don't try to remove directories if reference count is > 1 (my bad)
+@
+text
+@d1 1
+a1 1
+/**	$MirBSD: ports/infrastructure/stools/lib/plist.c,v 1.11 2005/02/06 23:48:33 bsiegert Exp $ */
+d28 1
+a28 1
+__RCSID("$MirBSD: ports/infrastructure/stools/lib/plist.c,v 1.11 2005/02/06 23:48:33 bsiegert Exp $");
+d165 1
+a165 1
+	return (char *) NULL;
+d206 1
+a206 1
+	if ((ret = (plist_t *)malloc(sizeof(plist_t))) == (plist_t *) NULL) {
+@
+
+
+1.11
+log
+@Implement @@sample dir/ and @@extra dir/. Have @@sample apply permissions
+correctly.
+
+This fixes two "show-stoppers", so @@sample should work without any worries
+now. Still missing: some minor implementation details and the corresponding
+documentation. I'm going to bed now.
+@
+text
+@d1 1
+a1 1
+/**	$MirBSD: ports/infrastructure/stools/lib/plist.c,v 1.10 2005/02/06 22:11:31 bsiegert Exp $ */
+d28 1
+a28 1
+__RCSID("$MirBSD: ports/infrastructure/stools/lib/plist.c,v 1.10 2005/02/06 22:11:31 bsiegert Exp $");
+d438 2
+a439 2
+		p->name[--len] = '\0';
+		if (p->type == PLIST_FILE)
+d441 1
+a441 1
+		else
+d457 1
+a457 1
+    int64_t rcount;
+d473 2
+d476 2
+a477 1
+		if (rcount && rcdb_modify(ourdb, rr, rcount, p->name) == -1) {
+d481 1
+a481 1
+		} else if (!rcount && rcdb_delete(ourdb, rr) == -1) {
+d489 3
+d580 1
+a580 1
+	pwarnx("empty extra file");
+d588 6
+a593 8
+    if (fname[len-1] == '/') {
+	if (dir) {
+	    if (b) {
+		if (rmdir(fname) == -1)
+		    pwarn("problem removing directory %s",
+			fname);
+	    } else {
+		pwarnx("extra directory %s is not a directory",
+d595 3
+a597 1
+	    }
+d599 8
+a606 8
+    } else {
+	if (!dir) {
+	    if (b) {
+		pwarnx("extra file %s is a directory", fname);
+	    } else {
+		if (unlink(fname) == -1)
+		    pwarn("problem removing %s", fname);
+	    }
+@
+
+
+1.10
+log
+@Refactoring: delete_files() -> delete_extra(), as it is only used for
+@@extra/@@sample entries. It also gains a second parameter to specify if you
+mean a file or a directory. While here, reindent and document.
+@
+text
+@d1 1
+a1 1
+/**	$MirBSD: ports/infrastructure/stools/lib/plist.c,v 1.9 2004/12/21 19:06:06 bsiegert Exp $ */
+d28 1
+a28 1
+__RCSID("$MirBSD: ports/infrastructure/stools/lib/plist.c,v 1.9 2004/12/21 19:06:06 bsiegert Exp $");
+d428 2
+a429 1
+	if (p->type == PLIST_FILE) {
+d439 4
+a442 1
+		fail = fail | process_dirrm(p, ign_err, &usedb, ourdb, Where);
+d566 1
+a566 1
+static void
+@
+
+
+1.9
+log
+@Refactor dir/ handling.
+
+This means that directory entries in PLISTs are not replaced by @@exec mkdir
+and @@dirrm at pkg_create time, but instead they are kept in the final package.
+No real functional changes, but packages created using these new tools are not
+compatible with older versions.
+
+This was needed to implement @@sample dir/ (which should come next).
+
+ok tg@@
+@
+text
+@d1 1
+a1 1
+/**	$MirBSD: ports/infrastructure/stools/lib/plist.c,v 1.8 2004/12/21 00:05:44 tg Exp $ */
+d28 1
+a28 1
+__RCSID("$MirBSD: ports/infrastructure/stools/lib/plist.c,v 1.8 2004/12/21 00:05:44 tg Exp $");
+a71 2
+static void delete_files(const char *);
+
+d415 1
+a415 6
+	    if (p->name[0] == '/')
+	    	delete_files(p->name);
+	    else {
+		(void) snprintf(tmp, sizeof(tmp), "%s/%s", Where, p->name);
+		delete_files(tmp);
+	    }
+d557 5
+d563 1
+a563 1
+delete_files(const char *fname)
+d565 2
+a566 2
+	size_t len;
+	Boolean b;
+d568 20
+a587 4
+	len = strlen(fname);
+	if (len == 0) {
+		pwarnx("empty extra file");
+		return;
+d589 8
+a596 21
+	/* don't warn if stuff does not exist */
+	if (!fexists(fname))
+		return;
+
+	b = isdir(fname);
+	if (fname[len-1] == '/') {
+		if (b) {
+			if (rmdir(fname) == -1)
+				pwarn("problem removing directory %s",
+				    fname);
+		} else {
+			pwarnx("extra directory %s is not a directory",
+			    fname);
+		}
+	} else {
+		if (b) {
+			pwarnx("extra file %s is a directory", fname);
+		} else {
+			if (unlink(fname) == -1)
+				pwarn("problem removing %s", fname);
+		}
+d598 1
+@
+
+
+1.8
+log
+@replace break; with goto foo;
+since I've obviously not understood that you cannot
+break out of an if { } block in 6 years.
+
+I should rewrite pkg_* in BASIC.
+@
+text
+@d1 1
+a1 1
+/**	$MirBSD: ports/infrastructure/stools/lib/plist.c,v 1.7 2004/12/16 20:44:20 tg Exp $ */
+d28 1
+a28 1
+__RCSID("$MirBSD: ports/infrastructure/stools/lib/plist.c,v 1.7 2004/12/16 20:44:20 tg Exp $");
+d326 1
+a326 1
+    plist_t *p;
+d329 1
+a331 2
+    recno_t rr;
+    int64_t rcount;
+d376 2
+a424 50
+	    if (usedb) {
+		if ((rr = rcdb_lookup(ourdb, p->name)) == (recno_t)-1) {
+		    warn("rcdb_lookup");
+		    usedb = 0;
+		    rcdb_close(ourdb);
+		}
+		if (rr) {
+		    /* found record; will reduce number by one
+		     * and delete record and dir if zero */
+		    if (rcdb_read(ourdb, rr, &rcount) == -1) {
+			warn("rcdb_read");
+			usedb = 0;
+			rcdb_close(ourdb);
+		    }
+		    if (!rcount)
+			goto notzero;
+		    if (rcdb_modify(ourdb, rr, --rcount, p->name) == -1) {
+			warn("rcdb_modify");
+			usedb = 0;
+			rcdb_close(ourdb);
+		    }
+		    if (rcount)
+			break;
+		    if (rcdb_delete(ourdb, rr) == -1) {
+			warn("rcdb_delete");
+			usedb = 0;
+			rcdb_close(ourdb);
+		    }
+		notzero:
+		    ;
+		} /* else record not in database, go on */
+	    }
+	    (void) snprintf(tmp, sizeof(tmp), "%s/%s", Where, p->name);
+	    if (!isdir(tmp)) {
+	    	if (fexists(tmp)) {
+			pwarnx("attempting to delete file `%s' as a directory\n"
+		"this packing list is incorrect - ignoring delete request", tmp);
+		} else {
+			pwarnx("attempting to delete non-existent directory `%s'\n"
+		"this packing list is incorrect - ignoring delete request", tmp);
+		}
+	    }
+	    else {
+		if (Verbose)
+		    printf("Delete directory %s\n", tmp);
+		if (!Fake && delete_hierarchy(tmp, ign_err, FALSE)) {
+		    pwarnx("unable to completely remove directory '%s'", tmp);
+		    fail = FAIL;
+		}
+	    }
+d426 1
+d432 18
+d453 54
+@
+
+
+1.7
+log
+@add a new plist item:
+	@@ldcache 0
+	@@ldcache 1
+
+only during @@ldcache 1 sessions, @@lib automatically
+adds the exec/unexec ldconfig calls.
+
+not tested, but since @@lib is not used anywhere, I
+commit it anyway, so Benny has got less work
+
+the <bsd.port.mk> logic is correct, and a simple port
+still installs with the new tools.
+@
+text
+@d1 1
+a1 1
+/**	$MirBSD: ports/infrastructure/stools/lib/plist.c,v 1.6 2004/12/15 19:01:13 bsiegert Exp $ */
+d28 1
+a28 1
+__RCSID("$MirBSD: ports/infrastructure/stools/lib/plist.c,v 1.6 2004/12/15 19:01:13 bsiegert Exp $");
+d439 1
+a439 1
+			break;
+d452 2
+@
+
+
+1.6
+log
+@A big one, finally: @@lib now automatically adds
+
+@@unexec ldconfig -R
+@@exec ldconfig -m %D/lib (or similar)
+
+if they are not yet there. OpenBSD also does this. This means:
+
+ a) If you use @@lib to mark your libs (as you should from now on), you do
+    not need DYNLIBDIR and friends any more.
+ b) @@lib is considered safe for use in MirPorts now.
+
+This also solves the biggest showstopper for the next OpenBSD import.
+@
+text
+@d1 2
+a2 2
+/* $MirBSD: ports/infrastructure/stools/lib/plist.c,v 1.5 2004/12/12 14:45:29 bsiegert Exp $ */
+/* $OpenBSD: plist.c,v 1.17 2003/08/21 20:24:57 espie Exp $ */
+d28 1
+a28 1
+__RCSID("$MirBSD: ports/infrastructure/stools/lib/plist.c,v 1.5 2004/12/12 14:45:29 bsiegert Exp $");
+d68 1
+@
+
+
+1.5
+log
+@Add support for @@man.
+
+pkg_create just changes them to a normal file entry.
+@
+text
+@d1 1
+a1 1
+/* $MirBSD: ports/infrastructure/stools/lib/plist.c,v 1.4 2004/11/12 21:24:05 bsiegert Exp $ */
+d28 1
+a28 1
+__RCSID("$MirBSD: ports/infrastructure/stools/lib/plist.c,v 1.4 2004/11/12 21:24:05 bsiegert Exp $");
+d150 1
+a150 1
+	for (pp = pkg->head ; (pp && pp->type != type) || (name && strcmp(name,pp->name)) ; pp = pp->next) {
+@
+
+
+1.4
+log
+@Change find_plist() to accept a string to search for.
+@
+text
+@d1 1
+a1 1
+/* $MirBSD: ports/infrastructure/stools/lib/plist.c,v 1.3 2004/10/12 21:35:08 bsiegert Exp $ */
+d28 1
+a28 1
+__RCSID("$MirBSD: ports/infrastructure/stools/lib/plist.c,v 1.3 2004/10/12 21:35:08 bsiegert Exp $");
+d63 1
+@
+
+
+1.3
+log
+@Implement @@lib, @@shell, and @@endfake.
+
+@@endfake is thrown away at pkg_create(1) time.
+@@lib and @@shell are treated like normal files.
+@
+text
+@d1 1
+a1 1
+/* $MirBSD: ports/infrastructure/stools/lib/plist.c,v 1.2 2004/10/10 16:46:21 tg Exp $ */
+d28 1
+a28 1
+__RCSID("$MirBSD: ports/infrastructure/stools/lib/plist.c,v 1.2 2004/10/10 16:46:21 tg Exp $");
+d145 1
+a145 1
+find_plist(package_t *pkg, pl_ent_t type)
+d149 1
+a149 1
+	for (pp = pkg->head ; pp && pp->type != type ; pp = pp->next) {
+@
+
+
+1.2
+log
+@* sync pkg tools with what's currently in src/
+  idea by bsiegert@@
+* -Wall -Werror only ifndef PORTABLE
+  (so it's still in for native development)
+* let setup.sh define PORTABLE
+@
+text
+@d1 1
+a1 1
+/* $MirBSD: src/usr.sbin/pkg_install/lib/plist.c,v 1.12 2004/09/20 16:39:33 tg Exp $ */
+d28 1
+a28 1
+__RCSID("$MirBSD: src/usr.sbin/pkg_install/lib/plist.c,v 1.12 2004/09/20 16:39:33 tg Exp $");
+d64 3
+d372 2
+@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@d1 1
+a1 1
+/* $MirBSD: src/usr.sbin/pkg_install/lib/plist.c,v 1.10 2004/08/05 13:43:38 bsiegert Exp $ */
+d28 3
+a30 1
+__RCSID("$MirBSD: src/usr.sbin/pkg_install/lib/plist.c,v 1.10 2004/08/05 13:43:38 bsiegert Exp $");
+d63 1
+d380 3
+a382 1
+		    if ((cp = MD5File(tmp, buf)) != NULL) {
+d403 1
+@
+
+
+1.1.3.1
+log
+@src/usr.sbin/pkg_install comes into ports/infrastructure
+@
+text
+@@

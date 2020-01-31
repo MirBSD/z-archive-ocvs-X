@@ -1,0 +1,728 @@
+head	1.2;
+branch	1.1.1;
+access;
+symbols
+	tg-mergetmp-2:1.1.1.3
+	cvs-200410241530:1.1.1.3
+	cvs-200410012000:1.1.1.3
+	cvs-200407141120:1.1.1.3
+	cvs-200406231010:1.1.1.3
+	MIRBSD_7quater:1.1.1.2
+	cvs-200405271510:1.1.1.3
+	XFree86_4_4_0:1.1.9.1
+	cvs-200403021700:1.1.1.3
+	XFREE86_20040213:1.1.9.1
+	xc:1.1.9
+	cvs-200401291925:1.1.1.2
+	MIRBSD_7_ALPHA:1.1.1.2.0.4
+	MIRBSD_7:1.1.1.2.0.2
+	MIRBSD_7ter:1.1.1.2
+	cvs-20011091815:1.1.1.2
+	cvs-200309162130:1.1.1.2
+	cvs-200308302005:1.1.1.2
+	ctmx-0387:1.1.1.2
+	ctmx-0384:1.1.1.2
+	MIRBSD_5:1.1.1.2
+	ctmx-0375:1.1.1.2
+	ctmx-0373:1.1.1.2
+	ctm-0371:1.1.1.2
+	ctm-0370:1.1.1.2
+	MIRBSD_4:1.1.1.2
+	ctm-0363:1.1.1.2
+	ctm-0359:1.1.1.2
+	ctm-0349:1.1.1.1
+	openbsd:1.1.1;
+locks; strict;
+comment	@ * @;
+
+
+1.2
+date	2003.05.16.16.28.17;	author tg;	state dead;
+branches;
+next	1.1;
+
+1.1
+date	2003.03.22.20.00.58;	author tg;	state Exp;
+branches
+	1.1.1.1
+	1.1.9.1;
+next	;
+
+1.1.1.1
+date	2003.03.22.20.00.58;	author tg;	state Exp;
+branches;
+next	1.1.1.2;
+
+1.1.1.2
+date	2003.04.08.18.20.02;	author tg;	state Exp;
+branches;
+next	1.1.1.3;
+
+1.1.1.3
+date	2004.03.02.17.28.47;	author tg;	state Stab;
+branches;
+next	;
+
+1.1.9.1
+date	2004.02.14.19.04.42;	author tg;	state Exp;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.2
+log
+@remove a bunch of files not used in MirBSD - clean tree. People who want them got cvs.
+@
+text
+@
+/*
+ * Mesa 3-D graphics library
+ * Version:  3.3
+ * 
+ * Copyright (C) 1999-2000  Brian Paul   All Rights Reserved.
+ * 
+ * Permission is hereby granted, free of charge, to any person obtaining a
+ * copy of this software and associated documentation files (the "Software"),
+ * to deal in the Software without restriction, including without limitation
+ * the rights to use, copy, modify, merge, publish, distribute, sublicense,
+ * and/or sell copies of the Software, and to permit persons to whom the
+ * Software is furnished to do so, subject to the following conditions:
+ * 
+ * The above copyright notice and this permission notice shall be included
+ * in all copies or substantial portions of the Software.
+ * 
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
+ * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL
+ * BRIAN PAUL BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN
+ * AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
+ * CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+ */
+
+
+#ifdef PC_HEADER
+#include "all.h"
+#else
+#include "glheader.h"
+#include "glthread.h"
+#include "hash.h"
+#include "mem.h"
+#endif
+
+
+/*
+ * Generic hash table.
+ *
+ * This is used to implement display list and texture object lookup.
+ * NOTE: key=0 is illegal.
+ */
+
+
+#define TABLE_SIZE 1024
+
+struct HashEntry {
+   GLuint Key;
+   void *Data;
+   struct HashEntry *Next;
+};
+
+struct _mesa_HashTable {
+   struct HashEntry *Table[TABLE_SIZE];
+   GLuint MaxKey;
+   _glthread_Mutex Mutex;
+};
+
+
+
+/*
+ * Return pointer to a new, empty hash table.
+ */
+struct _mesa_HashTable *_mesa_NewHashTable(void)
+{
+   return CALLOC_STRUCT(_mesa_HashTable);
+}
+
+
+
+/*
+ * Delete a hash table.
+ */
+void _mesa_DeleteHashTable(struct _mesa_HashTable *table)
+{
+   GLuint i;
+   assert(table);
+   for (i=0;i<TABLE_SIZE;i++) {
+      struct HashEntry *entry = table->Table[i];
+      while (entry) {
+	 struct HashEntry *next = entry->Next;
+	 FREE(entry);
+	 entry = next;
+      }
+   }
+   FREE(table);
+}
+
+
+
+/*
+ * Lookup an entry in the hash table.
+ * Input:  table - the hash table
+ *         key - the key
+ * Return:  user data pointer or NULL if key not in table
+ */
+void *_mesa_HashLookup(const struct _mesa_HashTable *table, GLuint key)
+{
+   GLuint pos;
+   const struct HashEntry *entry;
+
+   assert(table);
+
+   pos = key & (TABLE_SIZE-1);
+   entry = table->Table[pos];
+   while (entry) {
+      if (entry->Key == key) {
+	 return entry->Data;
+      }
+      entry = entry->Next;
+   }
+   return NULL;
+}
+
+
+
+/*
+ * Insert into the hash table.  If an entry with this key already exists
+ * we'll replace the existing entry.
+ * Input:  table - the hash table
+ *         key - the key (not zero)
+ *         data - pointer to user data
+ */
+void _mesa_HashInsert(struct _mesa_HashTable *table, GLuint key, void *data)
+{
+   /* search for existing entry with this key */
+   GLuint pos;
+   struct HashEntry *entry;
+
+   assert(table);
+
+   _glthread_LOCK_MUTEX(table->Mutex);
+
+   if (key > table->MaxKey)
+      table->MaxKey = key;
+
+   pos = key & (TABLE_SIZE-1);
+   entry = table->Table[pos];
+   while (entry) {
+      if (entry->Key == key) {
+         /* replace entry's data */
+	 entry->Data = data;
+         _glthread_UNLOCK_MUTEX(table->Mutex);
+	 return;
+      }
+      entry = entry->Next;
+   }
+
+   /* alloc and insert new table entry */
+   entry = MALLOC_STRUCT(HashEntry);
+   entry->Key = key;
+   entry->Data = data;
+   entry->Next = table->Table[pos];
+   table->Table[pos] = entry;
+
+   _glthread_UNLOCK_MUTEX(table->Mutex);
+}
+
+
+
+/*
+ * Remove an entry from the hash table.
+ * Input:  table - the hash table
+ *         key - key of entry to remove
+ */
+void _mesa_HashRemove(struct _mesa_HashTable *table, GLuint key)
+{
+   GLuint pos;
+   struct HashEntry *entry, *prev;
+
+   assert(table);
+
+   _glthread_LOCK_MUTEX(table->Mutex);
+
+   pos = key & (TABLE_SIZE-1);
+   prev = NULL;
+   entry = table->Table[pos];
+   while (entry) {
+      if (entry->Key == key) {
+         /* found it! */
+         if (prev) {
+            prev->Next = entry->Next;
+         }
+         else {
+            table->Table[pos] = entry->Next;
+         }
+         FREE(entry);
+         _glthread_UNLOCK_MUTEX(table->Mutex);
+	 return;
+      }
+      prev = entry;
+      entry = entry->Next;
+   }
+
+   _glthread_UNLOCK_MUTEX(table->Mutex);
+}
+
+
+
+/*
+ * Return the key of the "first" entry in the hash table.
+ * This is used in the course of deleting all display lists when
+ * a context is destroyed.
+ */
+GLuint _mesa_HashFirstEntry(struct _mesa_HashTable *table)
+{
+   GLuint pos;
+   assert(table);
+   _glthread_LOCK_MUTEX(table->Mutex);
+   for (pos=0; pos < TABLE_SIZE; pos++) {
+      if (table->Table[pos]) {
+         _glthread_UNLOCK_MUTEX(table->Mutex);
+         return table->Table[pos]->Key;
+      }
+   }
+   _glthread_UNLOCK_MUTEX(table->Mutex);
+   return 0;
+}
+
+
+
+/*
+ * Dump contents of hash table for debugging.
+ */
+void _mesa_HashPrint(const struct _mesa_HashTable *table)
+{
+   GLuint i;
+   assert(table);
+   for (i=0;i<TABLE_SIZE;i++) {
+      const struct HashEntry *entry = table->Table[i];
+      while (entry) {
+	 printf("%u %p\n", entry->Key, entry->Data);
+	 entry = entry->Next;
+      }
+   }
+}
+
+
+
+/*
+ * Find a block of 'numKeys' adjacent unused hash keys.
+ * Input:  table - the hash table
+ *         numKeys - number of keys needed
+ * Return:  starting key of free block or 0 if failure
+ */
+GLuint _mesa_HashFindFreeKeyBlock(struct _mesa_HashTable *table, GLuint numKeys)
+{
+   GLuint maxKey = ~((GLuint) 0);
+   _glthread_LOCK_MUTEX(table->Mutex);
+   if (maxKey - numKeys > table->MaxKey) {
+      /* the quick solution */
+      _glthread_UNLOCK_MUTEX(table->Mutex);
+      return table->MaxKey + 1;
+   }
+   else {
+      /* the slow solution */
+      GLuint freeCount = 0;
+      GLuint freeStart = 1;
+      GLuint key;
+      for (key=1; key!=maxKey; key++) {
+	 if (_mesa_HashLookup(table, key)) {
+	    /* darn, this key is already in use */
+	    freeCount = 0;
+	    freeStart = key+1;
+	 }
+	 else {
+	    /* this key not in use, check if we've found enough */
+	    freeCount++;
+	    if (freeCount == numKeys) {
+               _glthread_UNLOCK_MUTEX(table->Mutex);
+	       return freeStart;
+	    }
+	 }
+      }
+      /* cannot allocate a block of numKeys consecutive keys */
+      _glthread_UNLOCK_MUTEX(table->Mutex);
+      return 0;
+   }
+}
+
+
+
+#ifdef HASH_TEST_HARNESS
+int main(int argc, char *argv[])
+{
+   int a, b, c;
+   struct HashTable *t;
+
+   printf("&a = %p\n", &a);
+   printf("&b = %p\n", &b);
+
+   t = _mesa_NewHashTable();
+   _mesa_HashInsert(t, 501, &a);
+   _mesa_HashInsert(t, 10, &c);
+   _mesa_HashInsert(t, 0xfffffff8, &b);
+   _mesa_HashPrint(t);
+   printf("Find 501: %p\n", _mesa_HashLookup(t,501));
+   printf("Find 1313: %p\n", _mesa_HashLookup(t,1313));
+   printf("Find block of 100: %d\n", _mesa_HashFindFreeKeyBlock(t, 100));
+   _mesa_DeleteHashTable(t);
+
+   return 0;
+}
+#endif
+@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@@
+
+
+1.1.9.1
+log
+@OpenBSD just has imported exactly this tree into their vendor branch,
+called the same tag, in XF4/xc
+This is, apparently, the last XFree86 snapshot before the licence change
+(ie, addition of the advertising clause)
+
+Since the developers don't see any problems with that, and we would like
+to integrate improvements done by the remaining one or two (or so) XFree86
+developers (j/k), this prepares enabling us to update X-Window in the future.
+@
+text
+@d4 4
+a7 4
+ * Version:  4.1
+ *
+ * Copyright (C) 1999-2002  Brian Paul   All Rights Reserved.
+ *
+d14 1
+a14 1
+ *
+d17 1
+a17 1
+ *
+d26 4
+a30 1
+#include "imports.h"
+d33 2
+a34 1
+#include "context.h"
+d37 5
+a41 6
+/**
+ * \file hash.c
+ * \brief Generic hash table.  Used for display lists and texture objects.
+ * The hash functions are thread-safe.
+ * \author Brian Paul
+ * \note key=0 is illegal
+d45 1
+a45 1
+#define TABLE_SIZE 1023  /**< Size of lookup table/array */
+a46 3
+/**
+ * An entry in the hash table.  This struct is private to this file.
+ */
+d48 3
+a50 3
+   GLuint Key;             /**< the entry's key */
+   void *Data;             /**< the entry's data */
+   struct HashEntry *Next; /**< pointer to next entry */
+a52 4
+/**
+ * The hashtable data structure.  This is an opaque types (it's not
+ * defined in the .h file).
+ */
+d54 3
+a56 3
+   struct HashEntry *Table[TABLE_SIZE];  /**< the lookup table */
+   GLuint MaxKey;                        /**< highest key inserted so far */
+   _glthread_Mutex Mutex;                /**< mutual exclusion lock */
+d61 2
+a62 3
+/**
+ * Create a new hash table.
+ * \return pointer to a new, empty hash table.
+d66 1
+a66 5
+   struct _mesa_HashTable *table = CALLOC_STRUCT(_mesa_HashTable);
+   if (table) {
+      _glthread_INIT_MUTEX(table->Mutex);
+   }
+   return table;
+d71 1
+a71 1
+/**
+a72 1
+ * \param table - the hash table to delete
+a85 1
+   _glthread_DESTROY_MUTEX(table->Mutex);
+d91 1
+a91 1
+/**
+d93 3
+a95 3
+ * \param table - the hash table
+ * \param key - the key
+ * \return pointer to user's data or NULL if key not in table
+a102 1
+   assert(key);
+d117 1
+a117 1
+/**
+d120 3
+a122 3
+ * \param table - the hash table
+ * \param key - the key (not zero)
+ * \param data - pointer to user data
+a130 1
+   assert(key);
+d161 1
+a161 1
+/**
+d163 2
+a164 2
+ * \param table - the hash table
+ * \param key - key of entry to remove
+a171 1
+   assert(key);
+d200 2
+a201 2
+/**
+ * Get the key of the "first" entry in the hash table.
+a203 2
+ * \param table - the hash table
+ * \return key for the "first" entry in the hash table.
+d222 1
+a222 1
+/**
+a223 1
+ * \param table - the hash table
+d232 1
+a232 1
+	 _mesa_debug(NULL, "%u %p\n", entry->Key, entry->Data);
+d240 1
+a240 1
+/**
+d242 3
+a244 3
+ * \param table - the hash table
+ * \param numKeys - number of keys needed
+ * \return Starting key of free block or 0 if failure
+d289 2
+a290 2
+   _mesa_printf("&a = %p\n", &a);
+   _mesa_printf("&b = %p\n", &b);
+d297 3
+a299 5
+
+   _mesa_printf("Find 501: %p\n", _mesa_HashLookup(t,501));
+   _mesa_printf("Find 1313: %p\n", _mesa_HashLookup(t,1313));
+   _mesa_printf("Find block of 100: %d\n", _mesa_HashFindFreeKeyBlock(t, 100));
+
+@
+
+
+1.1.1.1
+log
+@Import OpenBSD 3.3 XF4 repository from CTM 3132 the first time
+This finalizes starting an OpenBSD-mirabile (aka MirBSD) repository.
+
+### MirBSD is:
+# Copyright (c) 1982-2003 by Thorsten "mirabile" Glaser <x86@@ePost.de>
+# Copyright © 1968-2003  The authors of And contributors to UNIX®, the
+#       C Language, BSD/Berkeley Unix; 386BSD, NetBSD 1.1 and OpenBSD.
+#
+# Anyone who obtained a copy of this work is hereby permitted to freely use,
+# distribute, modify, merge, sublicence, give away or sell it as long as the
+# authors are given due credit and the following notice is retained:
+#
+# This work is provided "as is", with no explicit or implicit warranty what-
+# soever. Use it only at your own risk. In no event may an author or contri-
+# butor be held liable for any damage, directly or indirectly, that origina-
+# ted through or is caused by creation or modification of this work.
+
+MirBSD is my private tree. MirBSD does not differ very much from OpenBSD
+and intentionally tracks OpenBSD. That's why it _is_ OpenBSD, just not the
+official one. It's like with DarrenBSD.
+
+At time of this writing, no advertising for MirBSD must be done,
+because the advertising clause has not yet been sorted out.
+
+http://templeofhate.com/tglaser/MirBSD/index.php
+@
+text
+@@
+
+
+1.1.1.2
+log
+@The X-Windowing System
+
+Import XFree86 4.3 from OpenBSD by CTM, in the hope it's stable
+@
+text
+@d4 4
+a7 4
+ * Version:  3.5
+ *
+ * Copyright (C) 1999-2001  Brian Paul   All Rights Reserved.
+ *
+d14 1
+a14 1
+ *
+d17 1
+a17 1
+ *
+d66 1
+a66 5
+   struct _mesa_HashTable *table = CALLOC_STRUCT(_mesa_HashTable);
+   if (table) {
+      _glthread_INIT_MUTEX(table->Mutex);
+   }
+   return table;
+a102 1
+   assert(key);
+a130 1
+   assert(key);
+a171 1
+   assert(key);
+@
+
+
+1.1.1.3
+log
+@That's what OpenBSD will, probably, ship as XF4 in 3.5
+their last sync against XFree86 4.3-current has been
+imported into our vendor branch, too
+@
+text
+@d4 1
+a4 1
+ * Version:  4.1
+d6 1
+a6 1
+ * Copyright (C) 1999-2002  Brian Paul   All Rights Reserved.
+d26 4
+a30 1
+#include "imports.h"
+d33 2
+a34 1
+#include "context.h"
+d37 5
+a41 6
+/**
+ * \file hash.c
+ * \brief Generic hash table.  Used for display lists and texture objects.
+ * The hash functions are thread-safe.
+ * \author Brian Paul
+ * \note key=0 is illegal
+d45 1
+a45 1
+#define TABLE_SIZE 1023  /**< Size of lookup table/array */
+a46 3
+/**
+ * An entry in the hash table.  This struct is private to this file.
+ */
+d48 3
+a50 3
+   GLuint Key;             /**< the entry's key */
+   void *Data;             /**< the entry's data */
+   struct HashEntry *Next; /**< pointer to next entry */
+a52 4
+/**
+ * The hashtable data structure.  This is an opaque types (it's not
+ * defined in the .h file).
+ */
+d54 3
+a56 3
+   struct HashEntry *Table[TABLE_SIZE];  /**< the lookup table */
+   GLuint MaxKey;                        /**< highest key inserted so far */
+   _glthread_Mutex Mutex;                /**< mutual exclusion lock */
+d61 2
+a62 3
+/**
+ * Create a new hash table.
+ * \return pointer to a new, empty hash table.
+d75 1
+a75 1
+/**
+a76 1
+ * \param table - the hash table to delete
+a89 1
+   _glthread_DESTROY_MUTEX(table->Mutex);
+d95 1
+a95 1
+/**
+d97 3
+a99 3
+ * \param table - the hash table
+ * \param key - the key
+ * \return pointer to user's data or NULL if key not in table
+d122 1
+a122 1
+/**
+d125 3
+a127 3
+ * \param table - the hash table
+ * \param key - the key (not zero)
+ * \param data - pointer to user data
+d167 1
+a167 1
+/**
+d169 2
+a170 2
+ * \param table - the hash table
+ * \param key - key of entry to remove
+d207 2
+a208 2
+/**
+ * Get the key of the "first" entry in the hash table.
+a210 2
+ * \param table - the hash table
+ * \return key for the "first" entry in the hash table.
+d229 1
+a229 1
+/**
+a230 1
+ * \param table - the hash table
+d239 1
+a239 1
+	 _mesa_debug(NULL, "%u %p\n", entry->Key, entry->Data);
+d247 1
+a247 1
+/**
+d249 3
+a251 3
+ * \param table - the hash table
+ * \param numKeys - number of keys needed
+ * \return Starting key of free block or 0 if failure
+d296 2
+a297 2
+   _mesa_printf("&a = %p\n", &a);
+   _mesa_printf("&b = %p\n", &b);
+d304 3
+a306 5
+
+   _mesa_printf("Find 501: %p\n", _mesa_HashLookup(t,501));
+   _mesa_printf("Find 1313: %p\n", _mesa_HashLookup(t,1313));
+   _mesa_printf("Find block of 100: %d\n", _mesa_HashFindFreeKeyBlock(t, 100));
+
+@
+
+

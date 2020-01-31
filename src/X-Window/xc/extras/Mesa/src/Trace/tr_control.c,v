@@ -1,0 +1,250 @@
+head	1.2;
+branch	1.1.1;
+access;
+symbols
+	tg-mergetmp-2:1.1.1.1
+	cvs-200410241530:1.1.1.1
+	cvs-200410012000:1.1.1.1
+	cvs-200407141120:1.1.1.1
+	cvs-200406231010:1.1.1.1
+	MIRBSD_7quater:1.1.1.1
+	cvs-200405271510:1.1.1.1
+	XFree86_4_4_0:1.1.9.1
+	cvs-200403021700:1.1.1.1
+	XFREE86_20040213:1.1.9.1
+	xc:1.1.9
+	cvs-200401291925:1.1.1.1
+	MIRBSD_7_ALPHA:1.1.1.1.0.4
+	MIRBSD_7:1.1.1.1.0.2
+	MIRBSD_7ter:1.1.1.1
+	cvs-20011091815:1.1.1.1
+	cvs-200309162130:1.1.1.1
+	cvs-200308302005:1.1.1.1
+	ctmx-0387:1.1.1.1
+	ctmx-0384:1.1.1.1
+	MIRBSD_5:1.1.1.1
+	ctmx-0375:1.1.1.1
+	ctmx-0373:1.1.1.1
+	ctm-0371:1.1.1.1
+	ctm-0370:1.1.1.1
+	MIRBSD_4:1.1.1.1
+	ctm-0363:1.1.1.1
+	ctm-0359:1.1.1.1
+	openbsd:1.1.1;
+locks; strict;
+comment	@ * @;
+
+
+1.2
+date	2003.05.16.16.28.24;	author tg;	state dead;
+branches;
+next	1.1;
+
+1.1
+date	2003.04.08.18.20.10;	author tg;	state Exp;
+branches
+	1.1.1.1
+	1.1.9.1;
+next	;
+
+1.1.1.1
+date	2003.04.08.18.20.10;	author tg;	state Stab;
+branches;
+next	;
+
+1.1.9.1
+date	2004.02.14.19.05.02;	author tg;	state Exp;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.2
+log
+@remove a bunch of files not used in MirBSD - clean tree. People who want them got cvs.
+@
+text
+@#ifdef MESA_TRACE
+#include "glheader.h"
+#include "glapi.h"
+#include "context.h" /* for _mesa_error */
+#include "mtypes.h"
+#include "tr_context.h"
+#include "tr_write.h"
+
+
+void glEnableTraceMESA( GLbitfield mask )
+{
+	trace_context_t * tctx = trCtx();
+
+	tctx->traceEnableLogBits = mask;
+	tctx->traceEnabled       = GL_TRUE;
+}
+
+
+void glDisableTraceMESA( GLbitfield mask )
+{
+	/* Reset traceEnableLogBits ? */
+	trCtx()->traceEnabled = GL_FALSE;
+}
+
+
+void glNewTraceMESA( GLbitfield logbits, const GLubyte * traceName )
+{
+	char * newname;
+	GLint     length;
+	GLcontext * ctx;
+	const char * defaultName = "traceGL";
+
+	ctx = (GLcontext *)_glapi_get_context();
+
+	assert(ctx);
+	assert(ctx->TraceCtx);
+	assert(ctx->TraceDispatch);
+	if( !ctx ||                                      /* Do we even have a context ? */
+		(ctx->TraceCtx->betweenBeginEnd == GL_TRUE)   || /* Are we currently between glBegin and glEnd ? */
+	   (ctx->TraceDispatch == _glapi_get_override_dispatch(1)) ) {  /* Has a trace already started ? */
+		_mesa_error(ctx, GL_INVALID_OPERATION, __FUNCTION__ );
+		return;
+	}
+
+	/* FIXME!!! When do we free tracename after the app is finished? */
+	if( ctx->TraceCtx->traceName ) {
+		free( ctx->TraceCtx->traceName );
+	}
+
+	length = strlen((char *)traceName) + 1;
+	if( length != 1 ) {
+		newname = (char *)malloc( length );
+		strncpy( (char *)newname, (char *)traceName, length );
+	} else {
+		length = strlen( defaultName );
+		newname = (char *)malloc( length );
+		strncpy( (char *)newname, defaultName, length );
+	}
+	ctx->TraceCtx->traceName          = newname;
+	ctx->TraceCtx->traceAttribLogBits = logbits;
+
+	trOpenLogFile();
+	trSetTraceDispatch();
+}
+
+
+void glEndTraceMESA(void)
+{
+	GLcontext * ctx;
+
+	ctx = (GLcontext *)_glapi_get_context();
+	assert(ctx);
+	assert(ctx->TraceCtx);
+	assert(ctx->TraceDispatch);
+
+        /* Do we even have a context ? */
+        /* Are we currently between glBegin and glEnd ? */
+        /* Are we sure the current dispatch _is_ the TraceDispatch ? */
+	if (!ctx ||
+            (ctx->TraceCtx->betweenBeginEnd == GL_TRUE)  ||
+	    (ctx->TraceDispatch != _glapi_get_override_dispatch(1)) ) {
+		_mesa_error(ctx, GL_INVALID_OPERATION, __FUNCTION__ );
+		return;
+	}
+
+#if 0
+	/* Always dump the max indices */
+// But not yet...
+	trWriteCMD( VAR_COLORPOINTER );
+	trWritei( ctx->TraceCtx->trColorPtrState.maxIndex );
+	trWriteCMD( VAR_EDGEFLAGPOINTER );
+	trWritei( ctx->TraceCtx->trEdgeFlagPtrState.maxIndex );
+	trWriteCMD( VAR_INDEXPOINTER );
+	trWritei( ctx->TraceCtx->trIndexPtrState.maxIndex );
+	trWriteCMD( VAR_NORMALPOINTER );
+	trWritei( ctx->TraceCtx->trNormalPtrState.maxIndex );
+	trWriteCMD( VAR_TEXCOORDPOINTER );
+	trWritei( ctx->TraceCtx->trTexCoordPtrState.maxIndex );
+	trWriteCMD( VAR_VERTEXPOINTER );
+	trWritei( ctx->TraceCtx->trVertexPtrState.maxIndex );
+#endif
+
+	trCloseLogFile();
+	trSetOriginalDispatch();
+}
+
+
+void glTraceAssertAttribMESA( GLbitfield attribMask )
+{
+#warning TraceAssertAttrib not implemented
+}
+
+
+void glTraceCommentMESA( const GLubyte * comment )
+{
+	trWriteString( (char *)comment );
+}
+
+
+void glTraceTextureMESA( GLuint name, const GLubyte* comment )
+{
+#warning TraceTexture not implemented
+}
+
+void glTraceListMESA( GLuint name, const GLubyte* comment )
+{
+#warning TraceList not implemented
+}
+
+
+void glTracePointerMESA( GLvoid* pointer, const GLubyte* comment )
+{
+#warning TracePointer not implemented
+}
+
+
+void glTracePointerRangeMESA( const GLvoid* first, const GLvoid* last, const GLubyte* comment )
+{
+#warning TracePointerRange not implemented
+}
+
+#else
+extern void tr_control_dummy_func(void);
+void tr_control_dummy_func(void)
+{
+}
+#endif
+@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@@
+
+
+1.1.9.1
+log
+@OpenBSD just has imported exactly this tree into their vendor branch,
+called the same tag, in XF4/xc
+This is, apparently, the last XFree86 snapshot before the licence change
+(ie, addition of the advertising clause)
+
+Since the developers don't see any problems with that, and we would like
+to integrate improvements done by the remaining one or two (or so) XFree86
+developers (j/k), this prepares enabling us to update X-Window in the future.
+@
+text
+@@
+
+
+1.1.1.1
+log
+@The X-Windowing System
+
+Import XFree86 4.3 from OpenBSD by CTM, in the hope it's stable
+@
+text
+@@

@@ -1,0 +1,650 @@
+head	1.1;
+branch	1.1.1;
+access;
+symbols
+	tg-mergetmp-2:1.1.1.2
+	cvs-200410241530:1.1.1.2
+	cvs-200410012000:1.1.1.2
+	cvs-200407141120:1.1.1.2
+	cvs-200406231010:1.1.1.2
+	MIRBSD_7quater:1.1.1.2
+	cvs-200405271510:1.1.1.2
+	XFree86_4_4_0:1.1.9.1
+	cvs-200403021700:1.1.1.2
+	XFREE86_20040213:1.1.9.1
+	xc:1.1.9
+	cvs-200401291925:1.1.1.2
+	MIRBSD_7_ALPHA:1.1.1.2.0.4
+	MIRBSD_7:1.1.1.2.0.2
+	MIRBSD_7ter:1.1.1.2
+	cvs-20011091815:1.1.1.2
+	cvs-200309162130:1.1.1.2
+	cvs-200308302005:1.1.1.2
+	ctmx-0387:1.1.1.2
+	ctmx-0384:1.1.1.2
+	MIRBSD_5:1.1.1.2
+	ctmx-0375:1.1.1.2
+	ctmx-0373:1.1.1.2
+	ctm-0371:1.1.1.2
+	ctm-0370:1.1.1.2
+	MIRBSD_4:1.1.1.2
+	ctm-0363:1.1.1.2
+	ctm-0359:1.1.1.2
+	ctm-0349:1.1.1.1
+	openbsd:1.1.1;
+locks; strict;
+comment	@ * @;
+
+
+1.1
+date	2003.03.22.20.09.38;	author tg;	state Exp;
+branches
+	1.1.1.1
+	1.1.9.1;
+next	;
+
+1.1.1.1
+date	2003.03.22.20.09.38;	author tg;	state Exp;
+branches;
+next	1.1.1.2;
+
+1.1.1.2
+date	2003.04.08.18.38.19;	author tg;	state Stab;
+branches;
+next	;
+
+1.1.9.1
+date	2004.02.14.19.26.35;	author tg;	state Exp;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@/*
+ * $XFree86: xc/programs/Xserver/miext/shadow/shrotate.c,v 1.3 2001/07/21 04:13:26 keithp Exp $
+ *
+ * Copyright © 2001 Keith Packard, member of The XFree86 Project, Inc.
+ *
+ * Permission to use, copy, modify, distribute, and sell this software and its
+ * documentation for any purpose is hereby granted without fee, provided that
+ * the above copyright notice appear in all copies and that both that
+ * copyright notice and this permission notice appear in supporting
+ * documentation, and that the name of Keith Packard not be used in
+ * advertising or publicity pertaining to distribution of the software without
+ * specific, written prior permission.  Keith Packard makes no
+ * representations about the suitability of this software for any purpose.  It
+ * is provided "as is" without express or implied warranty.
+ *
+ * KEITH PACKARD DISCLAIMS ALL WARRANTIES WITH REGARD TO THIS SOFTWARE,
+ * INCLUDING ALL IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS, IN NO
+ * EVENT SHALL KEITH PACKARD BE LIABLE FOR ANY SPECIAL, INDIRECT OR
+ * CONSEQUENTIAL DAMAGES OR ANY DAMAGES WHATSOEVER RESULTING FROM LOSS OF USE,
+ * DATA OR PROFITS, WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER
+ * TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR
+ * PERFORMANCE OF THIS SOFTWARE.
+ */
+
+#include    "X.h"
+#include    "scrnintstr.h"
+#include    "windowstr.h"
+#include    "font.h"
+#include    "dixfontstr.h"
+#include    "fontstruct.h"
+#include    "mi.h"
+#include    "regionstr.h"
+#include    "globals.h"
+#include    "gcstruct.h"
+#include    "shadow.h"
+#include    "fb.h"
+
+void
+shadowUpdateRotatePacked (ScreenPtr	pScreen,
+			  shadowBufPtr	pBuf)
+{
+    RegionPtr	damage = &pBuf->damage;
+    PixmapPtr	pShadow = pBuf->pPixmap;
+    int		nbox = REGION_NUM_RECTS (damage);
+    BoxPtr	pbox = REGION_RECTS (damage);
+    FbBits	*shaBits;
+    FbStride	shaStride;
+    int		shaBpp;
+    int		shaXoff, shaYoff;
+    int		box_x1, box_x2, box_y1, box_y2;
+    int		sha_x1, sha_y1;
+    int		scr_x1, scr_x2, scr_y1, scr_y2, scr_w, scr_h;
+    int		scr_x, scr_y;
+    int		w;
+    int		pixelsPerBits;
+    int		pixelsMask;
+    FbStride	shaStepOverY, shaStepDownY, shaStepOverX, shaStepDownX;
+    FbBits	*shaLine, *sha;
+    int		shaHeight = pShadow->drawable.height;
+    int		shaWidth = pShadow->drawable.width;
+    FbBits	shaMask;
+    int		shaFirstShift, shaShift;
+
+    fbGetDrawable (&pShadow->drawable, shaBits, shaStride, shaBpp, shaXoff, shaYoff);
+    pixelsPerBits = (sizeof (FbBits) * 8) / shaBpp;
+    pixelsMask = ~(pixelsPerBits - 1);
+    shaMask = FbBitsMask (FB_UNIT-shaBpp, shaBpp);
+    /*
+     * Compute rotation related constants to walk the shadow
+     */
+    switch (pBuf->rotate) {
+    case 0:
+    default:
+	shaStepOverX = shaBpp;
+	shaStepDownX = 0;
+	shaStepOverY = 0;
+	shaStepDownY = shaStride;
+	break;
+    case 90:
+	shaStepOverX = 0;
+	shaStepDownX = -shaBpp;
+	shaStepOverY = shaStride;
+	shaStepDownY = 0;
+	break;
+    case 180:
+	shaStepOverX = -shaBpp;
+	shaStepDownX = 0;
+	shaStepOverY = 0;
+	shaStepDownY = -shaStride;
+	break;
+    case 270:
+	shaStepOverX = 0;
+	shaStepDownX = shaBpp;
+	shaStepOverY = -shaStride;
+	shaStepDownY = 0;
+	break;
+    }
+    while (nbox--)
+    {
+        box_x1 = pbox->x1;
+        box_y1 = pbox->y1;
+        box_x2 = pbox->x2;
+        box_y2 = pbox->y2;
+        pbox++;
+
+	/*
+	 * Compute screen and shadow locations for this box
+	 */
+	switch (pBuf->rotate) {
+	case 0:
+	default:
+	    scr_x1 = box_x1 & pixelsMask;
+	    scr_x2 = (box_x2 + pixelsPerBits - 1) & pixelsMask;
+	    scr_y1 = box_y1;
+	    scr_y2 = box_y2;
+	    
+	    sha_x1 = box_x1;
+	    sha_y1 = box_y1;
+	    break;
+	case 90:
+	    scr_x1 = box_y1 & pixelsMask;
+	    scr_x2 = (box_y2 + pixelsPerBits - 1) & pixelsMask;
+	    scr_y1 = (shaWidth - box_x2);
+	    scr_y2 = (shaWidth - box_x1);
+
+	    sha_x1 = box_x2 - 1;
+	    sha_y1 = scr_x1;
+	    break;
+	case 180:
+	    scr_x1 = (shaWidth - box_x2) & pixelsMask;
+	    scr_x2 = (shaWidth - box_x1 + pixelsPerBits - 1) & pixelsMask;
+	    scr_y1 = shaHeight - box_y2;
+	    scr_y2 = shaHeight - box_y1;
+
+	    sha_x1 = (shaWidth - scr_x1 - 1);
+	    sha_y1 = box_y2 - 1;
+	    break;
+	case 270:
+	    scr_x1 = (shaHeight - box_y2) & pixelsMask;
+	    scr_x2 = (shaHeight - box_y1 + pixelsPerBits - 1) & pixelsMask;
+	    scr_y1 = box_x1;
+	    scr_y2 = box_x2;
+
+	    sha_x1 = box_x1;
+	    sha_y1 = (shaHeight - scr_x1 - 1);
+	    break;
+	}
+	scr_w = ((scr_x2 - scr_x1) * shaBpp) >> FB_SHIFT;
+	scr_h = scr_y2 - scr_y1;
+	scr_y = scr_y1;
+
+	/* shift amount for first pixel on screen */ 
+	shaFirstShift = FB_UNIT - ((sha_x1 * shaBpp) & FB_MASK) - shaBpp;
+	
+	/* pointer to shadow data first placed on screen */
+	shaLine = (shaBits + 
+		   sha_y1 * shaStride + 
+		   ((sha_x1 * shaBpp) >> FB_SHIFT));
+
+	/*
+	 * Copy the bits, always write across the physical frame buffer
+	 * to take advantage of write combining.
+	 */
+	while (scr_h--)
+	{
+	    int	    p;
+	    FbBits  bits;
+	    FbBits  *win;
+	    int	    i;
+	    CARD32  winSize;
+	    
+	    sha = shaLine;
+	    shaShift = shaFirstShift;
+	    w = scr_w;
+	    scr_x = scr_x1 * shaBpp >> FB_SHIFT;
+
+	    while (w)
+	    {
+		/*
+		 * Map some of this line
+		 */
+		win = (FbBits *) (*pBuf->window) (pScreen,
+						  scr_y,
+						  scr_x << 2,
+						  SHADOW_WINDOW_WRITE,
+						  &winSize,
+						  pBuf->closure);
+		i = (winSize >> 2);
+		if (i > w)
+		    i = w;
+		w -= i;
+		scr_x += i;
+		/*
+		 * Copy the portion of the line mapped
+		 */
+		while (i--)
+		{
+		    bits = 0;
+		    p = pixelsPerBits;
+		    /*
+		     * Build one word of output from multiple inputs
+		     * 
+		     * Note that for 90/270 rotations, this will walk
+		     * down the shadow hitting each scanline once.
+		     * This is probably not very efficient.
+		     */
+		    while (p--)
+		    {
+			bits = FbScrLeft(bits, shaBpp);
+			bits |= FbScrRight (*sha, shaShift) & shaMask;
+
+			shaShift -= shaStepOverX;
+			if (shaShift >= FB_UNIT)
+			{
+			    shaShift -= FB_UNIT;
+			    sha--;
+			}
+			else if (shaShift < 0)
+			{
+			    shaShift += FB_UNIT;
+			    sha++;
+			}
+			sha += shaStepOverY;
+		    }
+		    *win++ = bits;
+		}
+	    }
+	    scr_y++;
+	    shaFirstShift -= shaStepDownX;
+	    if (shaFirstShift >= FB_UNIT)
+	    {
+		shaFirstShift -= FB_UNIT;
+		shaLine--;
+	    }
+	    else if (shaFirstShift < 0)
+	    {
+		shaFirstShift += FB_UNIT;
+		shaLine++;
+	    }
+	    shaLine += shaStepDownY;
+	}
+    }
+}
+@
+
+
+1.1.9.1
+log
+@OpenBSD just has imported exactly this tree into their vendor branch,
+called the same tag, in XF4/xc
+This is, apparently, the last XFree86 snapshot before the licence change
+(ie, addition of the advertising clause)
+
+Since the developers don't see any problems with that, and we would like
+to integrate improvements done by the remaining one or two (or so) XFree86
+developers (j/k), this prepares enabling us to update X-Window in the future.
+@
+text
+@d2 1
+a2 1
+ * $XFree86: xc/programs/Xserver/miext/shadow/shrotate.c,v 1.5 2002/10/09 17:00:11 tsi Exp $
+a37 10
+/*
+ * These indicate which way the source (shadow) is scanned when
+ * walking the screen in a particular direction
+ */
+
+#define LEFT_TO_RIGHT	1
+#define RIGHT_TO_LEFT	-1
+#define TOP_TO_BOTTOM	2
+#define BOTTOM_TO_TOP	-2
+
+d51 2
+a52 2
+    int		sha_x1 = 0, sha_y1 = 0;
+    int		scr_x1 = 0, scr_x2 = 0, scr_y1 = 0, scr_y2 = 0, scr_w, scr_h;
+d57 1
+a57 2
+    FbStride	shaStepOverY = 0, shaStepDownY = 0;
+    FbStride	shaStepOverX = 0, shaStepDownX = 0;
+a62 4
+    int		o_x_dir;
+    int		o_y_dir;
+    int		x_dir;
+    int		y_dir;
+d71 2
+a72 8
+    o_x_dir = LEFT_TO_RIGHT;
+    o_y_dir = TOP_TO_BOTTOM;
+    if (pBuf->randr & SHADOW_REFLECT_X)
+	o_x_dir = -o_x_dir;
+    if (pBuf->randr & SHADOW_REFLECT_Y)
+	o_y_dir = -o_y_dir;
+    switch (pBuf->randr & (SHADOW_ROTATE_ALL)) {
+    case SHADOW_ROTATE_0:	/* upper left shadow -> upper left screen */
+a73 18
+	x_dir = o_x_dir;
+	y_dir = o_y_dir;
+	break;
+    case SHADOW_ROTATE_90:    	/* upper right shadow -> upper left screen */
+	x_dir = o_y_dir;
+	y_dir = -o_x_dir;
+	break;
+    case SHADOW_ROTATE_180:	/* lower right shadow -> upper left screen */
+	x_dir = -o_x_dir;
+	y_dir = -o_y_dir;
+	break;
+    case SHADOW_ROTATE_270:	/* lower left shadow -> upper left screen */
+	x_dir = -o_y_dir;
+	y_dir = o_x_dir;
+	break;
+    }
+    switch (x_dir) {
+    case LEFT_TO_RIGHT:
+d75 1
+d77 1
+d79 1
+a79 1
+    case TOP_TO_BOTTOM:
+d81 1
+d83 1
+d85 1
+a85 1
+    case RIGHT_TO_LEFT:
+d87 1
+d89 1
+d91 1
+a91 1
+    case BOTTOM_TO_TOP:
+d93 1
+a94 17
+	break;
+    }
+    switch (y_dir) {
+    case TOP_TO_BOTTOM:
+	shaStepDownX = 0;
+	shaStepDownY = shaStride;
+	break;
+    case RIGHT_TO_LEFT:
+	shaStepDownX = -shaBpp;
+	shaStepDownY = 0;
+	break;
+    case BOTTOM_TO_TOP:
+	shaStepDownX = 0;
+	shaStepDownY = -shaStride;
+	break;
+    case LEFT_TO_RIGHT:
+	shaStepDownX = shaBpp;
+a97 1
+    
+d109 3
+a111 2
+	switch (x_dir) {
+	case LEFT_TO_RIGHT:
+d114 2
+d117 2
+a118 1
+	    sha_x1 = scr_x1;
+d120 1
+a120 1
+	case TOP_TO_BOTTOM:
+d123 2
+d126 1
+d129 1
+a129 1
+	case RIGHT_TO_LEFT:
+d132 2
+d136 1
+d138 1
+a138 1
+	case BOTTOM_TO_TOP:
+a140 24
+	    
+	    sha_y1 = (shaHeight - scr_x1 - 1);
+	    break;
+	}
+	switch (y_dir) {
+	case TOP_TO_BOTTOM:
+	    scr_y1 = box_y1;
+	    scr_y2 = box_y2;
+
+	    sha_y1 = scr_y1;
+	    break;
+	case RIGHT_TO_LEFT:
+	    scr_y1 = (shaWidth - box_x2);
+	    scr_y2 = (shaWidth - box_x1);
+
+	    sha_x1 = box_x2 - 1;
+	    break;
+	case BOTTOM_TO_TOP:
+	    scr_y1 = shaHeight - box_y2;
+	    scr_y2 = shaHeight - box_y1;
+	    
+	    sha_y1 = box_y2 - 1;
+	    break;
+	case LEFT_TO_RIGHT:
+d145 1
+@
+
+
+1.1.1.1
+log
+@Import OpenBSD 3.3 XF4 repository from CTM 3132 the first time
+This finalizes starting an OpenBSD-mirabile (aka MirBSD) repository.
+
+### MirBSD is:
+# Copyright (c) 1982-2003 by Thorsten "mirabile" Glaser <x86@@ePost.de>
+# Copyright © 1968-2003  The authors of And contributors to UNIX®, the
+#       C Language, BSD/Berkeley Unix; 386BSD, NetBSD 1.1 and OpenBSD.
+#
+# Anyone who obtained a copy of this work is hereby permitted to freely use,
+# distribute, modify, merge, sublicence, give away or sell it as long as the
+# authors are given due credit and the following notice is retained:
+#
+# This work is provided "as is", with no explicit or implicit warranty what-
+# soever. Use it only at your own risk. In no event may an author or contri-
+# butor be held liable for any damage, directly or indirectly, that origina-
+# ted through or is caused by creation or modification of this work.
+
+MirBSD is my private tree. MirBSD does not differ very much from OpenBSD
+and intentionally tracks OpenBSD. That's why it _is_ OpenBSD, just not the
+official one. It's like with DarrenBSD.
+
+At time of this writing, no advertising for MirBSD must be done,
+because the advertising clause has not yet been sorted out.
+
+http://templeofhate.com/tglaser/MirBSD/index.php
+@
+text
+@@
+
+
+1.1.1.2
+log
+@The X-Windowing System
+
+Import XFree86 4.3 from OpenBSD by CTM, in the hope it's stable
+@
+text
+@d2 1
+a2 1
+ * $XFree86: xc/programs/Xserver/miext/shadow/shrotate.c,v 1.5 2002/10/09 17:00:11 tsi Exp $
+a37 10
+/*
+ * These indicate which way the source (shadow) is scanned when
+ * walking the screen in a particular direction
+ */
+
+#define LEFT_TO_RIGHT	1
+#define RIGHT_TO_LEFT	-1
+#define TOP_TO_BOTTOM	2
+#define BOTTOM_TO_TOP	-2
+
+d51 2
+a52 2
+    int		sha_x1 = 0, sha_y1 = 0;
+    int		scr_x1 = 0, scr_x2 = 0, scr_y1 = 0, scr_y2 = 0, scr_w, scr_h;
+d57 1
+a57 2
+    FbStride	shaStepOverY = 0, shaStepDownY = 0;
+    FbStride	shaStepOverX = 0, shaStepDownX = 0;
+a62 4
+    int		o_x_dir;
+    int		o_y_dir;
+    int		x_dir;
+    int		y_dir;
+d71 2
+a72 8
+    o_x_dir = LEFT_TO_RIGHT;
+    o_y_dir = TOP_TO_BOTTOM;
+    if (pBuf->randr & SHADOW_REFLECT_X)
+	o_x_dir = -o_x_dir;
+    if (pBuf->randr & SHADOW_REFLECT_Y)
+	o_y_dir = -o_y_dir;
+    switch (pBuf->randr & (SHADOW_ROTATE_ALL)) {
+    case SHADOW_ROTATE_0:	/* upper left shadow -> upper left screen */
+a73 18
+	x_dir = o_x_dir;
+	y_dir = o_y_dir;
+	break;
+    case SHADOW_ROTATE_90:    	/* upper right shadow -> upper left screen */
+	x_dir = o_y_dir;
+	y_dir = -o_x_dir;
+	break;
+    case SHADOW_ROTATE_180:	/* lower right shadow -> upper left screen */
+	x_dir = -o_x_dir;
+	y_dir = -o_y_dir;
+	break;
+    case SHADOW_ROTATE_270:	/* lower left shadow -> upper left screen */
+	x_dir = -o_y_dir;
+	y_dir = o_x_dir;
+	break;
+    }
+    switch (x_dir) {
+    case LEFT_TO_RIGHT:
+d75 1
+d77 1
+d79 1
+a79 1
+    case TOP_TO_BOTTOM:
+d81 1
+d83 1
+d85 1
+a85 1
+    case RIGHT_TO_LEFT:
+d87 1
+d89 1
+d91 1
+a91 1
+    case BOTTOM_TO_TOP:
+d93 1
+a94 17
+	break;
+    }
+    switch (y_dir) {
+    case TOP_TO_BOTTOM:
+	shaStepDownX = 0;
+	shaStepDownY = shaStride;
+	break;
+    case RIGHT_TO_LEFT:
+	shaStepDownX = -shaBpp;
+	shaStepDownY = 0;
+	break;
+    case BOTTOM_TO_TOP:
+	shaStepDownX = 0;
+	shaStepDownY = -shaStride;
+	break;
+    case LEFT_TO_RIGHT:
+	shaStepDownX = shaBpp;
+a97 1
+    
+d109 3
+a111 2
+	switch (x_dir) {
+	case LEFT_TO_RIGHT:
+d114 2
+d117 2
+a118 1
+	    sha_x1 = scr_x1;
+d120 1
+a120 1
+	case TOP_TO_BOTTOM:
+d123 2
+d126 1
+d129 1
+a129 1
+	case RIGHT_TO_LEFT:
+d132 2
+d136 1
+d138 1
+a138 1
+	case BOTTOM_TO_TOP:
+a140 24
+	    
+	    sha_y1 = (shaHeight - scr_x1 - 1);
+	    break;
+	}
+	switch (y_dir) {
+	case TOP_TO_BOTTOM:
+	    scr_y1 = box_y1;
+	    scr_y2 = box_y2;
+
+	    sha_y1 = scr_y1;
+	    break;
+	case RIGHT_TO_LEFT:
+	    scr_y1 = (shaWidth - box_x2);
+	    scr_y2 = (shaWidth - box_x1);
+
+	    sha_x1 = box_x2 - 1;
+	    break;
+	case BOTTOM_TO_TOP:
+	    scr_y1 = shaHeight - box_y2;
+	    scr_y2 = shaHeight - box_y1;
+	    
+	    sha_y1 = box_y2 - 1;
+	    break;
+	case LEFT_TO_RIGHT:
+d145 1
+@
+

@@ -1,0 +1,163 @@
+head	1.2;
+access;
+symbols
+	ctm-0349:1.1.1.1 openbsd-xf4:1.1.1;
+locks; strict;
+comment	@ * @;
+
+
+1.2
+date	2003.04.08.19.32.28;	author tg;	state dead;
+branches;
+next	1.1;
+
+1.1
+date	2003.03.22.20.04.11;	author tg;	state Exp;
+branches
+	1.1.1.1;
+next	;
+
+1.1.1.1
+date	2003.03.22.20.04.11;	author tg;	state Exp;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.2
+log
+@merge conflicts
+@
+text
+@#include <stdio.h>
+#include "shared_texture_lru.h"
+
+/* (Re)initialize the global circular LRU list.  The last element
+ * in the array (heap->nrRegions) is the sentinal.  Keeping it
+ * at the end of the array allows the other elements of the array
+ * to be addressed rationally when looking up objects at a
+ * particular location in texture memory.  
+ */
+static void resetGlobalLRU( driHeapPtr heap )
+{
+   driTexRegion *list = heap->shared->list;
+   int sz = 1 << heap->logGranularity;
+   int i;
+
+   heap->localAge = ++heap->shared->texAge;
+
+   for (i = 0 ; (i+1) * sz <= heap->size ; i++) {
+      list[i].prev = i-1;
+      list[i].next = i+1;
+      list[i].age = heap->shared->texAge;   
+   }
+
+   i--;
+   list[0].prev = heap->nrRegions;
+   list[i].prev = i-1;
+   list[i].next = heap->nrRegions;
+   list[heap->nrRegions].prev = i;
+   list[heap->nrRegions].next = 0;
+}
+
+/* Called by the client whenever it touches a local texture.  
+ */
+void driUpdateHeap( driHeapPtr heap, int start, int end )
+{
+   driTexRegion *list = heap->shared->list;
+   int i;
+
+   heap->localAge = ++heap->shared->globalAge;
+
+   for (i = start ; i <= end ; i++) 
+   {
+      list[i].in_use = 1;
+      list[i].age = heap->localAge;
+
+      /* remove_from_list(i)
+       */
+      list[(unsigned)list[i].next].prev = list[i].prev;
+      list[(unsigned)list[i].prev].next = list[i].next;
+      
+      /* insert_at_head(list, i)
+       */
+      list[i].prev = heap->nrRegions;
+      list[i].next = list[heap->nrRegions].next;
+      list[(unsigned)list[heap->nrRegions].next].prev = i;
+      list[heap->nrRegions].next = i;
+   }
+}
+
+
+/* Called by the client on lock contention to determine whether
+ * textures have been stolen
+ */
+void driAgeTextures( driHeapPtr heap )
+{
+   driTexRegion *list = heap->shared->list;
+   int sz = 1 << (heap->logGranularity);
+   int i, nr = 0;
+
+   /* Have to go right round from the back to ensure stuff ends up
+    * LRU in the local list...  Fix with a cursor pointer.
+    */
+   for (i = list[heap->nrRegions].prev ; 
+	i != heap->nrRegions && nr < heap->nrRegions ; 
+	i = list[i].prev, nr++)
+   {
+      if (list[i].age > heap->localAge) 
+	 heap->texturesGone( heap->driverContext, heap->heapId, i * sz, sz, 1); 
+   }
+
+   /* Loop or uninitialized heap detected.  Reset.
+    */
+   if (nr == heap->nrRegions) {
+      heap->texturesGone( heap->driverContext, heap->heapId, 0, heap->size, 0);
+      resetGlobalLRU( heap );
+   }
+}
+
+@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@@
+
+
+1.1.1.1
+log
+@Import OpenBSD 3.3 XF4 repository from CTM 3132 the first time
+This finalizes starting an OpenBSD-mirabile (aka MirBSD) repository.
+
+### MirBSD is:
+# Copyright (c) 1982-2003 by Thorsten "mirabile" Glaser <x86@@ePost.de>
+# Copyright © 1968-2003  The authors of And contributors to UNIX®, the
+#       C Language, BSD/Berkeley Unix; 386BSD, NetBSD 1.1 and OpenBSD.
+#
+# Anyone who obtained a copy of this work is hereby permitted to freely use,
+# distribute, modify, merge, sublicence, give away or sell it as long as the
+# authors are given due credit and the following notice is retained:
+#
+# This work is provided "as is", with no explicit or implicit warranty what-
+# soever. Use it only at your own risk. In no event may an author or contri-
+# butor be held liable for any damage, directly or indirectly, that origina-
+# ted through or is caused by creation or modification of this work.
+
+MirBSD is my private tree. MirBSD does not differ very much from OpenBSD
+and intentionally tracks OpenBSD. That's why it _is_ OpenBSD, just not the
+official one. It's like with DarrenBSD.
+
+At time of this writing, no advertising for MirBSD must be done,
+because the advertising clause has not yet been sorted out.
+
+http://templeofhate.com/tglaser/MirBSD/index.php
+@
+text
+@@

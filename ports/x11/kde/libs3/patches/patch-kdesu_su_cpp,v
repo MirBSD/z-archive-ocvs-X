@@ -1,0 +1,316 @@
+head	1.1;
+branch	1.1.1;
+access;
+symbols
+	cvs-200405281530:1.1.1.4
+	cvs-200402211630:1.1.1.4
+	cvs-200401261625:1.1.1.3
+	cvs-200401162142:1.1.1.3
+	cvs-200301141450:1.1.1.3
+	cvs-200312021610:1.1.1.3
+	cvs-200311151930:1.1.1.3
+	cvs-200310311830:1.1.1.3
+	cvs-200310021000:1.1.1.3
+	cvs-200309281111:1.1.1.3
+	cvs-200309171515:1.1.1.3
+	cvs-200308302005:1.1.1.3
+	cvs-200308171200:1.1.1.3
+	ctm-3449:1.1.1.2
+	cvs-200307191610:1.1.1.2
+	ctm-3416:1.1.1.2
+	cvs-200307091500:1.1.1.2
+	ctm-3389:1.1.1.2
+	cvs-200306291800:1.1.1.2
+	ctm-3369:1.1.1.2
+	ctm-3341:1.1.1.2
+	MIRBSD_5:1.1.1.2
+	cvs-200306082100:1.1.1.2
+	ctm-3316:1.1.1.2
+	ctm-3272:1.1.1.2
+	ctm-3264:1.1.1.2
+	ctm-3258:1.1.1.2
+	MIRBSD_4:1.1.1.2
+	ctm-3200:1.1.1.2
+	ctm-3188:1.1.1.2
+	ctm-3155:1.1.1.1
+	ctm-3132:1.1.1.1
+	openbsd:1.1.1;
+locks; strict;
+comment	@# @;
+
+
+1.1
+date	2003.03.22.19.55.20;	author tg;	state Exp;
+branches
+	1.1.1.1;
+next	;
+
+1.1.1.1
+date	2003.03.22.19.55.20;	author tg;	state Exp;
+branches;
+next	1.1.1.2;
+
+1.1.1.2
+date	2003.04.10.14.26.35;	author tg;	state Exp;
+branches;
+next	1.1.1.3;
+
+1.1.1.3
+date	2003.08.17.13.50.18;	author tg;	state Exp;
+branches;
+next	1.1.1.4;
+
+1.1.1.4
+date	2004.02.21.17.11.41;	author bsiegert;	state Stab;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@$OpenBSD: patch-kdesu_su_cpp,v 1.2 2003/01/06 22:46:02 espie Exp $
+--- kdesu/su.cpp.orig	Mon Mar  4 01:59:16 2002
++++ kdesu/su.cpp	Mon Jan  6 23:40:41 2003
+@@@@ -41,17 +41,33 @@@@
+ #ifndef __PATH_SU
+ #define __PATH_SU "false"
+ #endif
++#ifndef __PATH_SUDO
++#define __PATH_SUDO "false"
++#endif
+ 
++class SuProcess::SuProcessPrivate
++{
++public:
++    bool m_useSudo;
++};
+ 
+ SuProcess::SuProcess(const QCString &user, const QCString &command)
+ {
+     m_User = user;
+     m_Command = command;
++    d = new SuProcess::SuProcessPrivate();
++    d->m_useSudo = false;
+ }
+ 
+ 
+ SuProcess::~SuProcess()
+ {
++    delete d;
++}
++
++void SuProcess::setUseSudo(bool use_sudo)
++{
++    d->m_useSudo = use_sudo;
+ }
+ 
+ int SuProcess::checkInstall(const char *password)
+@@@@ -65,7 +81,7 @@@@ int SuProcess::checkNeedPassword()
+ }
+ 
+ /*
+- * Execute a command with su(1).
++ * Execute a command with su(1) or sudo
+  */
+ 
+ int SuProcess::exec(const char *password, int check)
+@@@@ -74,14 +90,22 @@@@ int SuProcess::exec(const char *password
+ 	setTerminal(true);
+ 
+     QCStringList args;
++    if (d->m_useSudo)
++    {
++	args += "-S";
++	args += "-p";
++	args += "Password:";
++	args += "-u";
++    }
+     if ((m_Scheduler != SchedNormal) || (m_Priority > 50))
+ 	args += "root";
+     else
+ 	args += m_User;
+-    args += "-c";
++    if (!d->m_useSudo)
++	args += "-c";
+     args += QCString(__KDE_BINDIR) + "/kdesu_stub";
+ 
+-    if (StubProcess::exec(__PATH_SU, args) < 0)
++    if (StubProcess::exec(d->m_useSudo ? __PATH_SUDO : __PATH_SU, args) < 0)
+     {
+ 	return check ? SuNotFound : -1;
+     }
+@@@@ -90,7 +114,8 @@@@ int SuProcess::exec(const char *password
+     if (ret < 0) 
+     {
+ 	if (!check)
+-	    kdError(900) << k_lineinfo << "Conversation with su failed\n";
++	    kdError(900) << k_lineinfo << "Conversation with " <<
++		(d->m_useSudo ? "sudo" : "su") << " failed\n";
+ 	return ret;
+     } 
+     if (check == 2)
+@@@@ -98,6 +123,8 @@@@ int SuProcess::exec(const char *password
+ 	if (ret == 1)
+ 	{
+ 	    kill(m_Pid, SIGTERM);
++	    close(m_Fd);
++	    m_Fd = -1;
+ 	    waitForChild();
+ 	}
+ 	return ret;
+@@@@ -170,6 +197,9 @@@@ int SuProcess::ConverseSU(const char *pa
+ 		return 0;
+ 	    }
+ 
++	    if (d->m_useSudo && line != "Password:")
++		break;
++
+ 	    // Match "Password: " with the regex ^[^:]+:[\w]*$.
+ 	    for (i=0,j=0,colon=0; i<line.length(); i++) 
+ 	    {
+@@@@ -210,6 +240,9 @@@@ int SuProcess::ConverseSU(const char *pa
+ 	}
+ 
+ 	case 2:
++	    if (d->m_useSudo && line == "Password:")
++		return -1;
++
+ 	    // Read till we get "kdesu_stub"
+ 	    if (line == "kdesu_stub")
+ 	    {
+@
+
+
+1.1.1.1
+log
+@Import OpenBSD 3.3 ports repository from CTM 3132 the first time
+This continues opening an OpenBSD-mirabile (aka MirBSD) repository.
+
+### MirBSD is:
+# Copyright (c) 1982-2003 by Thorsten "mirabile" Glaser <x86@@ePost.de>
+# Copyright © 1968-2003  The authors of And contributors to UNIX®, the
+#       C Language, BSD/Berkeley Unix; 386BSD, NetBSD 1.1 and OpenBSD.
+#
+# Anyone who obtained a copy of this work is hereby permitted to freely use,
+# distribute, modify, merge, sublicence, give away or sell it as long as the
+# authors are given due credit and the following notice is retained:
+#
+# This work is provided "as is", with no explicit or implicit warranty what-
+# soever. Use it only at your own risk. In no event may an author or contri-
+# butor be held liable for any damage, directly or indirectly, that origina-
+# ted through or is caused by creation or modification of this work.
+
+MirBSD is my private tree. MirBSD does not differ very much from OpenBSD
+and intentionally tracks OpenBSD. That's why it _is_ OpenBSD, just not the
+official one. It's like with DarrenBSD.
+
+At time of this writing, no advertising for MirBSD must be done,
+because the advertising clause has not yet been sorted out.
+
+http://templeofhate.com/tglaser/MirBSD/index.php
+@
+text
+@@
+
+
+1.1.1.2
+log
+@Import OpenBSD ports tree as of CTM 3188
+@
+text
+@d1 3
+a3 3
+$OpenBSD: patch-kdesu_su_cpp,v 1.3 2003/04/05 14:53:39 espie Exp $
+--- kdesu/su.cpp.orig	Sun Mar  2 20:00:58 2003
++++ kdesu/su.cpp	Sun Mar 30 16:24:08 2003
+d91 1
+a91 1
+@@@@ -167,6 +194,9 @@@@ int SuProcess::ConverseSU(const char *pa
+d101 1
+a101 1
+@@@@ -207,6 +237,9 @@@@ int SuProcess::ConverseSU(const char *pa
+@
+
+
+1.1.1.3
+log
+@Import OpenBSD CVS repository (checked out) of roughly 12:00 UTC today,
+retrieved from the canadian anoncvs server (due to CTM unavailability)
+@
+text
+@d1 3
+a3 3
+$OpenBSD: patch-kdesu_su_cpp,v 1.4 2003/07/30 12:59:23 espie Exp $
+--- kdesu/su.cpp.orig	Sun Jul 13 21:27:55 2003
++++ kdesu/su.cpp	Tue Jul 15 19:25:14 2003
+d47 1
+a47 1
+@@@@ -74,11 +90,19 @@@@ int SuProcess::exec(const char *password
+d67 1
+a67 6
+     QCString command = __PATH_SU;
+@@@@ -89,7 +113,7 @@@@ int SuProcess::exec(const char *password
+           return check ? SuNotFound : -1;
+     }
+ 
+-    if (StubProcess::exec(command, args) < 0)
+d72 1
+a72 1
+@@@@ -98,7 +122,8 @@@@ int SuProcess::exec(const char *password
+d82 10
+a91 1
+@@@@ -181,6 +206,9 @@@@ int SuProcess::ConverseSU(const char *pa
+d101 1
+a101 1
+@@@@ -221,6 +249,9 @@@@ int SuProcess::ConverseSU(const char *pa
+@
+
+
+1.1.1.4
+log
+@Import OpenBSD ports again. This will give us lots of new toys :).
+@
+text
+@d1 3
+a3 3
+$OpenBSD: patch-kdesu_su_cpp,v 1.5 2004/02/01 14:59:23 espie Exp $
+--- kdesu/su.cpp.orig	2003-11-30 10:46:50.000000000 +0100
++++ kdesu/su.cpp	2004-01-19 13:31:20.000000000 +0100
+d68 2
+a69 1
+@@@@ -90,7 +114,7 @@@@ int SuProcess::exec(const char *password
+a71 1
+     // kdDebug(900) << k_lineinfo << "Call StubProcess::exec()" << endl;
+d77 2
+a78 2
+@@@@ -102,7 +126,8 @@@@ int SuProcess::exec(const char *password
+     if (ret == error) 
+d86 8
+a93 8
+     if (check == NeedPassword)
+@@@@ -200,6 +225,9 @@@@ int SuProcess::ConverseSU(const char *pa
+ 		kdDebug(900) << k_lineinfo << "Read line <" << more << ">" << endl;
+             }
+             
++ 	    if (d->m_useSudo && line != "Password:")
++ 		break;
++ 
+d97 1
+a97 1
+@@@@ -251,6 +279,9 @@@@ int SuProcess::ConverseSU(const char *pa
+d100 4
+a103 4
+ 	case HandleStub:
++ 	    if (d->m_useSudo && line == "Password:")
++ 		return -1;
++ 
+@
+
+

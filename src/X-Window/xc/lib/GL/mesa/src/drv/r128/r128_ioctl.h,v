@@ -1,0 +1,352 @@
+head	1.1;
+branch	1.1.1;
+access;
+symbols
+	tg-mergetmp-2:1.1.1.2
+	cvs-200410241530:1.1.1.2
+	cvs-200410012000:1.1.1.2
+	cvs-200407141120:1.1.1.2
+	cvs-200406231010:1.1.1.2
+	MIRBSD_7quater:1.1.1.2
+	cvs-200405271510:1.1.1.2
+	XFree86_4_4_0:1.1.9.1
+	cvs-200403021700:1.1.1.2
+	XFREE86_20040213:1.1.9.1
+	xc:1.1.9
+	cvs-200401291925:1.1.1.2
+	MIRBSD_7_ALPHA:1.1.1.2.0.4
+	MIRBSD_7:1.1.1.2.0.2
+	MIRBSD_7ter:1.1.1.2
+	cvs-20011091815:1.1.1.2
+	cvs-200309162130:1.1.1.2
+	cvs-200308302005:1.1.1.2
+	ctmx-0387:1.1.1.2
+	ctmx-0384:1.1.1.2
+	MIRBSD_5:1.1.1.2
+	ctmx-0375:1.1.1.2
+	ctmx-0373:1.1.1.2
+	ctm-0371:1.1.1.2
+	ctm-0370:1.1.1.2
+	MIRBSD_4:1.1.1.2
+	ctm-0363:1.1.1.2
+	ctm-0359:1.1.1.2
+	ctm-0349:1.1.1.1
+	openbsd:1.1.1;
+locks; strict;
+comment	@ * @;
+
+
+1.1
+date	2003.03.22.20.04.19;	author tg;	state Exp;
+branches
+	1.1.1.1
+	1.1.9.1;
+next	;
+
+1.1.1.1
+date	2003.03.22.20.04.19;	author tg;	state Exp;
+branches;
+next	1.1.1.2;
+
+1.1.1.2
+date	2003.04.08.18.31.31;	author tg;	state Stab;
+branches;
+next	;
+
+1.1.9.1
+date	2004.02.14.19.18.01;	author tg;	state Exp;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@/* $XFree86: xc/lib/GL/mesa/src/drv/r128/r128_ioctl.h,v 1.3 2001/04/01 14:00:00 tsi Exp $ */
+/**************************************************************************
+
+Copyright 1999, 2000 ATI Technologies Inc. and Precision Insight, Inc.,
+                                               Cedar Park, Texas.
+All Rights Reserved.
+
+Permission is hereby granted, free of charge, to any person obtaining a
+copy of this software and associated documentation files (the "Software"),
+to deal in the Software without restriction, including without limitation
+on the rights to use, copy, modify, merge, publish, distribute, sub
+license, and/or sell copies of the Software, and to permit persons to whom
+the Software is furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice (including the next
+paragraph) shall be included in all copies or substantial portions of the
+Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NON-INFRINGEMENT. IN NO EVENT SHALL
+ATI, PRECISION INSIGHT AND/OR THEIR SUPPLIERS BE LIABLE FOR ANY CLAIM,
+DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR
+OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE
+USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+**************************************************************************/
+
+/*
+ * Authors:
+ *   Gareth Hughes <gareth@@valinux.com>
+ *
+ */
+
+#ifndef __R128_IOCTL_H__
+#define __R128_IOCTL_H__
+
+#ifdef GLX_DIRECT_RENDERING
+
+#include "r128_dri.h"
+#include "r128_reg.h"
+#include "r128_lock.h"
+
+#include "xf86drm.h"
+#include "xf86drmR128.h"
+
+#define R128_BUFFER_MAX_DWORDS	(R128_BUFFER_SIZE / sizeof(CARD32))
+
+
+extern drmBufPtr r128GetBufferLocked( r128ContextPtr rmesa );
+extern void r128FlushVerticesLocked( r128ContextPtr rmesa );
+
+extern void r128GetEltBufLocked( r128ContextPtr rmesa );
+extern void r128FlushEltsLocked( r128ContextPtr rmesa );
+extern void r128FireEltsLocked( r128ContextPtr rmesa,
+				GLuint start, GLuint end,
+				GLuint discard );
+extern void r128ReleaseBufLocked( r128ContextPtr rmesa, drmBufPtr buffer );
+
+/* Make this available as both a regular and an inline function.
+ */
+extern CARD32 *r128AllocVertices( r128ContextPtr rmesa, int count );
+
+static __inline CARD32 *r128AllocVerticesInline( r128ContextPtr rmesa,
+						 int count )
+{
+   int bytes = count * rmesa->vertsize * sizeof(CARD32);
+   CARD32 *head;
+
+   if ( !rmesa->vert_buf ) {
+      LOCK_HARDWARE( rmesa );
+
+      if ( rmesa->first_elt != rmesa->next_elt ) {
+	 r128FlushEltsLocked( rmesa );
+      }
+
+      rmesa->vert_buf = r128GetBufferLocked( rmesa );
+
+      UNLOCK_HARDWARE( rmesa );
+   } else if ( rmesa->vert_buf->used + bytes > rmesa->vert_buf->total ) {
+      LOCK_HARDWARE( rmesa );
+
+      r128FlushVerticesLocked( rmesa );
+      rmesa->vert_buf = r128GetBufferLocked( rmesa );
+
+      UNLOCK_HARDWARE( rmesa );
+   }
+
+   head = (CARD32 *)((char *)rmesa->vert_buf->address +
+		     rmesa->vert_buf->used);
+
+   rmesa->num_verts += count;
+   rmesa->vert_buf->used += bytes;
+   return head;
+}
+
+extern void r128FireBlitLocked( r128ContextPtr rmesa, drmBufPtr buffer,
+				GLint offset, GLint pitch, GLint format,
+				GLint x, GLint y, GLint width, GLint height );
+
+extern void r128WriteDepthSpanLocked( r128ContextPtr rmesa,
+				      GLuint n, GLint x, GLint y,
+				      const GLdepth depth[],
+				      const GLubyte mask[] );
+extern void r128WriteDepthPixelsLocked( r128ContextPtr rmesa, GLuint n,
+					const GLint x[], const GLint y[],
+					const GLdepth depth[],
+					const GLubyte mask[] );
+extern void r128ReadDepthSpanLocked( r128ContextPtr rmesa,
+				     GLuint n, GLint x, GLint y );
+extern void r128ReadDepthPixelsLocked( r128ContextPtr rmesa, GLuint n,
+				       const GLint x[], const GLint y[] );
+
+extern void r128SwapBuffers( r128ContextPtr rmesa );
+extern void r128PageFlip( r128ContextPtr rmesa );
+
+extern void r128WaitForIdleLocked( r128ContextPtr rmesa );
+
+
+extern void r128DDInitIoctlFuncs( GLcontext *ctx );
+
+
+/* ================================================================
+ * Helper macros:
+ */
+
+#define FLUSH_BATCH( rmesa )						\
+do {									\
+   if ( R128_DEBUG & DEBUG_VERBOSE_IOCTL )				\
+      fprintf( stderr, "FLUSH_BATCH in %s\n", __FUNCTION__ );		\
+   if ( rmesa->vert_buf ) {						\
+      r128FlushVertices( rmesa );					\
+   } else if ( rmesa->next_elt != rmesa->first_elt ) {			\
+      r128FlushElts( rmesa );						\
+   }									\
+} while (0)
+
+/* 64-bit align the next element address, and then make room for the
+ * next indexed prim packet header.
+ */
+#define ALIGN_NEXT_ELT( rmesa )						\
+do {									\
+   rmesa->next_elt = (GLushort *)					\
+      (((unsigned long)rmesa->next_elt + 7) & ~0x7);			\
+   rmesa->next_elt = (GLushort *)					\
+      ((GLubyte *)rmesa->next_elt + R128_INDEX_PRIM_OFFSET);		\
+} while (0)
+
+#define r128FlushVertices( rmesa )					\
+do {									\
+   LOCK_HARDWARE( rmesa );						\
+   r128FlushVerticesLocked( rmesa );					\
+   UNLOCK_HARDWARE( rmesa );						\
+} while (0)
+
+#define r128FlushElts( rmesa )						\
+do {									\
+   LOCK_HARDWARE( rmesa );						\
+   r128FlushEltsLocked( rmesa );					\
+   UNLOCK_HARDWARE( rmesa );						\
+} while (0)
+
+#define r128WaitForIdle( rmesa )					\
+   do {									\
+      LOCK_HARDWARE( rmesa );						\
+      r128WaitForIdleLocked( rmesa );					\
+      UNLOCK_HARDWARE( rmesa );						\
+   } while (0)
+
+#endif
+#endif /* __R128_IOCTL_H__ */
+@
+
+
+1.1.9.1
+log
+@OpenBSD just has imported exactly this tree into their vendor branch,
+called the same tag, in XF4/xc
+This is, apparently, the last XFree86 snapshot before the licence change
+(ie, addition of the advertising clause)
+
+Since the developers don't see any problems with that, and we would like
+to integrate improvements done by the remaining one or two (or so) XFree86
+developers (j/k), this prepares enabling us to update X-Window in the future.
+@
+text
+@d1 1
+a1 1
+/* $XFree86: xc/lib/GL/mesa/src/drv/r128/r128_ioctl.h,v 1.6 2002/12/16 16:18:53 dawes Exp $ */
+d45 1
+a45 1
+#include "r128_common.h"
+d53 13
+a65 1
+static __inline void *r128AllocDmaLow( r128ContextPtr rmesa, int bytes )
+d67 1
+d72 5
+d78 1
+d82 1
+d85 1
+d89 4
+a92 1
+   head = (CARD32 *)((char *)rmesa->vert_buf->address + rmesa->vert_buf->used);
+d114 2
+a115 3
+extern void r128CopyBuffer( const __DRIdrawablePrivate *dPriv );
+extern void r128PageFlip( const __DRIdrawablePrivate *dPriv );
+void r128WaitForVBlank( r128ContextPtr rmesa );
+d133 2
+d144 1
+a144 1
+      (((GLuint)rmesa->next_elt + 7) & ~0x7);				\
+@
+
+
+1.1.1.1
+log
+@Import OpenBSD 3.3 XF4 repository from CTM 3132 the first time
+This finalizes starting an OpenBSD-mirabile (aka MirBSD) repository.
+
+### MirBSD is:
+# Copyright (c) 1982-2003 by Thorsten "mirabile" Glaser <x86@@ePost.de>
+# Copyright © 1968-2003  The authors of And contributors to UNIX®, the
+#       C Language, BSD/Berkeley Unix; 386BSD, NetBSD 1.1 and OpenBSD.
+#
+# Anyone who obtained a copy of this work is hereby permitted to freely use,
+# distribute, modify, merge, sublicence, give away or sell it as long as the
+# authors are given due credit and the following notice is retained:
+#
+# This work is provided "as is", with no explicit or implicit warranty what-
+# soever. Use it only at your own risk. In no event may an author or contri-
+# butor be held liable for any damage, directly or indirectly, that origina-
+# ted through or is caused by creation or modification of this work.
+
+MirBSD is my private tree. MirBSD does not differ very much from OpenBSD
+and intentionally tracks OpenBSD. That's why it _is_ OpenBSD, just not the
+official one. It's like with DarrenBSD.
+
+At time of this writing, no advertising for MirBSD must be done,
+because the advertising clause has not yet been sorted out.
+
+http://templeofhate.com/tglaser/MirBSD/index.php
+@
+text
+@@
+
+
+1.1.1.2
+log
+@The X-Windowing System
+
+Import XFree86 4.3 from OpenBSD by CTM, in the hope it's stable
+@
+text
+@d1 1
+a1 1
+/* $XFree86: xc/lib/GL/mesa/src/drv/r128/r128_ioctl.h,v 1.6 2002/12/16 16:18:53 dawes Exp $ */
+d45 1
+a45 1
+#include "r128_common.h"
+d53 13
+a65 1
+static __inline void *r128AllocDmaLow( r128ContextPtr rmesa, int bytes )
+d67 1
+d72 5
+d78 1
+d82 1
+d85 1
+d89 4
+a92 1
+   head = (CARD32 *)((char *)rmesa->vert_buf->address + rmesa->vert_buf->used);
+d114 2
+a115 3
+extern void r128CopyBuffer( const __DRIdrawablePrivate *dPriv );
+extern void r128PageFlip( const __DRIdrawablePrivate *dPriv );
+void r128WaitForVBlank( r128ContextPtr rmesa );
+d133 2
+d144 1
+a144 1
+      (((GLuint)rmesa->next_elt + 7) & ~0x7);				\
+@
+

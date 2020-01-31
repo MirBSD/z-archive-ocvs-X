@@ -1,0 +1,342 @@
+head	1.1;
+branch	1.1.1;
+access;
+symbols
+	tg-mergetmp-2:1.1.1.2
+	cvs-200410241530:1.1.1.2
+	cvs-200410012000:1.1.1.2
+	cvs-200407141120:1.1.1.2
+	cvs-200406231010:1.1.1.2
+	MIRBSD_7quater:1.1.1.2
+	cvs-200405271510:1.1.1.2
+	XFree86_4_4_0:1.1.9.1
+	cvs-200403021700:1.1.1.2
+	XFREE86_20040213:1.1.9.1
+	xc:1.1.9
+	cvs-200401291925:1.1.1.2
+	MIRBSD_7_ALPHA:1.1.1.2.0.4
+	MIRBSD_7:1.1.1.2.0.2
+	MIRBSD_7ter:1.1.1.2
+	cvs-20011091815:1.1.1.2
+	cvs-200309162130:1.1.1.2
+	cvs-200308302005:1.1.1.2
+	ctmx-0387:1.1.1.2
+	ctmx-0384:1.1.1.2
+	MIRBSD_5:1.1.1.2
+	ctmx-0375:1.1.1.2
+	ctmx-0373:1.1.1.2
+	ctm-0371:1.1.1.2
+	ctm-0370:1.1.1.2
+	MIRBSD_4:1.1.1.2
+	ctm-0363:1.1.1.2
+	ctm-0359:1.1.1.2
+	ctm-0349:1.1.1.1
+	openbsd:1.1.1;
+locks; strict;
+comment	@ * @;
+
+
+1.1
+date	2003.03.22.20.04.11;	author tg;	state Exp;
+branches
+	1.1.1.1
+	1.1.9.1;
+next	;
+
+1.1.1.1
+date	2003.03.22.20.04.11;	author tg;	state Exp;
+branches;
+next	1.1.1.2;
+
+1.1.1.2
+date	2003.04.08.18.31.20;	author tg;	state Stab;
+branches;
+next	;
+
+1.1.9.1
+date	2004.02.14.19.17.48;	author tg;	state Exp;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@/* $XFree86: xc/lib/GL/mesa/src/drv/ffb/ffb_span.c,v 1.1 2000/06/20 05:08:39 dawes Exp $
+ *
+ * GLX Hardware Device Driver for Sun Creator/Creator3D
+ * Copyright (C) 2000 David S. Miller
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a
+ * copy of this software and associated documentation files (the "Software"),
+ * to deal in the Software without restriction, including without limitation
+ * the rights to use, copy, modify, merge, publish, distribute, sublicense,
+ * and/or sell copies of the Software, and to permit persons to whom the
+ * Software is furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included
+ * in all copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
+ * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL
+ * DAVID MILLER, OR ANY OTHER CONTRIBUTORS BE LIABLE FOR ANY CLAIM, 
+ * DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR 
+ * OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE 
+ * OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+ *
+ *
+ *    David S. Miller <davem@@redhat.com>
+ */
+
+#include "types.h"
+#include "ffb_dd.h"
+#include "ffb_span.h"
+#include "ffb_context.h"
+#include "ffb_lock.h"
+
+#define DBG 0
+
+#define HW_LOCK()						\
+	ffbContextPtr fmesa = FFB_CONTEXT(ctx);			\
+	if (!fmesa->hw_locked)					\
+		LOCK_HARDWARE(fmesa);
+
+#define HW_UNLOCK()			\
+	if (!fmesa->hw_locked)		\
+		UNLOCK_HARDWARE(fmesa); \
+
+#define LOCAL_VARS						\
+	__DRIdrawablePrivate *dPriv = fmesa->driDrawable;	\
+	GLuint height = dPriv->h;				\
+	char *buf
+
+#define INIT_MONO_PIXEL(p)		\
+	GLuint p = fmesa->MonoColor;
+
+/* We use WID clipping, so this test always passes. */
+#define CLIPPIXEL(__x, __y)	(1)
+
+/* And also, due to WID clipping, we need not do anything
+ * special here.
+ */
+#define CLIPSPAN(__x,__y,__n,__x1,__n1,__i)		\
+	__n1 = __n;					\
+	__x1 = __x;					\
+
+#define HW_CLIPLOOP()							\
+do {	unsigned int fbc, ppc, cmp;					\
+	FFBWait(fmesa, fmesa->regs);					\
+	fbc = fmesa->regs->fbc; ppc = fmesa->regs->ppc; cmp = fmesa->regs->cmp; \
+	fmesa->regs->fbc = ((fbc &					\
+			     ~(FFB_FBC_WB_C | FFB_FBC_ZE_MASK | FFB_FBC_RGBE_MASK)) \
+			    | (FFB_FBC_ZE_OFF | FFB_FBC_RGBE_MASK));	\
+	fmesa->regs->ppc = ((ppc &					\
+			     ~(FFB_PPC_XS_MASK | FFB_PPC_ABE_MASK | FFB_PPC_DCE_MASK | \
+			       FFB_PPC_APE_MASK | FFB_PPC_CS_MASK))	\
+			    | (FFB_PPC_XS_WID | FFB_PPC_ABE_DISABLE |	\
+			       FFB_PPC_DCE_DISABLE | FFB_PPC_APE_DISABLE | \
+			       FFB_PPC_CS_VAR));			\
+	fmesa->regs->cmp = ((cmp & ~(0xff << 16)) | (0x80 << 16));	\
+	fmesa->ffbScreen->rp_active = 1;				\
+	FFBWait(fmesa, fmesa->regs);					\
+	buf = (char *)(fmesa->sfb32 + (dPriv->x << 2) + (dPriv->y << 13));\
+	if (dPriv->numClipRects) {
+
+#define HW_ENDCLIPLOOP()	\
+	}			\
+	fmesa->regs->fbc = fbc;	\
+	fmesa->regs->ppc = ppc;	\
+	fmesa->regs->cmp = cmp;	\
+	fmesa->ffbScreen->rp_active = 1; \
+} while(0)
+
+#define Y_FLIP(__y)		(height - __y)
+
+#define READ_RGBA(rgba,__x,__y)					\
+do {	GLuint p = *(GLuint *)(buf + ((__x)<<2) + ((__y)<<13));	\
+	rgba[0] = (p >>  0) & 0xff;				\
+	rgba[1] = (p >>  8) & 0xff;				\
+	rgba[2] = (p >> 16) & 0xff;				\
+	rgba[3] = 0xff;						\
+} while(0)
+
+#define WRITE_RGBA(__x, __y, __r, __g, __b, __a)		\
+	*(GLuint *)(buf + ((__x)<<2) + ((__y)<<13)) =		\
+		((((__r) & 0xff) <<  0) |			\
+		 (((__g) & 0xff) <<  8) |			\
+		 (((__b) & 0xff) << 16))
+
+#define WRITE_PIXEL(__x, __y, __p) \
+	*(GLuint *)(buf + ((__x)<<2) + ((__y)<<13)) = (__p)
+
+#define TAG(x) ffb##x##_888
+
+#include <spantmp.h>
+
+void ffbDDInitSpanFuncs(GLcontext *ctx)
+{
+	ctx->Driver.WriteRGBASpan	= ffbWriteRGBASpan_888;
+	ctx->Driver.WriteRGBSpan	= ffbWriteRGBSpan_888;
+	ctx->Driver.WriteRGBAPixels	= ffbWriteRGBAPixels_888;
+	ctx->Driver.WriteMonoRGBASpan	= ffbWriteMonoRGBASpan_888;
+	ctx->Driver.WriteMonoRGBAPixels	= ffbWriteMonoRGBAPixels_888;
+	ctx->Driver.ReadRGBASpan	= ffbReadRGBASpan_888;
+	ctx->Driver.ReadRGBAPixels	= ffbReadRGBAPixels_888;
+
+	/* We don't support color index mode yet, but it will be
+	 * very easy to do. -DaveM
+	 */
+	ctx->Driver.WriteCI8Span        = NULL;
+	ctx->Driver.WriteCI32Span       = NULL;
+	ctx->Driver.WriteMonoCISpan     = NULL;
+	ctx->Driver.WriteCI32Pixels     = NULL;
+	ctx->Driver.WriteMonoCIPixels   = NULL;
+	ctx->Driver.ReadCI32Span        = NULL;
+	ctx->Driver.ReadCI32Pixels      = NULL;
+}
+@
+
+
+1.1.9.1
+log
+@OpenBSD just has imported exactly this tree into their vendor branch,
+called the same tag, in XF4/xc
+This is, apparently, the last XFree86 snapshot before the licence change
+(ie, addition of the advertising clause)
+
+Since the developers don't see any problems with that, and we would like
+to integrate improvements done by the remaining one or two (or so) XFree86
+developers (j/k), this prepares enabling us to update X-Window in the future.
+@
+text
+@d1 1
+a1 1
+/* $XFree86: xc/lib/GL/mesa/src/drv/ffb/ffb_span.c,v 1.2 2002/02/22 21:32:59 dawes Exp $
+d28 1
+a28 1
+#include "mtypes.h"
+a33 2
+#include "swrast/swrast.h"
+
+d48 4
+a51 8
+        GLuint p;						\
+	char *buf; 						\
+        (void) p
+
+#define INIT_MONO_PIXEL(p, color)		\
+        p = ((color[0] <<  0) |			\
+	     (color[1] << 8) |			\
+	     (color[2] << 16))
+d115 7
+a121 10
+	struct swrast_device_driver *swdd = 
+		_swrast_GetDeviceDriverReference(ctx);
+   
+	swdd->WriteRGBASpan	= ffbWriteRGBASpan_888;
+	swdd->WriteRGBSpan	= ffbWriteRGBSpan_888;
+	swdd->WriteRGBAPixels	= ffbWriteRGBAPixels_888;
+	swdd->WriteMonoRGBASpan	= ffbWriteMonoRGBASpan_888;
+	swdd->WriteMonoRGBAPixels	= ffbWriteMonoRGBAPixels_888;
+	swdd->ReadRGBASpan	= ffbReadRGBASpan_888;
+	swdd->ReadRGBAPixels	= ffbReadRGBAPixels_888;
+d126 7
+a132 7
+	swdd->WriteCI8Span        = NULL;
+	swdd->WriteCI32Span       = NULL;
+	swdd->WriteMonoCISpan     = NULL;
+	swdd->WriteCI32Pixels     = NULL;
+	swdd->WriteMonoCIPixels   = NULL;
+	swdd->ReadCI32Span        = NULL;
+	swdd->ReadCI32Pixels      = NULL;
+@
+
+
+1.1.1.1
+log
+@Import OpenBSD 3.3 XF4 repository from CTM 3132 the first time
+This finalizes starting an OpenBSD-mirabile (aka MirBSD) repository.
+
+### MirBSD is:
+# Copyright (c) 1982-2003 by Thorsten "mirabile" Glaser <x86@@ePost.de>
+# Copyright © 1968-2003  The authors of And contributors to UNIX®, the
+#       C Language, BSD/Berkeley Unix; 386BSD, NetBSD 1.1 and OpenBSD.
+#
+# Anyone who obtained a copy of this work is hereby permitted to freely use,
+# distribute, modify, merge, sublicence, give away or sell it as long as the
+# authors are given due credit and the following notice is retained:
+#
+# This work is provided "as is", with no explicit or implicit warranty what-
+# soever. Use it only at your own risk. In no event may an author or contri-
+# butor be held liable for any damage, directly or indirectly, that origina-
+# ted through or is caused by creation or modification of this work.
+
+MirBSD is my private tree. MirBSD does not differ very much from OpenBSD
+and intentionally tracks OpenBSD. That's why it _is_ OpenBSD, just not the
+official one. It's like with DarrenBSD.
+
+At time of this writing, no advertising for MirBSD must be done,
+because the advertising clause has not yet been sorted out.
+
+http://templeofhate.com/tglaser/MirBSD/index.php
+@
+text
+@@
+
+
+1.1.1.2
+log
+@The X-Windowing System
+
+Import XFree86 4.3 from OpenBSD by CTM, in the hope it's stable
+@
+text
+@d1 1
+a1 1
+/* $XFree86: xc/lib/GL/mesa/src/drv/ffb/ffb_span.c,v 1.2 2002/02/22 21:32:59 dawes Exp $
+d28 1
+a28 1
+#include "mtypes.h"
+a33 2
+#include "swrast/swrast.h"
+
+d48 4
+a51 8
+        GLuint p;						\
+	char *buf; 						\
+        (void) p
+
+#define INIT_MONO_PIXEL(p, color)		\
+        p = ((color[0] <<  0) |			\
+	     (color[1] << 8) |			\
+	     (color[2] << 16))
+d115 7
+a121 10
+	struct swrast_device_driver *swdd = 
+		_swrast_GetDeviceDriverReference(ctx);
+   
+	swdd->WriteRGBASpan	= ffbWriteRGBASpan_888;
+	swdd->WriteRGBSpan	= ffbWriteRGBSpan_888;
+	swdd->WriteRGBAPixels	= ffbWriteRGBAPixels_888;
+	swdd->WriteMonoRGBASpan	= ffbWriteMonoRGBASpan_888;
+	swdd->WriteMonoRGBAPixels	= ffbWriteMonoRGBAPixels_888;
+	swdd->ReadRGBASpan	= ffbReadRGBASpan_888;
+	swdd->ReadRGBAPixels	= ffbReadRGBAPixels_888;
+d126 7
+a132 7
+	swdd->WriteCI8Span        = NULL;
+	swdd->WriteCI32Span       = NULL;
+	swdd->WriteMonoCISpan     = NULL;
+	swdd->WriteCI32Pixels     = NULL;
+	swdd->WriteMonoCIPixels   = NULL;
+	swdd->ReadCI32Span        = NULL;
+	swdd->ReadCI32Pixels      = NULL;
+@
+

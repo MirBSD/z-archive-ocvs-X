@@ -1,0 +1,2621 @@
+head	1.1;
+branch	1.1.1;
+access;
+symbols
+	tg-mergetmp-2:1.1.1.3
+	cvs-200410241530:1.1.1.3
+	cvs-200410012000:1.1.1.3
+	cvs-200407141120:1.1.1.3
+	cvs-200406231010:1.1.1.3
+	MIRBSD_7quater:1.1.1.2
+	cvs-200405271510:1.1.1.3
+	XFree86_4_4_0:1.1.9.1
+	cvs-200403021700:1.1.1.3
+	XFREE86_20040213:1.1.9.1
+	xc:1.1.9
+	cvs-200401291925:1.1.1.2
+	MIRBSD_7_ALPHA:1.1.1.2.0.4
+	MIRBSD_7:1.1.1.2.0.2
+	MIRBSD_7ter:1.1.1.2
+	cvs-20011091815:1.1.1.2
+	cvs-200309162130:1.1.1.2
+	cvs-200308302005:1.1.1.2
+	ctmx-0387:1.1.1.2
+	ctmx-0384:1.1.1.2
+	MIRBSD_5:1.1.1.2
+	ctmx-0375:1.1.1.2
+	ctmx-0373:1.1.1.2
+	ctm-0371:1.1.1.2
+	ctm-0370:1.1.1.2
+	MIRBSD_4:1.1.1.2
+	ctm-0363:1.1.1.2
+	ctm-0359:1.1.1.2
+	ctm-0349:1.1.1.1
+	openbsd:1.1.1;
+locks; strict;
+comment	@ * @;
+
+
+1.1
+date	2003.03.22.20.04.20;	author tg;	state Exp;
+branches
+	1.1.1.1
+	1.1.9.1;
+next	;
+
+1.1.1.1
+date	2003.03.22.20.04.20;	author tg;	state Exp;
+branches;
+next	1.1.1.2;
+
+1.1.1.2
+date	2003.04.08.18.31.36;	author tg;	state Exp;
+branches;
+next	1.1.1.3;
+
+1.1.1.3
+date	2004.03.02.17.59.23;	author tg;	state Stab;
+branches;
+next	;
+
+1.1.9.1
+date	2004.02.14.19.18.10;	author tg;	state Exp;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@/* $XFree86: xc/lib/GL/mesa/src/drv/radeon/radeon_tex.c,v 1.4 2001/05/21 21:43:52 dawes Exp $ */
+/**************************************************************************
+
+Copyright 2000, 2001 ATI Technologies Inc., Ontario, Canada, and
+                     VA Linux Systems Inc., Fremont, California.
+
+All Rights Reserved.
+
+Permission is hereby granted, free of charge, to any person obtaining a
+copy of this software and associated documentation files (the "Software"),
+to deal in the Software without restriction, including without limitation
+on the rights to use, copy, modify, merge, publish, distribute, sub
+license, and/or sell copies of the Software, and to permit persons to whom
+the Software is furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice (including the next
+paragraph) shall be included in all copies or substantial portions of the
+Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NON-INFRINGEMENT. IN NO EVENT SHALL
+ATI, VA LINUX SYSTEMS AND/OR THEIR SUPPLIERS BE LIABLE FOR ANY CLAIM,
+DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR
+OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE
+USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+**************************************************************************/
+
+/*
+ * Authors:
+ *   Kevin E. Martin <martin@@valinux.com>
+ *   Gareth Hughes <gareth@@valinux.com>
+ *
+ */
+
+#include "radeon_context.h"
+#include "radeon_state.h"
+#include "radeon_ioctl.h"
+#include "radeon_vb.h"
+#include "radeon_tex.h"
+
+#include "mmath.h"
+#include "simple_list.h"
+#include "enums.h"
+#include "mem.h"
+#include "texutil.h"
+
+
+static void radeonSetTexWrap( radeonTexObjPtr t, GLenum swrap, GLenum twrap )
+{
+   t->pp_txfilter &= ~(RADEON_CLAMP_S_MASK | RADEON_CLAMP_T_MASK);
+
+   switch ( swrap ) {
+   case GL_REPEAT:
+      t->pp_txfilter |= RADEON_CLAMP_S_WRAP;
+      break;
+   case GL_CLAMP:
+      t->pp_txfilter |= RADEON_CLAMP_S_CLAMP_LAST;
+      break;
+   case GL_CLAMP_TO_EDGE:
+      t->pp_txfilter |= RADEON_CLAMP_S_CLAMP_LAST;
+      break;
+   }
+
+   switch ( twrap ) {
+   case GL_REPEAT:
+      t->pp_txfilter |= RADEON_CLAMP_T_WRAP;
+      break;
+   case GL_CLAMP:
+      t->pp_txfilter |= RADEON_CLAMP_T_CLAMP_LAST;
+      break;
+   case GL_CLAMP_TO_EDGE:
+      t->pp_txfilter |= RADEON_CLAMP_T_CLAMP_LAST;
+      break;
+   }
+}
+
+static void radeonSetTexFilter( radeonTexObjPtr t, GLenum minf, GLenum magf )
+{
+   t->pp_txfilter &= ~(RADEON_MIN_FILTER_MASK | RADEON_MAG_FILTER_MASK);
+
+   switch ( minf ) {
+   case GL_NEAREST:
+      t->pp_txfilter |= RADEON_MIN_FILTER_NEAREST;
+      break;
+   case GL_LINEAR:
+      t->pp_txfilter |= RADEON_MIN_FILTER_LINEAR;
+      break;
+   case GL_NEAREST_MIPMAP_NEAREST:
+      t->pp_txfilter |= RADEON_MIN_FILTER_NEAREST_MIP_NEAREST;
+      break;
+   case GL_NEAREST_MIPMAP_LINEAR:
+      t->pp_txfilter |= RADEON_MIN_FILTER_LINEAR_MIP_NEAREST;
+      break;
+   case GL_LINEAR_MIPMAP_NEAREST:
+      t->pp_txfilter |= RADEON_MIN_FILTER_NEAREST_MIP_LINEAR;
+      break;
+   case GL_LINEAR_MIPMAP_LINEAR:
+      t->pp_txfilter |= RADEON_MIN_FILTER_LINEAR_MIP_LINEAR;
+      break;
+   }
+
+   switch ( magf ) {
+   case GL_NEAREST:
+      t->pp_txfilter |= RADEON_MAG_FILTER_NEAREST;
+      break;
+   case GL_LINEAR:
+      t->pp_txfilter |= RADEON_MAG_FILTER_LINEAR;
+      break;
+   }
+}
+
+static void radeonSetTexBorderColor( radeonTexObjPtr t, GLubyte c[4] )
+{
+   t->pp_border_color = radeonPackColor( 4, c[0], c[1], c[2], c[3] );
+}
+
+static radeonTexObjPtr radeonAllocTexObj( struct gl_texture_object *texObj )
+{
+   radeonTexObjPtr t;
+
+   t = CALLOC_STRUCT( radeon_tex_obj );
+
+   if ( RADEON_DEBUG & DEBUG_VERBOSE_API ) {
+      fprintf( stderr, "%s( %p, %p )\n", __FUNCTION__, texObj, t );
+   }
+
+   /* Initialize non-image-dependent parts of the state:
+    */
+   t->tObj = texObj;
+#if 0
+   t->dirty_images = ~0;
+#endif
+   t->pp_txfilter = RADEON_BORDER_MODE_OGL;
+   t->pp_txformat = (RADEON_TXFORMAT_ENDIAN_NO_SWAP |
+		     RADEON_TXFORMAT_PERSPECTIVE_ENABLE);
+
+   make_empty_list( t );
+
+   radeonSetTexWrap( t, texObj->WrapS, texObj->WrapT );
+   radeonSetTexFilter( t, texObj->MinFilter, texObj->MagFilter );
+   radeonSetTexBorderColor( t, texObj->BorderColor );
+
+   return t;
+}
+
+
+static GLint radeonChooseTexFormat( radeonContextPtr rmesa,
+				    struct gl_texture_image *texImage,
+				    GLenum format, GLenum type )
+{
+   const GLboolean do32bpt = ( rmesa->radeonScreen->cpp == 4 );
+   const struct gl_texture_format *texFormat;
+   GLint ret;
+
+   if ( 0 )
+      fprintf( stderr, "internal=%s format=%s type=%s\n",
+	       texImage->IntFormat == 3 ? "GL_RGB (3)" :
+	       texImage->IntFormat == 4 ? "GL_RGBA (4)" :
+	       gl_lookup_enum_by_nr( texImage->IntFormat ),
+	       gl_lookup_enum_by_nr( format ),
+	       gl_lookup_enum_by_nr( type ) );
+
+#define SET_FORMAT( r, gl )						\
+   do {									\
+      ret = (r);							\
+      texFormat = &(gl);						\
+   } while (0)
+
+#define SET_FORMAT_32BPT( r32, gl32, r16, gl16 )			\
+   do {									\
+      if ( do32bpt ) {							\
+	 ret = (r32);							\
+	 texFormat = &(gl32);						\
+      } else {								\
+	 ret = (r16);							\
+	 texFormat = &(gl16);						\
+      }									\
+   } while (0)
+
+   switch ( texImage->IntFormat ) {
+      /* GH: Bias towards GL_RGB, GL_RGBA texture formats.  This has
+       * got to be better than sticking them way down the end of this
+       * huge list.
+       */
+   case GL_RGBA:
+   case 4:
+      if ( format == GL_BGRA ) {
+	 if ( type == GL_UNSIGNED_INT_8_8_8_8_REV ) {
+	    SET_FORMAT( RADEON_TXFORMAT_ARGB8888, _mesa_texformat_argb8888 );
+	    break;
+	 } else if ( type == GL_UNSIGNED_SHORT_4_4_4_4_REV ) {
+	    SET_FORMAT( RADEON_TXFORMAT_ARGB4444, _mesa_texformat_argb4444 );
+	    break;
+	 } else if ( type == GL_UNSIGNED_SHORT_1_5_5_5_REV ) {
+	    SET_FORMAT( RADEON_TXFORMAT_ARGB1555, _mesa_texformat_argb1555 );
+	    break;
+	 }
+      }
+      SET_FORMAT_32BPT( RADEON_TXFORMAT_RGBA8888, _mesa_texformat_rgba8888,
+			RADEON_TXFORMAT_ARGB4444, _mesa_texformat_argb4444 );
+      break;
+
+   case GL_RGB:
+   case 3:
+      if ( format == GL_RGB && type == GL_UNSIGNED_SHORT_5_6_5 ) {
+	 SET_FORMAT( RADEON_TXFORMAT_RGB565, _mesa_texformat_rgb565 );
+	 break;
+      }
+      SET_FORMAT_32BPT( RADEON_TXFORMAT_RGBA8888, _mesa_texformat_rgba8888,
+			RADEON_TXFORMAT_RGB565,   _mesa_texformat_rgb565 );
+      break;
+
+      /* GH: Okay, keep checking as normal.  Still test for GL_RGB,
+       * GL_RGBA formats first.
+       */
+   case GL_RGBA8:
+   case GL_RGB10_A2:
+   case GL_RGBA12:
+   case GL_RGBA16:
+      SET_FORMAT_32BPT( RADEON_TXFORMAT_RGBA8888, _mesa_texformat_rgba8888,
+			RADEON_TXFORMAT_ARGB4444, _mesa_texformat_argb4444 );
+      break;
+
+   case GL_RGBA4:
+   case GL_RGBA2:
+      SET_FORMAT( RADEON_TXFORMAT_ARGB4444, _mesa_texformat_argb4444 );
+      break;
+
+   case GL_RGB5_A1:
+      SET_FORMAT( RADEON_TXFORMAT_ARGB1555, _mesa_texformat_argb1555 );
+      break;
+
+   case GL_RGB8:
+   case GL_RGB10:
+   case GL_RGB12:
+   case GL_RGB16:
+      SET_FORMAT_32BPT( RADEON_TXFORMAT_RGBA8888, _mesa_texformat_rgba8888,
+			RADEON_TXFORMAT_RGB565,   _mesa_texformat_rgb565 );
+      break;
+
+   case GL_RGB5:
+   case GL_RGB4:
+   case GL_R3_G3_B2:
+      SET_FORMAT( RADEON_TXFORMAT_RGB565, _mesa_texformat_rgb565 );
+      break;
+
+   case GL_ALPHA:
+   case GL_ALPHA4:
+   case GL_ALPHA8:
+   case GL_ALPHA12:
+   case GL_ALPHA16:
+      SET_FORMAT( RADEON_TXFORMAT_AI88, _mesa_texformat_al88 );
+      break;
+
+   case 1:
+   case GL_LUMINANCE:
+   case GL_LUMINANCE4:
+   case GL_LUMINANCE8:
+   case GL_LUMINANCE12:
+   case GL_LUMINANCE16:
+      SET_FORMAT( RADEON_TXFORMAT_AI88, _mesa_texformat_al88 );
+      break;
+
+   case 2:
+   case GL_LUMINANCE_ALPHA:
+   case GL_LUMINANCE4_ALPHA4:
+   case GL_LUMINANCE6_ALPHA2:
+   case GL_LUMINANCE8_ALPHA8:
+   case GL_LUMINANCE12_ALPHA4:
+   case GL_LUMINANCE12_ALPHA12:
+   case GL_LUMINANCE16_ALPHA16:
+      SET_FORMAT( RADEON_TXFORMAT_AI88, _mesa_texformat_al88 );
+      break;
+
+   case GL_INTENSITY:
+   case GL_INTENSITY4:
+   case GL_INTENSITY8:
+   case GL_INTENSITY12:
+   case GL_INTENSITY16:
+      SET_FORMAT( RADEON_TXFORMAT_I8, _mesa_texformat_i8 );
+      break;
+
+   case GL_COLOR_INDEX:
+   case GL_COLOR_INDEX1_EXT:
+   case GL_COLOR_INDEX2_EXT:
+   case GL_COLOR_INDEX4_EXT:
+   case GL_COLOR_INDEX8_EXT:
+   case GL_COLOR_INDEX12_EXT:
+   case GL_COLOR_INDEX16_EXT:
+   default:
+      fprintf( stderr, "bad texture format in radeonChooseTexFormat() %d",
+	       texImage->IntFormat );
+      return -1;
+   }
+
+   texImage->TexFormat = texFormat;
+
+   return ret;
+}
+
+
+/* ================================================================
+ * Texture image callbacks
+ */
+
+static GLboolean
+radeonDDTexImage1D( GLcontext *ctx, GLenum target, GLint level,
+		    GLenum format, GLenum type, const GLvoid *pixels,
+		    const struct gl_pixelstore_attrib *packing,
+		    struct gl_texture_object *texObj,
+		    struct gl_texture_image *texImage,
+		    GLboolean *retainInternalCopy )
+{
+   radeonContextPtr rmesa = RADEON_CONTEXT(ctx);
+   radeonTexObjPtr t = (radeonTexObjPtr)texObj->DriverData;
+   const struct gl_texture_format *texFormat;
+   GLuint texSize;
+   GLint txformat;
+   GLubyte *data;
+
+   if ( target != GL_TEXTURE_1D )
+      return GL_FALSE;
+
+   if ( RADEON_DEBUG & DEBUG_VERBOSE_API ) {
+      fprintf( stderr, "%s( %p, %d )\n", __FUNCTION__, texObj, level );
+   }
+
+   if ( t ) {
+      if ( t->bound ) FLUSH_BATCH( rmesa );
+      radeonSwapOutTexObj( rmesa, t );
+   } else {
+      t = radeonAllocTexObj( texObj );
+      texObj->DriverData = t;
+   }
+
+   txformat = radeonChooseTexFormat( rmesa, texImage, format, type );
+   if ( txformat < 0 )
+      return GL_FALSE;
+
+   texFormat = texImage->TexFormat;
+   texSize = texImage->Width * texFormat->TexelBytes;
+
+   /* We really shouldn't have to keep the texture image, it should be
+    * hung from the main texImage structure.
+    */
+   if ( t->image[level].data ) {
+      FREE( t->image[level].data );
+      t->image[level].data = NULL;
+   }
+
+   data = (GLubyte *) MALLOC( texSize );
+   if ( !data )
+      return GL_FALSE;
+
+   if ( !_mesa_convert_texsubimage1d( texFormat->IntFormat,
+				      0, texImage->Width,
+				      format, type, packing,
+				      pixels, data ) ) {
+      /*fprintf( stderr, "   *** convert failed!\n" );*/
+      FREE( data );
+      return GL_FALSE;
+   }
+
+   t->image[level].data = data;
+   t->dirty_images |= (1 << level);
+
+   /* Format-specific hardware state:
+    */
+   t->pp_txformat &= ~(RADEON_TXFORMAT_FORMAT_MASK |
+		       RADEON_TXFORMAT_ALPHA_IN_MAP);
+   t->pp_txformat |= txformat;
+
+   if ( txformat == RADEON_TXFORMAT_RGBA8888 ||
+	txformat == RADEON_TXFORMAT_ARGB4444 ||
+	txformat == RADEON_TXFORMAT_ARGB1555 ||
+	txformat == RADEON_TXFORMAT_AI88 ) {
+      t->pp_txformat |= RADEON_TXFORMAT_ALPHA_IN_MAP;
+   }
+
+   ASSERT( t->image[level].data );
+
+   rmesa->new_state |= RADEON_NEW_TEXTURE;
+
+   *retainInternalCopy = GL_FALSE;
+   return GL_TRUE;
+}
+
+static GLboolean
+radeonDDTexImage2D( GLcontext *ctx, GLenum target, GLint level,
+		    GLenum format, GLenum type, const GLvoid *pixels,
+		    const struct gl_pixelstore_attrib *packing,
+		    struct gl_texture_object *texObj,
+		    struct gl_texture_image *texImage,
+		    GLboolean *retainInternalCopy )
+{
+   radeonContextPtr rmesa = RADEON_CONTEXT(ctx);
+   radeonTexObjPtr t = (radeonTexObjPtr)texObj->DriverData;
+   const struct gl_texture_format *texFormat;
+   GLuint texSize;
+   GLint txformat;
+   GLubyte *data;
+
+   if ( target != GL_TEXTURE_2D )
+      return GL_FALSE;
+
+   if ( RADEON_DEBUG & DEBUG_VERBOSE_API ) {
+      fprintf( stderr, "%s( %p, %d )\n", __FUNCTION__, texObj, level );
+   }
+
+   if ( t ) {
+      if ( t->bound ) FLUSH_BATCH( rmesa );
+      if ( t->image[level].data ) radeonSwapOutTexObj( rmesa, t );
+   } else {
+      t = radeonAllocTexObj( texObj );
+      texObj->DriverData = t;
+   }
+
+   txformat = radeonChooseTexFormat( rmesa, texImage, format, type );
+   if ( txformat < 0 )
+      return GL_FALSE;
+
+   texFormat = texImage->TexFormat;
+   texSize = texImage->Width * texImage->Height * texFormat->TexelBytes;
+
+   /* We really shouldn't have to keep the texture image, it should be
+    * hung from the main texImage structure.
+    */
+   if ( t->image[level].data ) {
+      FREE( t->image[level].data );
+      t->image[level].data = NULL;
+   }
+
+   data = (GLubyte *) MALLOC( texSize );
+   if ( !data )
+      return GL_FALSE;
+
+   if ( !_mesa_convert_texsubimage2d( texFormat->IntFormat,
+				      0, 0, texImage->Width, texImage->Height,
+				      texImage->Width, format, type, packing,
+				      pixels, data ) ) {
+      if ( 0 )
+	 fprintf( stderr, "   *** convert failed!  %s/%s-> %s\n",
+		  gl_lookup_enum_by_nr( format ),
+		  gl_lookup_enum_by_nr( type ),
+		  gl_lookup_enum_by_nr( texImage->IntFormat ) );
+      FREE( data );
+      return GL_FALSE;
+   }
+
+   t->image[level].data = data;
+   t->dirty_images |= (1 << level);
+
+   /* Format-specific hardware state:
+    */
+   t->pp_txformat &= ~(RADEON_TXFORMAT_FORMAT_MASK |
+		       RADEON_TXFORMAT_ALPHA_IN_MAP);
+   t->pp_txformat |= txformat;
+
+   if ( txformat == RADEON_TXFORMAT_RGBA8888 ||
+	txformat == RADEON_TXFORMAT_ARGB4444 ||
+	txformat == RADEON_TXFORMAT_ARGB1555 ||
+	txformat == RADEON_TXFORMAT_AI88 ) {
+      t->pp_txformat |= RADEON_TXFORMAT_ALPHA_IN_MAP;
+   }
+
+   ASSERT( t->image[level].data );
+
+   rmesa->new_state |= RADEON_NEW_TEXTURE;
+
+   *retainInternalCopy = GL_FALSE;
+   return GL_TRUE;
+}
+
+/* GH: This is undoubtedly broken...
+ */
+static GLboolean
+radeonDDTexImage3D( GLcontext *ctx, GLenum target, GLint level,
+		    GLenum format, GLenum type, const GLvoid *pixels,
+		    const struct gl_pixelstore_attrib *packing,
+		    struct gl_texture_object *texObj,
+		    struct gl_texture_image *texImage,
+		    GLboolean *retainInternalCopy )
+{
+   radeonContextPtr rmesa = RADEON_CONTEXT(ctx);
+   radeonTexObjPtr t = (radeonTexObjPtr)texObj->DriverData;
+   const struct gl_texture_format *texFormat;
+   GLuint texSize;
+   GLint txformat;
+   GLubyte *data;
+
+   if ( target != GL_TEXTURE_3D )
+      return GL_FALSE;
+
+   if ( t ) {
+      if ( t->bound ) FLUSH_BATCH( rmesa );
+      radeonSwapOutTexObj( rmesa, t );
+   } else {
+      t = radeonAllocTexObj( texObj );
+      texObj->DriverData = t;
+   }
+
+   txformat = radeonChooseTexFormat( rmesa, texImage, format, type );
+   if ( txformat < 0 )
+      return GL_FALSE;
+
+   texFormat = texImage->TexFormat;
+   texSize = (texImage->Width * texImage->Height *
+	      texImage->Depth * texFormat->TexelBytes);
+
+   /* We really shouldn't have to keep the texture image, it should be
+    * hung from the main texImage structure.
+    */
+   if ( t->image[level].data ) {
+      FREE( t->image[level].data );
+      t->image[level].data = NULL;
+   }
+
+   data = (GLubyte *) MALLOC( texSize );
+   if ( !data )
+      return GL_FALSE;
+
+   if ( !_mesa_convert_texsubimage3d( texFormat->IntFormat,
+				      0, 0, 0, texImage->Width,
+				      texImage->Height, texImage->Depth,
+				      texImage->Width, texImage->Height,
+				      format, type, packing,
+				      pixels, data ) ) {
+      FREE( data );
+      return GL_FALSE;
+   }
+
+   t->image[level].data = data;
+   t->dirty_images |= (1 << level);
+
+   ASSERT( t->image[level].data );
+
+   rmesa->new_state |= RADEON_NEW_TEXTURE;
+
+   *retainInternalCopy = GL_FALSE;
+   return GL_TRUE;
+}
+
+
+/* ================================================================
+ * Texture subimage callbacks
+ */
+
+static GLboolean
+radeonDDTexSubImage1D( GLcontext *ctx, GLenum target, GLint level,
+		       GLint xoffset, GLsizei width,
+		       GLenum format, GLenum type,
+		       const GLvoid *pixels,
+		       const struct gl_pixelstore_attrib *packing,
+		       struct gl_texture_object *texObj,
+		       struct gl_texture_image *texImage )
+{
+   radeonContextPtr rmesa = RADEON_CONTEXT(ctx);
+   radeonTexObjPtr t = (radeonTexObjPtr)texObj->DriverData;
+   const struct gl_texture_format *texFormat;
+
+   if ( target != GL_TEXTURE_1D )
+      return GL_FALSE;
+
+   /* FIXME: Can this ever be NULL???
+    */
+   ASSERT( t );
+   ASSERT( t->image[level].data );
+
+   if ( t->bound )
+      FLUSH_BATCH( rmesa );
+
+   texFormat = texImage->TexFormat;
+
+   if ( !_mesa_convert_texsubimage1d( texFormat->IntFormat,
+				      xoffset, width, format, type, packing,
+				      pixels, t->image[level].data ) ) {
+      /*fprintf( stderr, "   *** convert failed!\n" );*/
+      return GL_FALSE;
+   }
+
+   t->dirty_images |= (1 << level);
+   rmesa->new_state |= RADEON_NEW_TEXTURE;
+
+   return GL_TRUE;
+}
+
+static GLboolean
+radeonDDTexSubImage2D( GLcontext *ctx, GLenum target, GLint level,
+		       GLint xoffset, GLint yoffset,
+		       GLsizei width, GLsizei height,
+		       GLenum format, GLenum type,
+		       const GLvoid *pixels,
+		       const struct gl_pixelstore_attrib *packing,
+		       struct gl_texture_object *texObj,
+		       struct gl_texture_image *texImage )
+{
+   radeonContextPtr rmesa = RADEON_CONTEXT(ctx);
+   radeonTexObjPtr t = (radeonTexObjPtr)texObj->DriverData;
+   const struct gl_texture_format *texFormat;
+
+   if ( target != GL_TEXTURE_2D )
+      return GL_FALSE;
+
+   if ( RADEON_DEBUG & DEBUG_VERBOSE_API ) {
+      fprintf( stderr, "%s( %p, %d )\n", __FUNCTION__, texObj, level );
+   }
+
+   /* FIXME: Can this ever be NULL???
+    */
+   ASSERT( t );
+   ASSERT( t->image[level].data );
+
+   if ( t->bound )
+      FLUSH_BATCH( rmesa );
+
+   texFormat = texImage->TexFormat;
+
+   if ( !_mesa_convert_texsubimage2d( texFormat->IntFormat,
+				      xoffset, yoffset, width, height,
+				      texImage->Width, format, type, packing,
+				      pixels, t->image[level].data ) ) {
+      /*fprintf( stderr, "   *** convert failed!\n" );*/
+      return GL_FALSE;
+   }
+
+   t->dirty_images |= (1 << level);
+   rmesa->new_state |= RADEON_NEW_TEXTURE;
+
+   return GL_TRUE;
+}
+
+/* GH: This is undoubtedly broken...
+ */
+static GLboolean
+radeonDDTexSubImage3D( GLcontext *ctx, GLenum target, GLint level,
+		       GLint xoffset, GLint yoffset, GLint zoffset,
+		       GLsizei width, GLsizei height, GLint depth,
+		       GLenum format, GLenum type,
+		       const GLvoid *pixels,
+		       const struct gl_pixelstore_attrib *packing,
+		       struct gl_texture_object *texObj,
+		       struct gl_texture_image *texImage )
+{
+   radeonContextPtr rmesa = RADEON_CONTEXT(ctx);
+   radeonTexObjPtr t = (radeonTexObjPtr)texObj->DriverData;
+   const struct gl_texture_format *texFormat;
+
+   if ( target != GL_TEXTURE_3D )
+      return GL_FALSE;
+
+   /* FIXME: Can this ever be NULL???
+    */
+   ASSERT( t );
+   ASSERT( t->image[level].data );
+
+   if ( t->bound )
+      FLUSH_BATCH( rmesa );
+
+   texFormat = texImage->TexFormat;
+
+   if ( !_mesa_convert_texsubimage3d( texFormat->IntFormat,
+				      xoffset, yoffset, zoffset,
+				      width, height, depth,
+				      texImage->Width, texImage->Height,
+				      format, type, packing,
+				      pixels, t->image[level].data ) ) {
+      /*fprintf( stderr, "   *** convert failed!\n" );*/
+      return GL_FALSE;
+   }
+
+   t->dirty_images |= (1 << level);
+   rmesa->new_state |= RADEON_NEW_TEXTURE;
+
+   return GL_TRUE;
+}
+
+
+/* ================================================================
+ * DEPRECATED...
+ */
+
+static GLvoid *radeonDDGetTexImage( GLcontext *ctx, GLenum target, GLint level,
+				    const struct gl_texture_object *texObj,
+				    GLenum *formatOut, GLenum *typeOut,
+				    GLboolean *freeImageOut )
+{
+   const struct gl_texture_image *texImage = texObj->Image[level];
+   const struct gl_texture_format *texFormat = texImage->TexFormat;
+   radeonTexObjPtr t = (radeonTexObjPtr)texObj->DriverData;
+   GLubyte *data;
+
+   if ( !t || !t->image[level].data )
+      return NULL;
+
+   data = (GLubyte *) MALLOC( texImage->Width * texImage->Height * 4 );
+   if ( !data )
+      return NULL;
+
+   if ( 0 )
+      fprintf( stderr, "   in=%d out=%s\n",
+	       texFormat->IntFormat,
+	       gl_lookup_enum_by_nr( texImage->Format ) );
+
+   switch ( target ) {
+   case GL_TEXTURE_1D:
+      _mesa_unconvert_teximage1d( texFormat->IntFormat, texImage->Format,
+				  texImage->Width,
+				  t->image[level].data, data );
+      break;
+   case GL_TEXTURE_2D:
+      _mesa_unconvert_teximage2d( texFormat->IntFormat, texImage->Format,
+				  texImage->Width, texImage->Height,
+				  t->image[level].data, data );
+      break;
+   default:
+      return NULL;
+   }
+
+   *formatOut = texImage->Format;
+   *typeOut = GL_UNSIGNED_BYTE;
+   *freeImageOut = GL_TRUE;
+
+   return data;
+}
+
+
+/* ================================================================
+ * Texture state callbacks
+ */
+
+#define SCALED_FLOAT_TO_BYTE( x, scale ) \
+		((((GLint)((256.0F / scale) * (x))) - 1) / 2)
+
+static void radeonDDTexEnv( GLcontext *ctx, GLenum target,
+			    GLenum pname, const GLfloat *param )
+{
+   radeonContextPtr rmesa = RADEON_CONTEXT(ctx);
+   struct gl_texture_unit *texUnit;
+   GLuint source;
+   GLubyte c[4];
+   GLuint col;
+   GLfloat bias;
+   GLubyte b;
+
+   if ( RADEON_DEBUG & DEBUG_VERBOSE_API ) {
+      fprintf( stderr, "%s( %s )\n",
+	       __FUNCTION__, gl_lookup_enum_by_nr( pname ) );
+   }
+
+   switch ( pname ) {
+   case GL_TEXTURE_ENV_MODE:
+      FLUSH_BATCH( rmesa );
+      rmesa->new_state |= RADEON_NEW_TEXTURE | RADEON_NEW_ALPHA;
+      break;
+
+   case GL_TEXTURE_ENV_COLOR:
+      source = rmesa->tmu_source[ctx->Texture.CurrentUnit];
+      texUnit = &ctx->Texture.Unit[ctx->Texture.CurrentUnit];
+      FLOAT_RGBA_TO_UBYTE_RGBA( c, texUnit->EnvColor );
+      col = radeonPackColor( 4, c[0], c[1], c[2], c[3] );
+      if ( rmesa->env_color[source] != col ) {
+	 FLUSH_BATCH( rmesa );
+	 rmesa->env_color[source] = col;
+
+	 rmesa->new_state |= RADEON_NEW_TEXTURE;
+      }
+      break;
+
+   case GL_TEXTURE_LOD_BIAS_EXT:
+      /* The Radeon's LOD bias is a signed 2's complement value with a
+       * range of -1.0 <= bias < 4.0.  We break this into two linear
+       * functions, one mapping [-1.0,0.0] to [-128,0] and one mapping
+       * [0.0,4.0] to [0,127].
+       */
+      source = rmesa->tmu_source[ctx->Texture.CurrentUnit];
+      bias = CLAMP( *param, -1.0, 4.0 );
+      if ( bias == 0 ) {
+	 b = 0;
+      } else if ( bias > 0 ) {
+	 b = (GLubyte) SCALED_FLOAT_TO_BYTE( bias, 4.0 );
+      } else {
+	 b = (GLubyte) SCALED_FLOAT_TO_BYTE( bias, 1.0 );
+      }
+      if ( rmesa->lod_bias[source] != (GLuint)b ) {
+	 FLUSH_BATCH( rmesa );
+	 rmesa->lod_bias[source] = (GLuint)b;
+
+	 rmesa->new_state |= RADEON_NEW_TEXTURE;
+      }
+      break;
+
+   default:
+      return;
+   }
+}
+
+static void radeonDDTexParameter( GLcontext *ctx, GLenum target,
+				  struct gl_texture_object *tObj,
+				  GLenum pname, const GLfloat *params )
+{
+   radeonContextPtr rmesa = RADEON_CONTEXT(ctx);
+   radeonTexObjPtr t = (radeonTexObjPtr)tObj->DriverData;
+
+   if ( RADEON_DEBUG & DEBUG_VERBOSE_API ) {
+      fprintf( stderr, "%s( %s )\n",
+	       __FUNCTION__, gl_lookup_enum_by_nr( pname ) );
+   }
+
+   /* If we don't have a hardware texture, it will be automatically
+    * created with current state before it is used, so we don't have
+    * to do anything now.
+    */
+   if ( !t )
+      return;
+
+   if ( ( target != GL_TEXTURE_2D ) &&
+	( target != GL_TEXTURE_1D ) )
+      return;
+
+   switch ( pname ) {
+   case GL_TEXTURE_MIN_FILTER:
+   case GL_TEXTURE_MAG_FILTER:
+      if ( t->bound ) FLUSH_BATCH( rmesa );
+      radeonSetTexFilter( t, tObj->MinFilter, tObj->MagFilter );
+      break;
+
+   case GL_TEXTURE_WRAP_S:
+   case GL_TEXTURE_WRAP_T:
+      if ( t->bound ) FLUSH_BATCH( rmesa );
+      radeonSetTexWrap( t, tObj->WrapS, tObj->WrapT );
+      break;
+
+   case GL_TEXTURE_BORDER_COLOR:
+      if ( t->bound ) FLUSH_BATCH( rmesa );
+      radeonSetTexBorderColor( t, tObj->BorderColor );
+      break;
+
+   default:
+      return;
+   }
+
+   rmesa->new_state |= RADEON_NEW_TEXTURE;
+}
+
+static void radeonDDBindTexture( GLcontext *ctx, GLenum target,
+				 struct gl_texture_object *tObj )
+{
+   radeonContextPtr rmesa = RADEON_CONTEXT(ctx);
+   radeonTexObjPtr t = (radeonTexObjPtr) tObj->DriverData;
+   GLuint unit = ctx->Texture.CurrentUnit;
+
+   if ( RADEON_DEBUG & DEBUG_VERBOSE_API ) {
+      fprintf( stderr, "%s( %p ) unit=%d\n",
+	       __FUNCTION__, tObj, unit );
+   }
+
+   FLUSH_BATCH( rmesa );
+
+   if ( !t ) {
+      t = radeonAllocTexObj( tObj );
+      tObj->DriverData = t;
+   }
+
+   /* Unbind a currently bound texture.
+    */
+   if ( rmesa->CurrentTexObj[unit] ) {
+      rmesa->CurrentTexObj[unit]->bound &= ~(unit + 1);
+      rmesa->CurrentTexObj[unit] = NULL;
+   }
+
+   /* Bind to the given texture unit.
+    */
+   rmesa->CurrentTexObj[unit] = t;
+   t->bound |= unit + 1;
+
+   rmesa->new_state |= RADEON_NEW_TEXTURE;
+}
+
+static void radeonDDDeleteTexture( GLcontext *ctx,
+				   struct gl_texture_object *tObj )
+{
+   radeonContextPtr rmesa = RADEON_CONTEXT(ctx);
+   radeonTexObjPtr t = (radeonTexObjPtr)tObj->DriverData;
+
+   if ( RADEON_DEBUG & DEBUG_VERBOSE_API ) {
+      fprintf( stderr, __FUNCTION__ "( %p )\n", tObj );
+   }
+
+   if ( t ) {
+      if ( t->bound ) {
+	 FLUSH_BATCH( rmesa );
+	 if ( t->bound & TEX_0 ) rmesa->CurrentTexObj[0] = NULL;
+	 if ( t->bound & TEX_1 ) rmesa->CurrentTexObj[1] = NULL;
+	 rmesa->new_state |= RADEON_NEW_TEXTURE;
+      }
+
+      radeonDestroyTexObj( rmesa, t );
+      tObj->DriverData = NULL;
+   }
+}
+
+static GLboolean radeonDDIsTextureResident( GLcontext *ctx,
+					    struct gl_texture_object *tObj )
+{
+   radeonTexObjPtr t = (radeonTexObjPtr)tObj->DriverData;
+
+   return ( t && t->memBlock );
+}
+
+static void radeonDDInitTextureObjects( GLcontext *ctx )
+{
+   radeonContextPtr rmesa = RADEON_CONTEXT(ctx);
+   struct gl_texture_object *texObj;
+   GLuint tmp = ctx->Texture.CurrentUnit;
+
+   ctx->Texture.CurrentUnit = 0;
+
+   texObj = ctx->Texture.Unit[0].CurrentD[1];
+   radeonDDBindTexture( ctx, GL_TEXTURE_1D, texObj );
+   move_to_tail( &rmesa->SwappedOut, (radeonTexObjPtr)texObj->DriverData );
+
+   texObj = ctx->Texture.Unit[0].CurrentD[2];
+   radeonDDBindTexture( ctx, GL_TEXTURE_2D, texObj );
+   move_to_tail( &rmesa->SwappedOut, (radeonTexObjPtr)texObj->DriverData );
+
+   ctx->Texture.CurrentUnit = 1;
+
+   texObj = ctx->Texture.Unit[1].CurrentD[1];
+   radeonDDBindTexture( ctx, GL_TEXTURE_1D, texObj );
+   move_to_tail( &rmesa->SwappedOut, (radeonTexObjPtr)texObj->DriverData );
+
+   texObj = ctx->Texture.Unit[1].CurrentD[2];
+   radeonDDBindTexture( ctx, GL_TEXTURE_2D, texObj );
+   move_to_tail( &rmesa->SwappedOut, (radeonTexObjPtr)texObj->DriverData );
+
+   ctx->Texture.CurrentUnit = tmp;
+}
+
+void radeonDDInitTextureFuncs( GLcontext *ctx )
+{
+   ctx->Driver.TexImage1D		= radeonDDTexImage1D;
+   ctx->Driver.TexImage2D		= radeonDDTexImage2D;
+   ctx->Driver.TexImage3D		= NULL; (void) radeonDDTexImage3D;
+   ctx->Driver.TexSubImage1D		= radeonDDTexSubImage1D;
+   ctx->Driver.TexSubImage2D		= radeonDDTexSubImage2D;
+   ctx->Driver.TexSubImage3D		= NULL; (void) radeonDDTexSubImage3D;
+   ctx->Driver.GetTexImage		= radeonDDGetTexImage;
+   ctx->Driver.TexEnv			= radeonDDTexEnv;
+   ctx->Driver.TexParameter		= radeonDDTexParameter;
+   ctx->Driver.BindTexture		= radeonDDBindTexture;
+   ctx->Driver.DeleteTexture		= radeonDDDeleteTexture;
+   ctx->Driver.IsTextureResident	= radeonDDIsTextureResident;
+   ctx->Driver.PrioritizeTexture	= NULL;
+   ctx->Driver.ActiveTexture		= NULL;
+   ctx->Driver.UpdateTexturePalette	= NULL;
+
+   radeonDDInitTextureObjects( ctx );
+}
+@
+
+
+1.1.9.1
+log
+@OpenBSD just has imported exactly this tree into their vendor branch,
+called the same tag, in XF4/xc
+This is, apparently, the last XFree86 snapshot before the licence change
+(ie, addition of the advertising clause)
+
+Since the developers don't see any problems with that, and we would like
+to integrate improvements done by the remaining one or two (or so) XFree86
+developers (j/k), this prepares enabling us to update X-Window in the future.
+@
+text
+@d1 3
+a3 2
+/* $XFree86: xc/lib/GL/mesa/src/drv/radeon/radeon_tex.c,v 1.11 2004/01/23 03:57:06 dawes Exp $ */
+/*
+d9 20
+a28 20
+Permission is hereby granted, free of charge, to any person obtaining
+a copy of this software and associated documentation files (the
+"Software"), to deal in the Software without restriction, including
+without limitation the rights to use, copy, modify, merge, publish,
+distribute, sublicense, and/or sell copies of the Software, and to
+permit persons to whom the Software is furnished to do so, subject to
+the following conditions:
+
+The above copyright notice and this permission notice (including the
+next paragraph) shall be included in all copies or substantial
+portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
+IN NO EVENT SHALL THE COPYRIGHT OWNER(S) AND/OR ITS SUPPLIERS BE
+LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
+OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
+WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+*/
+d32 3
+a34 2
+ *    Gareth Hughes <gareth@@valinux.com>
+ *    Brian Paul <brianp@@valinux.com>
+a36 10
+#include "glheader.h"
+#include "imports.h"
+#include "colormac.h"
+#include "context.h"
+#include "enums.h"
+#include "image.h"
+#include "simple_list.h"
+#include "texformat.h"
+#include "texstore.h"
+
+d40 1
+a40 1
+#include "radeon_swtcl.h"
+d43 5
+a49 8
+/**
+ * Set the texture wrap modes.
+ * 
+ * \param t Texture object whose wrap modes are to be set
+ * \param swrap Wrap mode for the \a s texture coordinate
+ * \param twrap Wrap mode for the \a t texture coordinate
+ */
+
+d52 1
+a52 4
+   GLboolean  is_clamp = GL_FALSE;
+   GLboolean  is_clamp_to_border = GL_FALSE;
+
+   t->pp_txfilter &= ~(RADEON_CLAMP_S_MASK | RADEON_CLAMP_T_MASK | RADEON_BORDER_MODE_D3D);
+d59 1
+a59 2
+      t->pp_txfilter |= RADEON_CLAMP_S_CLAMP_GL;
+      is_clamp = GL_TRUE;
+a63 16
+   case GL_CLAMP_TO_BORDER:
+      t->pp_txfilter |= RADEON_CLAMP_S_CLAMP_GL;
+      is_clamp_to_border = GL_TRUE;
+      break;
+   case GL_MIRRORED_REPEAT:
+      t->pp_txfilter |= RADEON_CLAMP_S_MIRROR;
+      break;
+   case GL_MIRROR_CLAMP_ATI:
+      t->pp_txfilter |= RADEON_CLAMP_S_MIRROR_CLAMP_GL;
+      is_clamp = GL_TRUE;
+      break;
+   case GL_MIRROR_CLAMP_TO_EDGE_ATI:
+      t->pp_txfilter |= RADEON_CLAMP_S_MIRROR_CLAMP_LAST;
+      break;
+   default:
+      _mesa_problem(NULL, "bad S wrap mode in %s", __FUNCTION__);
+d71 1
+a71 2
+      t->pp_txfilter |= RADEON_CLAMP_T_CLAMP_GL;
+      is_clamp = GL_TRUE;
+a75 16
+   case GL_CLAMP_TO_BORDER:
+      t->pp_txfilter |= RADEON_CLAMP_T_CLAMP_GL;
+      is_clamp_to_border = GL_TRUE;
+      break;
+   case GL_MIRRORED_REPEAT:
+      t->pp_txfilter |= RADEON_CLAMP_T_MIRROR;
+      break;
+   case GL_MIRROR_CLAMP_ATI:
+      t->pp_txfilter |= RADEON_CLAMP_T_MIRROR_CLAMP_GL;
+      is_clamp = GL_TRUE;
+      break;
+   case GL_MIRROR_CLAMP_TO_EDGE_ATI:
+      t->pp_txfilter |= RADEON_CLAMP_T_MIRROR_CLAMP_LAST;
+      break;
+   default:
+      _mesa_problem(NULL, "bad T wrap mode in %s", __FUNCTION__);
+a76 6
+
+   if ( is_clamp_to_border ) {
+      t->pp_txfilter |= RADEON_BORDER_MODE_D3D;
+   }
+
+   t->border_fallback = (is_clamp && is_clamp_to_border);
+a78 25
+static void radeonSetTexMaxAnisotropy( radeonTexObjPtr t, GLfloat max )
+{
+   t->pp_txfilter &= ~RADEON_MAX_ANISO_MASK;
+
+   if ( max == 1.0 ) {
+      t->pp_txfilter |= RADEON_MAX_ANISO_1_TO_1;
+   } else if ( max <= 2.0 ) {
+      t->pp_txfilter |= RADEON_MAX_ANISO_2_TO_1;
+   } else if ( max <= 4.0 ) {
+      t->pp_txfilter |= RADEON_MAX_ANISO_4_TO_1;
+   } else if ( max <= 8.0 ) {
+      t->pp_txfilter |= RADEON_MAX_ANISO_8_TO_1;
+   } else {
+      t->pp_txfilter |= RADEON_MAX_ANISO_16_TO_1;
+   }
+}
+
+/**
+ * Set the texture magnification and minification modes.
+ * 
+ * \param t Texture whose filter modes are to be set
+ * \param minf Texture minification mode
+ * \param magf Texture magnification mode
+ */
+
+a80 2
+   GLuint anisotropy = (t->pp_txfilter & RADEON_MAX_ANISO_MASK);
+
+d83 19
+a101 38
+   if ( anisotropy == RADEON_MAX_ANISO_1_TO_1 ) {
+      switch ( minf ) {
+      case GL_NEAREST:
+	 t->pp_txfilter |= RADEON_MIN_FILTER_NEAREST;
+	 break;
+      case GL_LINEAR:
+	 t->pp_txfilter |= RADEON_MIN_FILTER_LINEAR;
+	 break;
+      case GL_NEAREST_MIPMAP_NEAREST:
+	 t->pp_txfilter |= RADEON_MIN_FILTER_NEAREST_MIP_NEAREST;
+	 break;
+      case GL_NEAREST_MIPMAP_LINEAR:
+	 t->pp_txfilter |= RADEON_MIN_FILTER_LINEAR_MIP_NEAREST;
+	 break;
+      case GL_LINEAR_MIPMAP_NEAREST:
+	 t->pp_txfilter |= RADEON_MIN_FILTER_NEAREST_MIP_LINEAR;
+	 break;
+      case GL_LINEAR_MIPMAP_LINEAR:
+	 t->pp_txfilter |= RADEON_MIN_FILTER_LINEAR_MIP_LINEAR;
+	 break;
+      }
+   } else {
+      switch ( minf ) {
+      case GL_NEAREST:
+	 t->pp_txfilter |= RADEON_MIN_FILTER_ANISO_NEAREST;
+	 break;
+      case GL_LINEAR:
+	 t->pp_txfilter |= RADEON_MIN_FILTER_ANISO_LINEAR;
+	 break;
+      case GL_NEAREST_MIPMAP_NEAREST:
+      case GL_LINEAR_MIPMAP_NEAREST:
+	 t->pp_txfilter |= RADEON_MIN_FILTER_ANISO_NEAREST_MIP_NEAREST;
+	 break;
+      case GL_NEAREST_MIPMAP_LINEAR:
+      case GL_LINEAR_MIPMAP_LINEAR:
+	 t->pp_txfilter |= RADEON_MIN_FILTER_ANISO_NEAREST_MIP_LINEAR;
+	 break;
+      }
+a118 7
+
+/**
+ * Allocate space for and load the mesa images into the texture memory block.
+ * This will happen before drawing with a new texture, or drawing with a
+ * texture after it was swapped out or teximaged again.
+ */
+
+a123 5
+   texObj->DriverData = t;
+   if ( t != NULL ) {
+      if ( RADEON_DEBUG & DEBUG_TEXTURE ) {
+	 fprintf( stderr, "%s( %p, %p )\n", __FUNCTION__, (void *)texObj, (void *)t );
+      }
+d125 3
+a127 4
+      /* Initialize non-image-dependent parts of the state:
+       */
+      t->base.tObj = texObj;
+      t->border_fallback = GL_FALSE;
+d129 15
+a143 11
+      t->pp_txfilter = RADEON_BORDER_MODE_OGL;
+      t->pp_txformat = (RADEON_TXFORMAT_ENDIAN_NO_SWAP |
+			RADEON_TXFORMAT_PERSPECTIVE_ENABLE);
+
+      make_empty_list( & t->base );
+
+      radeonSetTexWrap( t, texObj->WrapS, texObj->WrapT );
+      radeonSetTexMaxAnisotropy( t, texObj->MaxAnisotropy );
+      radeonSetTexFilter( t, texObj->MinFilter, texObj->MagFilter );
+      radeonSetTexBorderColor( t, texObj->_BorderChan );
+   }
+d149 3
+a151 3
+static const struct gl_texture_format *
+radeonChooseTextureFormat( GLcontext *ctx, GLint internalFormat,
+                           GLenum format, GLenum type )
+a152 1
+   radeonContextPtr rmesa = RADEON_CONTEXT(ctx);
+d154 2
+d157 31
+a187 1
+   switch ( internalFormat ) {
+a188 2
+   case GL_RGBA:
+   case GL_COMPRESSED_RGBA:
+d191 8
+a198 7
+	    return &_mesa_texformat_argb8888;
+	 }
+         else if ( type == GL_UNSIGNED_SHORT_4_4_4_4_REV ) {
+            return &_mesa_texformat_argb4444;
+	 }
+         else if ( type == GL_UNSIGNED_SHORT_1_5_5_5_REV ) {
+	    return &_mesa_texformat_argb1555;
+d201 3
+a203 1
+      return do32bpt ? &_mesa_texformat_rgba8888 : &_mesa_texformat_argb4444;
+d205 1
+a206 2
+   case GL_RGB:
+   case GL_COMPRESSED_RGB:
+d208 2
+a209 1
+	 return &_mesa_texformat_rgb565;
+d211 3
+a213 1
+      return do32bpt ? &_mesa_texformat_rgba8888 : &_mesa_texformat_rgb565;
+d215 3
+d222 3
+a224 1
+      return do32bpt ? &_mesa_texformat_rgba8888 : &_mesa_texformat_argb4444;
+d228 2
+a229 1
+      return &_mesa_texformat_argb4444;
+d232 2
+a233 1
+      return &_mesa_texformat_argb1555;
+d239 3
+a241 1
+      return do32bpt ? &_mesa_texformat_rgba8888 : &_mesa_texformat_rgb565;
+d246 2
+a247 1
+      return &_mesa_texformat_rgb565;
+d254 2
+a255 2
+   case GL_COMPRESSED_ALPHA:
+      return &_mesa_texformat_al88;
+d263 2
+a264 2
+   case GL_COMPRESSED_LUMINANCE:
+      return &_mesa_texformat_al88;
+d274 2
+a275 2
+   case GL_COMPRESSED_LUMINANCE_ALPHA:
+      return &_mesa_texformat_al88;
+d282 2
+a283 9
+   case GL_COMPRESSED_INTENSITY:
+      return &_mesa_texformat_i8;
+
+   case GL_YCBCR_MESA:
+      if (type == GL_UNSIGNED_SHORT_8_8_APPLE ||
+          type == GL_UNSIGNED_BYTE)
+         return &_mesa_texformat_ycbcr;
+      else
+         return &_mesa_texformat_ycbcr_rev;
+d285 7
+d293 3
+a295 2
+      _mesa_problem(ctx, "unexpected texture format in %s", __FUNCTION__);
+      return NULL;
+d298 3
+a300 1
+   return NULL; /* never get here */
+d304 11
+a314 7
+static void radeonTexImage1D( GLcontext *ctx, GLenum target, GLint level,
+                              GLint internalFormat,
+                              GLint width, GLint border,
+                              GLenum format, GLenum type, const GLvoid *pixels,
+                              const struct gl_pixelstore_attrib *packing,
+                              struct gl_texture_object *texObj,
+                              struct gl_texture_image *texImage )
+d316 13
+a328 1
+   driTextureObject * t = (driTextureObject *) texObj->DriverData;
+d331 20
+a350 1
+      driSwapOutTextureObject( t );
+d352 28
+a379 6
+   else {
+      t = (driTextureObject *) radeonAllocTexObj( texObj );
+      if (!t) {
+         _mesa_error(ctx, GL_OUT_OF_MEMORY, "glTexImage1D");
+         return;
+      }
+d382 1
+a382 4
+   /* Note, this will call ChooseTextureFormat */
+   _mesa_store_teximage1d(ctx, target, level, internalFormat,
+                          width, border, format, type, pixels,
+                          &ctx->Unpack, texObj, texImage);
+d384 4
+a387 1
+   t->dirty_images[0] |= (1 << level);
+d390 33
+d424 61
+a484 8
+static void radeonTexSubImage1D( GLcontext *ctx, GLenum target, GLint level,
+                                 GLint xoffset,
+                                 GLsizei width,
+                                 GLenum format, GLenum type,
+                                 const GLvoid *pixels,
+                                 const struct gl_pixelstore_attrib *packing,
+                                 struct gl_texture_object *texObj,
+                                 struct gl_texture_image *texImage )
+d486 9
+a494 1
+   driTextureObject * t = (driTextureObject *) texObj->DriverData;
+a495 1
+   assert( t ); /* this _should_ be true */
+d497 21
+a517 1
+      driSwapOutTextureObject( t );
+d519 62
+a580 6
+   else {
+      t = (driTextureObject *) radeonAllocTexObj( texObj );
+      if (!t) {
+         _mesa_error(ctx, GL_OUT_OF_MEMORY, "glTexSubImage1D");
+         return;
+      }
+d583 4
+a586 5
+   _mesa_store_texsubimage1d(ctx, target, level, xoffset, width,
+			     format, type, pixels, packing, texObj,
+			     texImage);
+
+   t->dirty_images[0] |= (1 << level);
+d589 16
+d606 2
+a607 24
+static void radeonTexImage2D( GLcontext *ctx, GLenum target, GLint level,
+                              GLint internalFormat,
+                              GLint width, GLint height, GLint border,
+                              GLenum format, GLenum type, const GLvoid *pixels,
+                              const struct gl_pixelstore_attrib *packing,
+                              struct gl_texture_object *texObj,
+                              struct gl_texture_image *texImage )
+{
+   driTextureObject * t = (driTextureObject *) texObj->DriverData;
+   GLuint face;
+
+   /* which cube face or ordinary 2D image */
+   switch (target) {
+   case GL_TEXTURE_CUBE_MAP_POSITIVE_X:
+   case GL_TEXTURE_CUBE_MAP_NEGATIVE_X:
+   case GL_TEXTURE_CUBE_MAP_POSITIVE_Y:
+   case GL_TEXTURE_CUBE_MAP_NEGATIVE_Y:
+   case GL_TEXTURE_CUBE_MAP_POSITIVE_Z:
+   case GL_TEXTURE_CUBE_MAP_NEGATIVE_Z:
+      face = (GLuint) target - (GLuint) GL_TEXTURE_CUBE_MAP_POSITIVE_X;
+      ASSERT(face < 6);
+      break;
+   default:
+      face = 0;
+d610 16
+a625 2
+   if ( t != NULL ) {
+      driSwapOutTextureObject( t );
+d627 44
+a670 6
+   else {
+      t = (driTextureObject *) radeonAllocTexObj( texObj );
+      if (!t) {
+         _mesa_error(ctx, GL_OUT_OF_MEMORY, "glTexImage2D");
+         return;
+      }
+d673 4
+a676 6
+   /* Note, this will call ChooseTextureFormat */
+   _mesa_store_teximage2d(ctx, target, level, internalFormat,
+                          width, height, border, format, type, pixels,
+                          &ctx->Unpack, texObj, texImage);
+
+   t->dirty_images[face] |= (1 << level);
+d680 36
+a715 23
+static void radeonTexSubImage2D( GLcontext *ctx, GLenum target, GLint level,
+                                 GLint xoffset, GLint yoffset,
+                                 GLsizei width, GLsizei height,
+                                 GLenum format, GLenum type,
+                                 const GLvoid *pixels,
+                                 const struct gl_pixelstore_attrib *packing,
+                                 struct gl_texture_object *texObj,
+                                 struct gl_texture_image *texImage )
+{
+   driTextureObject * t = (driTextureObject *) texObj->DriverData;
+   GLuint face;
+
+
+   /* which cube face or ordinary 2D image */
+   switch (target) {
+   case GL_TEXTURE_CUBE_MAP_POSITIVE_X:
+   case GL_TEXTURE_CUBE_MAP_NEGATIVE_X:
+   case GL_TEXTURE_CUBE_MAP_POSITIVE_Y:
+   case GL_TEXTURE_CUBE_MAP_NEGATIVE_Y:
+   case GL_TEXTURE_CUBE_MAP_POSITIVE_Z:
+   case GL_TEXTURE_CUBE_MAP_NEGATIVE_Z:
+      face = (GLuint) target - (GLuint) GL_TEXTURE_CUBE_MAP_POSITIVE_X;
+      ASSERT(face < 6);
+d718 1
+a718 1
+      face = 0;
+d721 3
+a723 15
+   assert( t ); /* this _should_ be true */
+   if ( t ) {
+      driSwapOutTextureObject( t );
+   }
+   else {
+      t = (driTextureObject *) radeonAllocTexObj( texObj );
+      if (!t) {
+         _mesa_error(ctx, GL_OUT_OF_MEMORY, "glTexSubImage2D");
+         return;
+      }
+   }
+
+   _mesa_store_texsubimage2d(ctx, target, level, xoffset, yoffset, width,
+			     height, format, type, pixels, packing, texObj,
+			     texImage);
+d725 1
+a725 1
+   t->dirty_images[face] |= (1 << level);
+d729 3
+d734 1
+a734 1
+		(((GLuint)((255.0F / scale) * (x))) / 2)
+d736 2
+a737 2
+static void radeonTexEnv( GLcontext *ctx, GLenum target,
+			  GLenum pname, const GLfloat *param )
+d740 6
+a745 2
+   GLuint unit = ctx->Texture.CurrentUnit;
+   struct gl_texture_unit *texUnit = &ctx->Texture.Unit[unit];
+d747 1
+a747 1
+   if ( RADEON_DEBUG & DEBUG_STATE ) {
+d749 1
+a749 1
+	       __FUNCTION__, _mesa_lookup_enum_by_nr( pname ) );
+d753 15
+a767 8
+   case GL_TEXTURE_ENV_COLOR: {
+      GLubyte c[4];
+      GLuint envColor;
+      UNCLAMPED_FLOAT_TO_RGBA_CHAN( c, texUnit->EnvColor );
+      envColor = radeonPackColor( 4, c[0], c[1], c[2], c[3] );
+      if ( rmesa->hw.tex[unit].cmd[TEX_PP_TFACTOR] != envColor ) {
+	 RADEON_STATECHANGE( rmesa, tex[unit] );
+	 rmesa->hw.tex[unit].cmd[TEX_PP_TFACTOR] = envColor;
+a769 5
+   }
+
+   case GL_TEXTURE_LOD_BIAS_EXT: {
+      GLfloat bias;
+      GLuint b;
+d771 1
+d777 1
+d782 1
+a782 1
+	 b = ((GLuint)SCALED_FLOAT_TO_BYTE( bias, 4.0 )) << RADEON_LOD_BIAS_SHIFT;
+d784 1
+a784 1
+	 b = ((GLuint)SCALED_FLOAT_TO_BYTE( bias, 1.0 )) << RADEON_LOD_BIAS_SHIFT;
+d786 5
+a790 4
+      if ( (rmesa->hw.tex[unit].cmd[TEX_PP_TXFILTER] & RADEON_LOD_BIAS_MASK) != b ) {
+	 RADEON_STATECHANGE( rmesa, tex[unit] );
+	 rmesa->hw.tex[unit].cmd[TEX_PP_TXFILTER] &= ~RADEON_LOD_BIAS_MASK;
+	 rmesa->hw.tex[unit].cmd[TEX_PP_TXFILTER] |= (b & RADEON_LOD_BIAS_MASK);
+a792 1
+   }
+d799 6
+d806 4
+a809 4
+/**
+ * Changes variables and flags for a state update, which will happen at the
+ * next UpdateTextureState
+ */
+d811 6
+a816 10
+static void radeonTexParameter( GLcontext *ctx, GLenum target,
+				struct gl_texture_object *texObj,
+				GLenum pname, const GLfloat *params )
+{
+   radeonTexObjPtr t = (radeonTexObjPtr) texObj->DriverData;
+
+   if ( RADEON_DEBUG & (DEBUG_STATE|DEBUG_TEXTURE) ) {
+      fprintf( stderr, "%s( %s )\n", __FUNCTION__,
+	       _mesa_lookup_enum_by_nr( pname ) );
+   }
+d825 2
+a826 3
+   case GL_TEXTURE_MAX_ANISOTROPY_EXT:
+      radeonSetTexMaxAnisotropy( t, texObj->MaxAnisotropy );
+      radeonSetTexFilter( t, texObj->MinFilter, texObj->MagFilter );
+d831 2
+a832 1
+      radeonSetTexWrap( t, texObj->WrapS, texObj->WrapT );
+d836 2
+a837 13
+      radeonSetTexBorderColor( t, texObj->_BorderChan );
+      break;
+
+   case GL_TEXTURE_BASE_LEVEL:
+   case GL_TEXTURE_MAX_LEVEL:
+   case GL_TEXTURE_MIN_LOD:
+   case GL_TEXTURE_MAX_LOD:
+      /* This isn't the most efficient solution but there doesn't appear to
+       * be a nice alternative.  Since there's no LOD clamping,
+       * we just have to rely on loading the right subset of mipmap levels
+       * to simulate a clamped LOD.
+       */
+      driSwapOutTextureObject( (driTextureObject *) t );
+d844 1
+a844 3
+   /* Mark this texobj as dirty (one bit per tex unit)
+    */
+   t->dirty_state = TEX_ALL;
+d847 6
+d854 4
+d859 5
+a863 6
+static void radeonBindTexture( GLcontext *ctx, GLenum target,
+			       struct gl_texture_object *texObj )
+{
+   if ( RADEON_DEBUG & (DEBUG_STATE|DEBUG_TEXTURE) ) {
+      fprintf( stderr, "%s( %p ) unit=%d\n", __FUNCTION__, (void *)texObj,
+	       ctx->Texture.CurrentUnit );
+d866 5
+a870 4
+   if ( target == GL_TEXTURE_2D || target == GL_TEXTURE_1D ) {
+      if ( texObj->DriverData == NULL ) {
+	 radeonAllocTexObj( texObj );
+      }
+d872 7
+d881 2
+a882 2
+static void radeonDeleteTexture( GLcontext *ctx,
+				 struct gl_texture_object *texObj )
+d885 1
+a885 1
+   driTextureObject * t = (driTextureObject *) texObj->DriverData;
+d887 2
+a888 3
+   if ( RADEON_DEBUG & (DEBUG_STATE|DEBUG_TEXTURE) ) {
+      fprintf( stderr, "%s( %p (target = %s) )\n", __FUNCTION__, (void *)texObj,
+	       _mesa_lookup_enum_by_nr( texObj->Target ) );
+d891 6
+a896 3
+   if ( t != NULL ) {
+      if ( rmesa ) {
+         RADEON_FIREVERTICES( rmesa );
+d899 2
+a900 1
+      driDestroyTextureObject( t );
+d904 2
+a905 14
+/* Need:  
+ *  - Same GEN_MODE for all active bits
+ *  - Same EyePlane/ObjPlane for all active bits when using Eye/Obj
+ *  - STRQ presumably all supported (matrix means incoming R values
+ *    can end up in STQ, this has implications for vertex support,
+ *    presumably ok if maos is used, though?)
+ *  
+ * Basically impossible to do this on the fly - just collect some
+ * basic info & do the checks from ValidateState().
+ */
+static void radeonTexGen( GLcontext *ctx,
+			  GLenum coord,
+			  GLenum pname,
+			  const GLfloat *params )
+d907 3
+a909 3
+   radeonContextPtr rmesa = RADEON_CONTEXT(ctx);
+   GLuint unit = ctx->Texture.CurrentUnit;
+   rmesa->recheck_texgen[unit] = GL_TRUE;
+d912 1
+a912 2
+
+void radeonInitTextureFuncs( GLcontext *ctx )
+d915 2
+d918 1
+d920 35
+a954 18
+   ctx->Driver.ChooseTextureFormat	= radeonChooseTextureFormat;
+   ctx->Driver.TexImage1D		= radeonTexImage1D;
+   ctx->Driver.TexImage2D		= radeonTexImage2D;
+   ctx->Driver.TexImage3D		= _mesa_store_teximage3d;
+   ctx->Driver.TexSubImage1D		= radeonTexSubImage1D;
+   ctx->Driver.TexSubImage2D		= radeonTexSubImage2D;
+   ctx->Driver.TexSubImage3D		= _mesa_store_texsubimage3d;
+   ctx->Driver.CopyTexImage1D		= _swrast_copy_teximage1d;
+   ctx->Driver.CopyTexImage2D		= _swrast_copy_teximage2d;
+   ctx->Driver.CopyTexSubImage1D	= _swrast_copy_texsubimage1d;
+   ctx->Driver.CopyTexSubImage2D	= _swrast_copy_texsubimage2d;
+   ctx->Driver.CopyTexSubImage3D 	= _swrast_copy_texsubimage3d;
+   ctx->Driver.TestProxyTexImage	= _mesa_test_proxy_teximage;
+
+   ctx->Driver.BindTexture		= radeonBindTexture;
+   ctx->Driver.CreateTexture		= NULL; /* FIXME: Is this used??? */
+   ctx->Driver.DeleteTexture		= radeonDeleteTexture;
+   ctx->Driver.IsTextureResident	= driIsTextureResident;
+d959 1
+a959 7
+   ctx->Driver.TexEnv			= radeonTexEnv;
+   ctx->Driver.TexParameter		= radeonTexParameter;
+   ctx->Driver.TexGen                   = radeonTexGen;
+
+   driInitTextureObjects( ctx, & rmesa->swapped,
+			  DRI_TEXMGR_DO_TEXTURE_1D
+			  | DRI_TEXMGR_DO_TEXTURE_2D );
+@
+
+
+1.1.1.1
+log
+@Import OpenBSD 3.3 XF4 repository from CTM 3132 the first time
+This finalizes starting an OpenBSD-mirabile (aka MirBSD) repository.
+
+### MirBSD is:
+# Copyright (c) 1982-2003 by Thorsten "mirabile" Glaser <x86@@ePost.de>
+# Copyright © 1968-2003  The authors of And contributors to UNIX®, the
+#       C Language, BSD/Berkeley Unix; 386BSD, NetBSD 1.1 and OpenBSD.
+#
+# Anyone who obtained a copy of this work is hereby permitted to freely use,
+# distribute, modify, merge, sublicence, give away or sell it as long as the
+# authors are given due credit and the following notice is retained:
+#
+# This work is provided "as is", with no explicit or implicit warranty what-
+# soever. Use it only at your own risk. In no event may an author or contri-
+# butor be held liable for any damage, directly or indirectly, that origina-
+# ted through or is caused by creation or modification of this work.
+
+MirBSD is my private tree. MirBSD does not differ very much from OpenBSD
+and intentionally tracks OpenBSD. That's why it _is_ OpenBSD, just not the
+official one. It's like with DarrenBSD.
+
+At time of this writing, no advertising for MirBSD must be done,
+because the advertising clause has not yet been sorted out.
+
+http://templeofhate.com/tglaser/MirBSD/index.php
+@
+text
+@@
+
+
+1.1.1.2
+log
+@The X-Windowing System
+
+Import XFree86 4.3 from OpenBSD by CTM, in the hope it's stable
+@
+text
+@d1 29
+a29 1
+/* $XFree86: xc/lib/GL/mesa/src/drv/radeon/radeon_tex.c,v 1.9 2002/12/16 16:18:59 dawes Exp $ */
+d31 3
+a33 11
+ * Copyright 2000, 2001 ATI Technologies Inc., Ontario, Canada, and
+ *                      VA Linux Systems Inc., Fremont, California.
+ *
+ * All Rights Reserved.
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a
+ * copy of this software and associated documentation files (the "Software"),
+ * to deal in the Software without restriction, including without limitation
+ * on the rights to use, copy, modify, merge, publish, distribute, sub
+ * license, and/or sell copies of the Software, and to permit persons to whom
+ * the Software is furnished to do so, subject to the following conditions:
+a34 15
+ * The above copyright notice and this permission notice (including the next
+ * paragraph) shall be included in all copies or substantial portions of the
+ * Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NON-INFRINGEMENT. IN NO EVENT SHALL
+ * ATI, VA LINUX SYSTEMS AND/OR THEIR SUPPLIERS BE LIABLE FOR ANY CLAIM,
+ * DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR
+ * OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE
+ * USE OR OTHER DEALINGS IN THE SOFTWARE.
+ *
+ * Authors:
+ *    Gareth Hughes <gareth@@valinux.com>
+ *    Brian Paul <brianp@@valinux.com>
+d40 1
+a40 1
+#include "radeon_swtcl.h"
+d43 2
+a44 2
+#include "colormac.h"
+#include "context.h"
+a45 1
+#include "image.h"
+d47 1
+a47 4
+#include "simple_list.h"
+#include "texformat.h"
+#include "texstore.h"
+
+a48 3
+/* =============================================================
+ * Utility functions:
+ */
+a63 12
+   case GL_CLAMP_TO_BORDER:
+      t->pp_txfilter |= RADEON_CLAMP_S_CLAMP_BORDER;
+      break;
+   case GL_MIRRORED_REPEAT:
+      t->pp_txfilter |= RADEON_CLAMP_S_MIRROR;
+      break;
+   case GL_MIRROR_CLAMP_ATI:
+      t->pp_txfilter |= RADEON_CLAMP_S_MIRROR_CLAMP_BORDER;
+      break;
+   case GL_MIRROR_CLAMP_TO_EDGE_ATI:
+      t->pp_txfilter |= RADEON_CLAMP_S_MIRROR_CLAMP_LAST;
+      break;
+a75 29
+   case GL_CLAMP_TO_BORDER:
+      t->pp_txfilter |= RADEON_CLAMP_T_CLAMP_BORDER;
+      break;
+   case GL_MIRRORED_REPEAT:
+      t->pp_txfilter |= RADEON_CLAMP_T_MIRROR;
+      break;
+   case GL_MIRROR_CLAMP_ATI:
+      t->pp_txfilter |= RADEON_CLAMP_T_MIRROR_CLAMP_BORDER;
+      break;
+   case GL_MIRROR_CLAMP_TO_EDGE_ATI:
+      t->pp_txfilter |= RADEON_CLAMP_T_MIRROR_CLAMP_LAST;
+      break;
+   }
+}
+
+static void radeonSetTexMaxAnisotropy( radeonTexObjPtr t, GLfloat max )
+{
+   t->pp_txfilter &= ~RADEON_MAX_ANISO_MASK;
+
+   if ( max == 1.0 ) {
+      t->pp_txfilter |= RADEON_MAX_ANISO_1_TO_1;
+   } else if ( max <= 2.0 ) {
+      t->pp_txfilter |= RADEON_MAX_ANISO_2_TO_1;
+   } else if ( max <= 4.0 ) {
+      t->pp_txfilter |= RADEON_MAX_ANISO_4_TO_1;
+   } else if ( max <= 8.0 ) {
+      t->pp_txfilter |= RADEON_MAX_ANISO_8_TO_1;
+   } else {
+      t->pp_txfilter |= RADEON_MAX_ANISO_16_TO_1;
+a80 2
+   GLuint anisotropy = (t->pp_txfilter & RADEON_MAX_ANISO_MASK);
+
+d83 19
+a101 38
+   if ( anisotropy == RADEON_MAX_ANISO_1_TO_1 ) {
+      switch ( minf ) {
+      case GL_NEAREST:
+	 t->pp_txfilter |= RADEON_MIN_FILTER_NEAREST;
+	 break;
+      case GL_LINEAR:
+	 t->pp_txfilter |= RADEON_MIN_FILTER_LINEAR;
+	 break;
+      case GL_NEAREST_MIPMAP_NEAREST:
+	 t->pp_txfilter |= RADEON_MIN_FILTER_NEAREST_MIP_NEAREST;
+	 break;
+      case GL_NEAREST_MIPMAP_LINEAR:
+	 t->pp_txfilter |= RADEON_MIN_FILTER_LINEAR_MIP_NEAREST;
+	 break;
+      case GL_LINEAR_MIPMAP_NEAREST:
+	 t->pp_txfilter |= RADEON_MIN_FILTER_NEAREST_MIP_LINEAR;
+	 break;
+      case GL_LINEAR_MIPMAP_LINEAR:
+	 t->pp_txfilter |= RADEON_MIN_FILTER_LINEAR_MIP_LINEAR;
+	 break;
+      }
+   } else {
+      switch ( minf ) {
+      case GL_NEAREST:
+	 t->pp_txfilter |= RADEON_MIN_FILTER_ANISO_NEAREST;
+	 break;
+      case GL_LINEAR:
+	 t->pp_txfilter |= RADEON_MIN_FILTER_ANISO_LINEAR;
+	 break;
+      case GL_NEAREST_MIPMAP_NEAREST:
+      case GL_LINEAR_MIPMAP_NEAREST:
+	 t->pp_txfilter |= RADEON_MIN_FILTER_ANISO_NEAREST_MIP_NEAREST;
+	 break;
+      case GL_NEAREST_MIPMAP_LINEAR:
+      case GL_LINEAR_MIPMAP_LINEAR:
+	 t->pp_txfilter |= RADEON_MIN_FILTER_ANISO_NEAREST_MIP_LINEAR;
+	 break;
+      }
+a118 1
+
+a123 2
+   if (!t)
+      return NULL;
+d125 1
+a125 1
+   if ( RADEON_DEBUG & DEBUG_TEXTURE ) {
+d129 2
+d132 7
+a140 2
+   /* Initialize non-image-dependent parts of the state:
+    */
+a141 1
+   radeonSetTexMaxAnisotropy( t, texObj->MaxAnisotropy );
+d144 1
+d149 3
+a151 3
+static const struct gl_texture_format *
+radeonChooseTextureFormat( GLcontext *ctx, GLint internalFormat,
+                           GLenum format, GLenum type )
+a152 1
+   radeonContextPtr rmesa = RADEON_CONTEXT(ctx);
+d154 2
+d157 31
+a187 1
+   switch ( internalFormat ) {
+a188 2
+   case GL_RGBA:
+   case GL_COMPRESSED_RGBA:
+d191 8
+a198 7
+	    return &_mesa_texformat_argb8888;
+	 }
+         else if ( type == GL_UNSIGNED_SHORT_4_4_4_4_REV ) {
+            return &_mesa_texformat_argb4444;
+	 }
+         else if ( type == GL_UNSIGNED_SHORT_1_5_5_5_REV ) {
+	    return &_mesa_texformat_argb1555;
+d201 3
+a203 1
+      return do32bpt ? &_mesa_texformat_rgba8888 : &_mesa_texformat_argb4444;
+d205 1
+a206 2
+   case GL_RGB:
+   case GL_COMPRESSED_RGB:
+d208 2
+a209 1
+	 return &_mesa_texformat_rgb565;
+d211 3
+a213 1
+      return do32bpt ? &_mesa_texformat_rgba8888 : &_mesa_texformat_rgb565;
+d215 3
+d222 3
+a224 1
+      return do32bpt ? &_mesa_texformat_rgba8888 : &_mesa_texformat_argb4444;
+d228 2
+a229 1
+      return &_mesa_texformat_argb4444;
+d232 2
+a233 1
+      return &_mesa_texformat_argb1555;
+d239 3
+a241 1
+      return do32bpt ? &_mesa_texformat_rgba8888 : &_mesa_texformat_rgb565;
+d246 2
+a247 1
+      return &_mesa_texformat_rgb565;
+d254 2
+a255 2
+   case GL_COMPRESSED_ALPHA:
+      return &_mesa_texformat_al88;
+d263 2
+a264 2
+   case GL_COMPRESSED_LUMINANCE:
+      return &_mesa_texformat_al88;
+d274 2
+a275 2
+   case GL_COMPRESSED_LUMINANCE_ALPHA:
+      return &_mesa_texformat_al88;
+d282 2
+a283 2
+   case GL_COMPRESSED_INTENSITY:
+      return &_mesa_texformat_i8;
+d285 7
+d293 3
+a295 2
+      _mesa_problem(ctx, "unexpected texture format in radeonChoosTexFormat");
+      return NULL;
+d298 3
+a300 1
+   return NULL; /* never get here */
+d304 11
+a314 7
+static void radeonTexImage1D( GLcontext *ctx, GLenum target, GLint level,
+                              GLint internalFormat,
+                              GLint width, GLint border,
+                              GLenum format, GLenum type, const GLvoid *pixels,
+                              const struct gl_pixelstore_attrib *packing,
+                              struct gl_texture_object *texObj,
+                              struct gl_texture_image *texImage )
+d317 12
+a328 1
+   radeonTexObjPtr t = (radeonTexObjPtr) texObj->DriverData;
+d331 1
+d333 1
+a333 2
+   }
+   else {
+a334 4
+      if (!t) {
+         _mesa_error(ctx, GL_OUT_OF_MEMORY, "glTexImage1D");
+         return;
+      }
+d338 18
+a355 4
+   /* Note, this will call radeonChooseTextureFormat */
+   _mesa_store_teximage1d(ctx, target, level, internalFormat,
+                          width, border, format, type, pixels,
+                          &ctx->Unpack, texObj, texImage);
+d357 10
+d368 20
+d390 7
+a396 9
+
+static void radeonTexSubImage1D( GLcontext *ctx, GLenum target, GLint level,
+                                 GLint xoffset,
+                                 GLsizei width,
+                                 GLenum format, GLenum type,
+                                 const GLvoid *pixels,
+                                 const struct gl_pixelstore_attrib *packing,
+                                 struct gl_texture_object *texObj,
+                                 struct gl_texture_image *texImage )
+d400 11
+a411 1
+   assert( t ); /* this _should_ be true */
+d413 4
+a416 9
+      radeonSwapOutTexObj( rmesa, t );
+      t->dirty_images |= (1 << level);
+   }
+   else {
+      t = radeonAllocTexObj(texObj);
+      if (!t) {
+         _mesa_error(ctx, GL_OUT_OF_MEMORY, "glTexSubImage1D");
+         return;
+      }
+d420 31
+a450 3
+   _mesa_store_texsubimage1d(ctx, target, level, xoffset, width,
+			     format, type, pixels, packing, texObj,
+			     texImage);
+d452 1
+d454 20
+d476 9
+a484 8
+
+static void radeonTexImage2D( GLcontext *ctx, GLenum target, GLint level,
+                              GLint internalFormat,
+                              GLint width, GLint height, GLint border,
+                              GLenum format, GLenum type, const GLvoid *pixels,
+                              const struct gl_pixelstore_attrib *packing,
+                              struct gl_texture_object *texObj,
+                              struct gl_texture_image *texImage )
+d488 4
+d493 2
+a494 1
+/*     fprintf(stderr, "%s\n", __FUNCTION__); */
+d497 1
+d499 1
+a499 2
+   }
+   else {
+a500 4
+      if (!t) {
+         _mesa_error(ctx, GL_OUT_OF_MEMORY, "glTexImage2D");
+         return;
+      }
+d504 29
+a532 4
+   /* Note, this will call radeonChooseTextureFormat */
+   _mesa_store_teximage2d(ctx, target, level, internalFormat,
+                          width, height, border, format, type, pixels,
+                          &ctx->Unpack, texObj, texImage);
+d534 1
+d536 7
+d546 12
+a557 8
+static void radeonTexSubImage2D( GLcontext *ctx, GLenum target, GLint level,
+                                 GLint xoffset, GLint yoffset,
+                                 GLsizei width, GLsizei height,
+                                 GLenum format, GLenum type,
+                                 const GLvoid *pixels,
+                                 const struct gl_pixelstore_attrib *packing,
+                                 struct gl_texture_object *texObj,
+                                 struct gl_texture_image *texImage )
+d560 2
+a561 1
+   radeonTexObjPtr t = (radeonTexObjPtr) texObj->DriverData;
+d563 7
+a569 1
+/*     fprintf(stderr, "%s\n", __FUNCTION__); */
+d571 37
+a607 3
+   assert( t ); /* this _should_ be true */
+   if ( t ) {
+      radeonSwapOutTexObj( rmesa, t );
+d609 17
+a625 7
+   else {
+      t = radeonAllocTexObj(texObj);
+      if (!t) {
+         _mesa_error(ctx, GL_OUT_OF_MEMORY, "glTexSubImage2D");
+         return;
+      }
+      texObj->DriverData = t;
+d628 44
+a671 3
+   _mesa_store_texsubimage2d(ctx, target, level, xoffset, yoffset, width,
+			     height, format, type, pixels, packing, texObj,
+			     texImage);
+d674 52
+d729 3
+d734 1
+a734 1
+		(((GLuint)((255.0F / scale) * (x))) / 2)
+d736 2
+a737 2
+static void radeonTexEnv( GLcontext *ctx, GLenum target,
+			  GLenum pname, const GLfloat *param )
+d740 6
+a745 2
+   GLuint unit = ctx->Texture.CurrentUnit;
+   struct gl_texture_unit *texUnit = &ctx->Texture.Unit[unit];
+d747 1
+a747 1
+   if ( RADEON_DEBUG & DEBUG_STATE ) {
+d749 1
+a749 1
+	       __FUNCTION__, _mesa_lookup_enum_by_nr( pname ) );
+d753 15
+a767 8
+   case GL_TEXTURE_ENV_COLOR: {
+      GLubyte c[4];
+      GLuint envColor;
+      UNCLAMPED_FLOAT_TO_RGBA_CHAN( c, texUnit->EnvColor );
+      envColor = radeonPackColor( 4, c[0], c[1], c[2], c[3] );
+      if ( rmesa->hw.tex[unit].cmd[TEX_PP_TFACTOR] != envColor ) {
+	 RADEON_STATECHANGE( rmesa, tex[unit] );
+	 rmesa->hw.tex[unit].cmd[TEX_PP_TFACTOR] = envColor;
+a769 5
+   }
+
+   case GL_TEXTURE_LOD_BIAS_EXT: {
+      GLfloat bias;
+      GLuint b;
+d771 1
+d777 1
+d782 1
+a782 1
+	 b = ((GLuint)SCALED_FLOAT_TO_BYTE( bias, 4.0 )) << RADEON_LOD_BIAS_SHIFT;
+d784 1
+a784 1
+	 b = ((GLuint)SCALED_FLOAT_TO_BYTE( bias, 1.0 )) << RADEON_LOD_BIAS_SHIFT;
+d786 5
+a790 4
+      if ( (rmesa->hw.tex[unit].cmd[TEX_PP_TXFILTER] & RADEON_LOD_BIAS_MASK) != b ) {
+	 RADEON_STATECHANGE( rmesa, tex[unit] );
+	 rmesa->hw.tex[unit].cmd[TEX_PP_TXFILTER] &= ~RADEON_LOD_BIAS_MASK;
+	 rmesa->hw.tex[unit].cmd[TEX_PP_TXFILTER] |= (b & RADEON_LOD_BIAS_MASK);
+a792 1
+   }
+d799 3
+a801 3
+static void radeonTexParameter( GLcontext *ctx, GLenum target,
+				struct gl_texture_object *texObj,
+				GLenum pname, const GLfloat *params )
+d804 1
+a804 1
+   radeonTexObjPtr t = (radeonTexObjPtr) texObj->DriverData;
+d806 3
+a808 3
+   if ( RADEON_DEBUG & (DEBUG_STATE|DEBUG_TEXTURE) ) {
+      fprintf( stderr, "%s( %s )\n", __FUNCTION__,
+	       _mesa_lookup_enum_by_nr( pname ) );
+d811 7
+d825 2
+a826 3
+   case GL_TEXTURE_MAX_ANISOTROPY_EXT:
+      radeonSetTexMaxAnisotropy( t, texObj->MaxAnisotropy );
+      radeonSetTexFilter( t, texObj->MinFilter, texObj->MagFilter );
+d831 2
+a832 1
+      radeonSetTexWrap( t, texObj->WrapS, texObj->WrapT );
+d836 2
+a837 13
+      radeonSetTexBorderColor( t, texObj->BorderColor );
+      break;
+
+   case GL_TEXTURE_BASE_LEVEL:
+   case GL_TEXTURE_MAX_LEVEL:
+   case GL_TEXTURE_MIN_LOD:
+   case GL_TEXTURE_MAX_LOD:
+      /* This isn't the most efficient solution but there doesn't appear to
+       * be a nice alternative for Radeon.  Since there's no LOD clamping,
+       * we just have to rely on loading the right subset of mipmap levels
+       * to simulate a clamped LOD.
+       */
+      radeonSwapOutTexObj( rmesa, t );
+d844 1
+a844 3
+   /* Mark this texobj as dirty (one bit per tex unit)
+    */
+   t->dirty_state = TEX_ALL;
+d847 6
+d854 4
+d859 1
+a859 5
+static void radeonBindTexture( GLcontext *ctx, GLenum target,
+			       struct gl_texture_object *texObj )
+{
+   radeonTexObjPtr t = (radeonTexObjPtr) texObj->DriverData;
+   GLuint unit = ctx->Texture.CurrentUnit;
+d861 3
+a863 2
+   if ( RADEON_DEBUG & (DEBUG_STATE|DEBUG_TEXTURE) ) {
+      fprintf( stderr, "%s( %p ) unit=%d\n", __FUNCTION__, texObj, unit );
+d866 5
+a870 5
+   if ( target == GL_TEXTURE_2D || target == GL_TEXTURE_1D ) {
+      if ( !t ) {
+	 t = radeonAllocTexObj( texObj );
+	 texObj->DriverData = t;
+      }
+d872 7
+d881 2
+a882 2
+static void radeonDeleteTexture( GLcontext *ctx,
+				 struct gl_texture_object *texObj )
+d885 1
+a885 1
+   radeonTexObjPtr t = (radeonTexObjPtr) texObj->DriverData;
+d887 2
+a888 2
+   if ( RADEON_DEBUG & (DEBUG_STATE|DEBUG_TEXTURE) ) {
+      fprintf( stderr, "%s( %p )\n", __FUNCTION__, texObj );
+d892 5
+a896 2
+      if ( rmesa ) {
+         RADEON_FIREVERTICES( rmesa );
+d898 1
+d900 1
+a900 1
+      texObj->DriverData = NULL;
+d904 2
+a905 2
+static GLboolean radeonIsTextureResident( GLcontext *ctx,
+					  struct gl_texture_object *texObj )
+d907 1
+a907 1
+   radeonTexObjPtr t = (radeonTexObjPtr) texObj->DriverData;
+d912 1
+a912 2
+
+static void radeonInitTextureObjects( GLcontext *ctx )
+d920 7
+a926 9
+   texObj = ctx->Texture.Unit[0].Current1D;
+   radeonBindTexture( ctx, GL_TEXTURE_1D, texObj );
+   move_to_tail( &rmesa->texture.swapped,
+		 (radeonTexObjPtr)texObj->DriverData );
+
+   texObj = ctx->Texture.Unit[0].Current2D;
+   radeonBindTexture( ctx, GL_TEXTURE_2D, texObj );
+   move_to_tail( &rmesa->texture.swapped,
+		 (radeonTexObjPtr)texObj->DriverData );
+d930 7
+a936 9
+   texObj = ctx->Texture.Unit[1].Current1D;
+   radeonBindTexture( ctx, GL_TEXTURE_1D, texObj );
+   move_to_tail( &rmesa->texture.swapped,
+		 (radeonTexObjPtr)texObj->DriverData );
+
+   texObj = ctx->Texture.Unit[1].Current2D;
+   radeonBindTexture( ctx, GL_TEXTURE_2D, texObj );
+   move_to_tail( &rmesa->texture.swapped,
+		 (radeonTexObjPtr)texObj->DriverData );
+d941 1
+a941 22
+/* Need:  
+ *  - Same GEN_MODE for all active bits
+ *  - Same EyePlane/ObjPlane for all active bits when using Eye/Obj
+ *  - STRQ presumably all supported (matrix means incoming R values
+ *    can end up in STQ, this has implications for vertex support,
+ *    presumably ok if maos is used, though?)
+ *  
+ * Basically impossible to do this on the fly - just collect some
+ * basic info & do the checks from ValidateState().
+ */
+static void radeonTexGen( GLcontext *ctx,
+			  GLenum coord,
+			  GLenum pname,
+			  const GLfloat *params )
+{
+   radeonContextPtr rmesa = RADEON_CONTEXT(ctx);
+   GLuint unit = ctx->Texture.CurrentUnit;
+   rmesa->recheck_texgen[unit] = GL_TRUE;
+}
+
+
+void radeonInitTextureFuncs( GLcontext *ctx )
+d943 12
+a954 18
+   ctx->Driver.ChooseTextureFormat	= radeonChooseTextureFormat;
+   ctx->Driver.TexImage1D		= radeonTexImage1D;
+   ctx->Driver.TexImage2D		= radeonTexImage2D;
+   ctx->Driver.TexImage3D		= _mesa_store_teximage3d;
+   ctx->Driver.TexSubImage1D		= radeonTexSubImage1D;
+   ctx->Driver.TexSubImage2D		= radeonTexSubImage2D;
+   ctx->Driver.TexSubImage3D		= _mesa_store_texsubimage3d;
+   ctx->Driver.CopyTexImage1D		= _swrast_copy_teximage1d;
+   ctx->Driver.CopyTexImage2D		= _swrast_copy_teximage2d;
+   ctx->Driver.CopyTexSubImage1D	= _swrast_copy_texsubimage1d;
+   ctx->Driver.CopyTexSubImage2D	= _swrast_copy_texsubimage2d;
+   ctx->Driver.CopyTexSubImage3D 	= _swrast_copy_texsubimage3d;
+   ctx->Driver.TestProxyTexImage	= _mesa_test_proxy_teximage;
+
+   ctx->Driver.BindTexture		= radeonBindTexture;
+   ctx->Driver.CreateTexture		= NULL; /* FIXME: Is this used??? */
+   ctx->Driver.DeleteTexture		= radeonDeleteTexture;
+   ctx->Driver.IsTextureResident	= radeonIsTextureResident;
+d959 1
+a959 5
+   ctx->Driver.TexEnv			= radeonTexEnv;
+   ctx->Driver.TexParameter		= radeonTexParameter;
+   ctx->Driver.TexGen                   = radeonTexGen;
+
+   radeonInitTextureObjects( ctx );
+@
+
+
+1.1.1.3
+log
+@That's what OpenBSD will, probably, ship as XF4 in 3.5
+their last sync against XFree86 4.3-current has been
+imported into our vendor branch, too
+@
+text
+@d1 1
+a1 28
+/* $XFree86: xc/lib/GL/mesa/src/drv/radeon/radeon_tex.c,v 1.11 2004/01/23 03:57:06 dawes Exp $ */
+/*
+Copyright 2000, 2001 ATI Technologies Inc., Ontario, Canada, and
+                     VA Linux Systems Inc., Fremont, California.
+
+All Rights Reserved.
+
+Permission is hereby granted, free of charge, to any person obtaining
+a copy of this software and associated documentation files (the
+"Software"), to deal in the Software without restriction, including
+without limitation the rights to use, copy, modify, merge, publish,
+distribute, sublicense, and/or sell copies of the Software, and to
+permit persons to whom the Software is furnished to do so, subject to
+the following conditions:
+
+The above copyright notice and this permission notice (including the
+next paragraph) shall be included in all copies or substantial
+portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
+IN NO EVENT SHALL THE COPYRIGHT OWNER(S) AND/OR ITS SUPPLIERS BE
+LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
+OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
+WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+*/
+
+d3 24
+d32 6
+a37 2
+#include "glheader.h"
+#include "imports.h"
+d42 1
+a46 6
+#include "radeon_context.h"
+#include "radeon_state.h"
+#include "radeon_ioctl.h"
+#include "radeon_swtcl.h"
+#include "radeon_tex.h"
+
+d48 2
+a49 7
+
+/**
+ * Set the texture wrap modes.
+ * 
+ * \param t Texture object whose wrap modes are to be set
+ * \param swrap Wrap mode for the \a s texture coordinate
+ * \param twrap Wrap mode for the \a t texture coordinate
+d54 1
+a54 4
+   GLboolean  is_clamp = GL_FALSE;
+   GLboolean  is_clamp_to_border = GL_FALSE;
+
+   t->pp_txfilter &= ~(RADEON_CLAMP_S_MASK | RADEON_CLAMP_T_MASK | RADEON_BORDER_MODE_D3D);
+d61 1
+a61 2
+      t->pp_txfilter |= RADEON_CLAMP_S_CLAMP_GL;
+      is_clamp = GL_TRUE;
+d67 1
+a67 2
+      t->pp_txfilter |= RADEON_CLAMP_S_CLAMP_GL;
+      is_clamp_to_border = GL_TRUE;
+d73 1
+a73 2
+      t->pp_txfilter |= RADEON_CLAMP_S_MIRROR_CLAMP_GL;
+      is_clamp = GL_TRUE;
+a77 2
+   default:
+      _mesa_problem(NULL, "bad S wrap mode in %s", __FUNCTION__);
+d85 1
+a85 2
+      t->pp_txfilter |= RADEON_CLAMP_T_CLAMP_GL;
+      is_clamp = GL_TRUE;
+d91 1
+a91 2
+      t->pp_txfilter |= RADEON_CLAMP_T_CLAMP_GL;
+      is_clamp_to_border = GL_TRUE;
+d97 1
+a97 2
+      t->pp_txfilter |= RADEON_CLAMP_T_MIRROR_CLAMP_GL;
+      is_clamp = GL_TRUE;
+a101 6
+   default:
+      _mesa_problem(NULL, "bad T wrap mode in %s", __FUNCTION__);
+   }
+
+   if ( is_clamp_to_border ) {
+      t->pp_txfilter |= RADEON_BORDER_MODE_D3D;
+a102 2
+
+   t->border_fallback = (is_clamp && is_clamp_to_border);
+a121 8
+/**
+ * Set the texture magnification and minification modes.
+ * 
+ * \param t Texture whose filter modes are to be set
+ * \param minf Texture minification mode
+ * \param magf Texture magnification mode
+ */
+
+a183 6
+/**
+ * Allocate space for and load the mesa images into the texture memory block.
+ * This will happen before drawing with a new texture, or drawing with a
+ * texture after it was swapped out or teximaged again.
+ */
+
+d189 2
+a190 5
+   texObj->DriverData = t;
+   if ( t != NULL ) {
+      if ( RADEON_DEBUG & DEBUG_TEXTURE ) {
+	 fprintf( stderr, "%s( %p, %p )\n", __FUNCTION__, (void *)texObj, (void *)t );
+      }
+d192 3
+a194 4
+      /* Initialize non-image-dependent parts of the state:
+       */
+      t->base.tObj = texObj;
+      t->border_fallback = GL_FALSE;
+d196 2
+a197 11
+      t->pp_txfilter = RADEON_BORDER_MODE_OGL;
+      t->pp_txformat = (RADEON_TXFORMAT_ENDIAN_NO_SWAP |
+			RADEON_TXFORMAT_PERSPECTIVE_ENABLE);
+
+      make_empty_list( & t->base );
+
+      radeonSetTexWrap( t, texObj->WrapS, texObj->WrapT );
+      radeonSetTexMaxAnisotropy( t, texObj->MaxAnisotropy );
+      radeonSetTexFilter( t, texObj->MinFilter, texObj->MagFilter );
+      radeonSetTexBorderColor( t, texObj->_BorderChan );
+   }
+d199 6
+a300 7
+   case GL_YCBCR_MESA:
+      if (type == GL_UNSIGNED_SHORT_8_8_APPLE ||
+          type == GL_UNSIGNED_BYTE)
+         return &_mesa_texformat_ycbcr;
+      else
+         return &_mesa_texformat_ycbcr_rev;
+
+d302 1
+a302 1
+      _mesa_problem(ctx, "unexpected texture format in %s", __FUNCTION__);
+d318 2
+a319 1
+   driTextureObject * t = (driTextureObject *) texObj->DriverData;
+d322 1
+a322 1
+      driSwapOutTextureObject( t );
+d325 1
+a325 1
+      t = (driTextureObject *) radeonAllocTexObj( texObj );
+d330 1
+d333 1
+a333 1
+   /* Note, this will call ChooseTextureFormat */
+d338 1
+a338 1
+   t->dirty_images[0] |= (1 << level);
+d351 2
+a352 1
+   driTextureObject * t = (driTextureObject *) texObj->DriverData;
+d356 2
+a357 1
+      driSwapOutTextureObject( t );
+d360 1
+a360 1
+      t = (driTextureObject *) radeonAllocTexObj( texObj );
+d365 1
+d372 1
+a372 1
+   t->dirty_images[0] |= (1 << level);
+d384 2
+a385 2
+   driTextureObject * t = (driTextureObject *) texObj->DriverData;
+   GLuint face;
+d387 1
+a387 14
+   /* which cube face or ordinary 2D image */
+   switch (target) {
+   case GL_TEXTURE_CUBE_MAP_POSITIVE_X:
+   case GL_TEXTURE_CUBE_MAP_NEGATIVE_X:
+   case GL_TEXTURE_CUBE_MAP_POSITIVE_Y:
+   case GL_TEXTURE_CUBE_MAP_NEGATIVE_Y:
+   case GL_TEXTURE_CUBE_MAP_POSITIVE_Z:
+   case GL_TEXTURE_CUBE_MAP_NEGATIVE_Z:
+      face = (GLuint) target - (GLuint) GL_TEXTURE_CUBE_MAP_POSITIVE_X;
+      ASSERT(face < 6);
+      break;
+   default:
+      face = 0;
+   }
+d389 2
+a390 2
+   if ( t != NULL ) {
+      driSwapOutTextureObject( t );
+d393 1
+a393 1
+      t = (driTextureObject *) radeonAllocTexObj( texObj );
+d398 1
+d401 1
+a401 1
+   /* Note, this will call ChooseTextureFormat */
+d406 1
+a406 1
+   t->dirty_images[face] |= (1 << level);
+d419 2
+a420 2
+   driTextureObject * t = (driTextureObject *) texObj->DriverData;
+   GLuint face;
+d422 1
+a422 15
+
+   /* which cube face or ordinary 2D image */
+   switch (target) {
+   case GL_TEXTURE_CUBE_MAP_POSITIVE_X:
+   case GL_TEXTURE_CUBE_MAP_NEGATIVE_X:
+   case GL_TEXTURE_CUBE_MAP_POSITIVE_Y:
+   case GL_TEXTURE_CUBE_MAP_NEGATIVE_Y:
+   case GL_TEXTURE_CUBE_MAP_POSITIVE_Z:
+   case GL_TEXTURE_CUBE_MAP_NEGATIVE_Z:
+      face = (GLuint) target - (GLuint) GL_TEXTURE_CUBE_MAP_POSITIVE_X;
+      ASSERT(face < 6);
+      break;
+   default:
+      face = 0;
+   }
+d426 1
+a426 1
+      driSwapOutTextureObject( t );
+d429 1
+a429 1
+      t = (driTextureObject *) radeonAllocTexObj( texObj );
+d434 1
+d441 1
+a441 1
+   t->dirty_images[face] |= (1 << level);
+a503 6
+
+/**
+ * Changes variables and flags for a state update, which will happen at the
+ * next UpdateTextureState
+ */
+
+d508 1
+d534 1
+a534 1
+      radeonSetTexBorderColor( t, texObj->_BorderChan );
+d542 1
+a542 1
+       * be a nice alternative.  Since there's no LOD clamping,
+d546 1
+a546 1
+      driSwapOutTextureObject( (driTextureObject *) t );
+d563 3
+d567 1
+a567 2
+      fprintf( stderr, "%s( %p ) unit=%d\n", __FUNCTION__, (void *)texObj,
+	       ctx->Texture.CurrentUnit );
+d571 3
+a573 2
+      if ( texObj->DriverData == NULL ) {
+	 radeonAllocTexObj( texObj );
+d582 1
+a582 1
+   driTextureObject * t = (driTextureObject *) texObj->DriverData;
+d585 1
+a585 2
+      fprintf( stderr, "%s( %p (target = %s) )\n", __FUNCTION__, (void *)texObj,
+	       _mesa_lookup_enum_by_nr( texObj->Target ) );
+d588 1
+a588 1
+   if ( t != NULL ) {
+d592 12
+d605 32
+a636 2
+      driDestroyTextureObject( t );
+   }
+a661 3
+   radeonContextPtr rmesa = RADEON_CONTEXT(ctx);
+
+
+d679 1
+a679 1
+   ctx->Driver.IsTextureResident	= driIsTextureResident;
+d688 1
+a688 3
+   driInitTextureObjects( ctx, & rmesa->swapped,
+			  DRI_TEXMGR_DO_TEXTURE_1D
+			  | DRI_TEXMGR_DO_TEXTURE_2D );
+@
+
+

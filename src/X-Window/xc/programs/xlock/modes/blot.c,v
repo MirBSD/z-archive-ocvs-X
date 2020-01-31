@@ -1,0 +1,304 @@
+head	1.1;
+branch	1.1.1;
+access;
+symbols
+	tg-mergetmp-2:1.1.1.1
+	cvs-200410241530:1.1.1.1
+	cvs-200410012000:1.1.1.1
+	cvs-200407141120:1.1.1.1
+	cvs-200406231010:1.1.1.1
+	MIRBSD_7quater:1.1.1.1
+	cvs-200405271510:1.1.1.1
+	cvs-200403021700:1.1.1.1
+	cvs-200401291925:1.1.1.1
+	MIRBSD_7_ALPHA:1.1.1.1.0.4
+	MIRBSD_7:1.1.1.1.0.2
+	MIRBSD_7ter:1.1.1.1
+	cvs-20011091815:1.1.1.1
+	cvs-200309162130:1.1.1.1
+	cvs-200308302005:1.1.1.1
+	ctmx-0387:1.1.1.1
+	ctmx-0384:1.1.1.1
+	MIRBSD_5:1.1.1.1
+	ctmx-0375:1.1.1.1
+	ctmx-0373:1.1.1.1
+	ctm-0371:1.1.1.1
+	ctm-0370:1.1.1.1
+	MIRBSD_4:1.1.1.1
+	ctm-0363:1.1.1.1
+	ctm-0359:1.1.1.1
+	ctm-0349:1.1.1.1
+	openbsd:1.1.1;
+locks; strict;
+comment	@ * @;
+
+
+1.1
+date	2003.03.22.20.10.45;	author tg;	state Exp;
+branches
+	1.1.1.1;
+next	;
+
+1.1.1.1
+date	2003.03.22.20.10.45;	author tg;	state Stab;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@/* -*- Mode: C; tab-width: 4 -*- */
+/* blot --- Rorschach's ink blot test */
+
+#if !defined( lint ) && !defined( SABER )
+static const char sccsid[] = "@@(#)blot.c	5.00 2000/11/01 xlockmore";
+
+#endif
+
+/*-
+ * Copyright (c) 1992 by Jamie Zawinski
+ *
+ * Permission to use, copy, modify, and distribute this software and its
+ * documentation for any purpose and without fee is hereby granted,
+ * provided that the above copyright notice appear in all copies and that
+ * both that copyright notice and this permission notice appear in
+ * supporting documentation.
+ *
+ * This file is provided AS IS with no warranties of any kind.  The author
+ * shall have no liability with respect to the infringement of copyrights,
+ * trade secrets or any patents by this file or any part thereof.  In no
+ * event will the author be liable for any lost revenue or profits or
+ * other special, indirect and consequential damages.
+ *
+ * 01-Nov-2000: Allocation checks
+ * 10-May-1997: Compatible with xscreensaver
+ * 05-Jan-1995: patch for Dual-Headed machines from Greg Onufer
+ *              <Greg.Onufer@@Eng.Sun.COM>
+ * 07-Dec-1994: now randomly has xsym, ysym, or both.
+ * 02-Sep-1993: xlock version David Bagley <bagleyd@@tux.org>
+ * 1992:        xscreensaver version Jamie Zawinski <jwz@@jwz.org>
+ */
+
+/*-
+ * original copyright
+ * Copyright (c) 1992 by Jamie Zawinski
+ * Permission to use, copy, modify, distribute, and sell this software and
+ * its documentation for any purpose is hereby granted without fee, provided
+ * that the above copyright notice appear in all copies and that both that
+ * copyright notice and this permission notice appear in supporting
+ * documentation.  No representations are made about the suitability of this
+ * software for any purpose.  It is provided "as is" without express or
+ * implied warranty.
+ */
+
+#ifdef STANDALONE
+#define PROGCLASS "Blot"
+#define HACK_INIT init_blot
+#define HACK_DRAW draw_blot
+#define blot_opts xlockmore_opts
+#define DEFAULTS "*delay: 2000000 \n" \
+ "*count: 6 \n" \
+ "*cycles: 30 \n" \
+ "*ncolors: 200 \n"
+#include "xlockmore.h"		/* in xscreensaver distribution */
+#else /* STANDALONE */
+#include "xlock.h"		/* in xlockmore distribution */
+#endif /* STANDALONE */
+
+#ifdef MODE_blot
+
+ModeSpecOpt blot_opts =
+{0, NULL, 0, NULL, NULL};
+
+#ifdef USE_MODULES
+ModStruct   blot_description =
+{"blot", "init_blot", "draw_blot", "release_blot",
+ "refresh_blot", "init_blot", NULL, &blot_opts,
+ 200000, 6, 30, 1, 64, 0.3, "",
+ "Shows Rorschach's ink blot test", 0, NULL};
+
+#endif
+
+typedef struct {
+	int         width;
+	int         height;
+	int         xmid, ymid;
+	int         offset;
+	int         xsym, ysym;
+	int         size;
+	int         pix;
+	int         count;
+	XPoint     *pointBuffer;
+	unsigned int pointBufferSize;
+} blotstruct;
+
+static blotstruct *blots = NULL;
+
+void
+init_blot(ModeInfo * mi)
+{
+	Display    *display = MI_DISPLAY(mi);
+	blotstruct *bp;
+
+	if (blots == NULL) {
+		if ((blots = (blotstruct *) calloc(MI_NUM_SCREENS(mi),
+					       sizeof (blotstruct))) == NULL)
+			return;
+	}
+	bp = &blots[MI_SCREEN(mi)];
+
+	bp->width = MI_WIDTH(mi);
+	bp->height = MI_HEIGHT(mi);
+	bp->xmid = bp->width / 2;
+	bp->ymid = bp->height / 2;
+
+	bp->offset = 4;
+	bp->ysym = (int) LRAND() & 1;
+	bp->xsym = (bp->ysym) ? (int) LRAND() & 1 : 1;
+	if (MI_NPIXELS(mi) > 2)
+		bp->pix = NRAND(MI_NPIXELS(mi));
+	if (bp->offset <= 0)
+		bp->offset = 3;
+	if (MI_COUNT(mi) < 0)
+		bp->size = NRAND(-MI_COUNT(mi) + 1);
+	else
+		bp->size = MI_COUNT(mi);
+
+	/* Fudge the size so it takes up the whole screen */
+	bp->size *= (bp->width / 32 + 1) * (bp->height / 32 + 1);
+	if (!bp->pointBuffer || bp->pointBufferSize < bp->size * sizeof (XPoint)) {
+		if (bp->pointBuffer != NULL)
+			(void) free((void *) bp->pointBuffer);
+		bp->pointBufferSize = bp->size * sizeof (XPoint);
+		if ((bp->pointBuffer = (XPoint *) malloc(bp->pointBufferSize)) ==
+				NULL) {
+			return;
+		}
+	}
+	MI_CLEARWINDOW(mi);
+	XSetForeground(display, MI_GC(mi), MI_WHITE_PIXEL(mi));
+	bp->count = 0;
+}
+
+void
+draw_blot(ModeInfo * mi)
+{
+	blotstruct *bp;
+	XPoint     *xp;
+	int         x, y, k;
+
+	if (blots == NULL)
+		return;
+	bp = &blots[MI_SCREEN(mi)];
+	xp = bp->pointBuffer;
+	if (xp == NULL)
+		init_blot(mi);
+
+	MI_IS_DRAWN(mi) = True;
+	if (MI_NPIXELS(mi) > 2) {
+		XSetForeground(MI_DISPLAY(mi), MI_GC(mi), MI_PIXEL(mi, bp->pix));
+		if (++bp->pix >= MI_NPIXELS(mi))
+			bp->pix = 0;
+	}
+	x = bp->xmid;
+	y = bp->ymid;
+	k = bp->size;
+	while (k >= 4) {
+		x += (NRAND(1 + (bp->offset << 1)) - bp->offset);
+		y += (NRAND(1 + (bp->offset << 1)) - bp->offset);
+		k--;
+		xp->x = x;
+		xp->y = y;
+		xp++;
+		if (bp->xsym) {
+			k--;
+			xp->x = bp->width - x;
+			xp->y = y;
+			xp++;
+		}
+		if (bp->ysym) {
+			k--;
+			xp->x = x;
+			xp->y = bp->height - y;
+			xp++;
+		}
+		if (bp->xsym && bp->ysym) {
+			k--;
+			xp->x = bp->width - x;
+			xp->y = bp->height - y;
+			xp++;
+		}
+	}
+	XDrawPoints(MI_DISPLAY(mi), MI_WINDOW(mi), MI_GC(mi),
+		    bp->pointBuffer, (bp->size - k), CoordModeOrigin);
+	if (++bp->count > MI_CYCLES(mi))
+		init_blot(mi);
+}
+
+
+void
+release_blot(ModeInfo * mi)
+{
+	if (blots != NULL) {
+		int         screen;
+
+		for (screen = 0; screen < MI_NUM_SCREENS(mi); screen++) {
+			blotstruct *bp = &blots[screen];
+
+			if (bp->pointBuffer != NULL) {
+				(void) free((void *) bp->pointBuffer);
+				/* bp->pointBuffer == NULL; */
+			}
+		}
+		(void) free((void *) blots);
+		blots = NULL;
+	}
+}
+
+void
+refresh_blot(ModeInfo * mi)
+{
+	MI_CLEARWINDOW(mi);
+}
+
+#endif /* MODE_blot */
+@
+
+
+1.1.1.1
+log
+@Import OpenBSD 3.3 XF4 repository from CTM 3132 the first time
+This finalizes starting an OpenBSD-mirabile (aka MirBSD) repository.
+
+### MirBSD is:
+# Copyright (c) 1982-2003 by Thorsten "mirabile" Glaser <x86@@ePost.de>
+# Copyright © 1968-2003  The authors of And contributors to UNIX®, the
+#       C Language, BSD/Berkeley Unix; 386BSD, NetBSD 1.1 and OpenBSD.
+#
+# Anyone who obtained a copy of this work is hereby permitted to freely use,
+# distribute, modify, merge, sublicence, give away or sell it as long as the
+# authors are given due credit and the following notice is retained:
+#
+# This work is provided "as is", with no explicit or implicit warranty what-
+# soever. Use it only at your own risk. In no event may an author or contri-
+# butor be held liable for any damage, directly or indirectly, that origina-
+# ted through or is caused by creation or modification of this work.
+
+MirBSD is my private tree. MirBSD does not differ very much from OpenBSD
+and intentionally tracks OpenBSD. That's why it _is_ OpenBSD, just not the
+official one. It's like with DarrenBSD.
+
+At time of this writing, no advertising for MirBSD must be done,
+because the advertising clause has not yet been sorted out.
+
+http://templeofhate.com/tglaser/MirBSD/index.php
+@
+text
+@@

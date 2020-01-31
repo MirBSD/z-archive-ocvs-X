@@ -1,0 +1,182 @@
+head	1.2;
+access;
+symbols
+	ctm-3341:1.1.1.1
+	MIRBSD_5:1.1.1.1
+	cvs-200306082100:1.1.1.1
+	ctm-3316:1.1.1.1
+	ctm-3272:1.1.1.1
+	ctm-3264:1.1.1.1
+	ctm-3258:1.1.1.1
+	MIRBSD_4:1.1.1.1
+	ctm-3200:1.1.1.1
+	ctm-3188:1.1.1.1
+	ctm-3155:1.1.1.1
+	ctm-3132:1.1.1.1
+	openbsd:1.1.1;
+locks; strict;
+comment	@# @;
+
+
+1.2
+date	2003.06.29.01.05.37;	author tg;	state dead;
+branches;
+next	1.1;
+
+1.1
+date	2003.03.22.19.51.19;	author tg;	state Exp;
+branches
+	1.1.1.1;
+next	;
+
+1.1.1.1
+date	2003.03.22.19.51.19;	author tg;	state Exp;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.2
+log
+@cvs does not delete files deleted in openbsd... weird
+@
+text
+@#!/usr/bin/perl 
+# $OpenBSD: createuser,v 1.2 1999/08/21 20:56:05 niklas Exp $
+
+# user creation script.
+# All ports that need to create new users should defer to this script
+# If specific capabilities are needed they should be added HERE as well.
+
+require '/usr/ports/infrastructure/db/user.db';
+
+use Fcntl ':flock'; # import LOCK_* constants
+
+sub check_root
+	{
+	if ($>) 
+		{ die "Only root can run this script\n"; } 
+	if ($<)
+		{ die "There is something fishy going on, I'd better quit\n"; }
+	}
+
+sub fill_user
+	{
+	my ($key) = shift;
+	unless (defined $users{$key})
+		{die "Sorry, no such user: $key, maybe you need to upgrade your createuser database ?\n"; }
+	my ($r) = $users{$key};
+	unless (defined $r->{fullname} && defined $r->{uid})
+		{ die "Incompletely defined user: $key\n"; }
+	$r->{user} = $key unless defined $r->{user};
+	$r->{group} = $r->{user} unless defined $r->{group};
+	$r->{gid} = $r->{uid} unless defined $r->{gid};
+	$r->{shell} = '/sbin/nologin' unless defined $r->{shell};
+	$r->{home} = '/root' unless defined $r->{home};
+		# avoid characters such as + or : in password entries...
+
+	my $k;
+	local $_;
+	while (($k, $_) = each %$r)
+		{ die "Bad chpass field $_\n" unless m/^[\d\w ()\-\/.]+$/; }
+	return $r;
+	}
+
+sub atomic_append 
+	{
+	my ($file,@@list) = @@_;
+
+	open F, ">> $file"  or die "$file: $!\n";
+	unless (flock(F, LOCK_EX | LOCK_NB))
+		{ die "Cannot lock $file\n"; }
+		# prevent the rare case where someone is already appending to that file
+	seek F, 0, 2;
+	print F join( "\n", @@list) . "\n";
+	close F;
+	flock  F, LOCK_UN ;
+	}
+
+
+# the main routine
+
+check_root();
+if ($#ARGV < 0)
+	{ die "Must supply one argument\n"; }
+
+
+my $r = fill_user($ARGV[0]);
+
+my ($uid, $gid);
+
+# find matching uid/gids.
+unless ( $uid = (getpwnam $r->{user})[2])
+	{
+	$uid = $r->{uid};
+	$uid++ while getpwuid $uid;
+	}
+
+unless ( $gid = (getgrnam $r->{group})[2])
+	{
+	$gid = $r->{gid};
+	$gid++ while getgrgid $gid;
+	}
+
+# check mandatory ids
+if ($r->{mandatory} =~ m/uid/ && $uid != $r->{uid})
+	{ die "Uid mismatch for $r->{user}\n"; }
+if ($r->{mandatory} =~ m/gid/ && $gid != $r->{gid})
+	{ die "Gid mismatch for $r->{user}\n"; }
+
+atomic_append( '/etc/group', "$r->{group}:*:$gid:" );
+
+print "$r->{user} with uid $uid, of group $r->{group} with gid $gid\n";
+
+$passargs = join(':', 
+	($r->{user}, '*', $uid, $gid, '', '', '', $r->{fullname}, $r->{home}, $r->{shell}));
+$local = `ypwhich >/dev/null 2>&1 && echo -n l`;
+print "/usr/bin/chpass -${local}a $passargs\n";
+system('/usr/bin/chpass', "-${local}a", $passargs);
+@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@@
+
+
+1.1.1.1
+log
+@Import OpenBSD 3.3 ports repository from CTM 3132 the first time
+This continues opening an OpenBSD-mirabile (aka MirBSD) repository.
+
+### MirBSD is:
+# Copyright (c) 1982-2003 by Thorsten "mirabile" Glaser <x86@@ePost.de>
+# Copyright © 1968-2003  The authors of And contributors to UNIX®, the
+#       C Language, BSD/Berkeley Unix; 386BSD, NetBSD 1.1 and OpenBSD.
+#
+# Anyone who obtained a copy of this work is hereby permitted to freely use,
+# distribute, modify, merge, sublicence, give away or sell it as long as the
+# authors are given due credit and the following notice is retained:
+#
+# This work is provided "as is", with no explicit or implicit warranty what-
+# soever. Use it only at your own risk. In no event may an author or contri-
+# butor be held liable for any damage, directly or indirectly, that origina-
+# ted through or is caused by creation or modification of this work.
+
+MirBSD is my private tree. MirBSD does not differ very much from OpenBSD
+and intentionally tracks OpenBSD. That's why it _is_ OpenBSD, just not the
+official one. It's like with DarrenBSD.
+
+At time of this writing, no advertising for MirBSD must be done,
+because the advertising clause has not yet been sorted out.
+
+http://templeofhate.com/tglaser/MirBSD/index.php
+@
+text
+@@

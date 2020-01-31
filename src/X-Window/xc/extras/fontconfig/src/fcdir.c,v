@@ -1,0 +1,400 @@
+head	1.2;
+access;
+symbols
+	tg-mergetmp-2:1.2
+	cvs-200410241530:1.1.1.2
+	cvs-200410012000:1.1.1.2
+	cvs-200407141120:1.1.1.2
+	cvs-200406231010:1.1.1.2
+	cvs-200405271510:1.1.1.1
+	XFree86_4_4_0:1.1.9.1
+	cvs-200403021700:1.1.1.1
+	openbsd:1.1.1
+	XFREE86_20040213:1.1.9.1
+	xc:1.1.9;
+locks; strict;
+comment	@ * @;
+
+
+1.2
+date	2004.06.23.12.36.23;	author tg;	state Stab;
+branches;
+next	1.1;
+
+1.1
+date	2004.02.14.19.06.00;	author tg;	state Exp;
+branches
+	1.1.1.1
+	1.1.9.1;
+next	;
+
+1.1.1.1
+date	2004.03.02.17.43.10;	author tg;	state Exp;
+branches;
+next	1.1.1.2;
+
+1.1.1.2
+date	2004.06.23.11.15.15;	author tg;	state Exp;
+branches;
+next	;
+
+1.1.9.1
+date	2004.02.14.19.06.00;	author tg;	state Exp;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.2
+log
+@merge
+@
+text
+@/*
+ * $RCSId: xc/lib/fontconfig/src/fcdir.c,v 1.9 2002/08/31 22:17:32 keithp Exp $
+ *
+ * Copyright © 2000 Keith Packard
+ *
+ * Permission to use, copy, modify, distribute, and sell this software and its
+ * documentation for any purpose is hereby granted without fee, provided that
+ * the above copyright notice appear in all copies and that both that
+ * copyright notice and this permission notice appear in supporting
+ * documentation, and that the name of Keith Packard not be used in
+ * advertising or publicity pertaining to distribution of the software without
+ * specific, written prior permission.  Keith Packard makes no
+ * representations about the suitability of this software for any purpose.  It
+ * is provided "as is" without express or implied warranty.
+ *
+ * KEITH PACKARD DISCLAIMS ALL WARRANTIES WITH REGARD TO THIS SOFTWARE,
+ * INCLUDING ALL IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS, IN NO
+ * EVENT SHALL KEITH PACKARD BE LIABLE FOR ANY SPECIAL, INDIRECT OR
+ * CONSEQUENTIAL DAMAGES OR ANY DAMAGES WHATSOEVER RESULTING FROM LOSS OF USE,
+ * DATA OR PROFITS, WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER
+ * TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR
+ * PERFORMANCE OF THIS SOFTWARE.
+ */
+
+#include "fcint.h"
+#include <dirent.h>
+
+static FcBool
+FcFileIsDir (const FcChar8 *file)
+{
+    struct stat	    statb;
+
+    if (stat ((const char *) file, &statb) != 0)
+	return FcFalse;
+    return S_ISDIR(statb.st_mode);
+}
+
+FcBool
+FcFileScan (FcFontSet	    *set,
+	    FcStrSet	    *dirs,
+	    FcGlobalCache   *cache,
+	    FcBlanks	    *blanks,
+	    const FcChar8   *file,
+	    FcBool	    force)
+{
+    int			id;
+    FcChar8		*name;
+    FcPattern		*font;
+    FcBool		ret = FcTrue;
+    FcBool		isDir;
+    int			count = 0;
+    FcGlobalCacheFile	*cache_file;
+    FcGlobalCacheDir	*cache_dir;
+    FcBool		need_scan;
+    
+    if (force)
+	cache = 0;
+    id = 0;
+    do
+    {
+	need_scan = FcTrue;
+	font = 0;
+	/*
+	 * Check the cache
+	 */
+	if (cache)
+	{
+	    if ((cache_file = FcGlobalCacheFileGet (cache, file, id, &count)))
+	    {
+		/*
+		 * Found a cache entry for the file
+		 */
+		if (FcGlobalCacheCheckTime (file, &cache_file->info))
+		{
+		    name = cache_file->name;
+		    need_scan = FcFalse;
+		    FcGlobalCacheReferenced (cache, &cache_file->info);
+		    /* "." means the file doesn't contain a font */
+		    if (FcStrCmp (name, FC_FONT_FILE_INVALID) != 0)
+		    {
+			font = FcNameParse (name);
+			if (font)
+			    if (!FcPatternAddString (font, FC_FILE, file))
+				ret = FcFalse;
+		    }
+		}
+	    }
+	    else if ((cache_dir = FcGlobalCacheDirGet (cache, file,
+						       strlen ((const char *) file),
+						       FcFalse)))
+	    {
+		if (FcGlobalCacheCheckTime (cache_dir->info.file, 
+					    &cache_dir->info))
+		{
+		    font = 0;
+		    need_scan = FcFalse;
+		    FcGlobalCacheReferenced (cache, &cache_dir->info);
+		    if (!FcStrSetAdd (dirs, file))
+			ret = FcFalse;
+		}
+	    }
+	}
+	/*
+	 * Nothing in the cache, scan the file
+	 */
+	if (need_scan)
+	{
+	    if (FcDebug () & FC_DBG_SCAN)
+	    {
+		printf ("\tScanning file %s...", file);
+		fflush (stdout);
+	    }
+	    font = FcFreeTypeQuery (file, id, blanks, &count);
+	    if (FcDebug () & FC_DBG_SCAN)
+		printf ("done\n");
+	    isDir = FcFalse;
+	    if (!font && FcFileIsDir (file))
+	    {
+		isDir = FcTrue;
+		ret = FcStrSetAdd (dirs, file);
+	    }
+	    /*
+	     * Update the cache
+	     */
+	    if (cache && font)
+	    {
+		FcChar8	*unparse;
+
+		unparse = FcNameUnparse (font);
+		if (unparse)
+		{
+		    (void) FcGlobalCacheUpdate (cache, file, id, unparse);
+		    FcStrFree (unparse);
+		}
+	    }
+	}
+	/*
+	 * Add the font
+	 */
+	if (font)
+	{
+	    if (!FcFontSetAdd (set, font))
+	    {
+		FcPatternDestroy (font);
+		font = 0;
+		ret = FcFalse;
+	    }
+	}
+	id++;
+    } while (font && ret && id < count);
+    return ret;
+}
+
+#define FC_MAX_FILE_LEN	    4096
+
+/*
+ * Scan 'dir', adding font files to 'set' and
+ * subdirectories to 'dirs'
+ */
+
+FcBool
+FcDirScan (FcFontSet	    *set,
+	   FcStrSet	    *dirs,
+	   FcGlobalCache    *cache,
+	   FcBlanks	    *blanks,
+	   const FcChar8    *dir,
+	   FcBool	    force)
+{
+    DIR			*d;
+    struct dirent	*e;
+    FcChar8		*file;
+    FcChar8		*base;
+    FcBool		ret = FcTrue;
+
+    if (!force)
+    {
+	/*
+	 * Check fonts.cache-<version> file
+	 */
+	if (FcDirCacheReadDir (set, dirs, dir))
+	{
+	    if (cache)
+		FcGlobalCacheReferenceSubdir (cache, dir);
+	    return FcTrue;
+	}
+    
+	/*
+	 * Check ~/.fonts.cache-<version> file
+	 */
+	if (cache && FcGlobalCacheScanDir (set, dirs, cache, dir))
+	    return FcTrue;
+    }
+    
+    /* freed below */
+    file = (FcChar8 *) malloc (strlen ((char *) dir) + 1 + FC_MAX_FILE_LEN + 1);
+    if (!file)
+	return FcFalse;
+
+    strcpy ((char *) file, (char *) dir);
+    strcat ((char *) file, "/");
+    base = file + strlen ((char *) file);
+    
+    if (FcDebug () & FC_DBG_SCAN)
+	printf ("\tScanning dir %s\n", dir);
+	
+    d = opendir ((char *) dir);
+    
+    if (!d)
+    {
+	free (file);
+	/* Don't complain about missing directories */
+	if (errno == ENOENT)
+	    return FcTrue;
+	return FcFalse;
+    }
+    while (ret && (e = readdir (d)))
+    {
+	if (e->d_name[0] != '.' && strlen (e->d_name) < FC_MAX_FILE_LEN)
+	{
+	    strcpy ((char *) base, (char *) e->d_name);
+	    ret = FcFileScan (set, dirs, cache, blanks, file, force);
+	}
+    }
+    free (file);
+    closedir (d);
+    /*
+     * Now that the directory has been scanned,
+     * add the cache entry 
+     */
+    if (ret && cache)
+	FcGlobalCacheUpdate (cache, dir, 0, 0);
+	
+    return ret;
+}
+
+FcBool
+FcDirSave (FcFontSet *set, FcStrSet *dirs, const FcChar8 *dir)
+{
+    return FcDirCacheWriteDir (set, dirs, dir);
+}
+@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@d2 3
+a4 1
+ * Copyright © 2000 Keith Packard, member of The XFree86 Project, Inc.
+a23 1
+/* $XFree86: xc/extras/fontconfig/src/fcdir.c,v 1.2 2003/06/04 16:29:39 dawes Exp $ */
+d50 1
+d73 1
+a73 1
+		if (FcGlobalCacheCheckTime (&cache_file->info))
+d92 2
+a93 1
+		if (FcGlobalCacheCheckTime (&cache_dir->info))
+d116 1
+d119 1
+a120 2
+		if (cache && ret)
+		    FcGlobalCacheUpdate (cache, file, 0, FC_FONT_FILE_DIR);
+d156 5
+d181 3
+d185 1
+d203 3
+d226 4
+@
+
+
+1.1.1.1
+log
+@That's what OpenBSD will, probably, ship as XF4 in 3.5
+their last sync against XFree86 4.3-current has been
+imported into our vendor branch, too
+@
+text
+@@
+
+
+1.1.1.2
+log
+@OpenBSD updated X-Window plus fontconfig 2.2.2.
+@
+text
+@d2 1
+a2 3
+ * $RCSId: xc/lib/fontconfig/src/fcdir.c,v 1.9 2002/08/31 22:17:32 keithp Exp $
+ *
+ * Copyright © 2000 Keith Packard
+d22 1
+a48 1
+    FcBool		isDir;
+d71 1
+a71 1
+		if (FcGlobalCacheCheckTime (file, &cache_file->info))
+d90 1
+a90 2
+		if (FcGlobalCacheCheckTime (cache_dir->info.file, 
+					    &cache_dir->info))
+a112 1
+	    isDir = FcFalse;
+a114 1
+		isDir = FcTrue;
+d116 2
+a152 5
+/*
+ * Scan 'dir', adding font files to 'set' and
+ * subdirectories to 'dirs'
+ */
+
+a172 3
+	{
+	    if (cache)
+		FcGlobalCacheReferenceSubdir (cache, dir);
+a173 1
+	}
+a190 3
+    if (FcDebug () & FC_DBG_SCAN)
+	printf ("\tScanning dir %s\n", dir);
+	
+a210 4
+    /*
+     * Now that the directory has been scanned,
+     * add the cache entry 
+     */
+@
+
+
+1.1.9.1
+log
+@OpenBSD just has imported exactly this tree into their vendor branch,
+called the same tag, in XF4/xc
+This is, apparently, the last XFree86 snapshot before the licence change
+(ie, addition of the advertising clause)
+
+Since the developers don't see any problems with that, and we would like
+to integrate improvements done by the remaining one or two (or so) XFree86
+developers (j/k), this prepares enabling us to update X-Window in the future.
+@
+text
+@@

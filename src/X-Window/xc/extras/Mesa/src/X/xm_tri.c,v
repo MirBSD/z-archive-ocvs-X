@@ -1,0 +1,2466 @@
+head	1.2;
+branch	1.1.1;
+access;
+symbols
+	tg-mergetmp-2:1.1.1.2
+	cvs-200410241530:1.1.1.2
+	cvs-200410012000:1.1.1.2
+	cvs-200407141120:1.1.1.2
+	cvs-200406231010:1.1.1.2
+	MIRBSD_7quater:1.1.1.1
+	cvs-200405271510:1.1.1.2
+	XFree86_4_4_0:1.1.9.1
+	cvs-200403021700:1.1.1.2
+	XFREE86_20040213:1.1.9.1
+	xc:1.1.9
+	cvs-200401291925:1.1.1.1
+	MIRBSD_7_ALPHA:1.1.1.1.0.4
+	MIRBSD_7:1.1.1.1.0.2
+	MIRBSD_7ter:1.1.1.1
+	cvs-20011091815:1.1.1.1
+	cvs-200309162130:1.1.1.1
+	cvs-200308302005:1.1.1.1
+	ctmx-0387:1.1.1.1
+	ctmx-0384:1.1.1.1
+	MIRBSD_5:1.1.1.1
+	ctmx-0375:1.1.1.1
+	ctmx-0373:1.1.1.1
+	ctm-0371:1.1.1.1
+	ctm-0370:1.1.1.1
+	MIRBSD_4:1.1.1.1
+	ctm-0363:1.1.1.1
+	ctm-0359:1.1.1.1
+	openbsd:1.1.1;
+locks; strict;
+comment	@ * @;
+
+
+1.2
+date	2003.05.16.16.28.27;	author tg;	state dead;
+branches;
+next	1.1;
+
+1.1
+date	2003.04.08.18.20.09;	author tg;	state Exp;
+branches
+	1.1.1.1
+	1.1.9.1;
+next	;
+
+1.1.1.1
+date	2003.04.08.18.20.09;	author tg;	state Exp;
+branches;
+next	1.1.1.2;
+
+1.1.1.2
+date	2004.03.02.17.29.30;	author tg;	state Stab;
+branches;
+next	;
+
+1.1.9.1
+date	2004.02.14.19.04.54;	author tg;	state Exp;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.2
+log
+@remove a bunch of files not used in MirBSD - clean tree. People who want them got cvs.
+@
+text
+@
+/*
+ * Mesa 3-D graphics library
+ * Version:  4.0.3
+ *
+ * Copyright (C) 1999-2002  Brian Paul   All Rights Reserved.
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a
+ * copy of this software and associated documentation files (the "Software"),
+ * to deal in the Software without restriction, including without limitation
+ * the rights to use, copy, modify, merge, publish, distribute, sublicense,
+ * and/or sell copies of the Software, and to permit persons to whom the
+ * Software is furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included
+ * in all copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
+ * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL
+ * BRIAN PAUL BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN
+ * AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
+ * CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+ */
+
+
+/*
+ * This file contains "accelerated" triangle functions.  It should be
+ * fairly easy to write new special-purpose triangle functions and hook
+ * them into this module.
+ */
+
+
+#include "glxheader.h"
+#include "depth.h"
+#include "macros.h"
+#include "mmath.h"
+#include "mtypes.h"
+#include "xmesaP.h"
+
+/* Internal swrast includes:
+ */
+#include "swrast/s_context.h"
+#include "swrast/s_depth.h"
+#include "swrast/s_triangle.h"
+#include "swrast/s_trispan.h"
+
+
+
+/**********************************************************************/
+/***                   Triangle rendering                           ***/
+/**********************************************************************/
+
+
+/*
+ * XImage, smooth, depth-buffered, PF_TRUECOLOR triangle.
+ */
+static void smooth_TRUECOLOR_z_triangle( GLcontext *ctx,
+                                         const SWvertex *v0,
+					 const SWvertex *v1,
+					 const SWvertex *v2 )
+{
+   XMesaContext xmesa = (XMesaContext) ctx->DriverCtx;
+   XMesaImage *img = xmesa->xm_buffer->backimage;
+#define INTERP_Z 1
+#define DEPTH_TYPE DEFAULT_SOFTWARE_DEPTH_TYPE
+#define INTERP_RGB 1
+
+#define RENDER_SPAN( span )					\
+   GLint x = span.x, y = FLIP(xmesa->xm_buffer, span.y);	\
+   GLuint i;							\
+   for (i = 0; i < span.count; i++, x++) {			\
+      const DEPTH_TYPE z = FixedToDepth(span.z);		\
+      if (z < zRow[i]) {					\
+         unsigned long p;					\
+         PACK_TRUECOLOR(p, FixedToInt(span.red),		\
+            FixedToInt(span.green), FixedToInt(span.blue));	\
+         XMesaPutPixel(img, x, y, p);				\
+         zRow[i] = z;						\
+      }								\
+      span.red += span.redStep;					\
+      span.green += span.greenStep;				\
+      span.blue += span.blueStep;				\
+      span.z += span.zStep;					\
+   }
+
+#include "swrast/s_tritemp.h"
+}
+
+
+
+/*
+ * XImage, smooth, depth-buffered, PF_8A8B8G8R triangle.
+ */
+static void smooth_8A8B8G8R_z_triangle( GLcontext *ctx,
+					const SWvertex *v0,
+					const SWvertex *v1,
+					const SWvertex *v2 )
+{
+   XMesaContext xmesa = (XMesaContext) ctx->DriverCtx;
+#define INTERP_Z 1
+#define DEPTH_TYPE DEFAULT_SOFTWARE_DEPTH_TYPE
+#define INTERP_RGB 1
+#define PIXEL_ADDRESS(X,Y) PIXELADDR4(xmesa->xm_buffer,X,Y)
+#define PIXEL_TYPE GLuint
+#define BYTES_PER_ROW (xmesa->xm_buffer->backimage->bytes_per_line)
+
+#define RENDER_SPAN( span )					\
+   GLuint i;							\
+   for (i = 0; i < span.count; i++) {				\
+      const DEPTH_TYPE z = FixedToDepth(span.z);		\
+      if (z < zRow[i]) {					\
+         pRow[i] = PACK_8B8G8R(FixedToInt(span.red),		\
+            FixedToInt(span.green), FixedToInt(span.blue));	\
+         zRow[i] = z;						\
+      }								\
+      span.red += span.redStep;					\
+      span.green += span.greenStep;				\
+      span.blue += span.blueStep;				\
+      span.z += span.zStep;					\
+   }
+
+#include "swrast/s_tritemp.h"
+}
+
+
+/*
+ * XImage, smooth, depth-buffered, PF_8R8G8B triangle.
+ */
+static void smooth_8R8G8B_z_triangle( GLcontext *ctx,
+				      const SWvertex *v0,
+				      const SWvertex *v1,
+				      const SWvertex *v2 )
+{
+   XMesaContext xmesa = (XMesaContext) ctx->DriverCtx;
+#define INTERP_Z 1
+#define DEPTH_TYPE DEFAULT_SOFTWARE_DEPTH_TYPE
+#define INTERP_RGB 1
+#define PIXEL_ADDRESS(X,Y) PIXELADDR4(xmesa->xm_buffer,X,Y)
+#define PIXEL_TYPE GLuint
+#define BYTES_PER_ROW (xmesa->xm_buffer->backimage->bytes_per_line)
+
+#define RENDER_SPAN( span )					\
+   GLuint i;							\
+   for (i = 0; i < span.count; i++) {				\
+      const DEPTH_TYPE z = FixedToDepth(span.z);		\
+      if (z < zRow[i]) {					\
+         pRow[i] = PACK_8R8G8B(FixedToInt(span.red),		\
+            FixedToInt(span.green), FixedToInt(span.blue));	\
+         zRow[i] = z;						\
+      }								\
+      span.red += span.redStep;					\
+      span.green += span.greenStep;				\
+      span.blue += span.blueStep;				\
+      span.z += span.zStep;					\
+   }
+
+#include "swrast/s_tritemp.h"
+}
+
+
+/*
+ * XImage, smooth, depth-buffered, PF_8R8G8B24 triangle.
+ */
+static void smooth_8R8G8B24_z_triangle( GLcontext *ctx,
+                                        const SWvertex *v0,
+					const SWvertex *v1,
+					const SWvertex *v2 )
+{
+   XMesaContext xmesa = (XMesaContext) ctx->DriverCtx;
+#define INTERP_Z 1
+#define DEPTH_TYPE DEFAULT_SOFTWARE_DEPTH_TYPE
+#define INTERP_RGB 1
+#define PIXEL_ADDRESS(X,Y) PIXELADDR3(xmesa->xm_buffer,X,Y)
+#define PIXEL_TYPE bgr_t
+#define BYTES_PER_ROW (xmesa->xm_buffer->backimage->bytes_per_line)
+
+#define RENDER_SPAN( span ) 					\
+   GLuint i;							\
+   for (i = 0; i < span.count; i++) {				\
+      const DEPTH_TYPE z = FixedToDepth(span.z);		\
+      if (z < zRow[i]) {					\
+	 PIXEL_TYPE *ptr = pRow + i;				\
+         ptr->r = FixedToInt(span.red);				\
+         ptr->g = FixedToInt(span.green);			\
+         ptr->b = FixedToInt(span.blue);			\
+         zRow[i] = z;						\
+      }								\
+      span.red += span.redStep;					\
+      span.green += span.greenStep;				\
+      span.blue += span.blueStep;				\
+      span.z += span.zStep;					\
+   }
+
+#include "swrast/s_tritemp.h"
+}
+
+
+/*
+ * XImage, smooth, depth-buffered, PF_TRUEDITHER triangle.
+ */
+static void smooth_TRUEDITHER_z_triangle( GLcontext *ctx,
+					  const SWvertex *v0,
+					  const SWvertex *v1,
+					  const SWvertex *v2 )
+{
+   XMesaContext xmesa = (XMesaContext) ctx->DriverCtx;
+   XMesaImage *img = xmesa->xm_buffer->backimage;
+#define INTERP_Z 1
+#define DEPTH_TYPE DEFAULT_SOFTWARE_DEPTH_TYPE
+#define INTERP_RGB 1
+
+#define RENDER_SPAN( span )					\
+   GLuint i;							\
+   GLint x = span.x, y = FLIP(xmesa->xm_buffer, span.y);	\
+   for (i = 0; i < span.count; i++, x++) {			\
+      const DEPTH_TYPE z = FixedToDepth(span.z);		\
+      if (z < zRow[i]) {					\
+         unsigned long p;					\
+         PACK_TRUEDITHER(p, x, y, FixedToInt(span.red),		\
+            FixedToInt(span.green), FixedToInt(span.blue));	\
+         XMesaPutPixel(img, x, y, p);				\
+         zRow[i] = z;						\
+      }								\
+      span.red += span.redStep;					\
+      span.green += span.greenStep;				\
+      span.blue += span.blueStep;				\
+      span.z += span.zStep;					\
+   }
+
+#include "swrast/s_tritemp.h"
+}
+
+
+/*
+ * XImage, smooth, depth-buffered, PF_5R6G5B triangle.
+ */
+static void smooth_5R6G5B_z_triangle( GLcontext *ctx,
+                                      const SWvertex *v0,
+				      const SWvertex *v1,
+				      const SWvertex *v2 )
+{
+   XMesaContext xmesa = (XMesaContext) ctx->DriverCtx;
+#define INTERP_Z 1
+#define DEPTH_TYPE DEFAULT_SOFTWARE_DEPTH_TYPE
+#define INTERP_RGB 1
+#define PIXEL_ADDRESS(X,Y) PIXELADDR2(xmesa->xm_buffer,X,Y)
+#define PIXEL_TYPE GLushort
+#define BYTES_PER_ROW (xmesa->xm_buffer->backimage->bytes_per_line)
+
+#define RENDER_SPAN( span )					\
+   GLuint i;							\
+   for (i = 0; i < span.count; i++) {				\
+      const DEPTH_TYPE z = FixedToDepth(span.z);		\
+      if (z < zRow[i]) {					\
+         pRow[i] = PACK_5R6G5B(FixedToInt(span.red),		\
+            FixedToInt(span.green), FixedToInt(span.blue));	\
+         zRow[i] = z;						\
+      }								\
+      span.red += span.redStep;					\
+      span.green += span.greenStep;				\
+      span.blue += span.blueStep;				\
+      span.z += span.zStep;					\
+   }
+
+#include "swrast/s_tritemp.h"
+}
+
+
+/*
+ * XImage, smooth, depth-buffered, PF_DITHER_5R6G5B triangle.
+ */
+static void smooth_DITHER_5R6G5B_z_triangle( GLcontext *ctx,
+                                             const SWvertex *v0,
+					     const SWvertex *v1,
+					     const SWvertex *v2 )
+{
+   XMesaContext xmesa = (XMesaContext) ctx->DriverCtx;
+#define INTERP_Z 1
+#define DEPTH_TYPE DEFAULT_SOFTWARE_DEPTH_TYPE
+#define INTERP_RGB 1
+#define PIXEL_ADDRESS(X,Y) PIXELADDR2(xmesa->xm_buffer,X,Y)
+#define PIXEL_TYPE GLushort
+#define BYTES_PER_ROW (xmesa->xm_buffer->backimage->bytes_per_line)
+
+#define RENDER_SPAN( span )					\
+   GLuint i;							\
+   GLint x = span.x, y = FLIP(xmesa->xm_buffer, span.y);	\
+   for (i = 0; i < span.count; i++, x++) {			\
+      const DEPTH_TYPE z = FixedToDepth(span.z);		\
+      if (z < zRow[i]) {					\
+         PACK_TRUEDITHER(pRow[i], x, y, FixedToInt(span.red),	\
+            FixedToInt(span.green), FixedToInt(span.blue));	\
+         zRow[i] = z;						\
+      }								\
+      span.red += span.redStep;					\
+      span.green += span.greenStep;				\
+      span.blue += span.blueStep;				\
+      span.z += span.zStep;					\
+   }
+
+#include "swrast/s_tritemp.h"
+}
+
+
+/*
+ * XImage, smooth, depth-buffered, 8-bit, PF_DITHER8 triangle.
+ */
+static void smooth_DITHER8_z_triangle( GLcontext *ctx,
+                                       const SWvertex *v0,
+				       const SWvertex *v1,
+				       const SWvertex *v2 )
+{
+   XMesaContext xmesa = (XMesaContext) ctx->DriverCtx;
+#define INTERP_Z 1
+#define DEPTH_TYPE DEFAULT_SOFTWARE_DEPTH_TYPE
+#define INTERP_RGB 1
+#define PIXEL_ADDRESS(X,Y) PIXELADDR1(xmesa->xm_buffer,X,Y)
+#define PIXEL_TYPE GLubyte
+#define BYTES_PER_ROW (xmesa->xm_buffer->backimage->bytes_per_line)
+
+#define RENDER_SPAN( span )					\
+   GLuint i;							\
+   GLint x = span.x, y = FLIP(xmesa->xm_buffer, span.y);	\
+   XDITHER_SETUP(y);						\
+   for (i = 0; i < span.count; i++, x++) {			\
+      const DEPTH_TYPE z = FixedToDepth(span.z);		\
+      if (z < zRow[i]) {					\
+         pRow[i] = (PIXEL_TYPE) XDITHER(x, FixedToInt(span.red),\
+            FixedToInt(span.green), FixedToInt(span.blue) );	\
+         zRow[i] = z;						\
+      }								\
+      span.red += span.redStep;					\
+      span.green += span.greenStep;				\
+      span.blue += span.blueStep;				\
+      span.z += span.zStep;					\
+   }
+
+#include "swrast/s_tritemp.h"
+}
+
+
+/*
+ * XImage, smooth, depth-buffered, PF_DITHER triangle.
+ */
+static void smooth_DITHER_z_triangle( GLcontext *ctx,
+				      const SWvertex *v0,
+				      const SWvertex *v1,
+				      const SWvertex *v2 )
+{
+   XMesaContext xmesa = (XMesaContext) ctx->DriverCtx;
+   XMesaImage *img = xmesa->xm_buffer->backimage;
+#define INTERP_Z 1
+#define DEPTH_TYPE DEFAULT_SOFTWARE_DEPTH_TYPE
+#define INTERP_RGB 1
+
+#define RENDER_SPAN( span )					\
+   GLuint i;							\
+   GLint x = span.x, y = FLIP(xmesa->xm_buffer, span.y);	\
+   XDITHER_SETUP(y);						\
+   for (i = 0; i < span.count; i++, x++) {			\
+      const DEPTH_TYPE z = FixedToDepth(span.z);		\
+      if (z < zRow[i]) {					\
+         unsigned long p = XDITHER(x, FixedToInt(span.red),	\
+            FixedToInt(span.green), FixedToInt(span.blue));	\
+	 XMesaPutPixel(img, x, y, p);			       	\
+         zRow[i] = z;						\
+      }								\
+      span.red += span.redStep;					\
+      span.green += span.greenStep;				\
+      span.blue += span.blueStep;				\
+      span.z += span.zStep;					\
+   }
+
+#include "swrast/s_tritemp.h"
+}
+
+
+/*
+ * XImage, smooth, depth-buffered, 8-bit PF_LOOKUP triangle.
+ */
+static void smooth_LOOKUP8_z_triangle( GLcontext *ctx,
+				       const SWvertex *v0,
+				       const SWvertex *v1,
+				       const SWvertex *v2 )
+{
+   XMesaContext xmesa = (XMesaContext) ctx->DriverCtx;
+#define INTERP_Z 1
+#define DEPTH_TYPE DEFAULT_SOFTWARE_DEPTH_TYPE
+#define INTERP_RGB 1
+#define PIXEL_ADDRESS(X,Y) PIXELADDR1(xmesa->xm_buffer,X,Y)
+#define PIXEL_TYPE GLubyte
+#define BYTES_PER_ROW (xmesa->xm_buffer->backimage->bytes_per_line)
+
+#define RENDER_SPAN( span )					\
+   GLuint i;							\
+   LOOKUP_SETUP;						\
+   for (i = 0; i < span.count; i++) {				\
+      const DEPTH_TYPE z = FixedToDepth(span.z);		\
+      if (z < zRow[i]) {					\
+         pRow[i] = LOOKUP(FixedToInt(span.red),			\
+            FixedToInt(span.green), FixedToInt(span.blue));	\
+         zRow[i] = z;						\
+      }								\
+      span.red += span.redStep;					\
+      span.green += span.greenStep;				\
+      span.blue += span.blueStep;				\
+      span.z += span.zStep;					\
+   }
+
+#include "swrast/s_tritemp.h"
+}
+
+
+
+/*
+ * XImage, smooth, depth-buffered, 8-bit PF_HPCR triangle.
+ */
+static void smooth_HPCR_z_triangle( GLcontext *ctx,
+				    const SWvertex *v0,
+				    const SWvertex *v1,
+				    const SWvertex *v2 )
+{
+   XMesaContext xmesa = (XMesaContext) ctx->DriverCtx;
+#define INTERP_Z 1
+#define DEPTH_TYPE DEFAULT_SOFTWARE_DEPTH_TYPE
+#define INTERP_RGB 1
+#define PIXEL_ADDRESS(X,Y) PIXELADDR1(xmesa->xm_buffer,X,Y)
+#define PIXEL_TYPE GLubyte
+#define BYTES_PER_ROW (xmesa->xm_buffer->backimage->bytes_per_line)
+
+#define RENDER_SPAN( span )					\
+   GLuint i;							\
+   GLint x = span.x, y = FLIP(xmesa->xm_buffer, span.y);	\
+   for (i = 0; i < span.count; i++, x++) {			\
+      const DEPTH_TYPE z = FixedToDepth(span.z);		\
+      if (z < zRow[i]) {					\
+         pRow[i] = DITHER_HPCR(x, y, FixedToInt(span.red),	\
+            FixedToInt(span.green), FixedToInt(span.blue) );	\
+         zRow[i] = z;						\
+      }								\
+      span.red += span.redStep;					\
+      span.green += span.greenStep;				\
+      span.blue += span.blueStep;				\
+      span.z += span.zStep;					\
+   }
+
+#include "swrast/s_tritemp.h"
+}
+
+
+/*
+ * XImage, flat, depth-buffered, PF_TRUECOLOR triangle.
+ */
+static void flat_TRUECOLOR_z_triangle( GLcontext *ctx,
+                        	       const SWvertex *v0,
+				       const SWvertex *v1,
+				       const SWvertex *v2 )
+{
+   XMesaContext xmesa = (XMesaContext) ctx->DriverCtx;
+   XMesaImage *img = xmesa->xm_buffer->backimage;
+#define INTERP_Z 1
+#define DEPTH_TYPE DEFAULT_SOFTWARE_DEPTH_TYPE
+#define SETUP_CODE						\
+   unsigned long pixel;						\
+   PACK_TRUECOLOR(pixel, v2->color[0], v2->color[1], v2->color[2]);
+
+#define RENDER_SPAN( span )					\
+   GLuint i;							\
+   GLint x = span.x, y = FLIP(xmesa->xm_buffer, span.y);	\
+   for (i = 0; i < span.count; i++, x++) {			\
+      const DEPTH_TYPE z = FixedToDepth(span.z);		\
+      if (z < zRow[i]) {					\
+         XMesaPutPixel(img, x, y, pixel);			\
+         zRow[i] = z;						\
+      }								\
+      span.z += span.zStep;					\
+   }
+
+#include "swrast/s_tritemp.h"
+}
+
+
+/*
+ * XImage, flat, depth-buffered, PF_8A8B8G8R triangle.
+ */
+static void flat_8A8B8G8R_z_triangle( GLcontext *ctx,
+				      const SWvertex *v0,
+				      const SWvertex *v1,
+				      const SWvertex *v2 )
+{
+   XMesaContext xmesa = (XMesaContext) ctx->DriverCtx;
+#define INTERP_Z 1
+#define DEPTH_TYPE DEFAULT_SOFTWARE_DEPTH_TYPE
+#define PIXEL_ADDRESS(X,Y) PIXELADDR4(xmesa->xm_buffer,X,Y)
+#define PIXEL_TYPE GLuint
+#define BYTES_PER_ROW (xmesa->xm_buffer->backimage->bytes_per_line)
+#define SETUP_CODE					\
+   unsigned long p = PACK_8B8G8R( v2->color[0],	\
+		 v2->color[1], v2->color[2] );
+#define RENDER_SPAN( span )				\
+   GLuint i;						\
+   for (i = 0; i < span.count; i++) {			\
+      const DEPTH_TYPE z = FixedToDepth(span.z);	\
+      if (z < zRow[i]) {				\
+	 pRow[i] = (PIXEL_TYPE) p;			\
+         zRow[i] = z;					\
+      }							\
+      span.z += span.zStep;				\
+   }
+
+#include "swrast/s_tritemp.h"
+}
+
+
+/*
+ * XImage, flat, depth-buffered, PF_8R8G8B triangle.
+ */
+static void flat_8R8G8B_z_triangle( GLcontext *ctx,
+				    const SWvertex *v0,
+				    const SWvertex *v1,
+				    const SWvertex *v2 )
+{
+   XMesaContext xmesa = (XMesaContext) ctx->DriverCtx;
+#define INTERP_Z 1
+#define DEPTH_TYPE DEFAULT_SOFTWARE_DEPTH_TYPE
+#define PIXEL_ADDRESS(X,Y) PIXELADDR4(xmesa->xm_buffer,X,Y)
+#define PIXEL_TYPE GLuint
+#define BYTES_PER_ROW (xmesa->xm_buffer->backimage->bytes_per_line)
+#define SETUP_CODE				\
+   unsigned long p = PACK_8R8G8B( v2->color[0],	\
+		 v2->color[1], v2->color[2] );
+#define RENDER_SPAN( span )			\
+   GLuint i;					\
+   for (i = 0; i < span.count; i++) {		\
+      DEPTH_TYPE z = FixedToDepth(span.z);	\
+      if (z < zRow[i]) {			\
+	 pRow[i] = (PIXEL_TYPE) p;		\
+         zRow[i] = z;				\
+      }						\
+      span.z += span.zStep;			\
+   }
+
+#include "swrast/s_tritemp.h"
+}
+
+
+/*
+ * XImage, flat, depth-buffered, PF_8R8G8B24 triangle.
+ */
+static void flat_8R8G8B24_z_triangle( GLcontext *ctx,
+				      const SWvertex *v0,
+				      const SWvertex *v1,
+				      const SWvertex *v2 )
+{
+   XMesaContext xmesa = (XMesaContext) ctx->DriverCtx;
+   const GLubyte *color = v2->color;
+#define INTERP_Z 1
+#define DEPTH_TYPE DEFAULT_SOFTWARE_DEPTH_TYPE
+#define PIXEL_ADDRESS(X,Y) PIXELADDR3(xmesa->xm_buffer,X,Y)
+#define PIXEL_TYPE bgr_t
+#define BYTES_PER_ROW (xmesa->xm_buffer->backimage->bytes_per_line)
+#define RENDER_SPAN( span )				\
+   GLuint i;						\
+   for (i = 0; i < span.count; i++) {			\
+      const DEPTH_TYPE z = FixedToDepth(span.z);	\
+      if (z < zRow[i]) {				\
+	 PIXEL_TYPE *ptr = pRow + i;			\
+         ptr->r = color[RCOMP];				\
+         ptr->g = color[GCOMP];				\
+         ptr->b = color[BCOMP];				\
+         zRow[i] = z;					\
+      }							\
+      span.z += span.zStep;				\
+   }
+
+#include "swrast/s_tritemp.h"
+}
+
+
+/*
+ * XImage, flat, depth-buffered, PF_TRUEDITHER triangle.
+ */
+static void flat_TRUEDITHER_z_triangle( GLcontext *ctx,
+					const SWvertex *v0,
+					const SWvertex *v1,
+					const SWvertex *v2 )
+{
+   XMesaContext xmesa = (XMesaContext) ctx->DriverCtx;
+   XMesaImage *img = xmesa->xm_buffer->backimage;
+#define INTERP_Z 1
+#define DEPTH_TYPE DEFAULT_SOFTWARE_DEPTH_TYPE
+#define RENDER_SPAN( span )					\
+   GLuint i;							\
+   GLint x = span.x, y = FLIP(xmesa->xm_buffer, span.y);	\
+   for (i = 0; i < span.count; i++, x++) {			\
+      const DEPTH_TYPE z = FixedToDepth(span.z);		\
+      if (z < zRow[i]) {					\
+         unsigned long p;					\
+         PACK_TRUEDITHER(p, x, y, v2->color[0],			\
+            v2->color[1], v2->color[2]);			\
+         XMesaPutPixel(img, x, y, p);				\
+         zRow[i] = z;						\
+      }								\
+      span.z += span.zStep;					\
+   }
+
+#include "swrast/s_tritemp.h"
+}
+
+
+/*
+ * XImage, flat, depth-buffered, PF_5R6G5B triangle.
+ */
+static void flat_5R6G5B_z_triangle( GLcontext *ctx,
+				    const SWvertex *v0,
+				    const SWvertex *v1,
+				    const SWvertex *v2 )
+{
+   XMesaContext xmesa = (XMesaContext) ctx->DriverCtx;
+#define INTERP_Z 1
+#define DEPTH_TYPE DEFAULT_SOFTWARE_DEPTH_TYPE
+#define PIXEL_ADDRESS(X,Y) PIXELADDR2(xmesa->xm_buffer,X,Y)
+#define PIXEL_TYPE GLushort
+#define BYTES_PER_ROW (xmesa->xm_buffer->backimage->bytes_per_line)
+#define SETUP_CODE					\
+   unsigned long p = PACK_5R6G5B( v2->color[0],		\
+            v2->color[1], v2->color[2] );
+#define RENDER_SPAN( span )				\
+   GLuint i;						\
+   for (i = 0; i < span.count; i++) {			\
+      const DEPTH_TYPE z = FixedToDepth(span.z);	\
+      if (z < zRow[i]) {				\
+	 pRow[i] = (PIXEL_TYPE) p;			\
+         zRow[i] = z;					\
+      }							\
+      span.z += span.zStep;				\
+   }
+
+#include "swrast/s_tritemp.h"
+}
+
+
+/*
+ * XImage, flat, depth-buffered, PF_DITHER_5R6G5B triangle.
+ */
+static void flat_DITHER_5R6G5B_z_triangle( GLcontext *ctx,
+					   const SWvertex *v0,
+					   const SWvertex *v1,
+					   const SWvertex *v2 )
+{
+   XMesaContext xmesa = (XMesaContext) ctx->DriverCtx;
+   const GLubyte *color = v2->color;
+#define INTERP_Z 1
+#define DEPTH_TYPE DEFAULT_SOFTWARE_DEPTH_TYPE
+#define PIXEL_ADDRESS(X,Y) PIXELADDR2(xmesa->xm_buffer,X,Y)
+#define PIXEL_TYPE GLushort
+#define BYTES_PER_ROW (xmesa->xm_buffer->backimage->bytes_per_line)
+#define RENDER_SPAN( span )					\
+   GLuint i;							\
+   GLint x = span.x, y = FLIP(xmesa->xm_buffer, span.y);	\
+   for (i = 0; i < span.count; i++, x++) {			\
+      const DEPTH_TYPE z = FixedToDepth(span.z);		\
+      if (z < zRow[i]) {					\
+	 PACK_TRUEDITHER(pRow[i], x, y, color[RCOMP],		\
+			 color[GCOMP], color[BCOMP]);		\
+         zRow[i] = z;						\
+      }								\
+      span.z += span.zStep;					\
+   }
+
+#include "swrast/s_tritemp.h"
+}
+
+
+/*
+ * XImage, flat, depth-buffered, 8-bit PF_DITHER triangle.
+ */
+static void flat_DITHER8_z_triangle( GLcontext *ctx,
+				     const SWvertex *v0,
+				     const SWvertex *v1,
+				     const SWvertex *v2 )
+{
+   XMesaContext xmesa = (XMesaContext) ctx->DriverCtx;
+#define INTERP_Z 1
+#define DEPTH_TYPE DEFAULT_SOFTWARE_DEPTH_TYPE
+#define PIXEL_ADDRESS(X,Y) PIXELADDR1(xmesa->xm_buffer,X,Y)
+#define PIXEL_TYPE GLubyte
+#define BYTES_PER_ROW (xmesa->xm_buffer->backimage->bytes_per_line)
+#define SETUP_CODE	\
+   FLAT_DITHER_SETUP( v2->color[0], v2->color[1], v2->color[2] );
+
+#define RENDER_SPAN( span )					\
+   GLuint i;							\
+   GLint x = span.x, y = FLIP(xmesa->xm_buffer, span.y);	\
+   FLAT_DITHER_ROW_SETUP(FLIP(xmesa->xm_buffer, y));		\
+   for (i = 0; i < span.count; i++, x++) {			\
+      const DEPTH_TYPE z = FixedToDepth(span.z);		\
+      if (z < zRow[i]) {					\
+	 pRow[i] = (PIXEL_TYPE) FLAT_DITHER(x);			\
+         zRow[i] = z;						\
+      }								\
+      span.z += span.zStep;					\
+   }
+
+#include "swrast/s_tritemp.h"
+}
+
+
+/*
+ * XImage, flat, depth-buffered, PF_DITHER triangle.
+ */
+static void flat_DITHER_z_triangle( GLcontext *ctx,
+				    const SWvertex *v0,
+				    const SWvertex *v1,
+				    const SWvertex *v2 )
+{
+   XMesaContext xmesa = (XMesaContext) ctx->DriverCtx;
+   XMesaImage *img = xmesa->xm_buffer->backimage;
+#define INTERP_Z 1
+#define DEPTH_TYPE DEFAULT_SOFTWARE_DEPTH_TYPE
+#define SETUP_CODE	\
+   FLAT_DITHER_SETUP( v2->color[0], v2->color[1], v2->color[2] );
+
+#define RENDER_SPAN( span )					\
+   GLuint i;							\
+   GLint x = span.x, y = FLIP(xmesa->xm_buffer, span.y);	\
+   FLAT_DITHER_ROW_SETUP(y);					\
+   for (i = 0; i < span.count; i++, x++) {			\
+      const DEPTH_TYPE z = FixedToDepth(span.z);		\
+      if (z < zRow[i]) {					\
+         unsigned long p = FLAT_DITHER(x);			\
+	 XMesaPutPixel(img, x, y, p);				\
+         zRow[i] = z;						\
+      }								\
+      span.z += span.zStep;					\
+   }
+
+#include "swrast/s_tritemp.h"
+}
+
+
+/*
+ * XImage, flat, depth-buffered, 8-bit PF_HPCR triangle.
+ */
+static void flat_HPCR_z_triangle( GLcontext *ctx,
+				  const SWvertex *v0,
+				  const SWvertex *v1,
+				  const SWvertex *v2 )
+{
+   XMesaContext xmesa = (XMesaContext) ctx->DriverCtx;
+#define INTERP_Z 1
+#define DEPTH_TYPE DEFAULT_SOFTWARE_DEPTH_TYPE
+#define PIXEL_ADDRESS(X,Y) PIXELADDR1(xmesa->xm_buffer,X,Y)
+#define PIXEL_TYPE GLubyte
+#define BYTES_PER_ROW (xmesa->xm_buffer->backimage->bytes_per_line)
+#define SETUP_CODE		\
+   GLubyte r = v2->color[0];	\
+   GLubyte g = v2->color[1];	\
+   GLubyte b = v2->color[2];
+#define RENDER_SPAN( span )					\
+   GLuint i;							\
+   GLint x = span.x, y = FLIP(xmesa->xm_buffer, span.y);	\
+   for (i = 0; i < span.count; i++, x++) {			\
+      const DEPTH_TYPE z = FixedToDepth(span.z);		\
+      if (z < zRow[i]) {					\
+	 pRow[i] = (PIXEL_TYPE) DITHER_HPCR(x, y, r, g, b);	\
+         zRow[i] = z;						\
+      }								\
+      span.z += span.zStep;					\
+   }
+
+#include "swrast/s_tritemp.h"
+}
+
+
+/*
+ * XImage, flat, depth-buffered, 8-bit PF_LOOKUP triangle.
+ */
+static void flat_LOOKUP8_z_triangle( GLcontext *ctx,
+				     const SWvertex *v0,
+				     const SWvertex *v1,
+				     const SWvertex *v2 )
+{
+   XMesaContext xmesa = (XMesaContext) ctx->DriverCtx;
+#define INTERP_Z 1
+#define DEPTH_TYPE DEFAULT_SOFTWARE_DEPTH_TYPE
+#define PIXEL_ADDRESS(X,Y) PIXELADDR1(xmesa->xm_buffer,X,Y)
+#define PIXEL_TYPE GLubyte
+#define BYTES_PER_ROW (xmesa->xm_buffer->backimage->bytes_per_line)
+#define SETUP_CODE				\
+   LOOKUP_SETUP;				\
+   GLubyte r = v2->color[0];	\
+   GLubyte g = v2->color[1];	\
+   GLubyte b = v2->color[2];	\
+   GLubyte p = LOOKUP(r,g,b);
+#define RENDER_SPAN( span )				\
+   GLuint i;						\
+   for (i = 0; i < span.count; i++) {			\
+      const DEPTH_TYPE z = FixedToDepth(span.z);	\
+      if (z < zRow[i]) {				\
+	 pRow[i] = p;					\
+         zRow[i] = z;					\
+      }							\
+      span.z += span.zStep;				\
+   }
+
+#include "swrast/s_tritemp.h"
+}
+
+
+
+/*
+ * XImage, smooth, NON-depth-buffered, PF_TRUECOLOR triangle.
+ */
+static void smooth_TRUECOLOR_triangle( GLcontext *ctx,
+				       const SWvertex *v0,
+				       const SWvertex *v1,
+				       const SWvertex *v2 )
+{
+   XMesaContext xmesa = (XMesaContext) ctx->DriverCtx;
+   XMesaImage *img = xmesa->xm_buffer->backimage;
+#define INTERP_RGB 1
+#define RENDER_SPAN( span )					\
+   GLuint i;							\
+   GLint x = span.x, y = FLIP(xmesa->xm_buffer, span.y);	\
+   for (i = 0; i < span.count; i++, x++) {			\
+      unsigned long p;						\
+      PACK_TRUECOLOR(p, FixedToInt(span.red),			\
+         FixedToInt(span.green), FixedToInt(span.blue));	\
+      XMesaPutPixel(img, x, y, p);				\
+      span.red += span.redStep;					\
+      span.green += span.greenStep;				\
+      span.blue += span.blueStep;				\
+   }
+
+#include "swrast/s_tritemp.h"
+}
+
+
+/*
+ * XImage, smooth, NON-depth-buffered, PF_8A8B8G8R triangle.
+ */
+static void smooth_8A8B8G8R_triangle( GLcontext *ctx,
+				      const SWvertex *v0,
+				      const SWvertex *v1,
+				      const SWvertex *v2 )
+{
+   XMesaContext xmesa = (XMesaContext) ctx->DriverCtx;
+#define INTERP_RGB 1
+#define PIXEL_ADDRESS(X,Y) PIXELADDR4(xmesa->xm_buffer,X,Y)
+#define PIXEL_TYPE GLuint
+#define BYTES_PER_ROW (xmesa->xm_buffer->backimage->bytes_per_line)
+#define RENDER_SPAN( span )					\
+   GLuint i;							\
+   for (i = 0; i < span.count; i++) {				\
+      pRow[i] = PACK_8B8G8R(FixedToInt(span.red),		\
+         FixedToInt(span.green), FixedToInt(span.blue) );	\
+      span.red += span.redStep;					\
+      span.green += span.greenStep;				\
+      span.blue += span.blueStep;				\
+   }								\
+
+#include "swrast/s_tritemp.h"
+}
+
+
+/*
+ * XImage, smooth, NON-depth-buffered, PF_8R8G8B triangle.
+ */
+static void smooth_8R8G8B_triangle( GLcontext *ctx,
+				    const SWvertex *v0,
+				    const SWvertex *v1,
+				    const SWvertex *v2 )
+{
+   XMesaContext xmesa = (XMesaContext) ctx->DriverCtx;
+#define INTERP_RGB 1
+#define PIXEL_ADDRESS(X,Y) PIXELADDR4(xmesa->xm_buffer,X,Y)
+#define PIXEL_TYPE GLuint
+#define BYTES_PER_ROW (xmesa->xm_buffer->backimage->bytes_per_line)
+#define RENDER_SPAN( span )					\
+   GLuint i;							\
+   for (i = 0; i < span.count; i++) {				\
+      pRow[i] = PACK_8R8G8B(FixedToInt(span.red),		\
+         FixedToInt(span.green), FixedToInt(span.blue) );	\
+      span.red += span.redStep;					\
+      span.green += span.greenStep;				\
+      span.blue += span.blueStep;				\
+   }
+
+#include "swrast/s_tritemp.h"
+}
+
+
+/*
+ * XImage, smooth, NON-depth-buffered, PF_8R8G8B triangle.
+ */
+static void smooth_8R8G8B24_triangle( GLcontext *ctx,
+				      const SWvertex *v0,
+				      const SWvertex *v1,
+				      const SWvertex *v2 )
+{
+   XMesaContext xmesa = (XMesaContext) ctx->DriverCtx;
+#define INTERP_RGB 1
+#define PIXEL_ADDRESS(X,Y) PIXELADDR3(xmesa->xm_buffer,X,Y)
+#define PIXEL_TYPE bgr_t
+#define BYTES_PER_ROW (xmesa->xm_buffer->backimage->bytes_per_line)
+#define RENDER_SPAN( span )				\
+   GLuint i;						\
+   PIXEL_TYPE *pixel = pRow;				\
+   for (i = 0; i < span.count; i++, pixel++) {		\
+      pixel->r = FixedToInt(span.red);			\
+      pixel->g = FixedToInt(span.green);		\
+      pixel->b = FixedToInt(span.blue);			\
+      span.red += span.redStep;				\
+      span.green += span.greenStep;			\
+      span.blue += span.blueStep;			\
+   }
+
+#include "swrast/s_tritemp.h"
+}
+
+
+/*
+ * XImage, smooth, NON-depth-buffered, PF_TRUEDITHER triangle.
+ */
+static void smooth_TRUEDITHER_triangle( GLcontext *ctx,
+					const SWvertex *v0,
+					const SWvertex *v1,
+					const SWvertex *v2 )
+{
+   XMesaContext xmesa = (XMesaContext) ctx->DriverCtx;
+   XMesaImage *img = xmesa->xm_buffer->backimage;
+#define INTERP_RGB 1
+#define RENDER_SPAN( span )					\
+   GLuint i;							\
+   GLint x = span.x, y = FLIP(xmesa->xm_buffer, span.y);	\
+   for (i = 0; i < span.count; i++, x++) {			\
+      unsigned long p;						\
+      PACK_TRUEDITHER(p, x, y, FixedToInt(span.red),		\
+         FixedToInt(span.green), FixedToInt(span.blue));	\
+      XMesaPutPixel(img, x, y, p );				\
+      span.red += span.redStep;					\
+      span.green += span.greenStep;				\
+      span.blue += span.blueStep;				\
+   }
+
+#include "swrast/s_tritemp.h"
+}
+
+
+/*
+ * XImage, smooth, NON-depth-buffered, PF_5R6G5B triangle.
+ */
+static void smooth_5R6G5B_triangle( GLcontext *ctx,
+				    const SWvertex *v0,
+				    const SWvertex *v1,
+				    const SWvertex *v2 )
+{
+   XMesaContext xmesa = (XMesaContext) ctx->DriverCtx;
+#define INTERP_RGB 1
+#define PIXEL_ADDRESS(X,Y) PIXELADDR2(xmesa->xm_buffer,X,Y)
+#define PIXEL_TYPE GLushort
+#define BYTES_PER_ROW (xmesa->xm_buffer->backimage->bytes_per_line)
+#define RENDER_SPAN( span )					\
+   GLuint i;							\
+   for (i = 0; i < span.count; i++) {				\
+      pRow[i] = (PIXEL_TYPE) PACK_5R6G5B(FixedToInt(span.red),	\
+         FixedToInt(span.green), FixedToInt(span.blue));	\
+      span.red += span.redStep;					\
+      span.green += span.greenStep;				\
+      span.blue += span.blueStep;				\
+   }
+
+#include "swrast/s_tritemp.h"
+}
+
+
+/*
+ * XImage, smooth, NON-depth-buffered, PF_DITHER_5R6G5B triangle.
+ */
+static void smooth_DITHER_5R6G5B_triangle( GLcontext *ctx,
+					   const SWvertex *v0,
+					   const SWvertex *v1,
+					   const SWvertex *v2 )
+{
+   XMesaContext xmesa = (XMesaContext) ctx->DriverCtx;
+#define INTERP_RGB 1
+#define PIXEL_ADDRESS(X,Y) PIXELADDR2(xmesa->xm_buffer,X,Y)
+#define PIXEL_TYPE GLushort
+#define BYTES_PER_ROW (xmesa->xm_buffer->backimage->bytes_per_line)
+#define RENDER_SPAN( span )					\
+   GLuint i;							\
+   GLint x = span.x, y = FLIP(xmesa->xm_buffer, span.y);	\
+   for (i = 0; i < span.count; i++, x++) {			\
+      PACK_TRUEDITHER(pRow[i], x, y, FixedToInt(span.red),	\
+         FixedToInt(span.green), FixedToInt(span.blue));	\
+      span.red += span.redStep;					\
+      span.green += span.greenStep;				\
+      span.blue += span.blueStep;				\
+   }
+
+#include "swrast/s_tritemp.h"
+}
+
+
+/*
+ * XImage, smooth, NON-depth-buffered, 8-bit PF_DITHER triangle.
+ */
+static void smooth_DITHER8_triangle( GLcontext *ctx,
+				     const SWvertex *v0,
+				     const SWvertex *v1,
+				     const SWvertex *v2 )
+{
+   XMesaContext xmesa = (XMesaContext) ctx->DriverCtx;
+#define INTERP_RGB 1
+#define PIXEL_ADDRESS(X,Y) PIXELADDR1(xmesa->xm_buffer,X,Y)
+#define PIXEL_TYPE GLubyte
+#define BYTES_PER_ROW (xmesa->xm_buffer->backimage->bytes_per_line)
+#define RENDER_SPAN( span )					\
+   GLuint i;							\
+   GLint x = span.x, y = FLIP(xmesa->xm_buffer, span.y);	\
+   XDITHER_SETUP(y);						\
+   for (i = 0; i < span.count; i++, x++) {			\
+      pRow[i] = (PIXEL_TYPE) XDITHER(x, FixedToInt(span.red),	\
+         FixedToInt(span.green), FixedToInt(span.blue) );	\
+      span.red += span.redStep;					\
+      span.green += span.greenStep;				\
+      span.blue += span.blueStep;				\
+   }
+
+#include "swrast/s_tritemp.h"
+}
+
+
+/*
+ * XImage, smooth, NON-depth-buffered, PF_DITHER triangle.
+ */
+static void smooth_DITHER_triangle( GLcontext *ctx,
+				    const SWvertex *v0,
+				    const SWvertex *v1,
+				    const SWvertex *v2 )
+{
+   XMesaContext xmesa = (XMesaContext) ctx->DriverCtx;
+   XMesaImage *img = xmesa->xm_buffer->backimage;
+
+#define INTERP_RGB 1
+#define RENDER_SPAN( span )					\
+   GLuint i;							\
+   GLint x = span.x, y = FLIP(xmesa->xm_buffer, span.y);	\
+   XDITHER_SETUP(y);						\
+   for (i = 0; i < span.count; i++, x++) {			\
+      unsigned long p = XDITHER(x, FixedToInt(span.red),	\
+         FixedToInt(span.green), FixedToInt(span.blue) );	\
+      XMesaPutPixel(img, x, y, p);				\
+      span.red += span.redStep;					\
+      span.green += span.greenStep;				\
+      span.blue += span.blueStep;				\
+   }
+
+#include "swrast/s_tritemp.h"
+}
+
+
+/*
+ * XImage, smooth, NON-depth-buffered, 8-bit PF_LOOKUP triangle.
+ */
+static void smooth_LOOKUP8_triangle( GLcontext *ctx,
+				     const SWvertex *v0,
+				     const SWvertex *v1,
+				     const SWvertex *v2 )
+{
+   XMesaContext xmesa = (XMesaContext) ctx->DriverCtx;
+
+#define INTERP_RGB 1
+#define PIXEL_ADDRESS(X,Y) PIXELADDR1(xmesa->xm_buffer,X,Y)
+#define PIXEL_TYPE GLubyte
+#define BYTES_PER_ROW (xmesa->xm_buffer->backimage->bytes_per_line)
+#define RENDER_SPAN( span )				\
+   GLuint i;						\
+   LOOKUP_SETUP;					\
+   for (i = 0; i < span.count; i++) {			\
+      pRow[i] = LOOKUP(FixedToInt(span.red),		\
+         FixedToInt(span.green), FixedToInt(span.blue));\
+      span.red += span.redStep;				\
+      span.green += span.greenStep;			\
+      span.blue += span.blueStep;			\
+   }
+
+#include "swrast/s_tritemp.h"
+}
+
+
+
+/*
+ * XImage, smooth, NON-depth-buffered, 8-bit PF_HPCR triangle.
+ */
+static void smooth_HPCR_triangle( GLcontext *ctx,
+				  const SWvertex *v0,
+				  const SWvertex *v1,
+				  const SWvertex *v2 )
+{
+   XMesaContext xmesa = (XMesaContext) ctx->DriverCtx;
+
+#define INTERP_RGB 1
+#define PIXEL_ADDRESS(X,Y) PIXELADDR1(xmesa->xm_buffer,X,Y)
+#define PIXEL_TYPE GLubyte
+#define BYTES_PER_ROW (xmesa->xm_buffer->backimage->bytes_per_line)
+#define RENDER_SPAN( span )					\
+   GLuint i;							\
+   GLint x = span.x, y = FLIP(xmesa->xm_buffer, span.y);	\
+   for (i = 0; i < span.count; i++, x++) {			\
+      pRow[i] = DITHER_HPCR(x, y, FixedToInt(span.red),		\
+         FixedToInt(span.green), FixedToInt(span.blue));	\
+      span.red += span.redStep;					\
+      span.green += span.greenStep;				\
+      span.blue += span.blueStep;				\
+   }
+
+#include "swrast/s_tritemp.h"
+}
+
+
+/*
+ * XImage, flat, NON-depth-buffered, PF_TRUECOLOR triangle.
+ */
+static void flat_TRUECOLOR_triangle( GLcontext *ctx,
+				     const SWvertex *v0,
+				     const SWvertex *v1,
+				     const SWvertex *v2 )
+{
+   XMesaContext xmesa = (XMesaContext) ctx->DriverCtx;
+   XMesaImage *img = xmesa->xm_buffer->backimage;
+#define SETUP_CODE						\
+   unsigned long pixel;						\
+   PACK_TRUECOLOR(pixel, v2->color[0], v2->color[1], v2->color[2]);
+
+#define RENDER_SPAN( span )					\
+   GLuint i;							\
+   GLint x = span.x, y = FLIP(xmesa->xm_buffer, span.y);	\
+   for (i = 0; i < span.count; i++, x++) {			\
+      XMesaPutPixel(img, x, y, pixel);				\
+   }
+
+#include "swrast/s_tritemp.h"
+}
+
+
+/*
+ * XImage, flat, NON-depth-buffered, PF_8A8B8G8R triangle.
+ */
+static void flat_8A8B8G8R_triangle( GLcontext *ctx,
+				    const SWvertex *v0,
+				    const SWvertex *v1,
+				    const SWvertex *v2 )
+{
+   XMesaContext xmesa = (XMesaContext) ctx->DriverCtx;
+#define PIXEL_ADDRESS(X,Y) PIXELADDR4(xmesa->xm_buffer,X,Y)
+#define PIXEL_TYPE GLuint
+#define BYTES_PER_ROW (xmesa->xm_buffer->backimage->bytes_per_line)
+#define SETUP_CODE					\
+   unsigned long p = PACK_8B8G8R( v2->color[0],		\
+		 v2->color[1], v2->color[2] );
+#define RENDER_SPAN( span )			\
+   GLuint i;					\
+   for (i = 0; i < span.count; i++) {		\
+      pRow[i] = (PIXEL_TYPE) p;			\
+   }
+
+#include "swrast/s_tritemp.h"
+}
+
+
+/*
+ * XImage, flat, NON-depth-buffered, PF_8R8G8B triangle.
+ */
+static void flat_8R8G8B_triangle( GLcontext *ctx,
+				  const SWvertex *v0,
+				  const SWvertex *v1,
+				  const SWvertex *v2 )
+{
+   XMesaContext xmesa = (XMesaContext) ctx->DriverCtx;
+#define PIXEL_ADDRESS(X,Y) PIXELADDR4(xmesa->xm_buffer,X,Y)
+#define PIXEL_TYPE GLuint
+#define BYTES_PER_ROW (xmesa->xm_buffer->backimage->bytes_per_line)
+#define SETUP_CODE				\
+   unsigned long p = PACK_8R8G8B( v2->color[0],	\
+		 v2->color[1], v2->color[2] );
+#define RENDER_SPAN( span )			\
+   GLuint i;					\
+   for (i = 0; i < span.count; i++) {		\
+      pRow[i] = (PIXEL_TYPE) p;			\
+   }
+
+#include "swrast/s_tritemp.h"
+}
+
+
+/*
+ * XImage, flat, NON-depth-buffered, PF_8R8G8B24 triangle.
+ */
+static void flat_8R8G8B24_triangle( GLcontext *ctx,
+				    const SWvertex *v0,
+				    const SWvertex *v1,
+				    const SWvertex *v2 )
+{
+   XMesaContext xmesa = (XMesaContext) ctx->DriverCtx;
+   const GLubyte *color = v2->color;
+#define PIXEL_ADDRESS(X,Y) PIXELADDR3(xmesa->xm_buffer,X,Y)
+#define PIXEL_TYPE bgr_t
+#define BYTES_PER_ROW (xmesa->xm_buffer->backimage->bytes_per_line)
+#define RENDER_SPAN( span )				\
+   GLuint i;						\
+   PIXEL_TYPE *pixel = pRow;				\
+   for (i = 0; i < span.count; i++, pixel++) {		\
+      pixel->r = color[RCOMP];				\
+      pixel->g = color[GCOMP];				\
+      pixel->b = color[BCOMP];				\
+   }
+
+#include "swrast/s_tritemp.h"
+}
+
+/*
+ * XImage, flat, NON-depth-buffered, PF_TRUEDITHER triangle.
+ */
+static void flat_TRUEDITHER_triangle( GLcontext *ctx,
+				      const SWvertex *v0,
+				      const SWvertex *v1,
+				      const SWvertex *v2 )
+{
+   XMesaContext xmesa = (XMesaContext) ctx->DriverCtx;
+   XMesaImage *img = xmesa->xm_buffer->backimage;
+
+#define RENDER_SPAN( span )					\
+   GLuint i;							\
+   GLint x = span.x, y = FLIP(xmesa->xm_buffer, span.y);	\
+   for (i = 0; i < span.count; i++, x++) {			\
+      unsigned long p;						\
+      PACK_TRUEDITHER(p, x, y, v2->color[0],			\
+               v2->color[1], v2->color[2] );			\
+      XMesaPutPixel(img, x, y, p);				\
+   }
+
+#include "swrast/s_tritemp.h"
+}
+
+
+
+/*
+ * XImage, flat, NON-depth-buffered, PF_5R6G5B triangle.
+ */
+static void flat_5R6G5B_triangle( GLcontext *ctx,
+				  const SWvertex *v0,
+				  const SWvertex *v1,
+				  const SWvertex *v2 )
+{
+   XMesaContext xmesa = (XMesaContext) ctx->DriverCtx;
+#define PIXEL_ADDRESS(X,Y) PIXELADDR2(xmesa->xm_buffer,X,Y)
+#define PIXEL_TYPE GLushort
+#define BYTES_PER_ROW (xmesa->xm_buffer->backimage->bytes_per_line)
+#define SETUP_CODE					\
+   unsigned long p = PACK_5R6G5B( v2->color[0],	\
+		 v2->color[1], v2->color[2] );
+#define RENDER_SPAN( span )			\
+   GLuint i;					\
+   for (i = 0; i < span.count; i++) {		\
+      pRow[i] = (PIXEL_TYPE) p;			\
+   }
+
+#include "swrast/s_tritemp.h"
+}
+
+
+/*
+ * XImage, flat, NON-depth-buffered, PF_DITHER_5R6G5B triangle.
+ */
+static void flat_DITHER_5R6G5B_triangle( GLcontext *ctx,
+					 const SWvertex *v0,
+					 const SWvertex *v1,
+					 const SWvertex *v2 )
+{
+   XMesaContext xmesa = (XMesaContext) ctx->DriverCtx;
+   const GLubyte *color = v2->color;
+#define PIXEL_ADDRESS(X,Y) PIXELADDR2(xmesa->xm_buffer,X,Y)
+#define PIXEL_TYPE GLushort
+#define BYTES_PER_ROW (xmesa->xm_buffer->backimage->bytes_per_line)
+#define RENDER_SPAN( span )					\
+   GLuint i;							\
+   GLint x = span.x, y = FLIP(xmesa->xm_buffer, span.y);	\
+   for (i = 0; i < span.count; i++, x++) {			\
+      PACK_TRUEDITHER(pRow[i], x, y, color[RCOMP],		\
+         color[GCOMP], color[BCOMP]);				\
+   }
+
+#include "swrast/s_tritemp.h"
+}
+
+
+/*
+ * XImage, flat, NON-depth-buffered, 8-bit PF_DITHER triangle.
+ */
+static void flat_DITHER8_triangle( GLcontext *ctx,
+				   const SWvertex *v0,
+				   const SWvertex *v1,
+				   const SWvertex *v2 )
+{
+   XMesaContext xmesa = (XMesaContext) ctx->DriverCtx;
+#define PIXEL_ADDRESS(X,Y) PIXELADDR1(xmesa->xm_buffer,X,Y)
+#define PIXEL_TYPE GLubyte
+#define BYTES_PER_ROW (xmesa->xm_buffer->backimage->bytes_per_line)
+#define SETUP_CODE	\
+   FLAT_DITHER_SETUP( v2->color[0], v2->color[1], v2->color[2] );
+
+#define RENDER_SPAN( span )					\
+   GLuint i;							\
+   GLint x = span.x, y = FLIP(xmesa->xm_buffer, span.y);	\
+   FLAT_DITHER_ROW_SETUP(FLIP(xmesa->xm_buffer, y));		\
+   for (i = 0; i < span.count; i++, x++) {			\
+      pRow[i] = (PIXEL_TYPE) FLAT_DITHER(x);			\
+   }
+
+#include "swrast/s_tritemp.h"
+}
+
+
+/*
+ * XImage, flat, NON-depth-buffered, PF_DITHER triangle.
+ */
+static void flat_DITHER_triangle( GLcontext *ctx,
+				  const SWvertex *v0,
+				  const SWvertex *v1,
+				  const SWvertex *v2 )
+{
+   XMesaContext xmesa = (XMesaContext) ctx->DriverCtx;
+   XMesaImage *img = xmesa->xm_buffer->backimage;
+#define SETUP_CODE	\
+   FLAT_DITHER_SETUP( v2->color[0], v2->color[1], v2->color[2] );
+
+#define RENDER_SPAN( span )					\
+   GLuint i;							\
+   GLint x = span.x, y = FLIP(xmesa->xm_buffer, span.y);	\
+   FLAT_DITHER_ROW_SETUP(y);					\
+   for (i = 0; i < span.count; i++, x++) {			\
+      unsigned long p = FLAT_DITHER(x);				\
+      XMesaPutPixel(img, x, y, p );				\
+   }
+
+#include "swrast/s_tritemp.h"
+}
+
+
+/*
+ * XImage, flat, NON-depth-buffered, 8-bit PF_HPCR triangle.
+ */
+static void flat_HPCR_triangle( GLcontext *ctx,
+				const SWvertex *v0,
+				const SWvertex *v1,
+				const SWvertex *v2 )
+{
+   XMesaContext xmesa = (XMesaContext) ctx->DriverCtx;
+#define PIXEL_ADDRESS(X,Y) PIXELADDR1(xmesa->xm_buffer,X,Y)
+#define PIXEL_TYPE GLubyte
+#define BYTES_PER_ROW (xmesa->xm_buffer->backimage->bytes_per_line)
+#define SETUP_CODE				\
+   GLubyte r = v2->color[0];	\
+   GLubyte g = v2->color[1];	\
+   GLubyte b = v2->color[2];
+#define RENDER_SPAN( span )				\
+   GLuint i;							\
+   GLint x = span.x, y = FLIP(xmesa->xm_buffer, span.y);	\
+   for (i = 0; i < span.count; i++, x++) {			\
+      pRow[i] = (PIXEL_TYPE) DITHER_HPCR(x, y, r, g, b);	\
+   }
+
+#include "swrast/s_tritemp.h"
+}
+
+
+/*
+ * XImage, flat, NON-depth-buffered, 8-bit PF_LOOKUP triangle.
+ */
+static void flat_LOOKUP8_triangle( GLcontext *ctx,
+				   const SWvertex *v0,
+				   const SWvertex *v1,
+				   const SWvertex *v2 )
+{
+   XMesaContext xmesa = (XMesaContext) ctx->DriverCtx;
+#define PIXEL_ADDRESS(X,Y) PIXELADDR1(xmesa->xm_buffer,X,Y)
+#define PIXEL_TYPE GLubyte
+#define BYTES_PER_ROW (xmesa->xm_buffer->backimage->bytes_per_line)
+#define SETUP_CODE				\
+   LOOKUP_SETUP;				\
+   GLubyte r = v2->color[0];			\
+   GLubyte g = v2->color[1];			\
+   GLubyte b = v2->color[2];			\
+   GLubyte p = LOOKUP(r,g,b);
+#define RENDER_SPAN( span )          		\
+   GLuint i;					\
+   for (i = 0; i < span.count; i++) {		\
+      pRow[i] = (PIXEL_TYPE) p;			\
+   }
+
+#include "swrast/s_tritemp.h"
+}
+
+
+#ifdef DEBUG
+extern void _xmesa_print_triangle_func( swrast_tri_func triFunc );
+void _xmesa_print_triangle_func( swrast_tri_func triFunc )
+{
+   printf("XMesa tri func = ");
+   if (triFunc ==smooth_TRUECOLOR_z_triangle)
+      printf("smooth_TRUECOLOR_z_triangle\n");
+   else if (triFunc ==smooth_8A8B8G8R_z_triangle)
+      printf("smooth_8A8B8G8R_z_triangle\n");
+   else if (triFunc ==smooth_8R8G8B_z_triangle)
+      printf("smooth_8R8G8B_z_triangle\n");
+   else if (triFunc ==smooth_8R8G8B24_z_triangle)
+      printf("smooth_8R8G8B24_z_triangle\n");
+   else if (triFunc ==smooth_TRUEDITHER_z_triangle)
+      printf("smooth_TRUEDITHER_z_triangle\n");
+   else if (triFunc ==smooth_5R6G5B_z_triangle)
+      printf("smooth_5R6G5B_z_triangle\n");
+   else if (triFunc ==smooth_DITHER_5R6G5B_z_triangle)
+      printf("smooth_DITHER_5R6G5B_z_triangle\n");
+   else if (triFunc ==smooth_HPCR_z_triangle)
+      printf("smooth_HPCR_z_triangle\n");
+   else if (triFunc ==smooth_DITHER8_z_triangle)
+      printf("smooth_DITHER8_z_triangle\n");
+   else if (triFunc ==smooth_LOOKUP8_z_triangle)
+      printf("smooth_LOOKUP8_z_triangle\n");
+   else if (triFunc ==flat_TRUECOLOR_z_triangle)
+      printf("flat_TRUECOLOR_z_triangle\n");
+   else if (triFunc ==flat_8A8B8G8R_z_triangle)
+      printf("flat_8A8B8G8R_z_triangle\n");
+   else if (triFunc ==flat_8R8G8B_z_triangle)
+      printf("flat_8R8G8B_z_triangle\n");
+   else if (triFunc ==flat_8R8G8B24_z_triangle)
+      printf("flat_8R8G8B24_z_triangle\n");
+   else if (triFunc ==flat_TRUEDITHER_z_triangle)
+      printf("flat_TRUEDITHER_z_triangle\n");
+   else if (triFunc ==flat_5R6G5B_z_triangle)
+      printf("flat_5R6G5B_z_triangle\n");
+   else if (triFunc ==flat_DITHER_5R6G5B_z_triangle)
+      printf("flat_DITHER_5R6G5B_z_triangle\n");
+   else if (triFunc ==flat_HPCR_z_triangle)
+      printf("flat_HPCR_z_triangle\n");
+   else if (triFunc ==flat_DITHER8_z_triangle)
+      printf("flat_DITHER8_z_triangle\n");
+   else if (triFunc ==flat_LOOKUP8_z_triangle)
+      printf("flat_LOOKUP8_z_triangle\n");
+   else if (triFunc ==smooth_TRUECOLOR_triangle)
+      printf("smooth_TRUECOLOR_triangle\n");
+   else if (triFunc ==smooth_8A8B8G8R_triangle)
+      printf("smooth_8A8B8G8R_triangle\n");
+   else if (triFunc ==smooth_8R8G8B_triangle)
+      printf("smooth_8R8G8B_triangle\n");
+   else if (triFunc ==smooth_8R8G8B24_triangle)
+      printf("smooth_8R8G8B24_triangle\n");
+   else if (triFunc ==smooth_TRUEDITHER_triangle)
+      printf("smooth_TRUEDITHER_triangle\n");
+   else if (triFunc ==smooth_5R6G5B_triangle)
+      printf("smooth_5R6G5B_triangle\n");
+   else if (triFunc ==smooth_DITHER_5R6G5B_triangle)
+      printf("smooth_DITHER_5R6G5B_triangle\n");
+   else if (triFunc ==smooth_HPCR_triangle)
+      printf("smooth_HPCR_triangle\n");
+   else if (triFunc ==smooth_DITHER8_triangle)
+      printf("smooth_DITHER8_triangle\n");
+   else if (triFunc ==smooth_LOOKUP8_triangle)
+      printf("smooth_LOOKUP8_triangle\n");
+   else if (triFunc ==flat_TRUECOLOR_triangle)
+      printf("flat_TRUECOLOR_triangle\n");
+   else if (triFunc ==flat_TRUEDITHER_triangle)
+      printf("flat_TRUEDITHER_triangle\n");
+   else if (triFunc ==flat_8A8B8G8R_triangle)
+      printf("flat_8A8B8G8R_triangle\n");
+   else if (triFunc ==flat_8R8G8B_triangle)
+      printf("flat_8R8G8B_triangle\n");
+   else if (triFunc ==flat_8R8G8B24_triangle)
+      printf("flat_8R8G8B24_triangle\n");
+   else if (triFunc ==flat_5R6G5B_triangle)
+      printf("flat_5R6G5B_triangle\n");
+   else if (triFunc ==flat_DITHER_5R6G5B_triangle)
+      printf("flat_DITHER_5R6G5B_triangle\n");
+   else if (triFunc ==flat_HPCR_triangle)
+      printf("flat_HPCR_triangle\n");
+   else if (triFunc ==flat_DITHER8_triangle)
+      printf("flat_DITHER8_triangle\n");
+   else if (triFunc ==flat_LOOKUP8_triangle)
+      printf("flat_LOOKUP8_triangle\n");
+   else
+      printf("???\n");
+}
+#endif
+
+
+#ifdef DEBUG
+
+/* record the current triangle function name */
+static const char *triFuncName = NULL;
+
+#define USE(triFunc)                   \
+do {                                   \
+    triFuncName = #triFunc;            \
+    return triFunc;                    \
+} while (0)
+
+#else
+
+#define USE(triFunc)  return triFunc
+
+#endif
+
+
+static swrast_tri_func get_triangle_func( GLcontext *ctx )
+{
+   SWcontext *swrast = SWRAST_CONTEXT(ctx);
+   XMesaContext xmesa = (XMesaContext) ctx->DriverCtx;
+   int depth = GET_VISUAL_DEPTH(xmesa->xm_visual);
+
+   (void) kernel1;
+
+#ifdef DEBUG
+   triFuncName = NULL;
+#endif
+
+   if (ctx->RenderMode != GL_RENDER ||
+       ctx->Polygon.SmoothFlag ||
+       ctx->Texture._ReallyEnabled ||
+       (swrast->_RasterMask & MULTI_DRAW_BIT) ||
+       (ctx->Polygon.CullFlag && ctx->Polygon.CullFaceMode == GL_FRONT_AND_BACK))
+      return (swrast_tri_func) NULL;
+
+   if (xmesa->xm_buffer->buffer==XIMAGE) {
+      if (   ctx->Light.ShadeModel==GL_SMOOTH
+          && swrast->_RasterMask==DEPTH_BIT
+          && ctx->Depth.Func==GL_LESS
+          && ctx->Depth.Mask==GL_TRUE
+          && ctx->Visual.depthBits == DEFAULT_SOFTWARE_DEPTH_BITS
+          && ctx->Polygon.StippleFlag==GL_FALSE) {
+         switch (xmesa->pixelformat) {
+            case PF_TRUECOLOR:
+	       USE(smooth_TRUECOLOR_z_triangle);
+            case PF_8A8B8G8R:
+               USE(smooth_8A8B8G8R_z_triangle);
+            case PF_8R8G8B:
+               USE(smooth_8R8G8B_z_triangle);
+            case PF_8R8G8B24:
+               USE(smooth_8R8G8B24_z_triangle);
+            case PF_TRUEDITHER:
+               USE(smooth_TRUEDITHER_z_triangle);
+            case PF_5R6G5B:
+               USE(smooth_5R6G5B_z_triangle);
+            case PF_DITHER_5R6G5B:
+               USE(smooth_DITHER_5R6G5B_z_triangle);
+            case PF_HPCR:
+	       USE(smooth_HPCR_z_triangle);
+            case PF_DITHER:
+               if (depth == 8)
+                  USE(smooth_DITHER8_z_triangle);
+               else
+                  USE(smooth_DITHER_z_triangle);
+               break;
+            case PF_LOOKUP:
+               if (depth == 8)
+                  USE(smooth_LOOKUP8_z_triangle);
+               else
+                  return (swrast_tri_func) NULL;
+            default:
+               return (swrast_tri_func) NULL;
+         }
+      }
+      if (   ctx->Light.ShadeModel==GL_FLAT
+          && swrast->_RasterMask==DEPTH_BIT
+          && ctx->Depth.Func==GL_LESS
+          && ctx->Depth.Mask==GL_TRUE
+          && ctx->Visual.depthBits == DEFAULT_SOFTWARE_DEPTH_BITS
+          && ctx->Polygon.StippleFlag==GL_FALSE) {
+         switch (xmesa->pixelformat) {
+            case PF_TRUECOLOR:
+	       USE(flat_TRUECOLOR_z_triangle);
+            case PF_8A8B8G8R:
+               USE(flat_8A8B8G8R_z_triangle);
+            case PF_8R8G8B:
+               USE(flat_8R8G8B_z_triangle);
+            case PF_8R8G8B24:
+               USE(flat_8R8G8B24_z_triangle);
+            case PF_TRUEDITHER:
+               USE(flat_TRUEDITHER_z_triangle);
+            case PF_5R6G5B:
+               USE(flat_5R6G5B_z_triangle);
+            case PF_DITHER_5R6G5B:
+               USE(flat_DITHER_5R6G5B_z_triangle);
+            case PF_HPCR:
+	       USE(flat_HPCR_z_triangle);
+            case PF_DITHER:
+               if (depth == 8)
+                  USE(flat_DITHER8_z_triangle);
+               else
+                  USE(flat_DITHER_z_triangle);
+               break;
+            case PF_LOOKUP:
+               if (depth == 8)
+                  USE(flat_LOOKUP8_z_triangle);
+               else
+                  return (swrast_tri_func) NULL;
+            default:
+               return (swrast_tri_func) NULL;
+         }
+      }
+      if (   swrast->_RasterMask==0   /* no depth test */
+          && ctx->Light.ShadeModel==GL_SMOOTH
+          && ctx->Polygon.StippleFlag==GL_FALSE) {
+         switch (xmesa->pixelformat) {
+            case PF_TRUECOLOR:
+	       USE(smooth_TRUECOLOR_triangle);
+            case PF_8A8B8G8R:
+               USE(smooth_8A8B8G8R_triangle);
+            case PF_8R8G8B:
+               USE(smooth_8R8G8B_triangle);
+            case PF_8R8G8B24:
+               USE(smooth_8R8G8B24_triangle);
+            case PF_TRUEDITHER:
+               USE(smooth_TRUEDITHER_triangle);
+            case PF_5R6G5B:
+               USE(smooth_5R6G5B_triangle);
+            case PF_DITHER_5R6G5B:
+               USE(smooth_DITHER_5R6G5B_triangle);
+            case PF_HPCR:
+	       USE(smooth_HPCR_triangle);
+            case PF_DITHER:
+               if (depth == 8)
+                  USE(smooth_DITHER8_triangle);
+               else
+                  USE(smooth_DITHER_triangle);
+               break;
+            case PF_LOOKUP:
+               if (depth == 8)
+                  USE(smooth_LOOKUP8_triangle);
+               else
+                  return (swrast_tri_func) NULL;
+            default:
+               return (swrast_tri_func) NULL;
+         }
+      }
+
+      if (   swrast->_RasterMask==0   /* no depth test */
+          && ctx->Light.ShadeModel==GL_FLAT
+          && ctx->Polygon.StippleFlag==GL_FALSE) {
+         switch (xmesa->pixelformat) {
+            case PF_TRUECOLOR:
+	       USE(flat_TRUECOLOR_triangle);
+            case PF_TRUEDITHER:
+	       USE(flat_TRUEDITHER_triangle);
+            case PF_8A8B8G8R:
+               USE(flat_8A8B8G8R_triangle);
+            case PF_8R8G8B:
+               USE(flat_8R8G8B_triangle);
+            case PF_8R8G8B24:
+               USE(flat_8R8G8B24_triangle);
+            case PF_5R6G5B:
+               USE(flat_5R6G5B_triangle);
+            case PF_DITHER_5R6G5B:
+               USE(flat_DITHER_5R6G5B_triangle);
+            case PF_HPCR:
+	       USE(flat_HPCR_triangle);
+            case PF_DITHER:
+               if (depth == 8)
+                  USE(flat_DITHER8_triangle);
+               else
+                  USE(flat_DITHER_triangle);
+               break;
+            case PF_LOOKUP:
+               if (depth == 8)
+                  USE(flat_LOOKUP8_triangle);
+               else
+                  return (swrast_tri_func) NULL;
+            default:
+               return (swrast_tri_func) NULL;
+         }
+      }
+
+      return (swrast_tri_func) NULL;
+   }
+   else {
+      /* draw to pixmap */
+      return (swrast_tri_func) NULL;
+   }
+}
+
+
+/* Override for the swrast tri-selection function.  Try to use one
+ * of our internal tri functions, otherwise fall back to the
+ * standard swrast functions.
+ */
+void xmesa_choose_triangle( GLcontext *ctx )
+{
+   SWcontext *swrast = SWRAST_CONTEXT(ctx);
+
+   if (!(swrast->Triangle = get_triangle_func( ctx )))
+      _swrast_choose_triangle( ctx );
+}
+
+@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@@
+
+
+1.1.9.1
+log
+@OpenBSD just has imported exactly this tree into their vendor branch,
+called the same tag, in XF4/xc
+This is, apparently, the last XFree86 snapshot before the licence change
+(ie, addition of the advertising clause)
+
+Since the developers don't see any problems with that, and we would like
+to integrate improvements done by the remaining one or two (or so) XFree86
+developers (j/k), this prepares enabling us to update X-Window in the future.
+@
+text
+@d4 1
+a4 1
+ * Version:  4.1
+a36 1
+#include "imports.h"
+d46 1
+d72 1
+a72 1
+   for (i = 0; i < span.end; i++, x++) {			\
+d110 1
+a110 1
+   for (i = 0; i < span.end; i++) {				\
+d145 1
+a145 1
+   for (i = 0; i < span.end; i++) {				\
+d180 1
+a180 1
+   for (i = 0; i < span.end; i++) {				\
+d216 1
+a216 1
+   for (i = 0; i < span.end; i++, x++) {			\
+d253 1
+a253 1
+   for (i = 0; i < span.end; i++) {				\
+d289 1
+a289 1
+   for (i = 0; i < span.end; i++, x++) {			\
+d326 1
+a326 1
+   for (i = 0; i < span.end; i++, x++) {			\
+d361 1
+a361 1
+   for (i = 0; i < span.end; i++, x++) {			\
+d398 1
+a398 1
+   for (i = 0; i < span.end; i++) {				\
+d435 1
+a435 1
+   for (i = 0; i < span.end; i++, x++) {			\
+d471 1
+a471 1
+   for (i = 0; i < span.end; i++, x++) {			\
+d503 1
+a503 1
+   for (i = 0; i < span.end; i++) {			\
+d535 1
+a535 1
+   for (i = 0; i < span.end; i++) {		\
+d565 1
+a565 1
+   for (i = 0; i < span.end; i++) {			\
+d596 1
+a596 1
+   for (i = 0; i < span.end; i++, x++) {			\
+d631 1
+a631 1
+   for (i = 0; i < span.end; i++) {			\
+d662 1
+a662 1
+   for (i = 0; i < span.end; i++, x++) {			\
+d697 1
+a697 1
+   for (i = 0; i < span.end; i++, x++) {			\
+d729 1
+a729 1
+   for (i = 0; i < span.end; i++, x++) {			\
+d764 1
+a764 1
+   for (i = 0; i < span.end; i++, x++) {			\
+d799 1
+a799 1
+   for (i = 0; i < span.end; i++) {			\
+d827 1
+a827 1
+   for (i = 0; i < span.end; i++, x++) {			\
+d832 1
+a832 1
+      span.red += span.redStep;				\
+d856 1
+a856 1
+   for (i = 0; i < span.end; i++) {				\
+d859 1
+a859 1
+      span.red += span.redStep;				\
+d883 1
+a883 1
+   for (i = 0; i < span.end; i++) {				\
+d886 1
+a886 1
+      span.red += span.redStep;				\
+d911 1
+a911 1
+   for (i = 0; i < span.end; i++, pixel++) {		\
+d914 2
+a915 2
+      pixel->b = FixedToInt(span.blue);		\
+      span.red += span.redStep;			\
+d938 1
+a938 1
+   for (i = 0; i < span.end; i++, x++) {			\
+d943 1
+a943 1
+      span.red += span.redStep;				\
+d967 1
+a967 1
+   for (i = 0; i < span.end; i++) {				\
+d970 1
+a970 1
+      span.red += span.redStep;				\
+d995 1
+a995 1
+   for (i = 0; i < span.end; i++, x++) {			\
+d998 1
+a998 1
+      span.red += span.redStep;				\
+d1024 1
+a1024 1
+   for (i = 0; i < span.end; i++, x++) {			\
+d1027 1
+a1027 1
+      span.red += span.redStep;				\
+d1046 1
+d1052 1
+a1052 1
+   for (i = 0; i < span.end; i++, x++) {			\
+d1056 1
+a1056 1
+      span.red += span.redStep;				\
+d1074 1
+d1082 1
+a1082 1
+   for (i = 0; i < span.end; i++) {			\
+d1085 1
+a1085 1
+      span.red += span.redStep;			\
+d1104 1
+d1112 2
+a1113 2
+   for (i = 0; i < span.end; i++, x++) {			\
+      pRow[i] = DITHER_HPCR(x, y, FixedToInt(span.red),	\
+d1115 1
+a1115 1
+      span.red += span.redStep;				\
+d1141 1
+a1141 1
+   for (i = 0; i < span.end; i++, x++) {			\
+d1166 1
+a1166 1
+   for (i = 0; i < span.end; i++) {		\
+d1191 1
+a1191 1
+   for (i = 0; i < span.end; i++) {		\
+d1215 1
+a1215 1
+   for (i = 0; i < span.end; i++, pixel++) {		\
+d1234 1
+d1238 1
+a1238 1
+   for (i = 0; i < span.end; i++, x++) {			\
+d1262 1
+a1262 1
+#define SETUP_CODE				\
+d1267 1
+a1267 1
+   for (i = 0; i < span.end; i++) {		\
+d1291 1
+a1291 1
+   for (i = 0; i < span.end; i++, x++) {			\
+d1319 1
+a1319 1
+   for (i = 0; i < span.end; i++, x++) {			\
+d1344 1
+a1344 1
+   for (i = 0; i < span.end; i++, x++) {			\
+d1365 1
+a1365 1
+#define SETUP_CODE		\
+d1369 1
+a1369 1
+#define RENDER_SPAN( span )					\
+d1372 1
+a1372 1
+   for (i = 0; i < span.end; i++, x++) {			\
+d1400 1
+a1400 1
+   for (i = 0; i < span.end; i++) {		\
+d1412 1
+a1412 1
+   _mesa_printf("XMesa tri func = ");
+d1414 1
+a1414 1
+      _mesa_printf("smooth_TRUECOLOR_z_triangle\n");
+d1416 1
+a1416 1
+      _mesa_printf("smooth_8A8B8G8R_z_triangle\n");
+d1418 1
+a1418 1
+      _mesa_printf("smooth_8R8G8B_z_triangle\n");
+d1420 1
+a1420 1
+      _mesa_printf("smooth_8R8G8B24_z_triangle\n");
+d1422 1
+a1422 1
+      _mesa_printf("smooth_TRUEDITHER_z_triangle\n");
+d1424 1
+a1424 1
+      _mesa_printf("smooth_5R6G5B_z_triangle\n");
+d1426 1
+a1426 1
+      _mesa_printf("smooth_DITHER_5R6G5B_z_triangle\n");
+d1428 1
+a1428 1
+      _mesa_printf("smooth_HPCR_z_triangle\n");
+d1430 1
+a1430 1
+      _mesa_printf("smooth_DITHER8_z_triangle\n");
+d1432 1
+a1432 1
+      _mesa_printf("smooth_LOOKUP8_z_triangle\n");
+d1434 1
+a1434 1
+      _mesa_printf("flat_TRUECOLOR_z_triangle\n");
+d1436 1
+a1436 1
+      _mesa_printf("flat_8A8B8G8R_z_triangle\n");
+d1438 1
+a1438 1
+      _mesa_printf("flat_8R8G8B_z_triangle\n");
+d1440 1
+a1440 1
+      _mesa_printf("flat_8R8G8B24_z_triangle\n");
+d1442 1
+a1442 1
+      _mesa_printf("flat_TRUEDITHER_z_triangle\n");
+d1444 1
+a1444 1
+      _mesa_printf("flat_5R6G5B_z_triangle\n");
+d1446 1
+a1446 1
+      _mesa_printf("flat_DITHER_5R6G5B_z_triangle\n");
+d1448 1
+a1448 1
+      _mesa_printf("flat_HPCR_z_triangle\n");
+d1450 1
+a1450 1
+      _mesa_printf("flat_DITHER8_z_triangle\n");
+d1452 1
+a1452 1
+      _mesa_printf("flat_LOOKUP8_z_triangle\n");
+d1454 1
+a1454 1
+      _mesa_printf("smooth_TRUECOLOR_triangle\n");
+d1456 1
+a1456 1
+      _mesa_printf("smooth_8A8B8G8R_triangle\n");
+d1458 1
+a1458 1
+      _mesa_printf("smooth_8R8G8B_triangle\n");
+d1460 1
+a1460 1
+      _mesa_printf("smooth_8R8G8B24_triangle\n");
+d1462 1
+a1462 1
+      _mesa_printf("smooth_TRUEDITHER_triangle\n");
+d1464 1
+a1464 1
+      _mesa_printf("smooth_5R6G5B_triangle\n");
+d1466 1
+a1466 1
+      _mesa_printf("smooth_DITHER_5R6G5B_triangle\n");
+d1468 1
+a1468 1
+      _mesa_printf("smooth_HPCR_triangle\n");
+d1470 1
+a1470 1
+      _mesa_printf("smooth_DITHER8_triangle\n");
+d1472 1
+a1472 1
+      _mesa_printf("smooth_LOOKUP8_triangle\n");
+d1474 1
+a1474 1
+      _mesa_printf("flat_TRUECOLOR_triangle\n");
+d1476 1
+a1476 1
+      _mesa_printf("flat_TRUEDITHER_triangle\n");
+d1478 1
+a1478 1
+      _mesa_printf("flat_8A8B8G8R_triangle\n");
+d1480 1
+a1480 1
+      _mesa_printf("flat_8R8G8B_triangle\n");
+d1482 1
+a1482 1
+      _mesa_printf("flat_8R8G8B24_triangle\n");
+d1484 1
+a1484 1
+      _mesa_printf("flat_5R6G5B_triangle\n");
+d1486 1
+a1486 1
+      _mesa_printf("flat_DITHER_5R6G5B_triangle\n");
+d1488 1
+a1488 1
+      _mesa_printf("flat_HPCR_triangle\n");
+d1490 1
+a1490 1
+      _mesa_printf("flat_DITHER8_triangle\n");
+d1492 1
+a1492 1
+      _mesa_printf("flat_LOOKUP8_triangle\n");
+d1494 1
+a1494 1
+      _mesa_printf("???\n");
+d1529 6
+a1534 7
+   if (ctx->RenderMode != GL_RENDER)  return (swrast_tri_func) NULL;
+   if (ctx->Polygon.SmoothFlag)       return (swrast_tri_func) NULL;
+   if (ctx->Texture._EnabledUnits)    return (swrast_tri_func) NULL;
+   if (swrast->_RasterMask & MULTI_DRAW_BIT) return (swrast_tri_func) NULL;
+   if (ctx->Polygon.CullFlag && 
+       ctx->Polygon.CullFaceMode == GL_FRONT_AND_BACK)
+                                        return (swrast_tri_func) NULL;
+@
+
+
+1.1.1.1
+log
+@The X-Windowing System
+
+Import XFree86 4.3 from OpenBSD by CTM, in the hope it's stable
+@
+text
+@@
+
+
+1.1.1.2
+log
+@That's what OpenBSD will, probably, ship as XF4 in 3.5
+their last sync against XFree86 4.3-current has been
+imported into our vendor branch, too
+@
+text
+@d4 1
+a4 1
+ * Version:  4.1
+a36 1
+#include "imports.h"
+d46 1
+d72 1
+a72 1
+   for (i = 0; i < span.end; i++, x++) {			\
+d110 1
+a110 1
+   for (i = 0; i < span.end; i++) {				\
+d145 1
+a145 1
+   for (i = 0; i < span.end; i++) {				\
+d180 1
+a180 1
+   for (i = 0; i < span.end; i++) {				\
+d216 1
+a216 1
+   for (i = 0; i < span.end; i++, x++) {			\
+d253 1
+a253 1
+   for (i = 0; i < span.end; i++) {				\
+d289 1
+a289 1
+   for (i = 0; i < span.end; i++, x++) {			\
+d326 1
+a326 1
+   for (i = 0; i < span.end; i++, x++) {			\
+d361 1
+a361 1
+   for (i = 0; i < span.end; i++, x++) {			\
+d398 1
+a398 1
+   for (i = 0; i < span.end; i++) {				\
+d435 1
+a435 1
+   for (i = 0; i < span.end; i++, x++) {			\
+d471 1
+a471 1
+   for (i = 0; i < span.end; i++, x++) {			\
+d503 1
+a503 1
+   for (i = 0; i < span.end; i++) {			\
+d535 1
+a535 1
+   for (i = 0; i < span.end; i++) {		\
+d565 1
+a565 1
+   for (i = 0; i < span.end; i++) {			\
+d596 1
+a596 1
+   for (i = 0; i < span.end; i++, x++) {			\
+d631 1
+a631 1
+   for (i = 0; i < span.end; i++) {			\
+d662 1
+a662 1
+   for (i = 0; i < span.end; i++, x++) {			\
+d697 1
+a697 1
+   for (i = 0; i < span.end; i++, x++) {			\
+d729 1
+a729 1
+   for (i = 0; i < span.end; i++, x++) {			\
+d764 1
+a764 1
+   for (i = 0; i < span.end; i++, x++) {			\
+d799 1
+a799 1
+   for (i = 0; i < span.end; i++) {			\
+d827 1
+a827 1
+   for (i = 0; i < span.end; i++, x++) {			\
+d832 1
+a832 1
+      span.red += span.redStep;				\
+d856 1
+a856 1
+   for (i = 0; i < span.end; i++) {				\
+d859 1
+a859 1
+      span.red += span.redStep;				\
+d883 1
+a883 1
+   for (i = 0; i < span.end; i++) {				\
+d886 1
+a886 1
+      span.red += span.redStep;				\
+d911 1
+a911 1
+   for (i = 0; i < span.end; i++, pixel++) {		\
+d914 2
+a915 2
+      pixel->b = FixedToInt(span.blue);		\
+      span.red += span.redStep;			\
+d938 1
+a938 1
+   for (i = 0; i < span.end; i++, x++) {			\
+d943 1
+a943 1
+      span.red += span.redStep;				\
+d967 1
+a967 1
+   for (i = 0; i < span.end; i++) {				\
+d970 1
+a970 1
+      span.red += span.redStep;				\
+d995 1
+a995 1
+   for (i = 0; i < span.end; i++, x++) {			\
+d998 1
+a998 1
+      span.red += span.redStep;				\
+d1024 1
+a1024 1
+   for (i = 0; i < span.end; i++, x++) {			\
+d1027 1
+a1027 1
+      span.red += span.redStep;				\
+d1046 1
+d1052 1
+a1052 1
+   for (i = 0; i < span.end; i++, x++) {			\
+d1056 1
+a1056 1
+      span.red += span.redStep;				\
+d1074 1
+d1082 1
+a1082 1
+   for (i = 0; i < span.end; i++) {			\
+d1085 1
+a1085 1
+      span.red += span.redStep;			\
+d1104 1
+d1112 2
+a1113 2
+   for (i = 0; i < span.end; i++, x++) {			\
+      pRow[i] = DITHER_HPCR(x, y, FixedToInt(span.red),	\
+d1115 1
+a1115 1
+      span.red += span.redStep;				\
+d1141 1
+a1141 1
+   for (i = 0; i < span.end; i++, x++) {			\
+d1166 1
+a1166 1
+   for (i = 0; i < span.end; i++) {		\
+d1191 1
+a1191 1
+   for (i = 0; i < span.end; i++) {		\
+d1215 1
+a1215 1
+   for (i = 0; i < span.end; i++, pixel++) {		\
+d1234 1
+d1238 1
+a1238 1
+   for (i = 0; i < span.end; i++, x++) {			\
+d1262 1
+a1262 1
+#define SETUP_CODE				\
+d1267 1
+a1267 1
+   for (i = 0; i < span.end; i++) {		\
+d1291 1
+a1291 1
+   for (i = 0; i < span.end; i++, x++) {			\
+d1319 1
+a1319 1
+   for (i = 0; i < span.end; i++, x++) {			\
+d1344 1
+a1344 1
+   for (i = 0; i < span.end; i++, x++) {			\
+d1365 1
+a1365 1
+#define SETUP_CODE		\
+d1369 1
+a1369 1
+#define RENDER_SPAN( span )					\
+d1372 1
+a1372 1
+   for (i = 0; i < span.end; i++, x++) {			\
+d1400 1
+a1400 1
+   for (i = 0; i < span.end; i++) {		\
+d1412 1
+a1412 1
+   _mesa_printf("XMesa tri func = ");
+d1414 1
+a1414 1
+      _mesa_printf("smooth_TRUECOLOR_z_triangle\n");
+d1416 1
+a1416 1
+      _mesa_printf("smooth_8A8B8G8R_z_triangle\n");
+d1418 1
+a1418 1
+      _mesa_printf("smooth_8R8G8B_z_triangle\n");
+d1420 1
+a1420 1
+      _mesa_printf("smooth_8R8G8B24_z_triangle\n");
+d1422 1
+a1422 1
+      _mesa_printf("smooth_TRUEDITHER_z_triangle\n");
+d1424 1
+a1424 1
+      _mesa_printf("smooth_5R6G5B_z_triangle\n");
+d1426 1
+a1426 1
+      _mesa_printf("smooth_DITHER_5R6G5B_z_triangle\n");
+d1428 1
+a1428 1
+      _mesa_printf("smooth_HPCR_z_triangle\n");
+d1430 1
+a1430 1
+      _mesa_printf("smooth_DITHER8_z_triangle\n");
+d1432 1
+a1432 1
+      _mesa_printf("smooth_LOOKUP8_z_triangle\n");
+d1434 1
+a1434 1
+      _mesa_printf("flat_TRUECOLOR_z_triangle\n");
+d1436 1
+a1436 1
+      _mesa_printf("flat_8A8B8G8R_z_triangle\n");
+d1438 1
+a1438 1
+      _mesa_printf("flat_8R8G8B_z_triangle\n");
+d1440 1
+a1440 1
+      _mesa_printf("flat_8R8G8B24_z_triangle\n");
+d1442 1
+a1442 1
+      _mesa_printf("flat_TRUEDITHER_z_triangle\n");
+d1444 1
+a1444 1
+      _mesa_printf("flat_5R6G5B_z_triangle\n");
+d1446 1
+a1446 1
+      _mesa_printf("flat_DITHER_5R6G5B_z_triangle\n");
+d1448 1
+a1448 1
+      _mesa_printf("flat_HPCR_z_triangle\n");
+d1450 1
+a1450 1
+      _mesa_printf("flat_DITHER8_z_triangle\n");
+d1452 1
+a1452 1
+      _mesa_printf("flat_LOOKUP8_z_triangle\n");
+d1454 1
+a1454 1
+      _mesa_printf("smooth_TRUECOLOR_triangle\n");
+d1456 1
+a1456 1
+      _mesa_printf("smooth_8A8B8G8R_triangle\n");
+d1458 1
+a1458 1
+      _mesa_printf("smooth_8R8G8B_triangle\n");
+d1460 1
+a1460 1
+      _mesa_printf("smooth_8R8G8B24_triangle\n");
+d1462 1
+a1462 1
+      _mesa_printf("smooth_TRUEDITHER_triangle\n");
+d1464 1
+a1464 1
+      _mesa_printf("smooth_5R6G5B_triangle\n");
+d1466 1
+a1466 1
+      _mesa_printf("smooth_DITHER_5R6G5B_triangle\n");
+d1468 1
+a1468 1
+      _mesa_printf("smooth_HPCR_triangle\n");
+d1470 1
+a1470 1
+      _mesa_printf("smooth_DITHER8_triangle\n");
+d1472 1
+a1472 1
+      _mesa_printf("smooth_LOOKUP8_triangle\n");
+d1474 1
+a1474 1
+      _mesa_printf("flat_TRUECOLOR_triangle\n");
+d1476 1
+a1476 1
+      _mesa_printf("flat_TRUEDITHER_triangle\n");
+d1478 1
+a1478 1
+      _mesa_printf("flat_8A8B8G8R_triangle\n");
+d1480 1
+a1480 1
+      _mesa_printf("flat_8R8G8B_triangle\n");
+d1482 1
+a1482 1
+      _mesa_printf("flat_8R8G8B24_triangle\n");
+d1484 1
+a1484 1
+      _mesa_printf("flat_5R6G5B_triangle\n");
+d1486 1
+a1486 1
+      _mesa_printf("flat_DITHER_5R6G5B_triangle\n");
+d1488 1
+a1488 1
+      _mesa_printf("flat_HPCR_triangle\n");
+d1490 1
+a1490 1
+      _mesa_printf("flat_DITHER8_triangle\n");
+d1492 1
+a1492 1
+      _mesa_printf("flat_LOOKUP8_triangle\n");
+d1494 1
+a1494 1
+      _mesa_printf("???\n");
+d1529 6
+a1534 7
+   if (ctx->RenderMode != GL_RENDER)  return (swrast_tri_func) NULL;
+   if (ctx->Polygon.SmoothFlag)       return (swrast_tri_func) NULL;
+   if (ctx->Texture._EnabledUnits)    return (swrast_tri_func) NULL;
+   if (swrast->_RasterMask & MULTI_DRAW_BIT) return (swrast_tri_func) NULL;
+   if (ctx->Polygon.CullFlag && 
+       ctx->Polygon.CullFaceMode == GL_FRONT_AND_BACK)
+                                        return (swrast_tri_func) NULL;
+@
+

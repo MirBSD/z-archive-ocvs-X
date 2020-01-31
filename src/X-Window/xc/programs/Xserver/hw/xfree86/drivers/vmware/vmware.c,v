@@ -1,0 +1,4077 @@
+head	1.1;
+branch	1.1.1;
+access;
+symbols
+	tg-mergetmp-2:1.1.1.3
+	cvs-200410241530:1.1.1.3
+	cvs-200410012000:1.1.1.3
+	cvs-200407221130:1.1.1.3
+	cvs-200407141120:1.1.1.3
+	cvs-200406231010:1.1.1.3
+	MIRBSD_7quater:1.1.1.2
+	cvs-200405271510:1.1.1.3
+	XFree86_4_4_0:1.1.9.2
+	cvs-200403021700:1.1.1.3
+	XFREE86_20040213:1.1.9.1
+	xc:1.1.9
+	cvs-200401291925:1.1.1.2
+	MIRBSD_7_ALPHA:1.1.1.2.0.4
+	MIRBSD_7:1.1.1.2.0.2
+	MIRBSD_7ter:1.1.1.2
+	cvs-20011091815:1.1.1.2
+	cvs-200309162130:1.1.1.2
+	cvs-200308302005:1.1.1.2
+	ctmx-0387:1.1.1.2
+	ctmx-0384:1.1.1.2
+	MIRBSD_5:1.1.1.2
+	ctmx-0375:1.1.1.2
+	ctmx-0373:1.1.1.2
+	ctm-0371:1.1.1.2
+	ctm-0370:1.1.1.2
+	MIRBSD_4:1.1.1.2
+	ctm-0363:1.1.1.2
+	ctm-0359:1.1.1.2
+	ctm-0349:1.1.1.1
+	openbsd:1.1.1;
+locks; strict;
+comment	@ * @;
+
+
+1.1
+date	2003.03.22.20.07.52;	author tg;	state Exp;
+branches
+	1.1.1.1
+	1.1.9.1;
+next	;
+
+1.1.1.1
+date	2003.03.22.20.07.52;	author tg;	state Exp;
+branches;
+next	1.1.1.2;
+
+1.1.1.2
+date	2003.04.08.18.36.56;	author tg;	state Exp;
+branches;
+next	1.1.1.3;
+
+1.1.1.3
+date	2004.03.02.18.21.04;	author tg;	state Stab;
+branches;
+next	;
+
+1.1.9.1
+date	2004.02.14.19.24.16;	author tg;	state Exp;
+branches;
+next	1.1.9.2;
+
+1.1.9.2
+date	2004.03.05.22.31.04;	author tg;	state Exp;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@/* **********************************************************
+ * Copyright (C) 1998-2001 VMware, Inc.
+ * All Rights Reserved
+ * **********************************************************/
+#ifdef VMX86_DEVEL
+char rcsId_vmware[] =
+
+    "Id: vmware.c,v 1.11 2001/02/23 02:10:39 yoel Exp $";
+#endif
+/* $XFree86: xc/programs/Xserver/hw/xfree86/drivers/vmware/vmware.c,v 1.8 2001/10/28 03:33:53 tsi Exp $ */
+
+#include "xf86.h"
+#include "xf86_OSproc.h"
+#include "xf86_ansic.h"
+#include "xf86Resources.h"
+
+#include "compiler.h"	/* inb/outb */
+
+#include "xf86PciInfo.h"	/* pci vendor id */
+#include "xf86Pci.h"		/* pci */
+
+#include "mipointer.h"		/* sw cursor */
+#include "mibstore.h"		/* backing store */
+#include "micmap.h"		/* mi color map */
+#include "vgaHW.h"		/* VGA hardware */
+#include "fb.h"
+
+#include "xf86cmap.h"		/* xf86HandleColormaps */
+
+#include "vmware.h"
+#include "guest_os.h"
+#include "vm_device_version.h"
+
+/*
+ * Sanity check that xf86PciInfo.h has the correct values (which come from
+ * the VMware source tree in vm_device_version.h.
+ */
+#if PCI_CHIP_VMWARE0405 != PCI_DEVICE_ID_VMWARE_SVGA2
+#error "PCI_CHIP_VMWARE0405 is wrong, update it from vm_device_version.h"
+#endif
+#if PCI_CHIP_VMWARE0710 != PCI_DEVICE_ID_VMWARE_SVGA
+#error "PCI_CHIP_VMWARE0710 is wrong, update it from vm_device_version.h"
+#endif
+#if PCI_VENDOR_VMWARE != PCI_VENDOR_ID_VMWARE
+#error "PCI_VENDOR_VMWARE is wrong, update it from vm_device_version.h"
+#endif
+
+/*
+ * This is the only way I know to turn a #define of an integer constant into
+ * a constant string.
+ */
+#define VMW_INNERSTRINGIFY(s)	#s
+#define VMW_STRING(str)		VMW_INNERSTRINGIFY(str)
+
+#define VMWARE_NAME	"VMWARE"
+#define VMWARE_DRIVER_NAME	"vmware"
+#define VMWARE_MAJOR_VERSION	10
+#define VMWARE_MINOR_VERSION	7
+#define VMWARE_PATCHLEVEL	0
+#define VERSION		(VMWARE_MAJOR_VERSION * 65536 + VMWARE_MINOR_VERSION * 256 + VMWARE_PATCHLEVEL)
+
+static const char VMWAREBuildStr[] =
+                     "VMware Guest X Server " VMW_STRING(VMWARE_MAJOR_VERSION)
+		     "." VMW_STRING(VMWARE_MINOR_VERSION)
+		     "." VMW_STRING(VMWARE_PATCHLEVEL) " - build=$Name:  $\n";
+
+static SymTabRec VMWAREChipsets[] = {
+	{ PCI_CHIP_VMWARE0405, "vmware0405" },
+	{ PCI_CHIP_VMWARE0710, "vmware0710" },
+	{ -1,                  NULL }
+};
+
+static resRange vmwareLegacyRes[] = {
+   { ResExcIoBlock, SVGA_LEGACY_BASE_PORT, SVGA_LEGACY_BASE_PORT + SVGA_NUM_PORTS*sizeof(uint32)},
+   _VGA_EXCLUSIVE, _END
+};
+
+/*
+ * Currently, even the PCI obedient 0405 chip still only obeys IOSE and
+ * MEMSE for the SVGA resources.  Thus, RES_EXCLUSIVE_VGA is required.
+ *
+ * The 0710 chip also uses hardcoded IO ports that aren't disablable.
+ */
+
+static PciChipsets VMWAREPciChipsets[] = {
+	{ PCI_CHIP_VMWARE0405, PCI_CHIP_VMWARE0405, RES_EXCLUSIVE_VGA },
+	{ PCI_CHIP_VMWARE0710, PCI_CHIP_VMWARE0710, vmwareLegacyRes },
+	{ -1,		       -1,		    RES_UNDEFINED }
+};
+
+static const char *vgahwSymbols[] = {
+	"vgaHWGetHWRec",
+	"vgaHWGetIOBase",
+	"vgaHWGetIndex",
+	"vgaHWInit",
+	"vgaHWProtect",
+	"vgaHWRestore",
+	"vgaHWSave",
+	"vgaHWSaveScreen",
+	"vgaHWUnlock",
+	NULL
+};
+
+static const char *fbSymbols[] = {
+	"fbPictureInit",
+	"fbScreenInit",
+	NULL
+};
+
+#ifdef XFree86LOADER
+static XF86ModuleVersionInfo vmwareVersRec = {
+	"vmware",
+	MODULEVENDORSTRING,
+	MODINFOSTRING1,
+	MODINFOSTRING2,
+	XF86_VERSION_CURRENT,
+	VMWARE_MAJOR_VERSION, VMWARE_MINOR_VERSION, VMWARE_PATCHLEVEL,
+	ABI_CLASS_VIDEODRV,
+	ABI_VIDEODRV_VERSION,
+	MOD_CLASS_VIDEODRV,
+	{ 0, 0, 0, 0}
+};
+#endif	/* XFree86LOADER */
+
+typedef enum {
+	OPTION_HW_CURSOR,
+	OPTION_NOACCEL
+} VMWAREOpts;
+
+static const OptionInfoRec VMWAREOptions[] = {
+	{ OPTION_HW_CURSOR,	"HWcursor",	OPTV_BOOLEAN,	{0},	FALSE },
+	{ OPTION_NOACCEL,	"NoAccel",	OPTV_BOOLEAN,	{0},	FALSE },
+	{ -1,			NULL,		OPTV_NONE,	{0},	FALSE }
+};
+
+static Bool
+VMWAREGetRec(ScrnInfoPtr pScrn)
+{
+	if (pScrn->driverPrivate != NULL) {
+		return TRUE;
+	}
+	pScrn->driverPrivate = xnfcalloc(sizeof(VMWARERec), 1);
+	/* FIXME: Initialize driverPrivate... */
+	return TRUE;
+}
+
+static void
+VMWAREFreeRec(ScrnInfoPtr pScrn)
+{
+	if (pScrn->driverPrivate) {
+		xfree(pScrn->driverPrivate);
+		pScrn->driverPrivate = NULL;
+	}
+}
+
+static void ScreenToPrivate(ScreenPtr, ScrnInfoPtr);
+static void ScreenFromPrivate(ScreenPtr, ScrnInfoPtr);
+
+/* VMware specific functions */
+
+static CARD32
+vmwareReadReg(VMWAREPtr pVMWARE, int index)
+{
+    outl(pVMWARE->indexReg, index);
+    return inl(pVMWARE->valueReg);
+}
+
+void
+vmwareWriteReg(VMWAREPtr pVMWARE, int index, CARD32 value)
+{
+    outl(pVMWARE->indexReg, index);
+    outl(pVMWARE->valueReg, value);
+}
+
+void
+vmwareWriteWordToFIFO(VMWAREPtr pVMWARE, CARD32 value)
+{
+    CARD32* vmwareFIFO = pVMWARE->vmwareFIFO;
+
+    /* Need to sync? */
+    if ((vmwareFIFO[SVGA_FIFO_NEXT_CMD] + sizeof(CARD32) == vmwareFIFO[SVGA_FIFO_STOP])
+     || (vmwareFIFO[SVGA_FIFO_NEXT_CMD] == vmwareFIFO[SVGA_FIFO_MAX] - sizeof(CARD32) &&
+	 vmwareFIFO[SVGA_FIFO_STOP] == vmwareFIFO[SVGA_FIFO_MIN])) {
+	vmwareWriteReg(pVMWARE, SVGA_REG_SYNC, 1);
+	while (vmwareReadReg(pVMWARE, SVGA_REG_BUSY)) ;
+    }
+    vmwareFIFO[vmwareFIFO[SVGA_FIFO_NEXT_CMD] / sizeof(CARD32)] = value;
+    vmwareFIFO[SVGA_FIFO_NEXT_CMD] += sizeof(CARD32);
+    if (vmwareFIFO[SVGA_FIFO_NEXT_CMD] == vmwareFIFO[SVGA_FIFO_MAX]) {
+	vmwareFIFO[SVGA_FIFO_NEXT_CMD] = vmwareFIFO[SVGA_FIFO_MIN];
+    }
+}
+
+void
+vmwareWaitForFB(VMWAREPtr pVMWARE)
+{
+    if (pVMWARE->vmwareFIFOMarkSet) {
+	vmwareWriteReg(pVMWARE, SVGA_REG_SYNC, 1);
+	while (vmwareReadReg(pVMWARE, SVGA_REG_BUSY)) ;
+	pVMWARE->vmwareFIFOMarkSet = FALSE;
+    }
+}
+
+void
+vmwareSendSVGACmdUpdate(VMWAREPtr pVMWARE, BoxPtr pBB)
+{
+    vmwareWriteWordToFIFO(pVMWARE, SVGA_CMD_UPDATE);
+    vmwareWriteWordToFIFO(pVMWARE, pBB->x1);
+    vmwareWriteWordToFIFO(pVMWARE, pBB->y1);
+    vmwareWriteWordToFIFO(pVMWARE, pBB->x2 - pBB->x1);
+    vmwareWriteWordToFIFO(pVMWARE, pBB->y2 - pBB->y1);
+}
+
+static void
+vmwareSendSVGACmdUpdateFullScreen(VMWAREPtr pVMWARE)
+{
+    BoxRec BB;
+
+    BB.x1 = 0;
+    BB.y1 = 0;
+    BB.x2 = pVMWARE->ModeReg.svga_reg_width;
+    BB.y2 = pVMWARE->ModeReg.svga_reg_height;
+    vmwareSendSVGACmdUpdate(pVMWARE, &BB);
+}
+
+static CARD32
+vmwareCalculateWeight(CARD32 mask)
+{
+    CARD32 weight;
+
+    for (weight = 0; mask; mask >>= 1) {
+	if (mask & 1) {
+	    weight++;
+	}
+    }
+    return weight;
+}
+
+/*
+ *-----------------------------------------------------------------------------
+ *
+ * VMXGetVMwareSvgaId --
+ *
+ *    Retrieve the SVGA_ID of the VMware SVGA adapter.
+ *    This function should hide any backward compatibility mess.
+ *
+ * Results:
+ *    The SVGA_ID_* of the present VMware adapter.
+ *
+ * Side effects:
+ *    ins/outs
+ *
+ *-----------------------------------------------------------------------------
+ */
+
+static uint32
+VMXGetVMwareSvgaId(VMWAREPtr pVMWARE)
+{
+   uint32 vmware_svga_id;
+
+   /* Any version with any SVGA_ID_* support will initialize SVGA_REG_ID
+    * to SVGA_ID_0 to support versions of this driver with SVGA_ID_0.
+    *
+    * Versions of SVGA_ID_0 ignore writes to the SVGA_REG_ID register.
+    *
+    * Versions of SVGA_ID_1 will allow us to overwrite the content
+    * of the SVGA_REG_ID register only with the values SVGA_ID_0 or SVGA_ID_1.
+    *
+    * Versions of SVGA_ID_2 will allow us to overwrite the content
+    * of the SVGA_REG_ID register only with the values SVGA_ID_0 or SVGA_ID_1
+    * or SVGA_ID_2.
+    */
+
+   vmwareWriteReg(pVMWARE, SVGA_REG_ID, SVGA_ID_2);
+   vmware_svga_id = vmwareReadReg(pVMWARE, SVGA_REG_ID);
+   if (vmware_svga_id == SVGA_ID_2) {
+      return SVGA_ID_2;
+   }
+
+   vmwareWriteReg(pVMWARE, SVGA_REG_ID, SVGA_ID_1);
+   vmware_svga_id = vmwareReadReg(pVMWARE, SVGA_REG_ID);
+   if (vmware_svga_id == SVGA_ID_1) {
+      return SVGA_ID_1;
+   }
+
+   if (vmware_svga_id == SVGA_ID_0) {
+      return SVGA_ID_0;
+   }
+
+   /* No supported VMware SVGA devices found */
+   return SVGA_ID_INVALID;
+}
+
+
+/*
+ *----------------------------------------------------------------------
+ *
+ *  RewriteTagString --
+ *
+ *      Rewrites the given string, removing the $Name:  $, and
+ *      replacing it with the contents.  The output string must
+ *      have enough room, or else.
+ *
+ * Results:
+ *
+ *      Output string updated.
+ *
+ * Side effects:
+ *      None.
+ *
+ *----------------------------------------------------------------------
+ */
+
+static void
+RewriteTagString(const char *istr, char *ostr, int osize)
+{
+    int chr;
+    Bool inTag = FALSE;
+    char *op = ostr;
+
+    do {
+	chr = *istr++;
+	if (chr == '$') {
+	    if (inTag) {
+		inTag = FALSE;
+		for (; op > ostr && op[-1] == ' '; op--) {
+		}
+		continue;
+	    }
+	    if (strncmp(istr, "Name:", 5) == 0) {
+		istr += 5;
+		istr += strspn(istr, " ");
+		inTag = TRUE;
+		continue;
+	    }
+	}
+	*op++ = chr;
+    } while (chr);
+}
+
+static void
+VMWAREIdentify(int flags)
+{
+	xf86PrintChipsets(VMWARE_NAME, "driver for VMware SVGA", VMWAREChipsets);
+}
+
+static const OptionInfoRec *
+VMWAREAvailableOptions(int chipid, int busid)
+{
+	return VMWAREOptions;
+}
+
+static Bool
+VMWAREPreInit(ScrnInfoPtr pScrn, int flags)
+{
+	MessageType from;
+	VMWAREPtr pVMWARE;
+	OptionInfoPtr options;
+	int bpp24flags;
+	uint32 id;
+	int i;
+	ClockRange* clockRanges;
+
+	if (flags & PROBE_DETECT) {
+		return FALSE;
+	}
+
+	if (pScrn->numEntities != 1) {
+		return FALSE;
+	}
+
+	if (!VMWAREGetRec(pScrn)) {
+		return FALSE;
+	}
+	pVMWARE = VMWAREPTR(pScrn);
+
+	pVMWARE->pEnt = xf86GetEntityInfo(pScrn->entityList[0]);
+	if (pVMWARE->pEnt->location.type != BUS_PCI) {
+		return FALSE;
+	}
+	pVMWARE->PciInfo = xf86GetPciInfoForEntity(pVMWARE->pEnt->index);
+	if (pVMWARE->PciInfo == NULL) {
+		return FALSE;
+	}
+
+	if (pVMWARE->PciInfo->chipType == PCI_CHIP_VMWARE0710) {
+		pVMWARE->indexReg =
+		   SVGA_LEGACY_BASE_PORT + SVGA_INDEX_PORT*sizeof(uint32);
+		pVMWARE->valueReg =
+		   SVGA_LEGACY_BASE_PORT + SVGA_VALUE_PORT*sizeof(uint32);
+	} else {
+		pVMWARE->indexReg =
+		   pVMWARE->PciInfo->ioBase[0] + SVGA_INDEX_PORT;
+		pVMWARE->valueReg =
+		   pVMWARE->PciInfo->ioBase[0] + SVGA_VALUE_PORT;
+	}
+	xf86DrvMsg(pScrn->scrnIndex, X_PROBED,
+	      "VMware SVGA regs at (0x%04x, 0x%04x)\n",
+	      pVMWARE->indexReg, pVMWARE->valueReg);
+
+	id = VMXGetVMwareSvgaId(pVMWARE);
+	if (id == SVGA_ID_0 || id == SVGA_ID_INVALID) {
+		xf86DrvMsg(pScrn->scrnIndex, X_ERROR,
+		      "No supported VMware SVGA found (read ID 0x%08x).\n", id);
+		return FALSE;
+	}
+
+	if (!xf86LoadSubModule(pScrn, "vgahw")) {
+		return FALSE;
+	}
+
+	xf86LoaderReqSymLists(vgahwSymbols, NULL);
+
+	if (!vgaHWGetHWRec(pScrn)) {
+		return FALSE;
+	}
+
+	pVMWARE->PciTag = pciTag(pVMWARE->PciInfo->bus, pVMWARE->PciInfo->device,
+				 pVMWARE->PciInfo->func);
+	pVMWARE->Primary = xf86IsPrimaryPci(pVMWARE->PciInfo);
+
+	pScrn->monitor = pScrn->confScreen->monitor;
+
+#define ACCELERATE_OPS
+#ifdef ACCELERATE_OPS
+	pVMWARE->vmwareCapability = vmwareReadReg(pVMWARE, SVGA_REG_CAPABILITIES);
+#else
+	pVMWARE->vmwareCapability = 0;
+#endif
+
+        if (pVMWARE->vmwareCapability & SVGA_CAP_8BIT_EMULATION) {
+	        pVMWARE->bitsPerPixel =
+                   vmwareReadReg(pVMWARE, SVGA_REG_HOST_BITS_PER_PIXEL);
+                vmwareWriteReg(pVMWARE,
+                               SVGA_REG_BITS_PER_PIXEL, pVMWARE->bitsPerPixel);
+        } else {
+	        pVMWARE->bitsPerPixel =
+                   vmwareReadReg(pVMWARE, SVGA_REG_BITS_PER_PIXEL);
+        }
+	pVMWARE->depth = vmwareReadReg(pVMWARE, SVGA_REG_DEPTH);
+	pVMWARE->videoRam = vmwareReadReg(pVMWARE, SVGA_REG_FB_MAX_SIZE);
+	pVMWARE->memPhysBase = vmwareReadReg(pVMWARE, SVGA_REG_FB_START);
+	pVMWARE->maxWidth = vmwareReadReg(pVMWARE, SVGA_REG_MAX_WIDTH);
+	pVMWARE->maxHeight = vmwareReadReg(pVMWARE, SVGA_REG_MAX_HEIGHT);
+	pVMWARE->cursorDefined = FALSE;
+	pVMWARE->mouseHidden = FALSE;
+
+        if (pVMWARE->vmwareCapability & SVGA_CAP_CURSOR_BYPASS_2) {
+                pVMWARE->cursorRemoveFromFB = SVGA_CURSOR_ON_REMOVE_FROM_FB;
+                pVMWARE->cursorRestoreToFB = SVGA_CURSOR_ON_RESTORE_TO_FB;
+        } else {
+                pVMWARE->cursorRemoveFromFB = SVGA_CURSOR_ON_HIDE;
+                pVMWARE->cursorRestoreToFB = SVGA_CURSOR_ON_SHOW;
+        }
+
+	xf86DrvMsgVerb(pScrn->scrnIndex, X_PROBED, 2, "caps:  0x%08X\n", pVMWARE->vmwareCapability);
+	xf86DrvMsgVerb(pScrn->scrnIndex, X_PROBED, 2, "depth: %d\n", pVMWARE->depth);
+	xf86DrvMsgVerb(pScrn->scrnIndex, X_PROBED, 2, "bpp:   %d\n", pVMWARE->bitsPerPixel);
+
+	xf86DrvMsgVerb(pScrn->scrnIndex, X_PROBED, 2, "vram:  %d\n", pVMWARE->videoRam);
+	xf86DrvMsgVerb(pScrn->scrnIndex, X_PROBED, 2, "pbase: %p\n", pVMWARE->memPhysBase);
+	xf86DrvMsgVerb(pScrn->scrnIndex, X_PROBED, 2, "mwidt: %d\n", pVMWARE->maxWidth);
+	xf86DrvMsgVerb(pScrn->scrnIndex, X_PROBED, 2, "mheig: %d\n", pVMWARE->maxHeight);
+
+	switch (pVMWARE->depth) {
+		case 16:
+		        /*
+			 * In certain cases, the Windows host appears to
+			 * report 16 bpp and 16 depth but 555 weight.  Just
+			 * silently convert it to depth of 15.
+			 */
+			if (pVMWARE->bitsPerPixel == 16 &&
+			    pVMWARE->weight.green == 5)
+				pVMWARE->depth = 15;
+		case 8:
+		case 15:
+			bpp24flags = NoDepth24Support;
+			break;
+
+		case 32:
+			/*
+			 * There is no 32 bit depth, apparently it can get
+			 * reported this way sometimes on the Windows host.
+			 */
+			if (pVMWARE->bitsPerPixel == 32)
+				pVMWARE->depth = 24;
+		case 24:
+			if (pVMWARE->bitsPerPixel == 24)
+				bpp24flags = Support24bppFb;
+			else
+				bpp24flags = Support32bppFb;
+			break;
+		default:
+			xf86DrvMsg(pScrn->scrnIndex, X_ERROR,
+				   "Adapter is using an unsupported depth (%d).\n",
+				   pVMWARE->depth);
+			return FALSE;
+	}
+
+	if (!xf86SetDepthBpp(pScrn, pVMWARE->depth, pVMWARE->bitsPerPixel, pVMWARE->bitsPerPixel, bpp24flags)) {
+		return FALSE;
+	}
+
+	if (pScrn->bitsPerPixel != pVMWARE->bitsPerPixel) {
+                if (pScrn->bitsPerPixel == 8 &&
+                    pVMWARE->vmwareCapability & SVGA_CAP_8BIT_EMULATION) {
+                        vmwareWriteReg(pVMWARE, SVGA_REG_BITS_PER_PIXEL, 8);
+                        pVMWARE->bitsPerPixel =
+                           vmwareReadReg(pVMWARE, SVGA_REG_BITS_PER_PIXEL);
+                } else {
+                        xf86DrvMsg(pScrn->scrnIndex, X_ERROR,
+                           "Currently unavailable depth/bpp of %d/%d requested.\n"
+                           "\tThe guest X server must run at the same depth and bpp as the host\n"
+                           "\t(which are currently %d/%d).  This is automatically detected.  Please\n"
+                           "\tdo not specify a depth on the command line or via the config file.\n",
+                            pScrn->depth, pScrn->bitsPerPixel,
+                            pVMWARE->depth, pVMWARE->bitsPerPixel);
+		        return FALSE;
+                }
+	}
+
+        /*
+         * Reread depth and defer reading the colour registers until here
+         * in case we changed bpp above.
+         */
+
+	pVMWARE->depth = vmwareReadReg(pVMWARE, SVGA_REG_DEPTH);
+	pVMWARE->weight.red =
+           vmwareCalculateWeight(vmwareReadReg(pVMWARE, SVGA_REG_RED_MASK));
+	pVMWARE->weight.green =
+           vmwareCalculateWeight(vmwareReadReg(pVMWARE, SVGA_REG_GREEN_MASK));
+	pVMWARE->weight.blue =
+           vmwareCalculateWeight(vmwareReadReg(pVMWARE, SVGA_REG_BLUE_MASK));
+	pVMWARE->offset.blue = 0;
+	pVMWARE->offset.green = pVMWARE->weight.blue;
+	pVMWARE->offset.red = pVMWARE->weight.green + pVMWARE->offset.green;
+	pVMWARE->defaultVisual = vmwareReadReg(pVMWARE, SVGA_REG_PSEUDOCOLOR) ?
+           PseudoColor : TrueColor;
+
+	xf86DrvMsgVerb(pScrn->scrnIndex, X_PROBED,
+                       2, "depth: %d\n", pVMWARE->depth);
+	xf86DrvMsgVerb(pScrn->scrnIndex, X_PROBED,
+                       2, "bpp:   %d\n", pVMWARE->bitsPerPixel);
+	xf86DrvMsgVerb(pScrn->scrnIndex, X_PROBED,
+                       2, "w.red: %d\n", pVMWARE->weight.red);
+	xf86DrvMsgVerb(pScrn->scrnIndex, X_PROBED,
+                       2, "w.grn: %d\n", pVMWARE->weight.green);
+	xf86DrvMsgVerb(pScrn->scrnIndex, X_PROBED,
+                       2, "w.blu: %d\n", pVMWARE->weight.blue);
+	xf86DrvMsgVerb(pScrn->scrnIndex, X_PROBED,
+                       2, "vis:   %d\n", pVMWARE->defaultVisual);
+
+	if (pScrn->depth != pVMWARE->depth) {
+                xf86DrvMsg(pScrn->scrnIndex, X_ERROR,
+                           "Currently unavailable depth of %d requested.\n"
+                           "\tThe guest X server must run at the same depth as the host (which\n"
+                           "\tis currently %d).  This is automatically detected.  Please do not\n"
+                           "\tspecify a depth on the command line or via the config file.\n",
+                            pScrn->depth, pVMWARE->depth);
+                return FALSE;
+	}
+	xf86PrintDepthBpp(pScrn);
+
+#if 0
+	if (pScrn->depth == 24 && pix24bpp == 0) {
+		pix24bpp = xf86GetBppFromDepth(pScrn, 24);
+	}
+#endif
+
+	if (pScrn->depth > 8) {
+		rgb zeros = { 0, 0, 0 };
+
+		if (!xf86SetWeight(pScrn, pVMWARE->weight, zeros)) {
+			return FALSE;
+		}
+		/* FIXME check returned weight */
+	}
+	if (!xf86SetDefaultVisual(pScrn, pVMWARE->defaultVisual)) {
+		return FALSE;
+	}
+	if (pScrn->defaultVisual != pVMWARE->defaultVisual) {
+		xf86DrvMsg(pScrn->scrnIndex, X_ERROR,
+			   "Given visual (%d) is not supported by this driver (%d is required)\n",
+			   pScrn->defaultVisual, pVMWARE->defaultVisual);
+		return FALSE;
+	}
+#if 0
+	bytesPerPixel = pScrn->bitsPerPixel / 8;
+#endif
+	pScrn->progClock = TRUE;
+
+#if 0 /* MGA does not do this */
+	if (pScrn->visual != 0) {	/* FIXME */
+		/* print error message */
+		return FALSE;
+	}
+#endif
+
+	xf86CollectOptions(pScrn, NULL);
+	if (!(options = xalloc(sizeof(VMWAREOptions))))
+		return FALSE;
+	memcpy(options, VMWAREOptions, sizeof(VMWAREOptions));
+	xf86ProcessOptions(pScrn->scrnIndex, pScrn->options, options);
+
+	if (pScrn->depth <= 8) {
+		pScrn->rgbBits = 8;
+	}
+
+	from = X_PROBED;
+	pScrn->chipset = (char*)xf86TokenToString(VMWAREChipsets, pVMWARE->PciInfo->chipType);
+
+	if (!pScrn->chipset) {
+		xf86DrvMsg(pScrn->scrnIndex, X_ERROR, "ChipID 0x%04 is not recognised\n", pVMWARE->PciInfo->chipType);
+		return FALSE;
+	}
+
+	from = X_DEFAULT;
+	pVMWARE->hwCursor = TRUE;
+	if (xf86GetOptValBool(options, OPTION_HW_CURSOR, &pVMWARE->hwCursor)) {
+		from = X_CONFIG;
+	}
+	if (pVMWARE->hwCursor && !(pVMWARE->vmwareCapability & SVGA_CAP_CURSOR)) {
+		xf86DrvMsg(pScrn->scrnIndex, X_WARNING, "HW cursor is not supported in this configuration\n");
+		from = X_PROBED;
+		pVMWARE->hwCursor = FALSE;
+	}
+	xf86DrvMsg(pScrn->scrnIndex, from, "Using %s cursor\n",
+		pVMWARE->hwCursor ? "HW" : "SW");
+	if (xf86IsOptionSet(options, OPTION_NOACCEL)) {
+		pVMWARE->noAccel = TRUE;
+		xf86DrvMsg(pScrn->scrnIndex, X_CONFIG, "Acceleration disabled\n");
+		pVMWARE->vmwareCapability = 0;
+	} else {
+		pVMWARE->noAccel = FALSE;
+	}
+	pScrn->videoRam = pVMWARE->videoRam / 1024;
+	pScrn->memPhysBase = pVMWARE->memPhysBase;
+	xfree(options);
+
+	{
+		Gamma zeros = { 0.0, 0.0, 0.0 };
+		if (!xf86SetGamma(pScrn, zeros)) {
+			return FALSE;
+		}
+	}
+#if 0
+	if ((i = xf86GetPciInfoForScreen(pScrn->scrnIndex, &pciList, NULL)) != 1) {
+		/* print error message */
+		VMWAREFreeRec(pScrn);
+		if (i > 0) {
+			xfree(pciList);
+		}
+		return FALSE;
+	}
+#endif
+	clockRanges = xnfcalloc(sizeof(ClockRange), 1);
+	clockRanges->next = NULL;
+	clockRanges->minClock = 1;
+	clockRanges->maxClock = 400000000;
+	clockRanges->clockIndex = -1;
+	clockRanges->interlaceAllowed = FALSE;
+	clockRanges->doubleScanAllowed = FALSE;
+	clockRanges->ClockMulFactor = 1;
+	clockRanges->ClockDivFactor = 1;
+
+	i = xf86ValidateModes(pScrn, pScrn->monitor->Modes, pScrn->display->modes,
+			clockRanges, NULL, 256, pVMWARE->maxWidth, 32 * 32,
+			128, pVMWARE->maxHeight,
+			pScrn->display->virtualX, pScrn->display->virtualY,
+			pVMWARE->videoRam,
+			LOOKUP_BEST_REFRESH);
+	if (i == -1) {
+		VMWAREFreeRec(pScrn);
+		return FALSE;
+	}
+	xf86PruneDriverModes(pScrn);
+	if (i == 0 || pScrn->modes == NULL) {
+		xf86DrvMsg(pScrn->scrnIndex, X_ERROR, "No valid modes found\n");
+		VMWAREFreeRec(pScrn);
+		return FALSE;
+	}
+	xf86SetCrtcForModes(pScrn, INTERLACE_HALVE_V);
+	pScrn->currentMode = pScrn->modes;
+	xf86PrintModes(pScrn);
+	xf86SetDpi(pScrn, 0, 0);
+	if (!xf86LoadSubModule(pScrn, "fb")) {
+		VMWAREFreeRec(pScrn);
+		return FALSE;
+	}
+	xf86LoaderReqSymLists(fbSymbols, NULL);
+#if 0
+	/* XXX This driver doesn't use XAA! */
+	if (!pVMWARE->noAccel || pVMWARE->hwCursor) {
+		if (!xf86LoadSubModule(pScrn, "xaa")) {
+			VMWAREFreeRec(pScrn);
+			return FALSE;
+		}
+		xf86LoaderReqSymLists(xaaSymbols, NULL);
+	}
+#endif
+	return TRUE;
+}
+
+static Bool
+VMWAREMapMem(ScrnInfoPtr pScrn)
+{
+	VMWAREPtr pVMWARE;
+
+	pVMWARE = VMWAREPTR(pScrn);
+
+	pVMWARE->FbBase = xf86MapPciMem(pScrn->scrnIndex, VIDMEM_FRAMEBUFFER, pVMWARE->PciTag, pVMWARE->memPhysBase, pVMWARE->videoRam);
+	if (!pVMWARE->FbBase)
+		return FALSE;
+	pVMWARE->FbSize = pVMWARE->videoRam;
+
+	VmwareLog(("FB Mapped: %p/%u -> %p/%u\n",
+			pVMWARE->memPhysBase, pVMWARE->videoRam,
+			pVMWARE->FbBase, pVMWARE->FbSize));
+	return TRUE;
+}
+
+static Bool
+VMWAREUnmapMem(ScrnInfoPtr pScrn)
+{
+	VMWAREPtr pVMWARE;
+
+	pVMWARE = VMWAREPTR(pScrn);
+
+	VmwareLog(("Unmapped: %p/%u\n", pVMWARE->FbBase, pVMWARE->FbSize));
+
+	xf86UnMapVidMem(pScrn->scrnIndex, pVMWARE->FbBase, pVMWARE->FbSize);
+	pVMWARE->FbBase = NULL;
+	return TRUE;
+}
+
+static void
+VMWARESave(ScrnInfoPtr pScrn)
+{
+	vgaHWPtr hwp = VGAHWPTR(pScrn);
+	vgaRegPtr vgaReg = &hwp->SavedReg;
+	VMWAREPtr pVMWARE = VMWAREPTR(pScrn);
+	VMWARERegPtr vmwareReg = &pVMWARE->SavedReg;
+
+	vgaHWSave(pScrn, vgaReg, VGA_SR_ALL);
+
+	vmwareReg->svga_reg_enable = 0;
+	/* FIXME: Save VMWARE state */
+}
+
+static void
+VMWARERestoreRegs(ScrnInfoPtr pScrn, VMWARERegPtr vmwareReg)
+{
+	VMWAREPtr pVMWARE = VMWAREPTR(pScrn);
+
+	if (vmwareReg->svga_reg_enable) {
+		vmwareWriteReg(pVMWARE, SVGA_REG_WIDTH, vmwareReg->svga_reg_width);
+		vmwareWriteReg(pVMWARE, SVGA_REG_HEIGHT, vmwareReg->svga_reg_height);
+		vmwareWriteReg(pVMWARE, SVGA_REG_ENABLE, vmwareReg->svga_reg_enable);
+		vmwareWriteReg(pVMWARE, SVGA_REG_GUEST_ID, GUEST_OS_LINUX);
+	} else {
+		vmwareWriteReg(pVMWARE, SVGA_REG_ENABLE, vmwareReg->svga_reg_enable);
+	}
+}
+
+static void
+VMWARERestore(ScrnInfoPtr pScrn)
+{
+	vgaHWPtr hwp = VGAHWPTR(pScrn);
+	vgaRegPtr vgaReg = &hwp->SavedReg;
+	VMWAREPtr pVMWARE = VMWAREPTR(pScrn);
+	VMWARERegPtr vmwareReg = &pVMWARE->SavedReg;
+
+	/* FIXME: Sync */
+	vgaHWProtect(pScrn, TRUE);
+	VMWARERestoreRegs(pScrn, vmwareReg);
+	vgaHWRestore(pScrn, vgaReg, VGA_SR_ALL);
+	vgaHWProtect(pScrn, FALSE);
+}
+
+static Bool
+VMWAREModeInit(ScrnInfoPtr pScrn, DisplayModePtr mode)
+{
+	vgaHWPtr hwp = VGAHWPTR(pScrn);
+	vgaRegPtr vgaReg = &hwp->ModeReg;
+	VMWAREPtr pVMWARE = VMWAREPTR(pScrn);
+	VMWARERegPtr vmwareReg = &pVMWARE->ModeReg;
+
+	vgaHWUnlock(hwp);
+	if (!vgaHWInit(pScrn, mode))
+		return FALSE;
+	pScrn->vtSema = TRUE;
+
+	if (!vgaHWInit(pScrn, mode))
+		return FALSE;
+
+	vmwareReg->svga_reg_enable = 1;
+	vmwareReg->svga_reg_width = max(mode->HDisplay, pScrn->virtualX);
+	vmwareReg->svga_reg_height = max(mode->VDisplay, pScrn->virtualY);
+
+	vgaHWProtect(pScrn, TRUE);
+
+	vgaHWRestore(pScrn, vgaReg, VGA_SR_ALL);
+	VMWARERestoreRegs(pScrn, vmwareReg);
+
+	VmwareLog(("Required mode: %ux%u\n", mode->HDisplay, mode->VDisplay));
+	VmwareLog(("Virtual:       %ux%u\n", pScrn->virtualX, pScrn->virtualY));
+	VmwareLog(("dispWidth:     %u\n", pScrn->displayWidth));
+	pVMWARE->fbOffset = vmwareReadReg(pVMWARE, SVGA_REG_FB_OFFSET);
+	pVMWARE->fbPitch = vmwareReadReg(pVMWARE, SVGA_REG_BYTES_PER_LINE);
+
+	pScrn->displayWidth = (pVMWARE->fbPitch * 8) / ((pScrn->bitsPerPixel + 7) & ~7);
+	VmwareLog(("fbOffset:      %u\n", pVMWARE->fbOffset));
+	VmwareLog(("fbPitch:       %u\n", pVMWARE->fbPitch));
+	VmwareLog(("New dispWidth: %u\n", pScrn->displayWidth));
+
+	vgaHWProtect(pScrn, FALSE);
+	pVMWARE->CurrentLayout.mode = mode;
+	return TRUE;
+}
+
+static void
+VMWAREAdjustFrame(int scrnIndex, int x, int y, int flags)
+{
+	/* FIXME */
+}
+
+static void
+VMWAREInitFIFO(ScrnInfoPtr pScrn)
+{
+	VMWAREPtr pVMWARE = VMWAREPTR(pScrn);
+	CARD32* vmwareFIFO;
+
+	pVMWARE->mmioPhysBase = vmwareReadReg(pVMWARE, SVGA_REG_MEM_START);
+	pVMWARE->mmioSize = vmwareReadReg(pVMWARE, SVGA_REG_MEM_SIZE) & ~3;
+	pVMWARE->mmioVirtBase = xf86MapPciMem(pScrn->scrnIndex, VIDMEM_MMIO, pVMWARE->PciTag, pVMWARE->mmioPhysBase, pVMWARE->mmioSize);
+	vmwareFIFO = pVMWARE->vmwareFIFO = (CARD32*)pVMWARE->mmioVirtBase;
+	vmwareFIFO[SVGA_FIFO_MIN] = 4 * sizeof(CARD32);
+	vmwareFIFO[SVGA_FIFO_MAX] = pVMWARE->mmioSize;
+	vmwareFIFO[SVGA_FIFO_NEXT_CMD] = 4 * sizeof(CARD32);
+	vmwareFIFO[SVGA_FIFO_STOP] = 4 * sizeof(CARD32);
+	pVMWARE->vmwareFIFOMarkSet = FALSE;
+	vmwareWriteReg(pVMWARE, SVGA_REG_CONFIG_DONE, 1);
+}
+
+static void
+VMWAREStopFIFO(ScrnInfoPtr pScrn)
+{
+	VMWAREPtr pVMWARE = VMWAREPTR(pScrn);
+
+	/* ??? */
+	vmwareWriteReg(pVMWARE, SVGA_REG_CONFIG_DONE, 0);
+}
+
+static Bool
+VMWARECloseScreen(int scrnIndex, ScreenPtr pScreen)
+{
+	ScrnInfoPtr pScrn = xf86Screens[scrnIndex];
+	VMWARERestore(pScrn);
+	VMWAREStopFIFO(pScrn);
+	VMWAREUnmapMem(pScrn);
+	pScrn->vtSema = FALSE;
+	ScreenFromPrivate(pScreen, pScrn);
+	return (*pScreen->CloseScreen)(scrnIndex, pScreen);
+}
+
+static Bool
+VMWARESaveScreen(ScreenPtr pScreen, int mode)
+{
+	return vgaHWSaveScreen(pScreen, mode);
+}
+
+static void
+VMWARELoadPalette(ScrnInfoPtr pScrn, int numColors, int* indices,
+		LOCO* colors, VisualPtr pVisual)
+{
+	VMWAREPtr pVMWARE = VMWAREPTR(pScrn);
+	int i;
+
+	for (i = 0; i < numColors; i++) {
+		vmwareWriteReg(pVMWARE, SVGA_PALETTE_BASE + *indices * 3 + 0, colors[*indices].red);
+		vmwareWriteReg(pVMWARE, SVGA_PALETTE_BASE + *indices * 3 + 1, colors[*indices].green);
+		vmwareWriteReg(pVMWARE, SVGA_PALETTE_BASE + *indices * 3 + 2, colors[*indices].blue);
+		indices++;
+	}
+
+	pVMWARE->checkCursorColor = TRUE;
+	VmwareLog(("Palette loading done\n"));
+}
+
+static Bool
+VMWAREScreenInit(int scrnIndex, ScreenPtr pScreen, int argc, char **argv)
+{
+	ScrnInfoPtr pScrn;
+	vgaHWPtr hwp;
+	VMWAREPtr pVMWARE;
+	Bool ret;
+
+	/* Get the ScrnInfoRec */
+	pScrn = xf86Screens[pScreen->myNum];
+	pVMWARE = VMWAREPTR(pScrn);
+
+        /*
+         * If using the vgahw module, its data structures and related
+         * things are typically initialised/mapped here.
+         */
+
+	hwp = VGAHWPTR(pScrn);
+	vgaHWGetIOBase(hwp);
+
+	/* Save the current video state */
+	VMWARESave(pScrn);
+
+	VMWAREInitFIFO(pScrn);
+
+	/* Initialise the first mode */
+	VMWAREModeInit(pScrn, pScrn->currentMode);
+
+	/* Set the viewport if supported */
+	VMWAREAdjustFrame(scrnIndex, pScrn->frameX0, pScrn->frameY0, 0);
+
+	/*
+	 * Setup the screen's visuals, and initialise the framebuffer
+	 * code.
+	 */
+	VMWAREMapMem(pScrn);
+
+	/* Reset the visual list */
+	miClearVisualTypes();
+
+	/*
+	 * Setup the visuals supported.  This driver only supports
+	 * TrueColor for bpp > 8, so the default set of visuals isn't
+	 * acceptable.  To deal with this, call miSetVisualTypes with
+	 * the appropriate visual mask.
+	 */
+
+	if (pScrn->bitsPerPixel > 8) {
+		if (!miSetVisualTypes(pScrn->depth, TrueColorMask,
+			pScrn->rgbBits, pScrn->defaultVisual)) {
+			return FALSE;
+		}
+	} else {
+		if (!miSetVisualTypes(pScrn->depth,
+				miGetDefaultVisualMask(pScrn->depth),
+			pScrn->rgbBits, pScrn->defaultVisual)) {
+			return FALSE;
+		}
+	}
+
+	miSetPixmapDepths ();
+
+	/*
+	 * Initialise the framebuffer.
+	 */
+
+	ret = fbScreenInit (pScreen, pVMWARE->FbBase,
+			    pScrn->virtualX, pScrn->virtualY,
+			    pScrn->xDpi, pScrn->yDpi,
+			    pScrn->displayWidth,
+			    pScrn->bitsPerPixel);
+    
+	if (!ret)
+		return FALSE;
+
+        /* Override the default mask/offset settings */
+        if (pScrn->bitsPerPixel > 8) {
+	int i;
+		VisualPtr visual;
+
+		for (i = 0, visual = pScreen->visuals;
+			i < pScreen->numVisuals; i++, visual++) {
+			if ((visual->class | DynamicClass) == DirectColor) {
+				visual->offsetRed = pScrn->offset.red;
+		                visual->offsetGreen = pScrn->offset.green;
+		                visual->offsetBlue = pScrn->offset.blue;
+				visual->redMask = pScrn->mask.red;
+				visual->greenMask = pScrn->mask.green;
+			        visual->blueMask = pScrn->mask.blue;
+			}
+		}
+	}
+
+	/* must be after RGB ordering fixed */
+	fbPictureInit (pScreen, 0, 0);
+
+	/*
+	 * Wrap the CloseScreen vector and set SaveScreen.
+	 */
+	ScreenToPrivate(pScreen, pScrn);
+        /*
+         * If backing store is to be supported (as is usually the case),
+         * initialise it.
+         */
+        miInitializeBackingStore(pScreen);
+
+        /*
+         * Set initial black & white colourmap indices.
+         */
+        xf86SetBlackWhitePixels(pScreen);
+
+        /*
+         * Install colourmap functions.  If using the vgahw module,
+         * vgaHandleColormaps would usually be called here.
+         */
+
+        /*
+         * Initialise cursor functions.  This example is for the mi
+         * software cursor.
+         */
+	if (pVMWARE->hwCursor) {
+		vmwareCursorInit(0, pScreen);
+	} else {
+	        miDCInitialize(pScreen, xf86GetPointerScreenFuncs());
+	}
+
+    	if (!fbCreateDefColormap(pScreen))
+	    return FALSE;
+
+	if (!xf86HandleColormaps(pScreen, 256, 8,
+		VMWARELoadPalette, NULL,
+		CMAP_PALETTED_TRUECOLOR | CMAP_RELOAD_ON_MODE_SWITCH)) {
+	    return FALSE;
+	}
+
+
+	/* Report any unused options (only for the first generation) */
+	if (serverGeneration == 1) {
+		xf86ShowUnusedOptions(pScrn->scrnIndex, pScrn->options);
+	}
+
+	vmwareSendSVGACmdUpdateFullScreen(pVMWARE);
+	if (pVMWARE->hwCursor) {
+		vmwareRestoreCursor(pScreen);
+	}
+	/* Done */
+	return TRUE;
+}
+
+static Bool
+VMWARESwitchMode(int scrnIndex, DisplayModePtr mode, int flags)
+{
+	return VMWAREModeInit(xf86Screens[scrnIndex], mode);
+}
+
+static Bool
+VMWAREEnterVT(int scrnIndex, int flags)
+{
+	ScrnInfoPtr pScrn = xf86Screens[scrnIndex];
+	return VMWAREModeInit(pScrn, pScrn->currentMode);
+}
+
+static void
+VMWARELeaveVT(int scrnIndex, int flags)
+{
+	ScrnInfoPtr pScrn = xf86Screens[scrnIndex];
+	VMWARERestore(pScrn);
+}
+
+static void
+VMWAREFreeScreen(int scrnIndex, int flags)
+{
+	/*
+	 * If the vgahw module is used vgaHWFreeHWRec() would be called
+	 * here.
+	 */
+	VMWAREFreeRec(xf86Screens[scrnIndex]);
+}
+
+static Bool
+VMWAREValidMode(int scrnIndex, DisplayModePtr mode, Bool verbose, int flags)
+{
+	/* FIXME... possible */
+	return MODE_OK;
+}
+
+static Bool
+VMWAREProbe(DriverPtr drv, int flags)
+{
+	int numDevSections, numUsed;
+	GDevPtr *devSections;
+	int *usedChips;
+	int i;
+	Bool foundScreen = FALSE;
+	char buildString[sizeof(VMWAREBuildStr)];
+
+	RewriteTagString(VMWAREBuildStr, buildString, sizeof(VMWAREBuildStr));
+	xf86MsgVerb(X_PROBED, 4, "%s", buildString);
+
+	numDevSections = xf86MatchDevice(VMWARE_DRIVER_NAME, &devSections);
+	if (numDevSections <= 0) {
+#ifdef DEBUG
+		xf86MsgVerb(X_ERROR, 0, "No vmware driver section\n");
+#endif
+		return FALSE;
+	}
+	if (xf86GetPciVideoInfo()) {
+		VmwareLog(("Some PCI Video Info Exists\n"));
+		numUsed = xf86MatchPciInstances(VMWARE_NAME, PCI_VENDOR_VMWARE,
+				VMWAREChipsets, VMWAREPciChipsets, devSections,
+				numDevSections, drv, &usedChips);
+		xfree(devSections);
+		if (numUsed <= 0)
+			return FALSE;
+		if (flags & PROBE_DETECT)
+			foundScreen = TRUE;
+		else for (i = 0; i < numUsed; i++) {
+			ScrnInfoPtr pScrn = NULL;
+
+			VmwareLog(("Even some VMware SVGA PCI instances exists\n"));
+			pScrn = xf86ConfigPciEntity(pScrn, flags, usedChips[i],
+					VMWAREPciChipsets, NULL, NULL, NULL,
+					NULL, NULL);
+			if (pScrn) {
+				VmwareLog(("And even configuration suceeded\n"));
+				pScrn->driverVersion = VERSION;
+				pScrn->driverName = VMWARE_DRIVER_NAME;
+				pScrn->name = VMWARE_NAME;
+				pScrn->Probe = VMWAREProbe;
+				pScrn->PreInit = VMWAREPreInit;
+				pScrn->ScreenInit = VMWAREScreenInit;
+				pScrn->SwitchMode = VMWARESwitchMode;
+				pScrn->AdjustFrame = VMWAREAdjustFrame;
+				pScrn->EnterVT = VMWAREEnterVT;
+				pScrn->LeaveVT = VMWARELeaveVT;
+				pScrn->FreeScreen = VMWAREFreeScreen;
+				pScrn->ValidMode = VMWAREValidMode;
+				foundScreen = TRUE;
+			}
+		}
+		xfree(usedChips);
+	}
+	return foundScreen;
+}
+
+DriverRec VMWARE = {
+	VERSION,
+	VMWARE_DRIVER_NAME,
+	VMWAREIdentify,
+	VMWAREProbe,
+	VMWAREAvailableOptions,
+	NULL,
+	0
+};
+
+#ifdef XFree86LOADER
+static MODULESETUPPROTO(vmwareSetup);
+
+XF86ModuleData vmwareModuleData = { &vmwareVersRec, vmwareSetup, NULL };
+
+static pointer
+vmwareSetup(pointer module, pointer opts, int *errmaj, int *errmin)
+{
+	static Bool setupDone = FALSE;
+
+	if (!setupDone) {
+		setupDone = TRUE;
+		xf86AddDriver(&VMWARE, module, 0);
+
+		LoaderRefSymLists(vgahwSymbols, fbSymbols, NULL);
+
+		return (pointer)1;
+	}
+	if (errmaj) {
+		*errmaj = LDR_ONCEONLY;
+	}
+	return NULL;
+}
+#endif	/* XFree86LOADER */
+
+ScreenPtr funcglob;
+ScrnInfoPtr scrnglob;
+int vmwareGCPrivateIndex;
+
+static void
+ScreenToPrivate(ScreenPtr pScreen, ScrnInfoPtr pScrn)
+{
+    VMWAREPtr pVMWARE = VMWAREPTR(pScrn);
+
+    pVMWARE->ScrnFuncs = *pScreen;
+    funcglob = &pVMWARE->ScrnFuncs;
+    scrnglob = pScrn;
+
+    pScreen->CloseScreen = VMWARECloseScreen;
+    pScreen->SaveScreen = VMWARESaveScreen;
+
+#if 0
+    pScreen->QueryBestSize = vmwareQueryBestSize;
+    pScreen->GetImage = vmwareGetImage;
+    pScreen->GetSpans = vmwareGetSpans;
+    pScreen->PointerNonInterestBox = vmwarePointerNonInterestBox;
+    pScreen->SourceValidate = vmwareSourceValidate;
+
+    pScreen->CreateWindow           = vmwareCreateWindow;
+    pScreen->DestroyWindow          = vmwareDestroyWindow;
+    pScreen->PositionWindow         = vmwarePositionWindow;
+    pScreen->ChangeWindowAttributes = vmwareChangeWindowAttributes;
+    pScreen->RealizeWindow          = vmwareRealizeWindow;
+    pScreen->UnrealizeWindow        = vmwareUnrealizeWindow;
+    pScreen->ValidateTree           = vmwareValidateTree;
+//    pScreen->PostValidateTree       = vmwarePostValidateTree;
+    pScreen->WindowExposures        = vmwareWindowExposures;
+    pScreen->PaintWindowBackground  = vmwarePaintWindowBackground;
+    pScreen->PaintWindowBorder      = vmwarePaintWindowBorder;
+    pScreen->CopyWindow             = vmwareCopyWindow;
+    pScreen->ClearToBackground      = vmwareClearToBackground;
+    pScreen->ClipNotify             = vmwareClipNotify;
+    pScreen->RestackWindow          = vmwareRestackWindow;
+
+    /* Pixmap procedures */
+
+    pScreen->CreatePixmap           = vmwareCreatePixmap;
+    pScreen->DestroyPixmap          = vmwareDestroyPixmap;
+
+    /* Backing store procedures */
+
+    pScreen->SaveDoomedAreas        = vmwareSaveDoomedAreas;
+    pScreen->RestoreAreas           = vmwareRestoreAreas;
+    pScreen->ExposeCopy             = vmwareExposeCopy;
+    pScreen->TranslateBackingStore  = vmwareTranslateBackingStore;
+    pScreen->ClearBackingStore      = vmwareClearBackingStore;
+    pScreen->DrawGuarantee          = vmwareDrawGuarantee;
+    /*
+     * A read/write copy of the lower level backing store vector is needed now
+     * that the functions can be wrapped.
+     */
+//    pScreen->BackingStoreFuncs      = vmwareBackingStoreFuncs;
+
+    /* Font procedures */
+
+    pScreen->RealizeFont            = vmwareRealizeFont;
+    pScreen->UnrealizeFont          = vmwareUnrealizeFont;
+
+    /* Cursor Procedures */
+
+    pScreen->ConstrainCursor        = vmwareConstrainCursor;
+    pScreen->CursorLimits           = vmwareCursorLimits;
+    pScreen->DisplayCursor          = vmwareDisplayCursor;
+    pScreen->RealizeCursor          = vmwareRealizeCursor;
+    pScreen->UnrealizeCursor        = vmwareUnrealizeCursor;
+    pScreen->RecolorCursor          = vmwareRecolorCursor;
+    pScreen->SetCursorPosition      = vmwareSetCursorPosition;
+
+    /* GC procedures */
+
+    pScreen->CreateGC               = vmwareCreateGC;
+
+    /* Colormap procedures */
+
+    pScreen->CreateColormap         = vmwareCreateColormap;
+    pScreen->DestroyColormap        = vmwareDestroyColormap;
+    pScreen->InstallColormap        = vmwareInstallColormap;
+    pScreen->UninstallColormap      = vmwareUninstallColormap;
+    pScreen->ListInstalledColormaps = vmwareListInstalledColormaps;
+    pScreen->StoreColors            = vmwareStoreColors;
+    pScreen->ResolveColor           = vmwareResolveColor;
+
+
+    pScreen->GetWindowPixmap        = vmwareGetWindowPixmap;
+    pScreen->SetWindowPixmap        = vmwareSetWindowPixmap;
+    pScreen->GetScreenPixmap        = vmwareGetScreenPixmap;
+    pScreen->SetScreenPixmap        = vmwareSetScreenPixmap;
+
+#endif
+
+    pScreen->PaintWindowBackground  = vmwarePaintWindow;
+    pScreen->PaintWindowBorder      = vmwarePaintWindow;
+    pScreen->CopyWindow             = vmwareCopyWindow;
+    pScreen->CreateGC               = vmwareCreateGC;
+    pScreen->GetSpans               = vmwareGetSpans;
+    pScreen->GetImage               = vmwareGetImage;
+    pScreen->BlockHandler           = vmwareBlockHandler;
+    pScreen->SaveDoomedAreas        = vmwareSaveDoomedAreas;
+    pScreen->RestoreAreas           = vmwareRestoreAreas;
+
+    vmwareGCPrivateIndex = AllocateGCPrivateIndex();
+    if (!AllocateGCPrivate(pScreen, vmwareGCPrivateIndex,
+	    sizeof(vmwarePrivGC))) return;
+
+
+    switch (pScrn->bitsPerPixel) {
+    case 8:
+	pVMWARE->Pmsk = 0x000000FF;
+	break;
+    case 16:
+	pVMWARE->Pmsk = 0x0000FFFF;
+	break;
+    case 24:
+	pVMWARE->Pmsk = 0x00FFFFFF;
+	break;
+    case 32:
+	pVMWARE->Pmsk = 0xFFFFFFFF;
+	break;
+    }
+}
+
+static void ScreenFromPrivate(ScreenPtr pScreen, ScrnInfoPtr p)
+{
+    VMWAREPtr pVMWARE = VMWAREPTR(p);
+    ScreenPtr save = &pVMWARE->ScrnFuncs;
+
+    /* Random screen procedures */
+
+    pScreen->CloseScreen            = save->CloseScreen;
+    pScreen->QueryBestSize          = save->QueryBestSize;
+    pScreen->SaveScreen             = save->SaveScreen;
+    pScreen->GetImage               = save->GetImage;
+    pScreen->GetSpans               = save->GetSpans;
+    pScreen->PointerNonInterestBox  = save->PointerNonInterestBox;
+    pScreen->SourceValidate         = save->SourceValidate;
+
+    /* Window Procedures */
+
+    pScreen->CreateWindow           = save->CreateWindow;
+    pScreen->DestroyWindow          = save->DestroyWindow;
+    pScreen->PositionWindow         = save->PositionWindow;
+    pScreen->ChangeWindowAttributes = save->ChangeWindowAttributes;
+    pScreen->RealizeWindow          = save->RealizeWindow;
+    pScreen->UnrealizeWindow        = save->UnrealizeWindow;
+    pScreen->ValidateTree           = save->ValidateTree;
+    pScreen->PostValidateTree       = save->PostValidateTree;
+    pScreen->WindowExposures        = save->WindowExposures;
+    pScreen->PaintWindowBackground  = save->PaintWindowBackground;
+    pScreen->PaintWindowBorder      = save->PaintWindowBorder;
+    pScreen->CopyWindow             = save->CopyWindow;
+    pScreen->ClearToBackground      = save->ClearToBackground;
+    pScreen->ClipNotify             = save->ClipNotify;
+    pScreen->RestackWindow          = save->RestackWindow;
+
+    /* Pixmap procedures */
+
+    pScreen->CreatePixmap           = save->CreatePixmap;
+    pScreen->DestroyPixmap          = save->DestroyPixmap;
+
+    /* Backing store procedures */
+
+    pScreen->SaveDoomedAreas        = save->SaveDoomedAreas;
+    pScreen->RestoreAreas           = save->RestoreAreas;
+    pScreen->ExposeCopy             = save->ExposeCopy;
+    pScreen->TranslateBackingStore  = save->TranslateBackingStore;
+    pScreen->ClearBackingStore      = save->ClearBackingStore;
+    pScreen->DrawGuarantee          = save->DrawGuarantee;
+    /*
+     * A read/write copy of the lower level backing store vector is needed now
+     * that the functions can be wrapped.
+     */
+    pScreen->BackingStoreFuncs      = save->BackingStoreFuncs;
+
+    /* Font procedures */
+
+    pScreen->RealizeFont            = save->RealizeFont;
+    pScreen->UnrealizeFont          = save->UnrealizeFont;
+
+    /* Cursor Procedures */
+
+    pScreen->ConstrainCursor        = save->ConstrainCursor;
+    pScreen->CursorLimits           = save->CursorLimits;
+    pScreen->DisplayCursor          = save->DisplayCursor;
+    pScreen->RealizeCursor          = save->RealizeCursor;
+    pScreen->UnrealizeCursor        = save->UnrealizeCursor;
+    pScreen->RecolorCursor          = save->RecolorCursor;
+    pScreen->SetCursorPosition      = save->SetCursorPosition;
+
+    /* GC procedures */
+
+    pScreen->CreateGC               = save->CreateGC;
+
+    /* Colormap procedures */
+
+    pScreen->CreateColormap         = save->CreateColormap;
+    pScreen->DestroyColormap        = save->DestroyColormap;
+    pScreen->InstallColormap        = save->InstallColormap;
+    pScreen->UninstallColormap      = save->UninstallColormap;
+    pScreen->ListInstalledColormaps = save->ListInstalledColormaps;
+    pScreen->StoreColors            = save->StoreColors;
+    pScreen->ResolveColor           = save->ResolveColor;
+
+    /* Region procedures */
+
+#ifdef NEED_SCREEN_REGIONS
+    pScreen->RegionCreate           = save->RegionCreate;
+    pScreen->RegionInit             = save->RegionInit;
+    pScreen->RegionCopy             = save->RegionCopy;
+    pScreen->RegionDestroy          = save->RegionDestroy;
+    pScreen->RegionUninit           = save->RegionUninit;
+    pScreen->Intersect              = save->Intersect;
+    pScreen->Union                  = save->Union;
+    pScreen->Subtract               = save->Subtract;
+    pScreen->Inverse                = save->Inverse;
+    pScreen->RegionReset            = save->RegionReset;
+    pScreen->TranslateRegion        = save->TranslateRegion;
+    pScreen->RectIn                 = save->RectIn;
+    pScreen->PointInRegion          = save->PointInRegion;
+    pScreen->RegionNotEmpty         = save->RegionNotEmpty;
+    pScreen->RegionBroken           = save->RegionBroken;
+    pScreen->RegionBreak            = save->RegionBreak;
+    pScreen->RegionEmpty            = save->RegionEmpty;
+    pScreen->RegionExtents          = save->RegionExtents;
+    pScreen->RegionAppend           = save->RegionAppend;
+    pScreen->RegionValidate         = save->RegionValidate;
+#endif /* NEED_SCREEN_REGIONS */
+    pScreen->BitmapToRegion         = save->BitmapToRegion;
+#ifdef NEED_SCREEN_REGIONS
+    pScreen->RectsToRegion          = save->RectsToRegion;
+#endif /* NEED_SCREEN_REGIONS */
+    pScreen->SendGraphicsExpose     = save->SendGraphicsExpose;
+
+    /* os layer procedures */
+
+    pScreen->BlockHandler           = save->BlockHandler;
+    pScreen->WakeupHandler          = save->WakeupHandler;
+
+    pScreen->CreateScreenResources  = save->CreateScreenResources;
+    pScreen->ModifyPixmapHeader     = save->ModifyPixmapHeader;
+
+    pScreen->GetWindowPixmap        = save->GetWindowPixmap;
+    pScreen->SetWindowPixmap        = save->SetWindowPixmap;
+    pScreen->GetScreenPixmap        = save->GetScreenPixmap;
+    pScreen->SetScreenPixmap        = save->SetScreenPixmap;
+
+    pScreen->MarkWindow             = save->MarkWindow;
+    pScreen->MarkOverlappedWindows  = save->MarkOverlappedWindows;
+    pScreen->ChangeSaveUnder        = save->ChangeSaveUnder;
+    pScreen->PostChangeSaveUnder    = save->PostChangeSaveUnder;
+    pScreen->MoveWindow             = save->MoveWindow;
+    pScreen->ResizeWindow           = save->ResizeWindow;
+    pScreen->GetLayerWindow         = save->GetLayerWindow;
+    pScreen->HandleExposures        = save->HandleExposures;
+    pScreen->ReparentWindow         = save->ReparentWindow;
+
+#ifdef SHAPE
+    pScreen->SetShape               = save->SetShape;
+#endif /* SHAPE */
+
+    pScreen->ChangeBorderWidth      = save->ChangeBorderWidth;
+    pScreen->MarkUnrealizedWindow   = save->MarkUnrealizedWindow;
+}
+
+@
+
+
+1.1.9.1
+log
+@OpenBSD just has imported exactly this tree into their vendor branch,
+called the same tag, in XF4/xc
+This is, apparently, the last XFree86 snapshot before the licence change
+(ie, addition of the advertising clause)
+
+Since the developers don't see any problems with that, and we would like
+to integrate improvements done by the remaining one or two (or so) XFree86
+developers (j/k), this prepares enabling us to update X-Window in the future.
+@
+text
+@d7 1
+d10 1
+a10 5
+/* $XFree86: xc/programs/Xserver/hw/xfree86/drivers/vmware/vmware.c,v 1.19 2003/10/30 17:37:16 tsi Exp $ */
+
+/*
+ * TODO: support the vmware linux kernel fb driver (Option "UseFBDev").
+ */
+a26 1
+#include "shadowfb.h"           /* ShadowFB wrappers */
+d52 2
+a53 2
+#define VMW_INNERSTRINGIFY(s) #s
+#define VMW_STRING(str) VMW_INNERSTRINGIFY(str)
+d55 2
+a56 2
+#define VMWARE_NAME "VMWARE"
+#define VMWARE_DRIVER_NAME "vmware"
+d58 8
+a65 7
+#define VMWARE_MINOR_VERSION	10
+#define VMWARE_PATCHLEVEL	2
+#define VERSION (VMWARE_MAJOR_VERSION * 65536 + VMWARE_MINOR_VERSION * 256 + VMWARE_PATCHLEVEL)
+
+static const char VMWAREBuildStr[] = "VMware Guest X Server " 
+    VMW_STRING(VMWARE_MAJOR_VERSION) "." VMW_STRING(VMWARE_MINOR_VERSION)
+    "." VMW_STRING(VMWARE_PATCHLEVEL) " - build=$Name: XFREE86_20040213 $\n";
+d68 3
+a70 3
+    { PCI_CHIP_VMWARE0405, "vmware0405" },
+    { PCI_CHIP_VMWARE0710, "vmware0710" },
+    { -1,                  NULL }
+d74 2
+a75 3
+    { ResExcIoBlock, SVGA_LEGACY_BASE_PORT,
+      SVGA_LEGACY_BASE_PORT + SVGA_NUM_PORTS*sizeof(uint32)},
+    _VGA_EXCLUSIVE, _END
+d86 3
+a88 3
+    { PCI_CHIP_VMWARE0405, PCI_CHIP_VMWARE0405, RES_EXCLUSIVE_VGA },
+    { PCI_CHIP_VMWARE0710, PCI_CHIP_VMWARE0710, vmwareLegacyRes },
+    { -1,		       -1,		    RES_UNDEFINED }
+d92 10
+a101 10
+    "vgaHWGetHWRec",
+    "vgaHWGetIOBase",
+    "vgaHWGetIndex",
+    "vgaHWInit",
+    "vgaHWProtect",
+    "vgaHWRestore",
+    "vgaHWSave",
+    "vgaHWSaveScreen",
+    "vgaHWUnlock",
+    NULL
+d105 3
+a107 16
+    "fbCreateDefColormap",
+    "fbPictureInit",
+    "fbScreenInit",
+    NULL
+};
+
+static const char *ramdacSymbols[] = {
+    "xf86CreateCursorInfoRec",
+    "xf86DestroyCursorInfoRec",
+    "xf86InitCursor",
+    NULL
+};
+
+static const char *shadowfbSymbols[] = {
+    "ShadowFBInit2",
+    NULL
+d112 10
+a121 10
+    "vmware",
+    MODULEVENDORSTRING,
+    MODINFOSTRING1,
+    MODINFOSTRING2,
+    XF86_VERSION_CURRENT,
+    VMWARE_MAJOR_VERSION, VMWARE_MINOR_VERSION, VMWARE_PATCHLEVEL,
+    ABI_CLASS_VIDEODRV,
+    ABI_VIDEODRV_VERSION,
+    MOD_CLASS_VIDEODRV,
+    { 0, 0, 0, 0}
+d126 2
+a127 2
+    OPTION_HW_CURSOR,
+    OPTION_NOACCEL
+d131 3
+a133 3
+    { OPTION_HW_CURSOR, "HWcursor",     OPTV_BOOLEAN,   {0},    FALSE },
+    { OPTION_NOACCEL,   "NoAccel",      OPTV_BOOLEAN,   {0},    FALSE },
+    { -1,               NULL,           OPTV_NONE,      {0},    FALSE }
+a135 2
+static void VMWAREStopFIFO(ScrnInfoPtr pScrn);
+
+d139 6
+a144 6
+    if (pScrn->driverPrivate != NULL) {
+        return TRUE;
+    }
+    pScrn->driverPrivate = xnfcalloc(sizeof(VMWARERec), 1);
+    /* FIXME: Initialize driverPrivate... */
+    return TRUE;
+d150 4
+a153 4
+    if (pScrn->driverPrivate) {
+        xfree(pScrn->driverPrivate);
+        pScrn->driverPrivate = NULL;
+    }
+d156 6
+a161 1
+CARD32
+a163 6
+    /*
+     * Block SIGIO for the duration, so we don't get interrupted after the
+     * outl but before the inl by a mouse move (which write to our registers).
+     */
+    int oldsigio, ret;
+    oldsigio = xf86BlockSIGIO();
+d165 1
+a165 3
+    ret = inl(pVMWARE->valueReg);
+    xf86UnblockSIGIO(oldsigio);
+    return ret;
+a170 6
+    /*
+     * Block SIGIO for the duration, so we don't get interrupted in between
+     * the outls by a mouse move (which write to our registers).
+     */
+    int oldsigio;
+    oldsigio = xf86BlockSIGIO();
+a172 1
+    xf86UnblockSIGIO(oldsigio);
+d184 2
+a185 2
+        VmwareLog(("Syncing because of full fifo\n"));
+        vmwareWaitForFB(pVMWARE);
+a186 1
+
+d188 3
+a190 5
+    if(vmwareFIFO[SVGA_FIFO_NEXT_CMD] == vmwareFIFO[SVGA_FIFO_MAX] -
+       sizeof(CARD32)) {
+        vmwareFIFO[SVGA_FIFO_NEXT_CMD] = vmwareFIFO[SVGA_FIFO_MIN];
+    } else {
+        vmwareFIFO[SVGA_FIFO_NEXT_CMD] += sizeof(CARD32);
+d197 5
+a201 2
+    vmwareWriteReg(pVMWARE, SVGA_REG_SYNC, 1);
+    while (vmwareReadReg(pVMWARE, SVGA_REG_BUSY));
+d232 3
+a234 3
+        if (mask & 1) {
+            weight++;
+        }
+d259 1
+a259 1
+    uint32 vmware_svga_id;
+d261 28
+a288 18
+    /* Any version with any SVGA_ID_* support will initialize SVGA_REG_ID
+     * to SVGA_ID_0 to support versions of this driver with SVGA_ID_0.
+     *
+     * Versions of SVGA_ID_0 ignore writes to the SVGA_REG_ID register.
+     *
+     * Versions of SVGA_ID_1 will allow us to overwrite the content
+     * of the SVGA_REG_ID register only with the values SVGA_ID_0 or SVGA_ID_1.
+     *
+     * Versions of SVGA_ID_2 will allow us to overwrite the content
+     * of the SVGA_REG_ID register only with the values SVGA_ID_0 or SVGA_ID_1
+     * or SVGA_ID_2.
+     */
+
+    vmwareWriteReg(pVMWARE, SVGA_REG_ID, SVGA_ID_2);
+    vmware_svga_id = vmwareReadReg(pVMWARE, SVGA_REG_ID);
+    if (vmware_svga_id == SVGA_ID_2) {
+        return SVGA_ID_2;
+    }
+d290 2
+a291 12
+    vmwareWriteReg(pVMWARE, SVGA_REG_ID, SVGA_ID_1);
+    vmware_svga_id = vmwareReadReg(pVMWARE, SVGA_REG_ID);
+    if (vmware_svga_id == SVGA_ID_1) {
+        return SVGA_ID_1;
+    }
+
+    if (vmware_svga_id == SVGA_ID_0) {
+        return SVGA_ID_0;
+    }
+
+    /* No supported VMware SVGA devices found */
+    return SVGA_ID_INVALID;
+d300 1
+a300 1
+ *      Rewrites the given string, removing the $Name: XFREE86_20040213 $, and
+d344 1
+a344 1
+    xf86PrintChipsets(VMWARE_NAME, "driver for VMware SVGA", VMWAREChipsets);
+d350 1
+a350 1
+    return VMWAREOptions;
+d356 7
+a362 8
+    MessageType from;
+    VMWAREPtr pVMWARE;
+    OptionInfoPtr options;
+    int bpp24flags;
+    uint32 id;
+    int i;
+    ClockRange* clockRanges;
+    IOADDRESS domainIOBase = 0;
+d364 3
+a366 3
+#ifndef BUILD_FOR_420
+    domainIOBase = pScrn->domainIOBase;
+#endif
+d368 3
+a370 3
+    if (flags & PROBE_DETECT) {
+        return FALSE;
+    }
+d372 4
+a375 3
+    if (pScrn->numEntities != 1) {
+        return FALSE;
+    }
+d377 8
+a384 4
+    if (!VMWAREGetRec(pScrn)) {
+        return FALSE;
+    }
+    pVMWARE = VMWAREPTR(pScrn);
+d386 21
+a406 1
+    pVMWARE->pvtSema = &pScrn->vtSema;
+d408 3
+a410 8
+    pVMWARE->pEnt = xf86GetEntityInfo(pScrn->entityList[0]);
+    if (pVMWARE->pEnt->location.type != BUS_PCI) {
+        return FALSE;
+    }
+    pVMWARE->PciInfo = xf86GetPciInfoForEntity(pVMWARE->pEnt->index);
+    if (pVMWARE->PciInfo == NULL) {
+        return FALSE;
+    }
+d412 1
+a412 22
+    if (pVMWARE->PciInfo->chipType == PCI_CHIP_VMWARE0710) {
+        pVMWARE->indexReg = domainIOBase +
+           SVGA_LEGACY_BASE_PORT + SVGA_INDEX_PORT*sizeof(uint32);
+        pVMWARE->valueReg = domainIOBase +
+           SVGA_LEGACY_BASE_PORT + SVGA_VALUE_PORT*sizeof(uint32);
+    } else {
+        /* Note:  This setting of valueReg causes unaligned I/O */
+        pVMWARE->indexReg = domainIOBase +
+           pVMWARE->PciInfo->ioBase[0] + SVGA_INDEX_PORT;
+        pVMWARE->valueReg = domainIOBase +
+           pVMWARE->PciInfo->ioBase[0] + SVGA_VALUE_PORT;
+    }
+    xf86DrvMsg(pScrn->scrnIndex, X_PROBED,
+               "VMware SVGA regs at (0x%04lx, 0x%04lx)\n",
+               pVMWARE->indexReg, pVMWARE->valueReg);
+
+    id = VMXGetVMwareSvgaId(pVMWARE);
+    if (id == SVGA_ID_0 || id == SVGA_ID_INVALID) {
+        xf86DrvMsg(pScrn->scrnIndex, X_ERROR,
+                   "No supported VMware SVGA found (read ID 0x%08x).\n", id);
+        return FALSE;
+    }
+d414 3
+a416 5
+    if (!xf86LoadSubModule(pScrn, "vgahw")) {
+        return FALSE;
+    }
+
+    xf86LoaderReqSymLists(vgahwSymbols, NULL);
+d418 3
+a420 3
+    if (!vgaHWGetHWRec(pScrn)) {
+        return FALSE;
+    }
+d422 1
+a422 5
+    pVMWARE->PciTag = pciTag(pVMWARE->PciInfo->bus, pVMWARE->PciInfo->device,
+                             pVMWARE->PciInfo->func);
+    pVMWARE->Primary = xf86IsPrimaryPci(pVMWARE->PciInfo);
+
+    pScrn->monitor = pScrn->confScreen->monitor;
+d424 1
+d426 1
+a426 1
+    pVMWARE->vmwareCapability = vmwareReadReg(pVMWARE, SVGA_REG_CAPABILITIES);
+d428 1
+a428 1
+    pVMWARE->vmwareCapability = 0;
+d431 68
+a498 24
+    if (pVMWARE->vmwareCapability & SVGA_CAP_8BIT_EMULATION) {
+        pVMWARE->bitsPerPixel =
+           vmwareReadReg(pVMWARE, SVGA_REG_HOST_BITS_PER_PIXEL);
+        vmwareWriteReg(pVMWARE,
+                       SVGA_REG_BITS_PER_PIXEL, pVMWARE->bitsPerPixel);
+    } else {
+        pVMWARE->bitsPerPixel =
+           vmwareReadReg(pVMWARE, SVGA_REG_BITS_PER_PIXEL);
+    }
+    pVMWARE->depth = vmwareReadReg(pVMWARE, SVGA_REG_DEPTH);
+    pVMWARE->videoRam = vmwareReadReg(pVMWARE, SVGA_REG_VRAM_SIZE);
+    pVMWARE->memPhysBase = vmwareReadReg(pVMWARE, SVGA_REG_FB_START);
+    pVMWARE->maxWidth = vmwareReadReg(pVMWARE, SVGA_REG_MAX_WIDTH);
+    pVMWARE->maxHeight = vmwareReadReg(pVMWARE, SVGA_REG_MAX_HEIGHT);
+    pVMWARE->cursorDefined = FALSE;
+    pVMWARE->cursorShouldBeHidden = FALSE;
+
+    if (pVMWARE->vmwareCapability & SVGA_CAP_CURSOR_BYPASS_2) {
+        pVMWARE->cursorRemoveFromFB = SVGA_CURSOR_ON_REMOVE_FROM_FB;
+        pVMWARE->cursorRestoreToFB = SVGA_CURSOR_ON_RESTORE_TO_FB;
+    } else {
+        pVMWARE->cursorRemoveFromFB = SVGA_CURSOR_ON_HIDE;
+        pVMWARE->cursorRestoreToFB = SVGA_CURSOR_ON_SHOW;
+    }
+d500 3
+a502 8
+    xf86DrvMsgVerb(pScrn->scrnIndex, X_PROBED, 2, "caps:  0x%08X\n", pVMWARE->vmwareCapability);
+    xf86DrvMsgVerb(pScrn->scrnIndex, X_PROBED, 2, "depth: %d\n", pVMWARE->depth);
+    xf86DrvMsgVerb(pScrn->scrnIndex, X_PROBED, 2, "bpp:   %d\n", pVMWARE->bitsPerPixel);
+
+    xf86DrvMsgVerb(pScrn->scrnIndex, X_PROBED, 2, "vram:  %d\n", pVMWARE->videoRam);
+    xf86DrvMsgVerb(pScrn->scrnIndex, X_PROBED, 2, "pbase: 0x%08lx\n", pVMWARE->memPhysBase);
+    xf86DrvMsgVerb(pScrn->scrnIndex, X_PROBED, 2, "mwidt: %d\n", pVMWARE->maxWidth);
+    xf86DrvMsgVerb(pScrn->scrnIndex, X_PROBED, 2, "mheig: %d\n", pVMWARE->maxHeight);
+d504 17
+a520 14
+    switch (pVMWARE->depth) {
+    case 16:
+        /*
+         * In certain cases, the Windows host appears to
+         * report 16 bpp and 16 depth but 555 weight.  Just
+         * silently convert it to depth of 15.
+         */
+        if (pVMWARE->bitsPerPixel == 16 &&
+            pVMWARE->weight.green == 5)
+            pVMWARE->depth = 15;
+    case 8:
+    case 15:
+        bpp24flags = NoDepth24Support;
+        break;
+a521 1
+    case 32:
+d523 2
+a524 2
+         * There is no 32 bit depth, apparently it can get
+         * reported this way sometimes on the Windows host.
+a525 14
+        if (pVMWARE->bitsPerPixel == 32)
+            pVMWARE->depth = 24;
+    case 24:
+        if (pVMWARE->bitsPerPixel == 24)
+            bpp24flags = Support24bppFb;
+        else
+            bpp24flags = Support32bppFb;
+        break;
+    default:
+        xf86DrvMsg(pScrn->scrnIndex, X_ERROR,
+                   "Adapter is using an unsupported depth (%d).\n",
+                   pVMWARE->depth);
+        return FALSE;
+    }
+d527 36
+a562 63
+    if (!xf86SetDepthBpp(pScrn, pVMWARE->depth, pVMWARE->bitsPerPixel, pVMWARE->bitsPerPixel, bpp24flags)) {
+        return FALSE;
+    }
+
+    if (pScrn->bitsPerPixel != pVMWARE->bitsPerPixel) {
+        if (pScrn->bitsPerPixel == 8 &&
+            pVMWARE->vmwareCapability & SVGA_CAP_8BIT_EMULATION) {
+            vmwareWriteReg(pVMWARE, SVGA_REG_BITS_PER_PIXEL, 8);
+            pVMWARE->bitsPerPixel =
+               vmwareReadReg(pVMWARE, SVGA_REG_BITS_PER_PIXEL);
+        } else {
+            xf86DrvMsg(pScrn->scrnIndex, X_ERROR,
+                       "Currently unavailable depth/bpp of %d/%d requested.\n"
+                       "\tThe guest X server must run at the same depth and bpp as the host\n"
+                       "\t(which are currently %d/%d).  This is automatically detected.  Please\n"
+                       "\tdo not specify a depth on the command line or via the config file.\n",
+                       pScrn->depth, pScrn->bitsPerPixel,
+                       pVMWARE->depth, pVMWARE->bitsPerPixel);
+            return FALSE;
+        }
+    }
+
+    /*
+     * Reread depth and defer reading the colour registers until here
+     * in case we changed bpp above.
+     */
+
+    pVMWARE->depth = vmwareReadReg(pVMWARE, SVGA_REG_DEPTH);
+    pVMWARE->weight.red =
+       vmwareCalculateWeight(vmwareReadReg(pVMWARE, SVGA_REG_RED_MASK));
+    pVMWARE->weight.green =
+       vmwareCalculateWeight(vmwareReadReg(pVMWARE, SVGA_REG_GREEN_MASK));
+    pVMWARE->weight.blue =
+       vmwareCalculateWeight(vmwareReadReg(pVMWARE, SVGA_REG_BLUE_MASK));
+    pVMWARE->offset.blue = 0;
+    pVMWARE->offset.green = pVMWARE->weight.blue;
+    pVMWARE->offset.red = pVMWARE->weight.green + pVMWARE->offset.green;
+    pVMWARE->defaultVisual = vmwareReadReg(pVMWARE, SVGA_REG_PSEUDOCOLOR) ?
+       PseudoColor : TrueColor;
+
+    xf86DrvMsgVerb(pScrn->scrnIndex, X_PROBED,
+                   2, "depth: %d\n", pVMWARE->depth);
+    xf86DrvMsgVerb(pScrn->scrnIndex, X_PROBED,
+                   2, "bpp:   %d\n", pVMWARE->bitsPerPixel);
+    xf86DrvMsgVerb(pScrn->scrnIndex, X_PROBED,
+                   2, "w.red: %d\n", (int)pVMWARE->weight.red);
+    xf86DrvMsgVerb(pScrn->scrnIndex, X_PROBED,
+                   2, "w.grn: %d\n", (int)pVMWARE->weight.green);
+    xf86DrvMsgVerb(pScrn->scrnIndex, X_PROBED,
+                   2, "w.blu: %d\n", (int)pVMWARE->weight.blue);
+    xf86DrvMsgVerb(pScrn->scrnIndex, X_PROBED,
+                   2, "vis:   %d\n", pVMWARE->defaultVisual);
+
+    if (pScrn->depth != pVMWARE->depth) {
+        xf86DrvMsg(pScrn->scrnIndex, X_ERROR,
+                   "Currently unavailable depth of %d requested.\n"
+                   "\tThe guest X server must run at the same depth as the host (which\n"
+                   "\tis currently %d).  This is automatically detected.  Please do not\n"
+                   "\tspecify a depth on the command line or via the config file.\n",
+                   pScrn->depth, pVMWARE->depth);
+        return FALSE;
+    }
+    xf86PrintDepthBpp(pScrn);
+d565 3
+a567 3
+    if (pScrn->depth == 24 && pix24bpp == 0) {
+        pix24bpp = xf86GetBppFromDepth(pScrn, 24);
+    }
+d570 2
+a571 2
+    if (pScrn->depth > 8) {
+        rgb zeros = { 0, 0, 0 };
+d573 14
+a586 14
+        if (!xf86SetWeight(pScrn, pVMWARE->weight, zeros)) {
+            return FALSE;
+        }
+        /* FIXME check returned weight */
+    }
+    if (!xf86SetDefaultVisual(pScrn, pVMWARE->defaultVisual)) {
+        return FALSE;
+    }
+    if (pScrn->defaultVisual != pVMWARE->defaultVisual) {
+        xf86DrvMsg(pScrn->scrnIndex, X_ERROR,
+                   "Given visual (%d) is not supported by this driver (%d is required)\n",
+                   pScrn->defaultVisual, pVMWARE->defaultVisual);
+        return FALSE;
+    }
+d588 1
+a588 1
+    bytesPerPixel = pScrn->bitsPerPixel / 8;
+d590 1
+a590 1
+    pScrn->progClock = TRUE;
+d593 4
+a596 4
+    if (pScrn->visual != 0) {	/* FIXME */
+        /* print error message */
+        return FALSE;
+    }
+d599 5
+a603 5
+    xf86CollectOptions(pScrn, NULL);
+    if (!(options = xalloc(sizeof(VMWAREOptions))))
+        return FALSE;
+    memcpy(options, VMWAREOptions, sizeof(VMWAREOptions));
+    xf86ProcessOptions(pScrn->scrnIndex, pScrn->options, options);
+d605 3
+a607 3
+    if (pScrn->depth <= 8) {
+        pScrn->rgbBits = 8;
+    }
+d609 2
+a610 2
+    from = X_PROBED;
+    pScrn->chipset = (char*)xf86TokenToString(VMWAREChipsets, pVMWARE->PciInfo->chipType);
+d612 4
+a615 4
+    if (!pScrn->chipset) {
+        xf86DrvMsg(pScrn->scrnIndex, X_ERROR, "ChipID 0x%04x is not recognised\n", pVMWARE->PciInfo->chipType);
+        return FALSE;
+    }
+d617 74
+a690 28
+    from = X_DEFAULT;
+    pVMWARE->hwCursor = TRUE;
+    if (xf86GetOptValBool(options, OPTION_HW_CURSOR, &pVMWARE->hwCursor)) {
+        from = X_CONFIG;
+    }
+    if (pVMWARE->hwCursor && !(pVMWARE->vmwareCapability & SVGA_CAP_CURSOR)) {
+        xf86DrvMsg(pScrn->scrnIndex, X_WARNING, "HW cursor is not supported in this configuration\n");
+        from = X_PROBED;
+        pVMWARE->hwCursor = FALSE;
+    }
+    xf86DrvMsg(pScrn->scrnIndex, from, "Using %s cursor\n",
+               pVMWARE->hwCursor ? "HW" : "SW");
+    if (xf86IsOptionSet(options, OPTION_NOACCEL)) {
+        pVMWARE->noAccel = TRUE;
+        xf86DrvMsg(pScrn->scrnIndex, X_CONFIG, "Acceleration disabled\n");
+    } else {
+        pVMWARE->noAccel = FALSE;
+    }
+    pScrn->videoRam = pVMWARE->videoRam / 1024;
+    pScrn->memPhysBase = pVMWARE->memPhysBase;
+    xfree(options);
+
+    {
+        Gamma zeros = { 0.0, 0.0, 0.0 };
+        if (!xf86SetGamma(pScrn, zeros)) {
+            return FALSE;
+        }
+    }
+d692 8
+a699 8
+    if ((i = xf86GetPciInfoForScreen(pScrn->scrnIndex, &pciList, NULL)) != 1) {
+        /* print error message */
+        VMWAREFreeRec(pScrn);
+        if (i > 0) {
+            xfree(pciList);
+        }
+        return FALSE;
+    }
+d701 1
+a701 55
+    clockRanges = xnfcalloc(sizeof(ClockRange), 1);
+    clockRanges->next = NULL;
+    clockRanges->minClock = 1;
+    clockRanges->maxClock = 400000000;
+    clockRanges->clockIndex = -1;
+    clockRanges->interlaceAllowed = FALSE;
+    clockRanges->doubleScanAllowed = FALSE;
+    clockRanges->ClockMulFactor = 1;
+    clockRanges->ClockDivFactor = 1;
+
+    i = xf86ValidateModes(pScrn, pScrn->monitor->Modes, pScrn->display->modes,
+                          clockRanges, NULL, 256, pVMWARE->maxWidth, 32 * 32,
+                          128, pVMWARE->maxHeight,
+                          pScrn->display->virtualX, pScrn->display->virtualY,
+                          pVMWARE->videoRam,
+                          LOOKUP_BEST_REFRESH);
+    if (i == -1) {
+        VMWAREFreeRec(pScrn);
+        return FALSE;
+    }
+    xf86PruneDriverModes(pScrn);
+    if (i == 0 || pScrn->modes == NULL) {
+        xf86DrvMsg(pScrn->scrnIndex, X_ERROR, "No valid modes found\n");
+        VMWAREFreeRec(pScrn);
+        return FALSE;
+    }
+    xf86SetCrtcForModes(pScrn, INTERLACE_HALVE_V);
+    pScrn->currentMode = pScrn->modes;
+    xf86PrintModes(pScrn);
+    xf86SetDpi(pScrn, 0, 0);
+    if (!xf86LoadSubModule(pScrn, "fb") ||
+        !xf86LoadSubModule(pScrn, "shadowfb")) {
+        VMWAREFreeRec(pScrn);
+        return FALSE;
+    }
+    xf86LoaderReqSymLists(fbSymbols, shadowfbSymbols, NULL);
+
+    /* Need ramdac for hwcursor */
+    if (pVMWARE->hwCursor) {
+        if (!xf86LoadSubModule(pScrn, "ramdac")) {
+            VMWAREFreeRec(pScrn);
+            return FALSE;
+        }
+        xf86LoaderReqSymLists(ramdacSymbols, NULL);
+    }
+
+    if (!pVMWARE->noAccel) {
+        if (!xf86LoadSubModule(pScrn, "xaa")) {
+            VMWAREFreeRec(pScrn);
+            return FALSE;
+        }
+        xf86LoaderReqSymLists(vmwareXaaSymbols, NULL);
+    }
+
+    return TRUE;
+d707 1
+a707 1
+    VMWAREPtr pVMWARE;
+d709 1
+a709 1
+    pVMWARE = VMWAREPTR(pScrn);
+d711 9
+a719 11
+    pVMWARE->FbBase = xf86MapPciMem(pScrn->scrnIndex, VIDMEM_FRAMEBUFFER,
+                                    pVMWARE->PciTag,
+                                    pVMWARE->memPhysBase,
+                                    pVMWARE->videoRam);
+    if (!pVMWARE->FbBase)
+        return FALSE;
+
+    VmwareLog(("FB Mapped: %p/%u -> %p/%u\n",
+               pVMWARE->memPhysBase, pVMWARE->videoRam,
+               pVMWARE->FbBase, pVMWARE->videoRam));
+    return TRUE;
+d725 1
+a725 1
+    VMWAREPtr pVMWARE;
+d727 1
+a727 1
+    pVMWARE = VMWAREPTR(pScrn);
+d729 1
+a729 1
+    VmwareLog(("Unmapped: %p/%u\n", pVMWARE->FbBase, pVMWARE->videoRam));
+d731 3
+a733 3
+    xf86UnMapVidMem(pScrn->scrnIndex, pVMWARE->FbBase, pVMWARE->videoRam);
+    pVMWARE->FbBase = NULL;
+    return TRUE;
+d739 4
+a742 4
+    vgaHWPtr hwp = VGAHWPTR(pScrn);
+    vgaRegPtr vgaReg = &hwp->SavedReg;
+    VMWAREPtr pVMWARE = VMWAREPTR(pScrn);
+    VMWARERegPtr vmwareReg = &pVMWARE->SavedReg;
+d744 1
+a744 1
+    vgaHWSave(pScrn, vgaReg, VGA_SR_ALL);
+d746 2
+a747 19
+    vmwareReg->svga_reg_enable = vmwareReadReg(pVMWARE, SVGA_REG_ENABLE);
+    vmwareReg->svga_reg_width = vmwareReadReg(pVMWARE, SVGA_REG_WIDTH);
+    vmwareReg->svga_reg_height = vmwareReadReg(pVMWARE, SVGA_REG_HEIGHT);
+    vmwareReg->svga_reg_bits_per_pixel =
+       vmwareReadReg(pVMWARE, SVGA_REG_BITS_PER_PIXEL);
+
+    /* XXX this should be based on the cap bit, not hwCursor... */
+    if (pVMWARE->hwCursor) {
+       vmwareReg->svga_reg_cursor_on =
+          vmwareReadReg(pVMWARE, SVGA_REG_CURSOR_ON);
+       vmwareReg->svga_reg_cursor_x =
+          vmwareReadReg(pVMWARE, SVGA_REG_CURSOR_X);
+       vmwareReg->svga_reg_cursor_y =
+          vmwareReadReg(pVMWARE, SVGA_REG_CURSOR_Y);
+       vmwareReg->svga_reg_cursor_id =
+          vmwareReadReg(pVMWARE, SVGA_REG_CURSOR_ID);
+    }
+
+    vmwareReg->svga_fifo_enabled = vmwareReadReg(pVMWARE, SVGA_REG_CONFIG_DONE);
+d753 10
+a762 24
+    VMWAREPtr pVMWARE = VMWAREPTR(pScrn);
+    VmwareLog(("VMWARERestoreRegs: W: %d, H: %d, BPP: %d, Enable: %d\n",
+	       vmwareReg->svga_reg_width, vmwareReg->svga_reg_height,
+	       vmwareReg->svga_reg_bits_per_pixel, vmwareReg->svga_reg_enable));
+    if (vmwareReg->svga_reg_enable) {
+        vmwareWriteReg(pVMWARE, SVGA_REG_WIDTH, vmwareReg->svga_reg_width);
+        vmwareWriteReg(pVMWARE, SVGA_REG_HEIGHT, vmwareReg->svga_reg_height);
+        vmwareWriteReg(pVMWARE, SVGA_REG_BITS_PER_PIXEL,
+                       vmwareReg->svga_reg_bits_per_pixel);
+        vmwareWriteReg(pVMWARE, SVGA_REG_ENABLE, vmwareReg->svga_reg_enable);
+        vmwareWriteReg(pVMWARE, SVGA_REG_GUEST_ID, GUEST_OS_LINUX);
+        if (pVMWARE->hwCursor) {
+            vmwareWriteReg(pVMWARE, SVGA_REG_CURSOR_ID,
+                           vmwareReg->svga_reg_cursor_id);
+            vmwareWriteReg(pVMWARE, SVGA_REG_CURSOR_X,
+                           vmwareReg->svga_reg_cursor_x);
+            vmwareWriteReg(pVMWARE, SVGA_REG_CURSOR_Y,
+                           vmwareReg->svga_reg_cursor_y);
+            vmwareWriteReg(pVMWARE, SVGA_REG_CURSOR_ON,
+                           vmwareReg->svga_reg_cursor_on);
+        }
+    } else {
+        vmwareWriteReg(pVMWARE, SVGA_REG_ENABLE, vmwareReg->svga_reg_enable);
+    }
+d768 10
+a777 14
+    vgaHWPtr hwp = VGAHWPTR(pScrn);
+    vgaRegPtr vgaReg = &hwp->SavedReg;
+    VMWAREPtr pVMWARE = VMWAREPTR(pScrn);
+    VMWARERegPtr vmwareReg = &pVMWARE->SavedReg;
+
+    vmwareWaitForFB(pVMWARE);
+    if (!vmwareReg->svga_fifo_enabled) {
+        VMWAREStopFIFO(pScrn);
+    }
+
+    vgaHWProtect(pScrn, TRUE);
+    VMWARERestoreRegs(pScrn, vmwareReg);
+    vgaHWRestore(pScrn, vgaReg, VGA_SR_ALL);
+    vgaHWProtect(pScrn, FALSE);
+d783 36
+a818 54
+    vgaHWPtr hwp = VGAHWPTR(pScrn);
+    vgaRegPtr vgaReg = &hwp->ModeReg;
+    VMWAREPtr pVMWARE = VMWAREPTR(pScrn);
+    VMWARERegPtr vmwareReg = &pVMWARE->ModeReg;
+
+    vgaHWUnlock(hwp);
+    if (!vgaHWInit(pScrn, mode))
+        return FALSE;
+    pScrn->vtSema = TRUE;
+
+    vmwareReg->svga_reg_enable = 1;
+    vmwareReg->svga_reg_width = max(mode->HDisplay, pScrn->virtualX);
+    vmwareReg->svga_reg_height = max(mode->VDisplay, pScrn->virtualY);
+    vmwareReg->svga_reg_bits_per_pixel = pVMWARE->bitsPerPixel;
+
+    vgaHWProtect(pScrn, TRUE);
+
+    vgaHWRestore(pScrn, vgaReg, VGA_SR_ALL);
+    VMWARERestoreRegs(pScrn, vmwareReg);
+
+    if (pVMWARE->hwCursor) {
+        vmwareCursorModeInit(pScrn, mode);
+    }
+
+    VmwareLog(("Required mode: %ux%u\n", mode->HDisplay, mode->VDisplay));
+    VmwareLog(("Virtual:       %ux%u\n", pScrn->virtualX, pScrn->virtualY));
+    VmwareLog(("dispWidth:     %u\n", pScrn->displayWidth));
+    pVMWARE->fbOffset = vmwareReadReg(pVMWARE, SVGA_REG_FB_OFFSET);
+    pVMWARE->fbPitch = vmwareReadReg(pVMWARE, SVGA_REG_BYTES_PER_LINE);
+    pVMWARE->FbSize = vmwareReadReg(pVMWARE, SVGA_REG_FB_SIZE);
+
+    pScrn->displayWidth = (pVMWARE->fbPitch * 8) / ((pScrn->bitsPerPixel + 7) & ~7);
+    VmwareLog(("fbOffset:      %u\n", pVMWARE->fbOffset));
+    VmwareLog(("fbPitch:       %u\n", pVMWARE->fbPitch));
+    VmwareLog(("fbSize:        %u\n", pVMWARE->FbSize));
+    VmwareLog(("New dispWidth: %u\n", pScrn->displayWidth));
+
+    vgaHWProtect(pScrn, FALSE);
+
+    /*
+     * XXX -- If we want to check that we got the mode we asked for, this
+     * would be a good place.
+     */
+
+    /*
+     * Let XAA know about the mode change.
+     */
+    if (!pVMWARE->noAccel) {
+        if (!vmwareXAAModeInit(pScrn, mode)) {
+            return FALSE;
+        }
+    }
+
+    return TRUE;
+d824 1
+a824 1
+    /* FIXME */
+d830 2
+a831 4
+    VMWAREPtr pVMWARE = VMWAREPTR(pScrn);
+    CARD32* vmwareFIFO;
+
+    TRACEPOINT
+d833 10
+a842 12
+    pVMWARE->mmioPhysBase = vmwareReadReg(pVMWARE, SVGA_REG_MEM_START);
+    pVMWARE->mmioSize = vmwareReadReg(pVMWARE, SVGA_REG_MEM_SIZE) & ~3;
+    pVMWARE->mmioVirtBase = xf86MapPciMem(pScrn->scrnIndex, VIDMEM_MMIO,
+                                          pVMWARE->PciTag,
+                                          pVMWARE->mmioPhysBase,
+                                          pVMWARE->mmioSize);
+    vmwareFIFO = pVMWARE->vmwareFIFO = (CARD32*)pVMWARE->mmioVirtBase;
+    vmwareFIFO[SVGA_FIFO_MIN] = 4 * sizeof(CARD32);
+    vmwareFIFO[SVGA_FIFO_MAX] = pVMWARE->mmioSize;
+    vmwareFIFO[SVGA_FIFO_NEXT_CMD] = 4 * sizeof(CARD32);
+    vmwareFIFO[SVGA_FIFO_STOP] = 4 * sizeof(CARD32);
+    vmwareWriteReg(pVMWARE, SVGA_REG_CONFIG_DONE, 1);
+d848 1
+a848 3
+    VMWAREPtr pVMWARE = VMWAREPTR(pScrn);
+
+    TRACEPOINT
+d850 2
+a851 2
+    vmwareWriteReg(pVMWARE, SVGA_REG_CONFIG_DONE, 0);
+    xf86UnMapVidMem(pScrn->scrnIndex, pVMWARE->mmioVirtBase, pVMWARE->mmioSize);
+d857 7
+a863 25
+    ScrnInfoPtr pScrn = xf86Screens[scrnIndex];
+    VMWAREPtr pVMWARE = VMWAREPTR(pScrn);
+    ScreenPtr save = &pVMWARE->ScrnFuncs;
+
+    VmwareLog(("cursorSema: %d\n", pVMWARE->cursorSema));
+
+    if (*pVMWARE->pvtSema) {
+        if (pVMWARE->CursorInfoRec) {
+            vmwareCursorCloseScreen(pScreen);
+        }
+
+        if (pVMWARE->xaaInfo) {
+            vmwareXAACloseScreen(pScreen);
+        }
+
+        VMWARERestore(pScrn);
+        VMWAREUnmapMem(pScrn);
+
+        pScrn->vtSema = FALSE;
+    }
+
+    pScreen->CloseScreen = save->CloseScreen;
+    pScreen->SaveScreen = save->SaveScreen;
+
+    return (*pScreen->CloseScreen)(scrnIndex, pScreen);
+d869 1
+a869 7
+    VmwareLog(("VMWareSaveScreen() mode = %d\n", mode));
+
+    /*
+     * This thoroughly fails to do anything useful to svga mode.  I doubt
+     * we care; who wants to idle-blank their VM's screen anyway?
+     */
+    return vgaHWSaveScreen(pScreen, mode);
+a871 3
+/* disabled by default to reduce spew in DEBUG_LOGGING mode. */
+/*#define DEBUG_LOG_UPDATES*/
+
+d873 2
+a874 1
+VMWAREPreDirtyBBUpdate(ScrnInfoPtr pScrn, int nboxes, BoxPtr boxPtr)
+d876 2
+a877 1
+    VMWAREPtr pVMWARE = VMWAREPTR(pScrn);
+d879 6
+a884 45
+#ifdef DEBUG_LOG_UPDATES
+    {
+        int i;
+        for (i = 0; i < nboxes; i++) {
+            VmwareLog(("PreUpdate #%d (%d, %d, w = %d, h = %d)\n", nboxes - i,
+                       boxPtr[i].x1, boxPtr[i].y1,
+                       boxPtr[i].x2 - boxPtr[i].x1,
+                       boxPtr[i].y2 - boxPtr[i].y1));
+        }
+    }
+#endif
+
+    /*
+     * We only register this callback if we have a HW cursor.
+     */
+    while (nboxes--) {
+        if (BOX_INTERSECT(*boxPtr, pVMWARE->hwcur.box)) {
+	    PRE_OP_HIDE_CURSOR();
+	    pVMWARE->cursorExcludedForUpdate = TRUE;
+	    break;
+        }
+        boxPtr++;
+    }
+}
+
+static void
+VMWAREPostDirtyBBUpdate(ScrnInfoPtr pScrn, int nboxes, BoxPtr boxPtr)
+{
+    VMWAREPtr pVMWARE = VMWAREPTR(pScrn);
+    while (nboxes--) {
+#ifdef DEBUG_LOG_UPDATES
+        VmwareLog(("PostUpdate #%d (%d, %d, w = %d, h = %d)\n", nboxes,
+                   boxPtr->x1, boxPtr->y1,
+                   boxPtr->x2 - boxPtr->x1, boxPtr->y2 - boxPtr->y1));
+#endif
+
+        /* Clip off (y only) for offscreen memory */
+        if (boxPtr->y2 >= pVMWARE->ModeReg.svga_reg_height)
+            boxPtr->y2 = pVMWARE->ModeReg.svga_reg_height;
+        if (boxPtr->y1 >= pVMWARE->ModeReg.svga_reg_height)
+            boxPtr->y1 = pVMWARE->ModeReg.svga_reg_height;
+        if (boxPtr->y1 == boxPtr->y2) {
+            boxPtr++;
+            continue;
+        }
+d886 2
+a887 23
+        vmwareSendSVGACmdUpdate(pVMWARE, boxPtr++);
+    }
+
+    if (pVMWARE->hwCursor && pVMWARE->cursorExcludedForUpdate) {
+        POST_OP_SHOW_CURSOR();
+        pVMWARE->cursorExcludedForUpdate = FALSE;
+    }
+}
+
+static void
+VMWARELoadPalette(ScrnInfoPtr pScrn, int numColors, int* indices,
+                  LOCO* colors, VisualPtr pVisual)
+{
+    VMWAREPtr pVMWARE = VMWAREPTR(pScrn);
+    int i;
+
+    for (i = 0; i < numColors; i++) {
+        vmwareWriteReg(pVMWARE, SVGA_PALETTE_BASE + *indices * 3 + 0, colors[*indices].red);
+        vmwareWriteReg(pVMWARE, SVGA_PALETTE_BASE + *indices * 3 + 1, colors[*indices].green);
+        vmwareWriteReg(pVMWARE, SVGA_PALETTE_BASE + *indices * 3 + 2, colors[*indices].blue);
+        indices++;
+    }
+    VmwareLog(("Palette loading done\n"));
+d893 8
+a900 7
+    ScrnInfoPtr pScrn;
+    vgaHWPtr hwp;
+    VMWAREPtr pVMWARE;
+
+    /* Get the ScrnInfoRec */
+    pScrn = xf86Screens[pScreen->myNum];
+    pVMWARE = VMWAREPTR(pScrn);
+d902 4
+a905 4
+    /*
+     * If using the vgahw module, its data structures and related
+     * things are typically initialised/mapped here.
+     */
+d907 2
+a908 2
+    hwp = VGAHWPTR(pScrn);
+    vgaHWGetIOBase(hwp);
+d910 2
+a911 2
+    /* Save the current video state */
+    VMWARESave(pScrn);
+d913 1
+a913 1
+    VMWAREInitFIFO(pScrn);
+d915 34
+a948 2
+    /* Initialise the first mode */
+    VMWAREModeInit(pScrn, pScrn->currentMode);
+d950 1
+a950 2
+    /* Set the viewport if supported */
+    VMWAREAdjustFrame(scrnIndex, pScrn->frameX0, pScrn->frameY0, 0);
+d952 30
+a981 5
+    /*
+     * Setup the screen's visuals, and initialise the framebuffer
+     * code.
+     */
+    VMWAREMapMem(pScrn);
+d983 2
+a984 5
+    /*
+     * Clear the framebuffer (and any black-border mode areas).
+     */
+    memset(pVMWARE->FbBase, 0, pVMWARE->FbSize);
+    vmwareSendSVGACmdUpdateFullScreen(pVMWARE);
+d986 9
+a994 2
+    /* Reset the visual list */
+    miClearVisualTypes();
+d996 4
+a999 6
+    /*
+     * Setup the visuals supported.  This driver only supports
+     * TrueColor for bpp > 8, so the default set of visuals isn't
+     * acceptable.  To deal with this, call miSetVisualTypes with
+     * the appropriate visual mask.
+     */
+d1001 4
+a1004 12
+    if (pScrn->bitsPerPixel > 8) {
+        if (!miSetVisualTypes(pScrn->depth, TrueColorMask,
+                              pScrn->rgbBits, pScrn->defaultVisual)) {
+            return FALSE;
+        }
+    } else {
+        if (!miSetVisualTypes(pScrn->depth,
+                              miGetDefaultVisualMask(pScrn->depth),
+                              pScrn->rgbBits, pScrn->defaultVisual)) {
+            return FALSE;
+        }
+    }
+d1006 9
+a1014 1
+    miSetPixmapDepths();
+d1016 2
+a1017 10
+    /*
+     * Initialise the framebuffer.
+     */
+    if (!fbScreenInit(pScreen, pVMWARE->FbBase + pVMWARE->fbOffset,
+                      pScrn->virtualX, pScrn->virtualY,
+                      pScrn->xDpi, pScrn->yDpi,
+                      pScrn->displayWidth,
+                      pScrn->bitsPerPixel)) {
+        return FALSE;
+    }
+d1019 5
+a1023 17
+    /* Override the default mask/offset settings */
+    if (pScrn->bitsPerPixel > 8) {
+        int i;
+        VisualPtr visual;
+
+        for (i = 0, visual = pScreen->visuals;
+             i < pScreen->numVisuals; i++, visual++) {
+            if ((visual->class | DynamicClass) == DirectColor) {
+                visual->offsetRed = pScrn->offset.red;
+                visual->offsetGreen = pScrn->offset.green;
+                visual->offsetBlue = pScrn->offset.blue;
+                visual->redMask = pScrn->mask.red;
+                visual->greenMask = pScrn->mask.green;
+                visual->blueMask = pScrn->mask.blue;
+            }
+        }
+    }
+a1024 2
+    /* must be after RGB ordering fixed */
+    fbPictureInit (pScreen, 0, 0);
+d1026 4
+a1029 7
+    /*
+     * Save the old screen vector, then wrap CloseScreen and
+     * set SaveScreen.
+     */
+    pVMWARE->ScrnFuncs = *pScreen;
+    pScreen->CloseScreen = VMWARECloseScreen;
+    pScreen->SaveScreen = VMWARESaveScreen;
+d1031 6
+a1036 82
+    /*
+     * Set initial black & white colourmap indices.
+     */
+    xf86SetBlackWhitePixels(pScreen);
+
+    /*
+     * Initialize shadowfb to notify us of dirty rectangles.  We only
+     * need preFB access callbacks if we're using the hw cursor.
+     */
+    if (!ShadowFBInit2(pScreen, 
+                       pVMWARE->hwCursor ? VMWAREPreDirtyBBUpdate : NULL,
+                       VMWAREPostDirtyBBUpdate)) {
+        xf86DrvMsg(pScrn->scrnIndex, X_ERROR,
+                   "ShadowFB initialization failed\n");
+        return FALSE;
+    }
+
+    /*
+     * If we have a hw cursor, we need to hook functions that might
+     * read from the framebuffer.
+     */
+    if (pVMWARE->hwCursor) {
+        vmwareCursorHookWrappers(pScreen);
+    }
+
+    /*
+     * Initialize acceleration.
+     */
+    if (!pVMWARE->noAccel) {
+        if (!vmwareXAAScreenInit(pScreen)) {
+            xf86DrvMsg(pScrn->scrnIndex, X_ERROR,
+                       "XAA initialization failed -- running unaccelerated!\n");
+            pVMWARE->noAccel = TRUE;
+        }
+    }
+
+    /*
+     * If backing store is to be supported (as is usually the case),
+     * initialise it.
+     */
+    miInitializeBackingStore(pScreen);
+    xf86SetBackingStore(pScreen);
+    xf86SetSilkenMouse(pScreen);
+
+    /*
+     * Initialize software cursor.
+     */
+    miDCInitialize(pScreen, xf86GetPointerScreenFuncs());
+
+    /*
+     * Initialize hardware cursor.
+     */
+    if (pVMWARE->hwCursor) {
+        if (!vmwareCursorInit(pScreen)) {
+            xf86DrvMsg(pScrn->scrnIndex, X_ERROR,
+                       "Hardware cursor initialization failed\n");
+            pVMWARE->hwCursor = FALSE;
+        }
+    }
+
+    /*
+     * Install colourmap functions.  If using the vgahw module,
+     * vgaHandleColormaps would usually be called here.
+     */
+
+    if (!fbCreateDefColormap(pScreen))
+        return FALSE;
+
+    if (!xf86HandleColormaps(pScreen, 256, 8,
+                             VMWARELoadPalette, NULL,
+                             CMAP_PALETTED_TRUECOLOR |
+                             CMAP_RELOAD_ON_MODE_SWITCH)) {
+        return FALSE;
+    }
+
+    /* Report any unused options (only for the first generation) */
+    if (serverGeneration == 1) {
+        xf86ShowUnusedOptions(pScrn->scrnIndex, pScrn->options);
+    }
+
+    /* Done */
+    return TRUE;
+d1042 1
+a1042 1
+    return VMWAREModeInit(xf86Screens[scrnIndex], mode);
+d1048 2
+a1049 7
+    ScrnInfoPtr pScrn = xf86Screens[scrnIndex];
+    VMWAREPtr pVMWARE = VMWAREPTR(pScrn);
+
+    if (!pVMWARE->SavedReg.svga_fifo_enabled) {
+        VMWAREInitFIFO(pScrn);
+    }
+    return VMWAREModeInit(pScrn, pScrn->currentMode);
+d1055 2
+a1056 2
+    ScrnInfoPtr pScrn = xf86Screens[scrnIndex];
+    VMWARERestore(pScrn);
+d1062 5
+a1066 5
+    /*
+     * If the vgahw module is used vgaHWFreeHWRec() would be called
+     * here.
+     */
+   VMWAREFreeRec(xf86Screens[scrnIndex]);
+d1069 1
+a1069 1
+static ModeStatus
+d1072 2
+a1073 1
+    return MODE_OK;
+d1079 6
+a1084 6
+    int numDevSections, numUsed;
+    GDevPtr *devSections;
+    int *usedChips;
+    int i;
+    Bool foundScreen = FALSE;
+    char buildString[sizeof(VMWAREBuildStr)];
+d1086 2
+a1087 2
+    RewriteTagString(VMWAREBuildStr, buildString, sizeof(VMWAREBuildStr));
+    xf86MsgVerb(X_PROBED, 4, "%s", buildString);
+d1089 2
+a1090 2
+    numDevSections = xf86MatchDevice(VMWARE_DRIVER_NAME, &devSections);
+    if (numDevSections <= 0) {
+d1092 1
+a1092 1
+        xf86MsgVerb(X_ERROR, 0, "No vmware driver section\n");
+d1094 39
+a1132 40
+        return FALSE;
+    }
+    if (xf86GetPciVideoInfo()) {
+        VmwareLog(("Some PCI Video Info Exists\n"));
+        numUsed = xf86MatchPciInstances(VMWARE_NAME, PCI_VENDOR_VMWARE,
+                                        VMWAREChipsets, VMWAREPciChipsets, devSections,
+                                        numDevSections, drv, &usedChips);
+        xfree(devSections);
+        if (numUsed <= 0)
+            return FALSE;
+        if (flags & PROBE_DETECT)
+            foundScreen = TRUE;
+        else
+            for (i = 0; i < numUsed; i++) {
+                ScrnInfoPtr pScrn = NULL;
+
+                VmwareLog(("Even some VMware SVGA PCI instances exists\n"));
+                pScrn = xf86ConfigPciEntity(pScrn, flags, usedChips[i],
+                                            VMWAREPciChipsets, NULL, NULL, NULL,
+                                            NULL, NULL);
+                if (pScrn) {
+                    VmwareLog(("And even configuration suceeded\n"));
+                    pScrn->driverVersion = VERSION;
+                    pScrn->driverName = VMWARE_DRIVER_NAME;
+                    pScrn->name = VMWARE_NAME;
+                    pScrn->Probe = VMWAREProbe;
+                    pScrn->PreInit = VMWAREPreInit;
+                    pScrn->ScreenInit = VMWAREScreenInit;
+                    pScrn->SwitchMode = VMWARESwitchMode;
+                    pScrn->AdjustFrame = VMWAREAdjustFrame;
+                    pScrn->EnterVT = VMWAREEnterVT;
+                    pScrn->LeaveVT = VMWARELeaveVT;
+                    pScrn->FreeScreen = VMWAREFreeScreen;
+                    pScrn->ValidMode = VMWAREValidMode;
+                    foundScreen = TRUE;
+                }
+            }
+        xfree(usedChips);
+    }
+    return foundScreen;
+d1136 7
+a1142 7
+    VERSION,
+    VMWARE_DRIVER_NAME,
+    VMWAREIdentify,
+    VMWAREProbe,
+    VMWAREAvailableOptions,
+    NULL,
+    0
+d1153 1
+a1153 1
+    static Bool setupDone = FALSE;
+d1155 3
+a1157 3
+    if (!setupDone) {
+        setupDone = TRUE;
+        xf86AddDriver(&VMWARE, module, 0);
+d1159 26
+a1184 2
+        LoaderRefSymLists(vgahwSymbols, fbSymbols, ramdacSymbols,
+                          shadowfbSymbols, vmwareXaaSymbols, NULL);
+d1186 107
+a1292 1
+        return (pointer)1;
+a1293 4
+    if (errmaj) {
+        *errmaj = LDR_ONCEONLY;
+    }
+    return NULL;
+d1295 143
+a1437 1
+#endif	/* XFree86LOADER */
+@
+
+
+1.1.9.2
+log
+@Import XFree86 4.4 from The XFree86(TM) Project, Inc.
+(integrity cannot be checked)
+
+got via cvs -qd anoncvs@@anoncvs.xfree86.org:/cvs co -Prxf-4_4_0 xc
+@
+text
+@d68 1
+a68 1
+    "." VMW_STRING(VMWARE_PATCHLEVEL) " - build=$Name:  $\n";
+d329 1
+a329 1
+ *      Rewrites the given string, removing the $Name:  $, and
+@
+
+
+1.1.1.1
+log
+@Import OpenBSD 3.3 XF4 repository from CTM 3132 the first time
+This finalizes starting an OpenBSD-mirabile (aka MirBSD) repository.
+
+### MirBSD is:
+# Copyright (c) 1982-2003 by Thorsten "mirabile" Glaser <x86@@ePost.de>
+# Copyright © 1968-2003  The authors of And contributors to UNIX®, the
+#       C Language, BSD/Berkeley Unix; 386BSD, NetBSD 1.1 and OpenBSD.
+#
+# Anyone who obtained a copy of this work is hereby permitted to freely use,
+# distribute, modify, merge, sublicence, give away or sell it as long as the
+# authors are given due credit and the following notice is retained:
+#
+# This work is provided "as is", with no explicit or implicit warranty what-
+# soever. Use it only at your own risk. In no event may an author or contri-
+# butor be held liable for any damage, directly or indirectly, that origina-
+# ted through or is caused by creation or modification of this work.
+
+MirBSD is my private tree. MirBSD does not differ very much from OpenBSD
+and intentionally tracks OpenBSD. That's why it _is_ OpenBSD, just not the
+official one. It's like with DarrenBSD.
+
+At time of this writing, no advertising for MirBSD must be done,
+because the advertising clause has not yet been sorted out.
+
+http://templeofhate.com/tglaser/MirBSD/index.php
+@
+text
+@@
+
+
+1.1.1.2
+log
+@The X-Windowing System
+
+Import XFree86 4.3 from OpenBSD by CTM, in the hope it's stable
+@
+text
+@d7 1
+d10 1
+a10 5
+/* $XFree86: xc/programs/Xserver/hw/xfree86/drivers/vmware/vmware.c,v 1.17 2003/02/18 19:10:36 alanh Exp $ */
+
+/*
+ * TODO: support the vmware linux kernel fb driver (Option "UseFBDev").
+ */
+a26 1
+#include "shadowfb.h"           /* ShadowFB wrappers */
+d52 2
+a53 2
+#define VMW_INNERSTRINGIFY(s) #s
+#define VMW_STRING(str) VMW_INNERSTRINGIFY(str)
+d55 2
+a56 2
+#define VMWARE_NAME "VMWARE"
+#define VMWARE_DRIVER_NAME "vmware"
+d58 8
+a65 7
+#define VMWARE_MINOR_VERSION	10
+#define VMWARE_PATCHLEVEL	2
+#define VERSION (VMWARE_MAJOR_VERSION * 65536 + VMWARE_MINOR_VERSION * 256 + VMWARE_PATCHLEVEL)
+
+static const char VMWAREBuildStr[] = "VMware Guest X Server " 
+    VMW_STRING(VMWARE_MAJOR_VERSION) "." VMW_STRING(VMWARE_MINOR_VERSION)
+    "." VMW_STRING(VMWARE_PATCHLEVEL) " - build=$Name:  $\n";
+d68 3
+a70 3
+    { PCI_CHIP_VMWARE0405, "vmware0405" },
+    { PCI_CHIP_VMWARE0710, "vmware0710" },
+    { -1,                  NULL }
+d74 2
+a75 3
+    { ResExcIoBlock, SVGA_LEGACY_BASE_PORT,
+      SVGA_LEGACY_BASE_PORT + SVGA_NUM_PORTS*sizeof(uint32)},
+    _VGA_EXCLUSIVE, _END
+d86 3
+a88 3
+    { PCI_CHIP_VMWARE0405, PCI_CHIP_VMWARE0405, RES_EXCLUSIVE_VGA },
+    { PCI_CHIP_VMWARE0710, PCI_CHIP_VMWARE0710, vmwareLegacyRes },
+    { -1,		       -1,		    RES_UNDEFINED }
+d92 10
+a101 10
+    "vgaHWGetHWRec",
+    "vgaHWGetIOBase",
+    "vgaHWGetIndex",
+    "vgaHWInit",
+    "vgaHWProtect",
+    "vgaHWRestore",
+    "vgaHWSave",
+    "vgaHWSaveScreen",
+    "vgaHWUnlock",
+    NULL
+d105 3
+a107 16
+    "fbCreateDefColormap",
+    "fbPictureInit",
+    "fbScreenInit",
+    NULL
+};
+
+static const char *ramdacSymbols[] = {
+    "xf86CreateCursorInfoRec",
+    "xf86DestroyCursorInfoRec",
+    "xf86InitCursor",
+    NULL
+};
+
+static const char *shadowfbSymbols[] = {
+    "ShadowFBInit2",
+    NULL
+d112 10
+a121 10
+    "vmware",
+    MODULEVENDORSTRING,
+    MODINFOSTRING1,
+    MODINFOSTRING2,
+    XF86_VERSION_CURRENT,
+    VMWARE_MAJOR_VERSION, VMWARE_MINOR_VERSION, VMWARE_PATCHLEVEL,
+    ABI_CLASS_VIDEODRV,
+    ABI_VIDEODRV_VERSION,
+    MOD_CLASS_VIDEODRV,
+    { 0, 0, 0, 0}
+d126 2
+a127 2
+    OPTION_HW_CURSOR,
+    OPTION_NOACCEL
+d131 3
+a133 3
+    { OPTION_HW_CURSOR, "HWcursor",     OPTV_BOOLEAN,   {0},    FALSE },
+    { OPTION_NOACCEL,   "NoAccel",      OPTV_BOOLEAN,   {0},    FALSE },
+    { -1,               NULL,           OPTV_NONE,      {0},    FALSE }
+a135 2
+static void VMWAREStopFIFO(ScrnInfoPtr pScrn);
+
+d139 6
+a144 6
+    if (pScrn->driverPrivate != NULL) {
+        return TRUE;
+    }
+    pScrn->driverPrivate = xnfcalloc(sizeof(VMWARERec), 1);
+    /* FIXME: Initialize driverPrivate... */
+    return TRUE;
+d150 4
+a153 4
+    if (pScrn->driverPrivate) {
+        xfree(pScrn->driverPrivate);
+        pScrn->driverPrivate = NULL;
+    }
+d156 6
+a161 1
+CARD32
+a163 6
+    /*
+     * Block SIGIO for the duration, so we don't get interrupted after the
+     * outl but before the inl by a mouse move (which write to our registers).
+     */
+    int oldsigio, ret;
+    oldsigio = xf86BlockSIGIO();
+d165 1
+a165 3
+    ret = inl(pVMWARE->valueReg);
+    xf86UnblockSIGIO(oldsigio);
+    return ret;
+a170 6
+    /*
+     * Block SIGIO for the duration, so we don't get interrupted in between
+     * the outls by a mouse move (which write to our registers).
+     */
+    int oldsigio;
+    oldsigio = xf86BlockSIGIO();
+a172 1
+    xf86UnblockSIGIO(oldsigio);
+d184 2
+a185 2
+        VmwareLog(("Syncing because of full fifo\n"));
+        vmwareWaitForFB(pVMWARE);
+a186 1
+
+d188 3
+a190 5
+    if(vmwareFIFO[SVGA_FIFO_NEXT_CMD] == vmwareFIFO[SVGA_FIFO_MAX] -
+       sizeof(CARD32)) {
+        vmwareFIFO[SVGA_FIFO_NEXT_CMD] = vmwareFIFO[SVGA_FIFO_MIN];
+    } else {
+        vmwareFIFO[SVGA_FIFO_NEXT_CMD] += sizeof(CARD32);
+d197 5
+a201 2
+    vmwareWriteReg(pVMWARE, SVGA_REG_SYNC, 1);
+    while (vmwareReadReg(pVMWARE, SVGA_REG_BUSY));
+d232 3
+a234 3
+        if (mask & 1) {
+            weight++;
+        }
+d259 1
+a259 1
+    uint32 vmware_svga_id;
+d261 28
+a288 18
+    /* Any version with any SVGA_ID_* support will initialize SVGA_REG_ID
+     * to SVGA_ID_0 to support versions of this driver with SVGA_ID_0.
+     *
+     * Versions of SVGA_ID_0 ignore writes to the SVGA_REG_ID register.
+     *
+     * Versions of SVGA_ID_1 will allow us to overwrite the content
+     * of the SVGA_REG_ID register only with the values SVGA_ID_0 or SVGA_ID_1.
+     *
+     * Versions of SVGA_ID_2 will allow us to overwrite the content
+     * of the SVGA_REG_ID register only with the values SVGA_ID_0 or SVGA_ID_1
+     * or SVGA_ID_2.
+     */
+
+    vmwareWriteReg(pVMWARE, SVGA_REG_ID, SVGA_ID_2);
+    vmware_svga_id = vmwareReadReg(pVMWARE, SVGA_REG_ID);
+    if (vmware_svga_id == SVGA_ID_2) {
+        return SVGA_ID_2;
+    }
+d290 2
+a291 12
+    vmwareWriteReg(pVMWARE, SVGA_REG_ID, SVGA_ID_1);
+    vmware_svga_id = vmwareReadReg(pVMWARE, SVGA_REG_ID);
+    if (vmware_svga_id == SVGA_ID_1) {
+        return SVGA_ID_1;
+    }
+
+    if (vmware_svga_id == SVGA_ID_0) {
+        return SVGA_ID_0;
+    }
+
+    /* No supported VMware SVGA devices found */
+    return SVGA_ID_INVALID;
+d344 1
+a344 1
+    xf86PrintChipsets(VMWARE_NAME, "driver for VMware SVGA", VMWAREChipsets);
+d350 1
+a350 1
+    return VMWAREOptions;
+d356 7
+a362 8
+    MessageType from;
+    VMWAREPtr pVMWARE;
+    OptionInfoPtr options;
+    int bpp24flags;
+    uint32 id;
+    int i;
+    ClockRange* clockRanges;
+    IOADDRESS domainIOBase = 0;
+d364 3
+a366 3
+#ifndef BUILD_FOR_420
+    domainIOBase = pScrn->domainIOBase;
+#endif
+d368 3
+a370 3
+    if (flags & PROBE_DETECT) {
+        return FALSE;
+    }
+d372 4
+a375 3
+    if (pScrn->numEntities != 1) {
+        return FALSE;
+    }
+d377 8
+a384 4
+    if (!VMWAREGetRec(pScrn)) {
+        return FALSE;
+    }
+    pVMWARE = VMWAREPTR(pScrn);
+d386 21
+a406 1
+    pVMWARE->pvtSema = &pScrn->vtSema;
+d408 3
+a410 8
+    pVMWARE->pEnt = xf86GetEntityInfo(pScrn->entityList[0]);
+    if (pVMWARE->pEnt->location.type != BUS_PCI) {
+        return FALSE;
+    }
+    pVMWARE->PciInfo = xf86GetPciInfoForEntity(pVMWARE->pEnt->index);
+    if (pVMWARE->PciInfo == NULL) {
+        return FALSE;
+    }
+d412 1
+a412 22
+    if (pVMWARE->PciInfo->chipType == PCI_CHIP_VMWARE0710) {
+        pVMWARE->indexReg = domainIOBase +
+           SVGA_LEGACY_BASE_PORT + SVGA_INDEX_PORT*sizeof(uint32);
+        pVMWARE->valueReg = domainIOBase +
+           SVGA_LEGACY_BASE_PORT + SVGA_VALUE_PORT*sizeof(uint32);
+    } else {
+        /* Note:  This setting of valueReg causes unaligned I/O */
+        pVMWARE->indexReg = domainIOBase +
+           pVMWARE->PciInfo->ioBase[0] + SVGA_INDEX_PORT;
+        pVMWARE->valueReg = domainIOBase +
+           pVMWARE->PciInfo->ioBase[0] + SVGA_VALUE_PORT;
+    }
+    xf86DrvMsg(pScrn->scrnIndex, X_PROBED,
+               "VMware SVGA regs at (0x%04x, 0x%04x)\n",
+               pVMWARE->indexReg, pVMWARE->valueReg);
+
+    id = VMXGetVMwareSvgaId(pVMWARE);
+    if (id == SVGA_ID_0 || id == SVGA_ID_INVALID) {
+        xf86DrvMsg(pScrn->scrnIndex, X_ERROR,
+                   "No supported VMware SVGA found (read ID 0x%08x).\n", id);
+        return FALSE;
+    }
+d414 3
+a416 5
+    if (!xf86LoadSubModule(pScrn, "vgahw")) {
+        return FALSE;
+    }
+
+    xf86LoaderReqSymLists(vgahwSymbols, NULL);
+d418 3
+a420 3
+    if (!vgaHWGetHWRec(pScrn)) {
+        return FALSE;
+    }
+d422 1
+a422 5
+    pVMWARE->PciTag = pciTag(pVMWARE->PciInfo->bus, pVMWARE->PciInfo->device,
+                             pVMWARE->PciInfo->func);
+    pVMWARE->Primary = xf86IsPrimaryPci(pVMWARE->PciInfo);
+
+    pScrn->monitor = pScrn->confScreen->monitor;
+d424 1
+d426 1
+a426 1
+    pVMWARE->vmwareCapability = vmwareReadReg(pVMWARE, SVGA_REG_CAPABILITIES);
+d428 1
+a428 1
+    pVMWARE->vmwareCapability = 0;
+d431 68
+a498 24
+    if (pVMWARE->vmwareCapability & SVGA_CAP_8BIT_EMULATION) {
+        pVMWARE->bitsPerPixel =
+           vmwareReadReg(pVMWARE, SVGA_REG_HOST_BITS_PER_PIXEL);
+        vmwareWriteReg(pVMWARE,
+                       SVGA_REG_BITS_PER_PIXEL, pVMWARE->bitsPerPixel);
+    } else {
+        pVMWARE->bitsPerPixel =
+           vmwareReadReg(pVMWARE, SVGA_REG_BITS_PER_PIXEL);
+    }
+    pVMWARE->depth = vmwareReadReg(pVMWARE, SVGA_REG_DEPTH);
+    pVMWARE->videoRam = vmwareReadReg(pVMWARE, SVGA_REG_VRAM_SIZE);
+    pVMWARE->memPhysBase = vmwareReadReg(pVMWARE, SVGA_REG_FB_START);
+    pVMWARE->maxWidth = vmwareReadReg(pVMWARE, SVGA_REG_MAX_WIDTH);
+    pVMWARE->maxHeight = vmwareReadReg(pVMWARE, SVGA_REG_MAX_HEIGHT);
+    pVMWARE->cursorDefined = FALSE;
+    pVMWARE->cursorShouldBeHidden = FALSE;
+
+    if (pVMWARE->vmwareCapability & SVGA_CAP_CURSOR_BYPASS_2) {
+        pVMWARE->cursorRemoveFromFB = SVGA_CURSOR_ON_REMOVE_FROM_FB;
+        pVMWARE->cursorRestoreToFB = SVGA_CURSOR_ON_RESTORE_TO_FB;
+    } else {
+        pVMWARE->cursorRemoveFromFB = SVGA_CURSOR_ON_HIDE;
+        pVMWARE->cursorRestoreToFB = SVGA_CURSOR_ON_SHOW;
+    }
+d500 3
+a502 8
+    xf86DrvMsgVerb(pScrn->scrnIndex, X_PROBED, 2, "caps:  0x%08X\n", pVMWARE->vmwareCapability);
+    xf86DrvMsgVerb(pScrn->scrnIndex, X_PROBED, 2, "depth: %d\n", pVMWARE->depth);
+    xf86DrvMsgVerb(pScrn->scrnIndex, X_PROBED, 2, "bpp:   %d\n", pVMWARE->bitsPerPixel);
+
+    xf86DrvMsgVerb(pScrn->scrnIndex, X_PROBED, 2, "vram:  %d\n", pVMWARE->videoRam);
+    xf86DrvMsgVerb(pScrn->scrnIndex, X_PROBED, 2, "pbase: %p\n", pVMWARE->memPhysBase);
+    xf86DrvMsgVerb(pScrn->scrnIndex, X_PROBED, 2, "mwidt: %d\n", pVMWARE->maxWidth);
+    xf86DrvMsgVerb(pScrn->scrnIndex, X_PROBED, 2, "mheig: %d\n", pVMWARE->maxHeight);
+d504 17
+a520 14
+    switch (pVMWARE->depth) {
+    case 16:
+        /*
+         * In certain cases, the Windows host appears to
+         * report 16 bpp and 16 depth but 555 weight.  Just
+         * silently convert it to depth of 15.
+         */
+        if (pVMWARE->bitsPerPixel == 16 &&
+            pVMWARE->weight.green == 5)
+            pVMWARE->depth = 15;
+    case 8:
+    case 15:
+        bpp24flags = NoDepth24Support;
+        break;
+a521 1
+    case 32:
+d523 2
+a524 2
+         * There is no 32 bit depth, apparently it can get
+         * reported this way sometimes on the Windows host.
+a525 14
+        if (pVMWARE->bitsPerPixel == 32)
+            pVMWARE->depth = 24;
+    case 24:
+        if (pVMWARE->bitsPerPixel == 24)
+            bpp24flags = Support24bppFb;
+        else
+            bpp24flags = Support32bppFb;
+        break;
+    default:
+        xf86DrvMsg(pScrn->scrnIndex, X_ERROR,
+                   "Adapter is using an unsupported depth (%d).\n",
+                   pVMWARE->depth);
+        return FALSE;
+    }
+d527 36
+a562 63
+    if (!xf86SetDepthBpp(pScrn, pVMWARE->depth, pVMWARE->bitsPerPixel, pVMWARE->bitsPerPixel, bpp24flags)) {
+        return FALSE;
+    }
+
+    if (pScrn->bitsPerPixel != pVMWARE->bitsPerPixel) {
+        if (pScrn->bitsPerPixel == 8 &&
+            pVMWARE->vmwareCapability & SVGA_CAP_8BIT_EMULATION) {
+            vmwareWriteReg(pVMWARE, SVGA_REG_BITS_PER_PIXEL, 8);
+            pVMWARE->bitsPerPixel =
+               vmwareReadReg(pVMWARE, SVGA_REG_BITS_PER_PIXEL);
+        } else {
+            xf86DrvMsg(pScrn->scrnIndex, X_ERROR,
+                       "Currently unavailable depth/bpp of %d/%d requested.\n"
+                       "\tThe guest X server must run at the same depth and bpp as the host\n"
+                       "\t(which are currently %d/%d).  This is automatically detected.  Please\n"
+                       "\tdo not specify a depth on the command line or via the config file.\n",
+                       pScrn->depth, pScrn->bitsPerPixel,
+                       pVMWARE->depth, pVMWARE->bitsPerPixel);
+            return FALSE;
+        }
+    }
+
+    /*
+     * Reread depth and defer reading the colour registers until here
+     * in case we changed bpp above.
+     */
+
+    pVMWARE->depth = vmwareReadReg(pVMWARE, SVGA_REG_DEPTH);
+    pVMWARE->weight.red =
+       vmwareCalculateWeight(vmwareReadReg(pVMWARE, SVGA_REG_RED_MASK));
+    pVMWARE->weight.green =
+       vmwareCalculateWeight(vmwareReadReg(pVMWARE, SVGA_REG_GREEN_MASK));
+    pVMWARE->weight.blue =
+       vmwareCalculateWeight(vmwareReadReg(pVMWARE, SVGA_REG_BLUE_MASK));
+    pVMWARE->offset.blue = 0;
+    pVMWARE->offset.green = pVMWARE->weight.blue;
+    pVMWARE->offset.red = pVMWARE->weight.green + pVMWARE->offset.green;
+    pVMWARE->defaultVisual = vmwareReadReg(pVMWARE, SVGA_REG_PSEUDOCOLOR) ?
+       PseudoColor : TrueColor;
+
+    xf86DrvMsgVerb(pScrn->scrnIndex, X_PROBED,
+                   2, "depth: %d\n", pVMWARE->depth);
+    xf86DrvMsgVerb(pScrn->scrnIndex, X_PROBED,
+                   2, "bpp:   %d\n", pVMWARE->bitsPerPixel);
+    xf86DrvMsgVerb(pScrn->scrnIndex, X_PROBED,
+                   2, "w.red: %d\n", pVMWARE->weight.red);
+    xf86DrvMsgVerb(pScrn->scrnIndex, X_PROBED,
+                   2, "w.grn: %d\n", pVMWARE->weight.green);
+    xf86DrvMsgVerb(pScrn->scrnIndex, X_PROBED,
+                   2, "w.blu: %d\n", pVMWARE->weight.blue);
+    xf86DrvMsgVerb(pScrn->scrnIndex, X_PROBED,
+                   2, "vis:   %d\n", pVMWARE->defaultVisual);
+
+    if (pScrn->depth != pVMWARE->depth) {
+        xf86DrvMsg(pScrn->scrnIndex, X_ERROR,
+                   "Currently unavailable depth of %d requested.\n"
+                   "\tThe guest X server must run at the same depth as the host (which\n"
+                   "\tis currently %d).  This is automatically detected.  Please do not\n"
+                   "\tspecify a depth on the command line or via the config file.\n",
+                   pScrn->depth, pVMWARE->depth);
+        return FALSE;
+    }
+    xf86PrintDepthBpp(pScrn);
+d565 3
+a567 3
+    if (pScrn->depth == 24 && pix24bpp == 0) {
+        pix24bpp = xf86GetBppFromDepth(pScrn, 24);
+    }
+d570 2
+a571 2
+    if (pScrn->depth > 8) {
+        rgb zeros = { 0, 0, 0 };
+d573 14
+a586 14
+        if (!xf86SetWeight(pScrn, pVMWARE->weight, zeros)) {
+            return FALSE;
+        }
+        /* FIXME check returned weight */
+    }
+    if (!xf86SetDefaultVisual(pScrn, pVMWARE->defaultVisual)) {
+        return FALSE;
+    }
+    if (pScrn->defaultVisual != pVMWARE->defaultVisual) {
+        xf86DrvMsg(pScrn->scrnIndex, X_ERROR,
+                   "Given visual (%d) is not supported by this driver (%d is required)\n",
+                   pScrn->defaultVisual, pVMWARE->defaultVisual);
+        return FALSE;
+    }
+d588 1
+a588 1
+    bytesPerPixel = pScrn->bitsPerPixel / 8;
+d590 1
+a590 1
+    pScrn->progClock = TRUE;
+d593 4
+a596 4
+    if (pScrn->visual != 0) {	/* FIXME */
+        /* print error message */
+        return FALSE;
+    }
+d599 5
+a603 5
+    xf86CollectOptions(pScrn, NULL);
+    if (!(options = xalloc(sizeof(VMWAREOptions))))
+        return FALSE;
+    memcpy(options, VMWAREOptions, sizeof(VMWAREOptions));
+    xf86ProcessOptions(pScrn->scrnIndex, pScrn->options, options);
+d605 3
+a607 3
+    if (pScrn->depth <= 8) {
+        pScrn->rgbBits = 8;
+    }
+d609 2
+a610 2
+    from = X_PROBED;
+    pScrn->chipset = (char*)xf86TokenToString(VMWAREChipsets, pVMWARE->PciInfo->chipType);
+d612 4
+a615 4
+    if (!pScrn->chipset) {
+        xf86DrvMsg(pScrn->scrnIndex, X_ERROR, "ChipID 0x%04 is not recognised\n", pVMWARE->PciInfo->chipType);
+        return FALSE;
+    }
+d617 74
+a690 28
+    from = X_DEFAULT;
+    pVMWARE->hwCursor = TRUE;
+    if (xf86GetOptValBool(options, OPTION_HW_CURSOR, &pVMWARE->hwCursor)) {
+        from = X_CONFIG;
+    }
+    if (pVMWARE->hwCursor && !(pVMWARE->vmwareCapability & SVGA_CAP_CURSOR)) {
+        xf86DrvMsg(pScrn->scrnIndex, X_WARNING, "HW cursor is not supported in this configuration\n");
+        from = X_PROBED;
+        pVMWARE->hwCursor = FALSE;
+    }
+    xf86DrvMsg(pScrn->scrnIndex, from, "Using %s cursor\n",
+               pVMWARE->hwCursor ? "HW" : "SW");
+    if (xf86IsOptionSet(options, OPTION_NOACCEL)) {
+        pVMWARE->noAccel = TRUE;
+        xf86DrvMsg(pScrn->scrnIndex, X_CONFIG, "Acceleration disabled\n");
+    } else {
+        pVMWARE->noAccel = FALSE;
+    }
+    pScrn->videoRam = pVMWARE->videoRam / 1024;
+    pScrn->memPhysBase = pVMWARE->memPhysBase;
+    xfree(options);
+
+    {
+        Gamma zeros = { 0.0, 0.0, 0.0 };
+        if (!xf86SetGamma(pScrn, zeros)) {
+            return FALSE;
+        }
+    }
+d692 8
+a699 8
+    if ((i = xf86GetPciInfoForScreen(pScrn->scrnIndex, &pciList, NULL)) != 1) {
+        /* print error message */
+        VMWAREFreeRec(pScrn);
+        if (i > 0) {
+            xfree(pciList);
+        }
+        return FALSE;
+    }
+d701 1
+a701 55
+    clockRanges = xnfcalloc(sizeof(ClockRange), 1);
+    clockRanges->next = NULL;
+    clockRanges->minClock = 1;
+    clockRanges->maxClock = 400000000;
+    clockRanges->clockIndex = -1;
+    clockRanges->interlaceAllowed = FALSE;
+    clockRanges->doubleScanAllowed = FALSE;
+    clockRanges->ClockMulFactor = 1;
+    clockRanges->ClockDivFactor = 1;
+
+    i = xf86ValidateModes(pScrn, pScrn->monitor->Modes, pScrn->display->modes,
+                          clockRanges, NULL, 256, pVMWARE->maxWidth, 32 * 32,
+                          128, pVMWARE->maxHeight,
+                          pScrn->display->virtualX, pScrn->display->virtualY,
+                          pVMWARE->videoRam,
+                          LOOKUP_BEST_REFRESH);
+    if (i == -1) {
+        VMWAREFreeRec(pScrn);
+        return FALSE;
+    }
+    xf86PruneDriverModes(pScrn);
+    if (i == 0 || pScrn->modes == NULL) {
+        xf86DrvMsg(pScrn->scrnIndex, X_ERROR, "No valid modes found\n");
+        VMWAREFreeRec(pScrn);
+        return FALSE;
+    }
+    xf86SetCrtcForModes(pScrn, INTERLACE_HALVE_V);
+    pScrn->currentMode = pScrn->modes;
+    xf86PrintModes(pScrn);
+    xf86SetDpi(pScrn, 0, 0);
+    if (!xf86LoadSubModule(pScrn, "fb") ||
+        !xf86LoadSubModule(pScrn, "shadowfb")) {
+        VMWAREFreeRec(pScrn);
+        return FALSE;
+    }
+    xf86LoaderReqSymLists(fbSymbols, shadowfbSymbols, NULL);
+
+    /* Need ramdac for hwcursor */
+    if (pVMWARE->hwCursor) {
+        if (!xf86LoadSubModule(pScrn, "ramdac")) {
+            VMWAREFreeRec(pScrn);
+            return FALSE;
+        }
+        xf86LoaderReqSymLists(ramdacSymbols, NULL);
+    }
+
+    if (!pVMWARE->noAccel) {
+        if (!xf86LoadSubModule(pScrn, "xaa")) {
+            VMWAREFreeRec(pScrn);
+            return FALSE;
+        }
+        xf86LoaderReqSymLists(vmwareXaaSymbols, NULL);
+    }
+
+    return TRUE;
+d707 1
+a707 1
+    VMWAREPtr pVMWARE;
+d709 1
+a709 1
+    pVMWARE = VMWAREPTR(pScrn);
+d711 9
+a719 11
+    pVMWARE->FbBase = xf86MapPciMem(pScrn->scrnIndex, VIDMEM_FRAMEBUFFER,
+                                    pVMWARE->PciTag,
+                                    pVMWARE->memPhysBase,
+                                    pVMWARE->videoRam);
+    if (!pVMWARE->FbBase)
+        return FALSE;
+
+    VmwareLog(("FB Mapped: %p/%u -> %p/%u\n",
+               pVMWARE->memPhysBase, pVMWARE->videoRam,
+               pVMWARE->FbBase, pVMWARE->videoRam));
+    return TRUE;
+d725 1
+a725 1
+    VMWAREPtr pVMWARE;
+d727 1
+a727 1
+    pVMWARE = VMWAREPTR(pScrn);
+d729 1
+a729 1
+    VmwareLog(("Unmapped: %p/%u\n", pVMWARE->FbBase, pVMWARE->videoRam));
+d731 3
+a733 3
+    xf86UnMapVidMem(pScrn->scrnIndex, pVMWARE->FbBase, pVMWARE->videoRam);
+    pVMWARE->FbBase = NULL;
+    return TRUE;
+d739 4
+a742 4
+    vgaHWPtr hwp = VGAHWPTR(pScrn);
+    vgaRegPtr vgaReg = &hwp->SavedReg;
+    VMWAREPtr pVMWARE = VMWAREPTR(pScrn);
+    VMWARERegPtr vmwareReg = &pVMWARE->SavedReg;
+d744 1
+a744 1
+    vgaHWSave(pScrn, vgaReg, VGA_SR_ALL);
+d746 2
+a747 19
+    vmwareReg->svga_reg_enable = vmwareReadReg(pVMWARE, SVGA_REG_ENABLE);
+    vmwareReg->svga_reg_width = vmwareReadReg(pVMWARE, SVGA_REG_WIDTH);
+    vmwareReg->svga_reg_height = vmwareReadReg(pVMWARE, SVGA_REG_HEIGHT);
+    vmwareReg->svga_reg_bits_per_pixel =
+       vmwareReadReg(pVMWARE, SVGA_REG_BITS_PER_PIXEL);
+
+    /* XXX this should be based on the cap bit, not hwCursor... */
+    if (pVMWARE->hwCursor) {
+       vmwareReg->svga_reg_cursor_on =
+          vmwareReadReg(pVMWARE, SVGA_REG_CURSOR_ON);
+       vmwareReg->svga_reg_cursor_x =
+          vmwareReadReg(pVMWARE, SVGA_REG_CURSOR_X);
+       vmwareReg->svga_reg_cursor_y =
+          vmwareReadReg(pVMWARE, SVGA_REG_CURSOR_Y);
+       vmwareReg->svga_reg_cursor_id =
+          vmwareReadReg(pVMWARE, SVGA_REG_CURSOR_ID);
+    }
+
+    vmwareReg->svga_fifo_enabled = vmwareReadReg(pVMWARE, SVGA_REG_CONFIG_DONE);
+d753 10
+a762 24
+    VMWAREPtr pVMWARE = VMWAREPTR(pScrn);
+    VmwareLog(("VMWARERestoreRegs: W: %d, H: %d, BPP: %d, Enable: %d\n",
+	       vmwareReg->svga_reg_width, vmwareReg->svga_reg_height,
+	       vmwareReg->svga_reg_bits_per_pixel, vmwareReg->svga_reg_enable));
+    if (vmwareReg->svga_reg_enable) {
+        vmwareWriteReg(pVMWARE, SVGA_REG_WIDTH, vmwareReg->svga_reg_width);
+        vmwareWriteReg(pVMWARE, SVGA_REG_HEIGHT, vmwareReg->svga_reg_height);
+        vmwareWriteReg(pVMWARE, SVGA_REG_BITS_PER_PIXEL,
+                       vmwareReg->svga_reg_bits_per_pixel);
+        vmwareWriteReg(pVMWARE, SVGA_REG_ENABLE, vmwareReg->svga_reg_enable);
+        vmwareWriteReg(pVMWARE, SVGA_REG_GUEST_ID, GUEST_OS_LINUX);
+        if (pVMWARE->hwCursor) {
+            vmwareWriteReg(pVMWARE, SVGA_REG_CURSOR_ID,
+                           vmwareReg->svga_reg_cursor_id);
+            vmwareWriteReg(pVMWARE, SVGA_REG_CURSOR_X,
+                           vmwareReg->svga_reg_cursor_x);
+            vmwareWriteReg(pVMWARE, SVGA_REG_CURSOR_Y,
+                           vmwareReg->svga_reg_cursor_y);
+            vmwareWriteReg(pVMWARE, SVGA_REG_CURSOR_ON,
+                           vmwareReg->svga_reg_cursor_on);
+        }
+    } else {
+        vmwareWriteReg(pVMWARE, SVGA_REG_ENABLE, vmwareReg->svga_reg_enable);
+    }
+d768 10
+a777 14
+    vgaHWPtr hwp = VGAHWPTR(pScrn);
+    vgaRegPtr vgaReg = &hwp->SavedReg;
+    VMWAREPtr pVMWARE = VMWAREPTR(pScrn);
+    VMWARERegPtr vmwareReg = &pVMWARE->SavedReg;
+
+    vmwareWaitForFB(pVMWARE);
+    if (!vmwareReg->svga_fifo_enabled) {
+        VMWAREStopFIFO(pScrn);
+    }
+
+    vgaHWProtect(pScrn, TRUE);
+    VMWARERestoreRegs(pScrn, vmwareReg);
+    vgaHWRestore(pScrn, vgaReg, VGA_SR_ALL);
+    vgaHWProtect(pScrn, FALSE);
+d783 36
+a818 54
+    vgaHWPtr hwp = VGAHWPTR(pScrn);
+    vgaRegPtr vgaReg = &hwp->ModeReg;
+    VMWAREPtr pVMWARE = VMWAREPTR(pScrn);
+    VMWARERegPtr vmwareReg = &pVMWARE->ModeReg;
+
+    vgaHWUnlock(hwp);
+    if (!vgaHWInit(pScrn, mode))
+        return FALSE;
+    pScrn->vtSema = TRUE;
+
+    vmwareReg->svga_reg_enable = 1;
+    vmwareReg->svga_reg_width = max(mode->HDisplay, pScrn->virtualX);
+    vmwareReg->svga_reg_height = max(mode->VDisplay, pScrn->virtualY);
+    vmwareReg->svga_reg_bits_per_pixel = pVMWARE->bitsPerPixel;
+
+    vgaHWProtect(pScrn, TRUE);
+
+    vgaHWRestore(pScrn, vgaReg, VGA_SR_ALL);
+    VMWARERestoreRegs(pScrn, vmwareReg);
+
+    if (pVMWARE->hwCursor) {
+        vmwareCursorModeInit(pScrn, mode);
+    }
+
+    VmwareLog(("Required mode: %ux%u\n", mode->HDisplay, mode->VDisplay));
+    VmwareLog(("Virtual:       %ux%u\n", pScrn->virtualX, pScrn->virtualY));
+    VmwareLog(("dispWidth:     %u\n", pScrn->displayWidth));
+    pVMWARE->fbOffset = vmwareReadReg(pVMWARE, SVGA_REG_FB_OFFSET);
+    pVMWARE->fbPitch = vmwareReadReg(pVMWARE, SVGA_REG_BYTES_PER_LINE);
+    pVMWARE->FbSize = vmwareReadReg(pVMWARE, SVGA_REG_FB_SIZE);
+
+    pScrn->displayWidth = (pVMWARE->fbPitch * 8) / ((pScrn->bitsPerPixel + 7) & ~7);
+    VmwareLog(("fbOffset:      %u\n", pVMWARE->fbOffset));
+    VmwareLog(("fbPitch:       %u\n", pVMWARE->fbPitch));
+    VmwareLog(("fbSize:        %u\n", pVMWARE->FbSize));
+    VmwareLog(("New dispWidth: %u\n", pScrn->displayWidth));
+
+    vgaHWProtect(pScrn, FALSE);
+
+    /*
+     * XXX -- If we want to check that we got the mode we asked for, this
+     * would be a good place.
+     */
+
+    /*
+     * Let XAA know about the mode change.
+     */
+    if (!pVMWARE->noAccel) {
+        if (!vmwareXAAModeInit(pScrn, mode)) {
+            return FALSE;
+        }
+    }
+
+    return TRUE;
+d824 1
+a824 1
+    /* FIXME */
+d830 2
+a831 4
+    VMWAREPtr pVMWARE = VMWAREPTR(pScrn);
+    CARD32* vmwareFIFO;
+
+    TRACEPOINT
+d833 10
+a842 12
+    pVMWARE->mmioPhysBase = vmwareReadReg(pVMWARE, SVGA_REG_MEM_START);
+    pVMWARE->mmioSize = vmwareReadReg(pVMWARE, SVGA_REG_MEM_SIZE) & ~3;
+    pVMWARE->mmioVirtBase = xf86MapPciMem(pScrn->scrnIndex, VIDMEM_MMIO,
+                                          pVMWARE->PciTag,
+                                          pVMWARE->mmioPhysBase,
+                                          pVMWARE->mmioSize);
+    vmwareFIFO = pVMWARE->vmwareFIFO = (CARD32*)pVMWARE->mmioVirtBase;
+    vmwareFIFO[SVGA_FIFO_MIN] = 4 * sizeof(CARD32);
+    vmwareFIFO[SVGA_FIFO_MAX] = pVMWARE->mmioSize;
+    vmwareFIFO[SVGA_FIFO_NEXT_CMD] = 4 * sizeof(CARD32);
+    vmwareFIFO[SVGA_FIFO_STOP] = 4 * sizeof(CARD32);
+    vmwareWriteReg(pVMWARE, SVGA_REG_CONFIG_DONE, 1);
+d848 1
+a848 3
+    VMWAREPtr pVMWARE = VMWAREPTR(pScrn);
+
+    TRACEPOINT
+d850 2
+a851 2
+    vmwareWriteReg(pVMWARE, SVGA_REG_CONFIG_DONE, 0);
+    xf86UnMapVidMem(pScrn->scrnIndex, pVMWARE->mmioVirtBase, pVMWARE->mmioSize);
+d857 7
+a863 25
+    ScrnInfoPtr pScrn = xf86Screens[scrnIndex];
+    VMWAREPtr pVMWARE = VMWAREPTR(pScrn);
+    ScreenPtr save = &pVMWARE->ScrnFuncs;
+
+    VmwareLog(("cursorSema: %d\n", pVMWARE->cursorSema));
+
+    if (*pVMWARE->pvtSema) {
+        if (pVMWARE->CursorInfoRec) {
+            vmwareCursorCloseScreen(pScreen);
+        }
+
+        if (pVMWARE->xaaInfo) {
+            vmwareXAACloseScreen(pScreen);
+        }
+
+        VMWARERestore(pScrn);
+        VMWAREUnmapMem(pScrn);
+
+        pScrn->vtSema = FALSE;
+    }
+
+    pScreen->CloseScreen = save->CloseScreen;
+    pScreen->SaveScreen = save->SaveScreen;
+
+    return (*pScreen->CloseScreen)(scrnIndex, pScreen);
+d869 1
+a869 7
+    VmwareLog(("VMWareSaveScreen() mode = %d\n", mode));
+
+    /*
+     * This thoroughly fails to do anything useful to svga mode.  I doubt
+     * we care; who wants to idle-blank their VM's screen anyway?
+     */
+    return vgaHWSaveScreen(pScreen, mode);
+a871 3
+/* disabled by default to reduce spew in DEBUG_LOGGING mode. */
+/*#define DEBUG_LOG_UPDATES*/
+
+d873 2
+a874 1
+VMWAREPreDirtyBBUpdate(ScrnInfoPtr pScrn, int nboxes, BoxPtr boxPtr)
+d876 2
+a877 1
+    VMWAREPtr pVMWARE = VMWAREPTR(pScrn);
+d879 6
+a884 61
+#ifdef DEBUG_LOG_UPDATES
+    {
+        int i;
+        for (i = 0; i < nboxes; i++) {
+            VmwareLog(("PreUpdate #%d (%d, %d, w = %d, h = %d)\n", nboxes - i,
+                       boxPtr[i].x1, boxPtr[i].y1,
+                       boxPtr[i].x2 - boxPtr[i].x1,
+                       boxPtr[i].y2 - boxPtr[i].y1));
+        }
+    }
+#endif
+
+    /*
+     * We only register this callback if we have a HW cursor.
+     */
+    while (nboxes--) {
+        if (BOX_INTERSECT(*boxPtr, pVMWARE->hwcur.box)) {
+	    PRE_OP_HIDE_CURSOR();
+	    pVMWARE->cursorExcludedForUpdate = TRUE;
+	    break;
+        }
+        boxPtr++;
+    }
+}
+
+static void
+VMWAREPostDirtyBBUpdate(ScrnInfoPtr pScrn, int nboxes, BoxPtr boxPtr)
+{
+    VMWAREPtr pVMWARE = VMWAREPTR(pScrn);
+    while (nboxes--) {
+#ifdef DEBUG_LOG_UPDATES
+        VmwareLog(("PostUpdate #%d (%d, %d, w = %d, h = %d)\n", nboxes,
+                   boxPtr->x1, boxPtr->y1,
+                   boxPtr->x2 - boxPtr->x1, boxPtr->y2 - boxPtr->y1));
+#endif
+
+        /* Clip off (y only) for offscreen memory */
+        if (boxPtr->y2 >= pVMWARE->ModeReg.svga_reg_height)
+            boxPtr->y2 = pVMWARE->ModeReg.svga_reg_height;
+        if (boxPtr->y1 >= pVMWARE->ModeReg.svga_reg_height)
+            boxPtr->y1 = pVMWARE->ModeReg.svga_reg_height;
+        if (boxPtr->y1 == boxPtr->y2) {
+            boxPtr++;
+            continue;
+        }
+
+        vmwareSendSVGACmdUpdate(pVMWARE, boxPtr++);
+    }
+
+    if (pVMWARE->hwCursor && pVMWARE->cursorExcludedForUpdate) {
+        POST_OP_SHOW_CURSOR();
+        pVMWARE->cursorExcludedForUpdate = FALSE;
+    }
+}
+
+static void
+VMWARELoadPalette(ScrnInfoPtr pScrn, int numColors, int* indices,
+                  LOCO* colors, VisualPtr pVisual)
+{
+    VMWAREPtr pVMWARE = VMWAREPTR(pScrn);
+    int i;
+d886 2
+a887 7
+    for (i = 0; i < numColors; i++) {
+        vmwareWriteReg(pVMWARE, SVGA_PALETTE_BASE + *indices * 3 + 0, colors[*indices].red);
+        vmwareWriteReg(pVMWARE, SVGA_PALETTE_BASE + *indices * 3 + 1, colors[*indices].green);
+        vmwareWriteReg(pVMWARE, SVGA_PALETTE_BASE + *indices * 3 + 2, colors[*indices].blue);
+        indices++;
+    }
+    VmwareLog(("Palette loading done\n"));
+d893 8
+a900 7
+    ScrnInfoPtr pScrn;
+    vgaHWPtr hwp;
+    VMWAREPtr pVMWARE;
+
+    /* Get the ScrnInfoRec */
+    pScrn = xf86Screens[pScreen->myNum];
+    pVMWARE = VMWAREPTR(pScrn);
+d902 4
+a905 4
+    /*
+     * If using the vgahw module, its data structures and related
+     * things are typically initialised/mapped here.
+     */
+d907 2
+a908 2
+    hwp = VGAHWPTR(pScrn);
+    vgaHWGetIOBase(hwp);
+d910 2
+a911 2
+    /* Save the current video state */
+    VMWARESave(pScrn);
+d913 1
+a913 1
+    VMWAREInitFIFO(pScrn);
+d915 34
+a948 2
+    /* Initialise the first mode */
+    VMWAREModeInit(pScrn, pScrn->currentMode);
+d950 1
+a950 2
+    /* Set the viewport if supported */
+    VMWAREAdjustFrame(scrnIndex, pScrn->frameX0, pScrn->frameY0, 0);
+d952 30
+a981 5
+    /*
+     * Setup the screen's visuals, and initialise the framebuffer
+     * code.
+     */
+    VMWAREMapMem(pScrn);
+d983 2
+a984 5
+    /*
+     * Clear the framebuffer (and any black-border mode areas).
+     */
+    memset(pVMWARE->FbBase, 0, pVMWARE->FbSize);
+    vmwareSendSVGACmdUpdateFullScreen(pVMWARE);
+d986 9
+a994 2
+    /* Reset the visual list */
+    miClearVisualTypes();
+d996 4
+a999 6
+    /*
+     * Setup the visuals supported.  This driver only supports
+     * TrueColor for bpp > 8, so the default set of visuals isn't
+     * acceptable.  To deal with this, call miSetVisualTypes with
+     * the appropriate visual mask.
+     */
+d1001 4
+a1004 12
+    if (pScrn->bitsPerPixel > 8) {
+        if (!miSetVisualTypes(pScrn->depth, TrueColorMask,
+                              pScrn->rgbBits, pScrn->defaultVisual)) {
+            return FALSE;
+        }
+    } else {
+        if (!miSetVisualTypes(pScrn->depth,
+                              miGetDefaultVisualMask(pScrn->depth),
+                              pScrn->rgbBits, pScrn->defaultVisual)) {
+            return FALSE;
+        }
+    }
+d1006 9
+a1014 1
+    miSetPixmapDepths();
+d1016 2
+a1017 10
+    /*
+     * Initialise the framebuffer.
+     */
+    if (!fbScreenInit(pScreen, pVMWARE->FbBase + pVMWARE->fbOffset,
+                      pScrn->virtualX, pScrn->virtualY,
+                      pScrn->xDpi, pScrn->yDpi,
+                      pScrn->displayWidth,
+                      pScrn->bitsPerPixel)) {
+        return FALSE;
+    }
+d1019 5
+a1023 17
+    /* Override the default mask/offset settings */
+    if (pScrn->bitsPerPixel > 8) {
+        int i;
+        VisualPtr visual;
+
+        for (i = 0, visual = pScreen->visuals;
+             i < pScreen->numVisuals; i++, visual++) {
+            if ((visual->class | DynamicClass) == DirectColor) {
+                visual->offsetRed = pScrn->offset.red;
+                visual->offsetGreen = pScrn->offset.green;
+                visual->offsetBlue = pScrn->offset.blue;
+                visual->redMask = pScrn->mask.red;
+                visual->greenMask = pScrn->mask.green;
+                visual->blueMask = pScrn->mask.blue;
+            }
+        }
+    }
+a1024 2
+    /* must be after RGB ordering fixed */
+    fbPictureInit (pScreen, 0, 0);
+d1026 4
+a1029 7
+    /*
+     * Save the old screen vector, then wrap CloseScreen and
+     * set SaveScreen.
+     */
+    pVMWARE->ScrnFuncs = *pScreen;
+    pScreen->CloseScreen = VMWARECloseScreen;
+    pScreen->SaveScreen = VMWARESaveScreen;
+d1031 6
+a1036 82
+    /*
+     * Set initial black & white colourmap indices.
+     */
+    xf86SetBlackWhitePixels(pScreen);
+
+    /*
+     * Initialize shadowfb to notify us of dirty rectangles.  We only
+     * need preFB access callbacks if we're using the hw cursor.
+     */
+    if (!ShadowFBInit2(pScreen, 
+                       pVMWARE->hwCursor ? VMWAREPreDirtyBBUpdate : NULL,
+                       VMWAREPostDirtyBBUpdate)) {
+        xf86DrvMsg(pScrn->scrnIndex, X_ERROR,
+                   "ShadowFB initialization failed\n");
+        return FALSE;
+    }
+
+    /*
+     * If we have a hw cursor, we need to hook functions that might
+     * read from the framebuffer.
+     */
+    if (pVMWARE->hwCursor) {
+        vmwareCursorHookWrappers(pScreen);
+    }
+
+    /*
+     * Initialize acceleration.
+     */
+    if (!pVMWARE->noAccel) {
+        if (!vmwareXAAScreenInit(pScreen)) {
+            xf86DrvMsg(pScrn->scrnIndex, X_ERROR,
+                       "XAA initialization failed -- running unaccelerated!\n");
+            pVMWARE->noAccel = TRUE;
+        }
+    }
+
+    /*
+     * If backing store is to be supported (as is usually the case),
+     * initialise it.
+     */
+    miInitializeBackingStore(pScreen);
+    xf86SetBackingStore(pScreen);
+    xf86SetSilkenMouse(pScreen);
+
+    /*
+     * Initialize software cursor.
+     */
+    miDCInitialize(pScreen, xf86GetPointerScreenFuncs());
+
+    /*
+     * Initialize hardware cursor.
+     */
+    if (pVMWARE->hwCursor) {
+        if (!vmwareCursorInit(pScreen)) {
+            xf86DrvMsg(pScrn->scrnIndex, X_ERROR,
+                       "Hardware cursor initialization failed\n");
+            pVMWARE->hwCursor = FALSE;
+        }
+    }
+
+    /*
+     * Install colourmap functions.  If using the vgahw module,
+     * vgaHandleColormaps would usually be called here.
+     */
+
+    if (!fbCreateDefColormap(pScreen))
+        return FALSE;
+
+    if (!xf86HandleColormaps(pScreen, 256, 8,
+                             VMWARELoadPalette, NULL,
+                             CMAP_PALETTED_TRUECOLOR |
+                             CMAP_RELOAD_ON_MODE_SWITCH)) {
+        return FALSE;
+    }
+
+    /* Report any unused options (only for the first generation) */
+    if (serverGeneration == 1) {
+        xf86ShowUnusedOptions(pScrn->scrnIndex, pScrn->options);
+    }
+
+    /* Done */
+    return TRUE;
+d1042 1
+a1042 1
+    return VMWAREModeInit(xf86Screens[scrnIndex], mode);
+d1048 2
+a1049 7
+    ScrnInfoPtr pScrn = xf86Screens[scrnIndex];
+    VMWAREPtr pVMWARE = VMWAREPTR(pScrn);
+
+    if (!pVMWARE->SavedReg.svga_fifo_enabled) {
+        VMWAREInitFIFO(pScrn);
+    }
+    return VMWAREModeInit(pScrn, pScrn->currentMode);
+d1055 2
+a1056 2
+    ScrnInfoPtr pScrn = xf86Screens[scrnIndex];
+    VMWARERestore(pScrn);
+d1062 5
+a1066 5
+    /*
+     * If the vgahw module is used vgaHWFreeHWRec() would be called
+     * here.
+     */
+   VMWAREFreeRec(xf86Screens[scrnIndex]);
+d1072 2
+a1073 1
+    return MODE_OK;
+d1079 6
+a1084 6
+    int numDevSections, numUsed;
+    GDevPtr *devSections;
+    int *usedChips;
+    int i;
+    Bool foundScreen = FALSE;
+    char buildString[sizeof(VMWAREBuildStr)];
+d1086 2
+a1087 2
+    RewriteTagString(VMWAREBuildStr, buildString, sizeof(VMWAREBuildStr));
+    xf86MsgVerb(X_PROBED, 4, "%s", buildString);
+d1089 2
+a1090 2
+    numDevSections = xf86MatchDevice(VMWARE_DRIVER_NAME, &devSections);
+    if (numDevSections <= 0) {
+d1092 1
+a1092 1
+        xf86MsgVerb(X_ERROR, 0, "No vmware driver section\n");
+d1094 39
+a1132 40
+        return FALSE;
+    }
+    if (xf86GetPciVideoInfo()) {
+        VmwareLog(("Some PCI Video Info Exists\n"));
+        numUsed = xf86MatchPciInstances(VMWARE_NAME, PCI_VENDOR_VMWARE,
+                                        VMWAREChipsets, VMWAREPciChipsets, devSections,
+                                        numDevSections, drv, &usedChips);
+        xfree(devSections);
+        if (numUsed <= 0)
+            return FALSE;
+        if (flags & PROBE_DETECT)
+            foundScreen = TRUE;
+        else
+            for (i = 0; i < numUsed; i++) {
+                ScrnInfoPtr pScrn = NULL;
+
+                VmwareLog(("Even some VMware SVGA PCI instances exists\n"));
+                pScrn = xf86ConfigPciEntity(pScrn, flags, usedChips[i],
+                                            VMWAREPciChipsets, NULL, NULL, NULL,
+                                            NULL, NULL);
+                if (pScrn) {
+                    VmwareLog(("And even configuration suceeded\n"));
+                    pScrn->driverVersion = VERSION;
+                    pScrn->driverName = VMWARE_DRIVER_NAME;
+                    pScrn->name = VMWARE_NAME;
+                    pScrn->Probe = VMWAREProbe;
+                    pScrn->PreInit = VMWAREPreInit;
+                    pScrn->ScreenInit = VMWAREScreenInit;
+                    pScrn->SwitchMode = VMWARESwitchMode;
+                    pScrn->AdjustFrame = VMWAREAdjustFrame;
+                    pScrn->EnterVT = VMWAREEnterVT;
+                    pScrn->LeaveVT = VMWARELeaveVT;
+                    pScrn->FreeScreen = VMWAREFreeScreen;
+                    pScrn->ValidMode = VMWAREValidMode;
+                    foundScreen = TRUE;
+                }
+            }
+        xfree(usedChips);
+    }
+    return foundScreen;
+d1136 7
+a1142 7
+    VERSION,
+    VMWARE_DRIVER_NAME,
+    VMWAREIdentify,
+    VMWAREProbe,
+    VMWAREAvailableOptions,
+    NULL,
+    0
+d1153 1
+a1153 1
+    static Bool setupDone = FALSE;
+d1155 3
+a1157 3
+    if (!setupDone) {
+        setupDone = TRUE;
+        xf86AddDriver(&VMWARE, module, 0);
+d1159 26
+a1184 2
+        LoaderRefSymLists(vgahwSymbols, fbSymbols, ramdacSymbols,
+                          shadowfbSymbols, vmwareXaaSymbols, NULL);
+d1186 107
+a1292 1
+        return (pointer)1;
+a1293 4
+    if (errmaj) {
+        *errmaj = LDR_ONCEONLY;
+    }
+    return NULL;
+d1295 143
+a1437 1
+#endif	/* XFree86LOADER */
+@
+
+
+1.1.1.3
+log
+@That's what OpenBSD will, probably, ship as XF4 in 3.5
+their last sync against XFree86 4.3-current has been
+imported into our vendor branch, too
+@
+text
+@d9 1
+a9 1
+/* $XFree86: xc/programs/Xserver/hw/xfree86/drivers/vmware/vmware.c,v 1.19 2003/10/30 17:37:16 tsi Exp $ */
+d435 1
+a435 1
+               "VMware SVGA regs at (0x%04lx, 0x%04lx)\n",
+d497 1
+a497 1
+    xf86DrvMsgVerb(pScrn->scrnIndex, X_PROBED, 2, "pbase: 0x%08lx\n", pVMWARE->memPhysBase);
+d581 1
+a581 1
+                   2, "w.red: %d\n", (int)pVMWARE->weight.red);
+d583 1
+a583 1
+                   2, "w.grn: %d\n", (int)pVMWARE->weight.green);
+d585 1
+a585 1
+                   2, "w.blu: %d\n", (int)pVMWARE->weight.blue);
+d649 1
+a649 1
+        xf86DrvMsg(pScrn->scrnIndex, X_ERROR, "ChipID 0x%04x is not recognised\n", pVMWARE->PciInfo->chipType);
+d1306 1
+a1306 1
+static ModeStatus
+@
+
+

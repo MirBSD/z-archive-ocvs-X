@@ -1,0 +1,399 @@
+head	1.1;
+branch	1.1.1;
+access;
+symbols
+	cvs-200405281530:1.1.1.2
+	cvs-200402211630:1.1.1.2
+	cvs-200401261625:1.1.1.2
+	cvs-200401162142:1.1.1.2
+	cvs-200301141450:1.1.1.2
+	cvs-200312021610:1.1.1.2
+	cvs-200311151930:1.1.1.2
+	cvs-200310311830:1.1.1.2
+	cvs-200310021000:1.1.1.2
+	cvs-200309281111:1.1.1.2
+	cvs-200309171515:1.1.1.2
+	cvs-200308302005:1.1.1.2
+	cvs-200308171200:1.1.1.2
+	ctm-3449:1.1.1.2
+	cvs-200307191610:1.1.1.2
+	ctm-3425:1.1.1.2
+	ctm-3416:1.1.1.2
+	cvs-200307091500:1.1.1.2
+	ctm-3389:1.1.1.2
+	cvs-200306291800:1.1.1.2
+	ctm-3369:1.1.1.2
+	ctm-3341:1.1.1.2
+	MIRBSD_5:1.1.1.1
+	cvs-200306082100:1.1.1.1
+	ctm-3316:1.1.1.1
+	ctm-3272:1.1.1.1
+	ctm-3264:1.1.1.1
+	ctm-3258:1.1.1.1
+	MIRBSD_4:1.1.1.1
+	ctm-3200:1.1.1.1
+	ctm-3188:1.1.1.1
+	ctm-3155:1.1.1.1
+	ctm-3132:1.1.1.1
+	openbsd:1.1.1;
+locks; strict;
+comment	@ * @;
+
+
+1.1
+date	2003.03.22.19.49.05;	author tg;	state Exp;
+branches
+	1.1.1.1;
+next	;
+
+1.1.1.1
+date	2003.03.22.19.49.05;	author tg;	state Exp;
+branches;
+next	1.1.1.2;
+
+1.1.1.2
+date	2003.06.19.13.21.48;	author tg;	state Stab;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@/* $OpenBSD */
+
+#include <sys/types.h>
+#include <stdio.h>
+#include <unistd.h>
+#include <fcntl.h>
+#include <errno.h>
+
+#include <stdlib.h>
+
+#include <sys/ioctl.h>
+
+#include "mpg123.h"
+
+#include <sys/audioio.h>
+
+static void audio_set_format_helper(int fmt, audio_info_t *ainfo);
+
+static int audio_fd = -1;
+static int uptodate = 1;
+static int possible = 0;
+
+static audio_info_t ainfo;
+
+static void really_close_audio()
+{
+  if (audio_fd != -1)
+    close(audio_fd);
+}
+
+static void really_open_audio(struct audio_info_struct *ai)
+{
+  if (audio_fd == -1) {
+    audio_encoding_t cap;
+
+    if(!ai->device) {
+      if(getenv("AUDIODEV")) {
+	if(param.verbose > 1) 
+	   fprintf(stderr,"Using audio-device value from AUDIODEV environment variable!\n");
+	ai->device = getenv("AUDIODEV");
+      }
+      else 
+	ai->device = "/dev/audio";
+    }
+    if ((audio_fd = open (ai->device, O_WRONLY)) == -1) {
+      fprintf (stderr, "Failed to open %.100s: %s\n", ai->device, 
+	       strerror (errno));
+      return;
+    }
+    for (cap.index = 0; ioctl(audio_fd, AUDIO_GETENC, &cap) == 0; cap.index++) {
+      if (cap.flags & AUDIO_ENCODINGFLAG_EMULATED)
+	continue;
+      switch(cap.encoding) {
+      case AUDIO_ENCODING_ULAW:
+	possible |= AUDIO_FORMAT_ULAW_8;
+	break;
+      case AUDIO_ENCODING_ALAW:
+	possible |= AUDIO_FORMAT_ALAW_8;
+	break;
+      case AUDIO_ENCODING_SLINEAR:
+      case AUDIO_ENCODING_SLINEAR_BE:
+      case AUDIO_ENCODING_SLINEAR_LE:
+	if (cap.precision == 8)
+	  possible |= AUDIO_FORMAT_SIGNED_8;
+	else
+	  possible |= AUDIO_FORMAT_SIGNED_16;
+	break;
+      case AUDIO_ENCODING_ULINEAR:
+      case AUDIO_ENCODING_ULINEAR_BE:
+      case AUDIO_ENCODING_ULINEAR_LE:
+	if (cap.precision == 8)
+	  possible |= AUDIO_FORMAT_UNSIGNED_8;
+	else
+	  possible |= AUDIO_FORMAT_UNSIGNED_16;
+	break;
+      }
+    }
+    atexit(really_close_audio);
+  }
+}
+  
+int audio_open(struct audio_info_struct *ai)
+{
+  really_open_audio(ai);
+
+  ai->fn = audio_fd;
+  if(ai->fn < 0)
+     return ai->fn;
+
+  AUDIO_INITINFO(&ainfo);
+  uptodate = 0;
+  {
+    audio_device_t ad;
+    if(ioctl(ai->fn, AUDIO_GETDEV, &ad) == -1)
+      return -1;
+    if(param.verbose > 1)
+      fprintf(stderr,"Audio device type: %s\n",ad.name);
+  }
+
+  if(audio_reset_parameters(ai) < 0) {
+    return -1;
+  }
+
+  if(ai->output > 0)
+    ainfo.play.port = 0;
+  if(ai->output & AUDIO_OUT_INTERNAL_SPEAKER)
+    ainfo.play.port |= AUDIO_SPEAKER;
+  if(ai->output & AUDIO_OUT_HEADPHONES)
+    ainfo.play.port |= AUDIO_HEADPHONE;
+  if(ai->output & AUDIO_OUT_LINE_OUT)
+    ainfo.play.port |= AUDIO_LINE_OUT;
+
+  return ai->fn;
+}
+
+int audio_reset_parameters(struct audio_info_struct *ai)
+{
+  if(ai->rate != -1)
+    ainfo.play.sample_rate = ai->rate;
+  if(ai->channels >= 0)
+    ainfo.play.channels = ai->channels;
+  audio_set_format_helper(ai->format,&ainfo);
+  uptodate = 0;
+
+  return 0;
+}
+
+int audio_rate_best_match(struct audio_info_struct *ai)
+{
+  audio_info_t ainfo;
+ 
+  ainfo.play.sample_rate = ai->rate;
+  if(ioctl(ai->fn, AUDIO_SETINFO, &ainfo) < 0) {
+    ai->rate = 0;
+    return 0;
+  }
+  if(ioctl(ai->fn, AUDIO_GETINFO, &ainfo) < 0) {
+    return -1;
+  }
+  ai->rate = ainfo.play.sample_rate;
+  uptodate = 1;
+  return 0;
+}
+
+int audio_set_rate(struct audio_info_struct *ai)
+{
+  audio_info_t ainfo;
+
+  if(ai->rate != -1) {
+    ainfo.play.sample_rate = ai->rate;
+    uptodate = 0;
+    return 0;
+  }
+  return -1;
+}
+
+int audio_set_channels(struct audio_info_struct *ai)
+{
+  audio_info_t ainfo;
+
+  ainfo.play.channels = ai->channels;
+  uptodate = 0;
+  return 0;
+}
+
+static void audio_set_format_helper(int fmt, audio_info_t *ainfo)
+{
+  switch(fmt) {
+    case -1:
+    case AUDIO_FORMAT_SIGNED_16:
+    default:
+      ainfo->play.encoding = AUDIO_ENCODING_SLINEAR;
+      ainfo->play.precision = 16;
+      break;
+    case AUDIO_FORMAT_UNSIGNED_16:
+      ainfo->play.encoding = AUDIO_ENCODING_ULINEAR;
+      ainfo->play.precision = 16;
+      break;
+    case AUDIO_FORMAT_UNSIGNED_8:
+      ainfo->play.encoding = AUDIO_ENCODING_ULINEAR;
+      ainfo->play.precision = 8;
+      break;
+    case AUDIO_FORMAT_SIGNED_8:
+      ainfo->play.encoding = AUDIO_ENCODING_SLINEAR;
+      ainfo->play.precision = 8;
+      break;
+    case AUDIO_FORMAT_ULAW_8:
+      ainfo->play.encoding = AUDIO_ENCODING_ULAW;
+      ainfo->play.precision = 8;
+      break;
+    case AUDIO_FORMAT_ALAW_8:
+      ainfo->play.encoding = AUDIO_ENCODING_ALAW;
+      ainfo->play.precision = 8;
+      break;
+  }
+}
+
+int audio_set_format(struct audio_info_struct *ai)
+{
+  audio_set_format_helper(ai->format,&ainfo);
+  uptodate = 0;
+
+  return 0;
+}
+
+
+static int try_format(int fmt, struct audio_info_struct *ai)
+{
+  audio_info_t ainfo;
+
+  AUDIO_INITINFO(&ainfo);
+
+  audio_set_format_helper(fmt, &ainfo);
+  ainfo.play.sample_rate = ai->rate;
+  ainfo.play.channels = ai->channels;
+  if(ioctl(audio_fd, AUDIO_SETINFO, &ainfo) >= 0) 
+    return fmt;
+  else
+    return 0;
+}
+
+int audio_get_formats(struct audio_info_struct *ai)
+{
+  int fmts = 0;
+
+  really_open_audio(ai);
+
+  if ((possible & AUDIO_FORMAT_SIGNED_16) == AUDIO_FORMAT_SIGNED_16)
+    fmts |= try_format(AUDIO_FORMAT_SIGNED_16, ai);
+  else if ((possible & AUDIO_FORMAT_UNSIGNED_16) == AUDIO_FORMAT_UNSIGNED_16)
+    fmts |= try_format(AUDIO_FORMAT_UNSIGNED_16, ai);
+  if ((possible & AUDIO_FORMAT_SIGNED_8) == AUDIO_FORMAT_SIGNED_8)
+    fmts |= try_format(AUDIO_FORMAT_SIGNED_8, ai);
+  else if ((possible & AUDIO_FORMAT_UNSIGNED_8) == AUDIO_FORMAT_UNSIGNED_8)
+    fmts |= try_format(AUDIO_FORMAT_UNSIGNED_8, ai);
+  if (!fmts && ((possible & AUDIO_FORMAT_ULAW_8) == AUDIO_FORMAT_ULAW_8))
+    fmts |= try_format(AUDIO_FORMAT_ULAW_8, ai);
+  if (!fmts && ((possible & AUDIO_FORMAT_ALAW_8) == AUDIO_FORMAT_ALAW_8))
+    fmts |= try_format(AUDIO_FORMAT_ALAW_8, ai);
+  return fmts;
+}
+    
+
+int audio_play_samples(struct audio_info_struct *ai,unsigned char *buf,int len)
+{
+  if (!uptodate) {
+    uptodate = 1;
+    ioctl(ai->fn, AUDIO_SETINFO, &ainfo);
+  }
+  
+  return write(ai->fn,buf,len);
+}
+
+int audio_close(struct audio_info_struct *ai)
+{
+  return 0;
+}
+
+void audio_queueflush (struct audio_info_struct *ai)
+{
+  ioctl (ai->fn, AUDIO_FLUSH, 0);
+}
+@
+
+
+1.1.1.1
+log
+@Import OpenBSD 3.3 ports repository from CTM 3132 the first time
+This continues opening an OpenBSD-mirabile (aka MirBSD) repository.
+
+### MirBSD is:
+# Copyright (c) 1982-2003 by Thorsten "mirabile" Glaser <x86@@ePost.de>
+# Copyright © 1968-2003  The authors of And contributors to UNIX®, the
+#       C Language, BSD/Berkeley Unix; 386BSD, NetBSD 1.1 and OpenBSD.
+#
+# Anyone who obtained a copy of this work is hereby permitted to freely use,
+# distribute, modify, merge, sublicence, give away or sell it as long as the
+# authors are given due credit and the following notice is retained:
+#
+# This work is provided "as is", with no explicit or implicit warranty what-
+# soever. Use it only at your own risk. In no event may an author or contri-
+# butor be held liable for any damage, directly or indirectly, that origina-
+# ted through or is caused by creation or modification of this work.
+
+MirBSD is my private tree. MirBSD does not differ very much from OpenBSD
+and intentionally tracks OpenBSD. That's why it _is_ OpenBSD, just not the
+official one. It's like with DarrenBSD.
+
+At time of this writing, no advertising for MirBSD must be done,
+because the advertising clause has not yet been sorted out.
+
+http://templeofhate.com/tglaser/MirBSD/index.php
+@
+text
+@@
+
+
+1.1.1.2
+log
+@sync Ports with OpenBSD CTM#3341 plus xpdf security fix
+@
+text
+@d1 1
+a1 25
+/* $OpenBSD: audio_openbsd.c,v 1.6 2003/06/12 22:25:59 pvalchev Exp $ */
+/*-
+ * Copyright (c) 1999 Marc Espie.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE OPENBSD PROJECT AND CONTRIBUTORS 
+ * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT 
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR 
+ * A PARTICULAR PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL THE OPENBSD
+ * PROJECT OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, 
+ * SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT 
+ * LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, 
+ * DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY 
+ * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT 
+ * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE 
+ * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ */
+@
+

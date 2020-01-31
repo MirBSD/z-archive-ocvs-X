@@ -1,0 +1,387 @@
+head	1.1;
+branch	1.1.1;
+access;
+symbols
+	tg-mergetmp-2:1.1.1.1
+	cvs-200410241530:1.1.1.1
+	cvs-200410012000:1.1.1.1
+	cvs-200407141120:1.1.1.1
+	cvs-200406231010:1.1.1.1
+	MIRBSD_7quater:1.1.1.1
+	cvs-200405271510:1.1.1.1
+	XFree86_4_4_0:1.1.9.1
+	cvs-200403021700:1.1.1.1
+	XFREE86_20040213:1.1.9.1
+	xc:1.1.9
+	cvs-200401291925:1.1.1.1
+	MIRBSD_7_ALPHA:1.1.1.1.0.4
+	MIRBSD_7:1.1.1.1.0.2
+	MIRBSD_7ter:1.1.1.1
+	cvs-20011091815:1.1.1.1
+	cvs-200309162130:1.1.1.1
+	cvs-200308302005:1.1.1.1
+	ctmx-0387:1.1.1.1
+	ctmx-0384:1.1.1.1
+	MIRBSD_5:1.1.1.1
+	ctmx-0375:1.1.1.1
+	ctmx-0373:1.1.1.1
+	ctm-0371:1.1.1.1
+	ctm-0370:1.1.1.1
+	MIRBSD_4:1.1.1.1
+	ctm-0363:1.1.1.1
+	ctm-0359:1.1.1.1
+	ctm-0349:1.1.1.1
+	openbsd:1.1.1;
+locks; strict;
+comment	@ * @;
+
+
+1.1
+date	2003.03.22.20.11.05;	author tg;	state Exp;
+branches
+	1.1.1.1
+	1.1.9.1;
+next	;
+
+1.1.1.1
+date	2003.03.22.20.11.05;	author tg;	state Stab;
+branches;
+next	;
+
+1.1.9.1
+date	2004.02.14.19.29.29;	author tg;	state Exp;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@/* $Xorg: PRead.c,v 1.4 2001/02/09 02:05:58 xorgcvs Exp $ */
+/*
+
+Copyright 1996, 1998  The Open Group
+
+Permission to use, copy, modify, distribute, and sell this software and its
+documentation for any purpose is hereby granted without fee, provided that
+the above copyright notice appear in all copies and that both that
+copyright notice and this permission notice appear in supporting
+documentation.
+
+The above copyright notice and this permission notice shall be included
+in all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
+OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABIL-
+ITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT
+SHALL THE OPEN GROUP BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABIL-
+ITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
+IN THE SOFTWARE.
+
+Except as contained in this notice, the name of The Open Group shall
+not be used in advertising or otherwise to promote the sale, use or
+other dealings in this Software without prior written authorization from
+The Open Group.
+
+*/
+
+#include "RxI.h"
+#include <ctype.h>
+
+
+/* Not null terminated string */
+typedef struct {
+    char *ptr;			/* beginning of string */
+    int length;			/* length of string */
+} NString;
+
+
+#ifdef NETSCAPE_PLUGIN
+/* utility function for netscape plugin where realloc is not available
+ * it's too bad we need both the old size and the new one...
+ */
+void *
+_RxRealloc(void *p, size_t olds, size_t s)
+{
+    void *np = Malloc(s);
+    if (np) {
+	memcpy(np, p, olds);
+	Free(p);
+    }
+    return np;
+}
+#endif
+
+
+/* get next word and return trailing stream */
+static char *
+NextWord(char *stream, char *limit, NString *word)
+{
+    /* skip leading whitespace */
+    while (isspace((int) *stream) && *stream && stream != limit)
+	stream++;
+    word->ptr = stream;
+    /* go to first whitespace */
+    while (!isspace((int) *stream) && *stream && stream != limit)
+	stream++;
+    word->length = stream - word->ptr;
+    return stream;
+}
+
+
+/* get next chunk of text, with possible quoted sections,
+   and return trailing stream */
+static char *
+NextChunk(char *stream, char *limit, NString *word)
+{
+    /* skip leading whitespace */
+    while (isspace((int) *stream) && *stream && stream != limit)
+	stream++;
+    word->ptr = stream;
+
+    /* go to first whitespace or end of string */
+    while (!isspace((int) *stream) && *stream && stream != limit) {
+	if (*stream == '"' || *stream == '\'') {
+	    char quote = *stream;
+	    do
+		stream++;
+	    while (*stream != quote && *stream && stream != limit);
+	    if (*stream && stream != limit)
+		stream++;
+	    break;
+	} else
+	    stream++;
+    }
+    word->length = stream - word->ptr;
+    return stream;
+}
+
+
+/* get next SGML element "< ... >" and return next trailing stream */
+static char *
+NextElement(char *stream, NString *element)
+{
+
+    /* look for opening bracket */
+    while (*stream != '<' && *stream)
+	stream++;
+
+    element->ptr = stream;
+
+    /* look for closing bracket */
+    while (*stream != '>' && *stream)
+	stream++;
+
+    element->length = stream - element->ptr;
+
+    return *stream ? stream + 1 : stream;
+}
+
+
+/* seek next PARAM element content: "<PARAM ... >" (delimiters excluded)
+   and return next trailing stream */
+static char *
+NextParam(char *stream, NString *param)
+{
+    NString element, word;
+
+    do {
+	stream = NextElement(stream, &element);
+
+	if (element.length)
+	    /* get element name */
+	    (void) NextWord(element.ptr + 1, element.ptr + element.length - 1,
+			    &word);
+	else {
+	    /* no more elements stop here */
+	    param->ptr = 0;
+	    param->length = 0;
+
+	    return stream;
+	}
+
+	/* check if it's a PARAM element */
+    } while(word.length != 5 && memcmp("PARAM", word.ptr, 5) != 0 && *stream);
+
+    param->ptr = word.ptr + word.length;
+    param->length = element.length - word.length - 1; /* delimiters excluded */
+
+    return stream;
+}
+
+
+/* return literal value as a Null terminated string,
+   removing possible quotes and extra whitespace */
+static char *
+GetLiteralValue(NString *literal)
+{
+    char *ptr, *limit, *value, *vptr;
+    char quote;
+    int skip;
+
+    value = vptr = (char *)Malloc(literal->length + 1);
+    if (!value)
+	return 0;
+
+    ptr = literal->ptr;
+    limit = ptr + literal->length;
+    quote = (*ptr == '"' || *ptr == '\'') ? *ptr++ : '\0';
+    skip = 0;
+    do
+	if (isspace((int) *ptr)) {
+	    if (!skip) {
+		*vptr++ = ' ';
+		skip = 1;
+	    }
+	    ptr++;
+	} else {
+	    skip = 0;
+	    *vptr++ = *ptr++;
+	}
+    while (*ptr != quote && ptr != limit);
+    *vptr = '\0';
+
+    return value;
+}
+
+
+/* parse PARAM tag content: " NAME=... VALUE=... " */
+static int
+ParseParam(NString *param, char **name_ret, char **value_ret)
+{
+    NString word, name, value;
+    char *stream = param->ptr;
+    char *limit = param->ptr + param->length;
+
+    /* look for the name part */
+    do
+	stream = NextChunk(stream, limit, &word);
+    while (word.length < 5 && memcmp("NAME=", word.ptr, 5 != 0) && *stream);
+    if (stream == limit)
+	return 1;
+    name.ptr = word.ptr + 5;
+    name.length = word.length - 5;
+    *name_ret = GetLiteralValue(&name);
+
+    /* look for the value part */
+    do
+	stream = NextChunk(stream, limit, &word);
+    while (word.length < 6 && memcmp("VALUE=", word.ptr, 6) != 0 && *stream);
+    value.ptr = word.ptr + 6;
+    value.length = word.length - 6;
+    *value_ret = GetLiteralValue(&value);
+
+    return 0;
+}
+
+/* how much we make a params array bigger every time we reach the limit */
+#define PARAMSINC 10
+
+/* read an RX document stream and augment the given list of arguments */
+int
+RxReadParams(char *stream,
+	     char **argn_ret[], char **argv_ret[], int *argc_ret)
+{
+    char **argv, **argn;
+    int argc, n;
+    NString param;
+    char *name, *value;
+    int status;
+
+    status = 0;
+    argc = n = 0;
+    argn = argv = NULL;
+    if (stream != NULL) {
+	do {
+	    stream = NextParam(stream, &param);
+	    if (param.length != 0 && ParseParam(&param, &name, &value) == 0) {
+		argc++;
+		if (n == 0) {	/* alloc first block */
+		    n = PARAMSINC;
+		    argn = (char **)Malloc(sizeof(char *) * n);
+		    if (!argn)
+			return 1;
+		    argv = (char **)Malloc(sizeof(char *) * n);
+		    if (!argv) {
+			Free(argn);
+			return 1;
+		    }
+		}
+		if (argc % PARAMSINC == 0) { /* we need to add a block */
+		    n += PARAMSINC;
+		    argn = (char **)
+		      Realloc(argn, sizeof(char *) * argc, sizeof(char *) * n);
+		    argv = (char **)
+		      Realloc(argv, sizeof(char *) * argc, sizeof(char *) * n);
+		    if (!argn || !argv) {
+			argc--;
+			status = 1;
+			break;
+		    }
+		}
+		argn[argc - 1] = name;
+		argv[argc - 1] = value;
+	    }
+	} while (*stream);
+    }
+    *argn_ret = argn;
+    *argv_ret = argv;
+    *argc_ret = argc;
+
+    return status;
+}
+@
+
+
+1.1.9.1
+log
+@OpenBSD just has imported exactly this tree into their vendor branch,
+called the same tag, in XF4/xc
+This is, apparently, the last XFree86 snapshot before the licence change
+(ie, addition of the advertising clause)
+
+Since the developers don't see any problems with that, and we would like
+to integrate improvements done by the remaining one or two (or so) XFree86
+developers (j/k), this prepares enabling us to update X-Window in the future.
+@
+text
+@@
+
+
+1.1.1.1
+log
+@Import OpenBSD 3.3 XF4 repository from CTM 3132 the first time
+This finalizes starting an OpenBSD-mirabile (aka MirBSD) repository.
+
+### MirBSD is:
+# Copyright (c) 1982-2003 by Thorsten "mirabile" Glaser <x86@@ePost.de>
+# Copyright © 1968-2003  The authors of And contributors to UNIX®, the
+#       C Language, BSD/Berkeley Unix; 386BSD, NetBSD 1.1 and OpenBSD.
+#
+# Anyone who obtained a copy of this work is hereby permitted to freely use,
+# distribute, modify, merge, sublicence, give away or sell it as long as the
+# authors are given due credit and the following notice is retained:
+#
+# This work is provided "as is", with no explicit or implicit warranty what-
+# soever. Use it only at your own risk. In no event may an author or contri-
+# butor be held liable for any damage, directly or indirectly, that origina-
+# ted through or is caused by creation or modification of this work.
+
+MirBSD is my private tree. MirBSD does not differ very much from OpenBSD
+and intentionally tracks OpenBSD. That's why it _is_ OpenBSD, just not the
+official one. It's like with DarrenBSD.
+
+At time of this writing, no advertising for MirBSD must be done,
+because the advertising clause has not yet been sorted out.
+
+http://templeofhate.com/tglaser/MirBSD/index.php
+@
+text
+@@

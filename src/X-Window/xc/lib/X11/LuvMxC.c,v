@@ -1,0 +1,350 @@
+head	1.1;
+branch	1.1.1;
+access;
+symbols
+	tg-mergetmp-2:1.1.1.2
+	cvs-200410241530:1.1.1.2
+	cvs-200410012000:1.1.1.2
+	cvs-200407141120:1.1.1.2
+	cvs-200406231010:1.1.1.2
+	MIRBSD_7quater:1.1.1.1
+	cvs-200405271510:1.1.1.2
+	XFree86_4_4_0:1.1.9.1
+	cvs-200403021700:1.1.1.2
+	XFREE86_20040213:1.1.9.1
+	xc:1.1.9
+	cvs-200401291925:1.1.1.1
+	MIRBSD_7_ALPHA:1.1.1.1.0.4
+	MIRBSD_7:1.1.1.1.0.2
+	MIRBSD_7ter:1.1.1.1
+	cvs-20011091815:1.1.1.1
+	cvs-200309162130:1.1.1.1
+	cvs-200308302005:1.1.1.1
+	ctmx-0387:1.1.1.1
+	ctmx-0384:1.1.1.1
+	MIRBSD_5:1.1.1.1
+	ctmx-0375:1.1.1.1
+	ctmx-0373:1.1.1.1
+	ctm-0371:1.1.1.1
+	ctm-0370:1.1.1.1
+	MIRBSD_4:1.1.1.1
+	ctm-0363:1.1.1.1
+	ctm-0359:1.1.1.1
+	ctm-0349:1.1.1.1
+	openbsd:1.1.1;
+locks; strict;
+comment	@ * @;
+
+
+1.1
+date	2003.03.22.20.04.31;	author tg;	state Exp;
+branches
+	1.1.1.1
+	1.1.9.1;
+next	;
+
+1.1.1.1
+date	2003.03.22.20.04.31;	author tg;	state Exp;
+branches;
+next	1.1.1.2;
+
+1.1.1.2
+date	2004.03.02.18.01.02;	author tg;	state Stab;
+branches;
+next	;
+
+1.1.9.1
+date	2004.02.14.19.18.32;	author tg;	state Exp;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@/* $Xorg: LuvMxC.c,v 1.3 2000/08/17 19:44:41 cpqbld Exp $ */
+
+/*
+ * Code and supporting documentation (c) Copyright 1990 1991 Tektronix, Inc.
+ * 	All Rights Reserved
+ * 
+ * This file is a component of an X Window System-specific implementation
+ * of XCMS based on the TekColor Color Management System.  Permission is
+ * hereby granted to use, copy, modify, sell, and otherwise distribute this
+ * software and its documentation for any purpose and without fee, provided
+ * that this copyright, permission, and disclaimer notice is reproduced in
+ * all copies of this software and in supporting documentation.  TekColor
+ * is a trademark of Tektronix, Inc.
+ * 
+ * Tektronix makes no representation about the suitability of this software
+ * for any purpose.  It is provided "as is" and with all faults.
+ * 
+ * TEKTRONIX DISCLAIMS ALL WARRANTIES APPLICABLE TO THIS SOFTWARE,
+ * INCLUDING THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A
+ * PARTICULAR PURPOSE.  IN NO EVENT SHALL TEKTRONIX BE LIABLE FOR ANY
+ * SPECIAL, INDIRECT OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES WHATSOEVER
+ * RESULTING FROM LOSS OF USE, DATA, OR PROFITS, WHETHER IN AN ACTION OF
+ * CONTRACT, NEGLIGENCE, OR OTHER TORTIOUS ACTION, ARISING OUT OF OR IN
+ * CONNECTION WITH THE USE OR THE PERFORMANCE OF THIS SOFTWARE.
+ *
+ *
+ *
+ *	NAME
+ *		CIELuvMxC.c
+ *
+ *	DESCRIPTION
+ *		Source for the XcmsCIELuvQueryMaxC() gamut boundary
+ *		querying routine.
+ *
+ */
+/* $XFree86: xc/lib/X11/LuvMxC.c,v 1.3 2001/01/17 19:41:39 dawes Exp $ */
+
+#include "Xlibint.h"
+#include "Xcmsint.h"
+#include <math.h>
+
+/*
+ *	DEFINES
+ */
+#define MAXBISECTCOUNT	100
+#define EPS	        (XcmsFloat)0.001
+#define START_CHROMA	(XcmsFloat)2.2
+#define TOPL		(XcmsFloat)100.0
+/*
+ *	EXTERNS
+ */
+extern Status _XcmsCIELuvQueryMaxLCRGB();
+
+/* CvColW.c */
+extern Status _XcmsConvertColorsWithWhitePt();
+
+
+/************************************************************************
+ *									*
+ *			 PUBLIC ROUTINES				*
+ *									*
+ ************************************************************************/
+
+/*
+ *	NAME
+ *		XcmsCIELuvQueryMaxC - max chroma for a hue_angle and L_star
+ *
+ *	SYNOPSIS
+ */
+Status
+XcmsCIELuvQueryMaxC(ccc, hue_angle, L_star, pColor_return)
+    XcmsCCC ccc;
+    XcmsFloat hue_angle;	    /* hue angle in degrees */
+    XcmsFloat L_star;
+    XcmsColor *pColor_return;
+/*
+ *	DESCRIPTION
+ *		Return the maximum chroma for a specific hue_angle and L_star.
+ *		The returned format is in XcmsCIELuvFormat.
+ *
+ *
+ *	ASSUMPTIONS
+ *		This routine assumes that the white point associated with
+ *		the color specification is the Screen White Point.  The
+ *		Screen White Point will also be associated with the
+ *		returned color specification.
+ *
+ *	RETURNS
+ *		XcmsFailure - Failure
+ *              XcmsSuccess - Succeeded
+ *
+ */
+{
+    XcmsCCCRec	myCCC;
+    XcmsColor  tmp;
+    XcmsColor  max_lc;
+    XcmsFloat n_L_star, last_L_star, prev_L_star;
+    XcmsFloat hue, lastuStar, lastvStar, /*lastChroma,*/ maxDist, nT, rFactor;
+    XcmsRGBi   rgb_saved;
+    int nCount, nMaxCount;
+
+    /*
+     * Check Arguments
+     */
+    if (ccc == NULL || pColor_return == NULL) {
+	return(XcmsFailure);
+    }
+
+    /* Use my own CCC  and inherit screen white Pt */
+    memcpy ((char *)&myCCC, (char *)ccc, sizeof(XcmsCCCRec));
+    myCCC.clientWhitePt.format = XcmsUndefinedFormat; 
+    myCCC.gamutCompProc = (XcmsCompressionProc)NULL;/* no gamut comp func */
+
+    while (hue_angle < 0.0) {
+	hue_angle += 360.0;
+    }
+    while (hue_angle >= 360.0) {
+	hue_angle -= 360.0;
+    } 
+
+    hue = radians(hue_angle);
+    tmp.spec.CIELuv.L_star = L_star;
+    tmp.spec.CIELuv.u_star = XCMS_CIEUSTAROFHUE(hue, START_CHROMA);
+    tmp.spec.CIELuv.v_star = XCMS_CIEVSTAROFHUE(hue, START_CHROMA);
+    tmp.pixel = pColor_return->pixel;
+    tmp.format = XcmsCIELuvFormat;
+
+    /* Step 1: compute the maximum L_star and chroma for this hue. */
+    memcpy((char *)&max_lc, (char *)&tmp, sizeof(XcmsColor));
+    if (_XcmsCIELuvQueryMaxLCRGB(&myCCC, hue, &max_lc, &rgb_saved)
+	== XcmsFailure) {
+	    return(XcmsFailure);
+    }
+
+    /*
+     * Step 2:  Do a bisection here to compute the maximum chroma
+     *          Note the differences between when the point to be found
+     *          is above the maximum LC point and when it is below.
+     */
+    if (L_star <= max_lc.spec.CIELuv.L_star) {
+	maxDist = max_lc.spec.CIELuv.L_star;
+    } else {
+	maxDist = TOPL - max_lc.spec.CIELuv.L_star;
+    }
+
+    n_L_star = L_star;
+    last_L_star = -1.0;
+    nMaxCount = MAXBISECTCOUNT;
+    rFactor = 1.0;
+
+    for (nCount = 0; nCount < nMaxCount; nCount++) {
+	prev_L_star =  last_L_star;
+	last_L_star =  tmp.spec.CIELuv.L_star;
+/*	lastChroma = XCMS_CIELUV_PMETRIC_CHROMA(tmp.spec.CIELuv.u_star,  */
+/*						tmp.spec.CIELuv.v_star); */
+	lastuStar = tmp.spec.CIELuv.u_star;
+	lastvStar = tmp.spec.CIELuv.v_star;
+	nT = (n_L_star - max_lc.spec.CIELuv.L_star) / maxDist * rFactor;
+        /* printf("(n_L_star, nT) = %lf %lf ", n_L_star, nT); */
+	if (nT > 0) {
+	    tmp.spec.RGBi.red = rgb_saved.red * (1.0 - nT) + nT;
+	    tmp.spec.RGBi.green = rgb_saved.green * (1.0 - nT) + nT;
+	    tmp.spec.RGBi.blue  = rgb_saved.blue * (1.0 - nT) + nT;
+	} else {
+	    tmp.spec.RGBi.red = rgb_saved.red + (rgb_saved.red * nT);
+	    tmp.spec.RGBi.green = rgb_saved.green + (rgb_saved.green * nT);
+	    tmp.spec.RGBi.blue = rgb_saved.blue + (rgb_saved.blue * nT);
+	}
+	tmp.format = XcmsRGBiFormat;
+
+	/* convert from RGB to CIELuv */
+	if (_XcmsConvertColorsWithWhitePt(&myCCC, &tmp,
+			    ScreenWhitePointOfCCC(&myCCC), 1, XcmsCIELuvFormat,
+			    (Bool *) NULL) == XcmsFailure) {
+	    return(XcmsFailure);
+	}
+
+	/*
+	 * Now check if we've reached the target L_star
+	 */
+	/* printf("result Lstar = %lf\n", tmp.spec.CIELuv.L_star); */
+	if (tmp.spec.CIELuv.L_star <= L_star + EPS &&
+	    tmp.spec.CIELuv.L_star >= L_star - EPS) {
+		memcpy((char *)pColor_return, (char *)&tmp, sizeof(XcmsColor));
+		return(XcmsSuccess);
+	}
+	if (nT > 0) {
+	    n_L_star += ((TOPL - n_L_star) * 
+			 (L_star - tmp.spec.CIELuv.L_star)) / (TOPL - L_star);
+	} else {
+	    n_L_star *= L_star / tmp.spec.CIELuv.L_star;
+	}
+	if (tmp.spec.CIELuv.L_star <= prev_L_star + EPS &&
+	    tmp.spec.CIELuv.L_star >= prev_L_star - EPS) {
+		rFactor *= 0.5;  /* selective relaxation employed */
+		/* printf("rFactor = %lf\n", rFactor); */
+	}
+    }
+    if (XCMS_FABS(last_L_star - L_star) < 
+	XCMS_FABS(tmp.spec.CIELuv.L_star - L_star)) {
+	    tmp.spec.CIELuv.u_star = lastuStar;
+	    tmp.spec.CIELuv.v_star = lastvStar;
+/*	    tmp.spec.CIELuv.u_star = XCMS_CIEUSTAROFHUE(hue, lastChroma); */
+/*	    tmp.spec.CIELuv.v_star = XCMS_CIEVSTAROFHUE(hue, lastChroma); */
+    }
+    tmp.spec.CIELuv.L_star = L_star;
+    memcpy((char *)pColor_return, (char *)&tmp, sizeof(XcmsColor));
+    return(XcmsSuccess);
+}
+@
+
+
+1.1.9.1
+log
+@OpenBSD just has imported exactly this tree into their vendor branch,
+called the same tag, in XF4/xc
+This is, apparently, the last XFree86 snapshot before the licence change
+(ie, addition of the advertising clause)
+
+Since the developers don't see any problems with that, and we would like
+to integrate improvements done by the remaining one or two (or so) XFree86
+developers (j/k), this prepares enabling us to update X-Window in the future.
+@
+text
+@d36 1
+a36 1
+/* $XFree86: xc/lib/X11/LuvMxC.c,v 1.4 2003/04/13 19:22:17 dawes Exp $ */
+a40 1
+#include "Cv.h"
+d49 7
+@
+
+
+1.1.1.1
+log
+@Import OpenBSD 3.3 XF4 repository from CTM 3132 the first time
+This finalizes starting an OpenBSD-mirabile (aka MirBSD) repository.
+
+### MirBSD is:
+# Copyright (c) 1982-2003 by Thorsten "mirabile" Glaser <x86@@ePost.de>
+# Copyright © 1968-2003  The authors of And contributors to UNIX®, the
+#       C Language, BSD/Berkeley Unix; 386BSD, NetBSD 1.1 and OpenBSD.
+#
+# Anyone who obtained a copy of this work is hereby permitted to freely use,
+# distribute, modify, merge, sublicence, give away or sell it as long as the
+# authors are given due credit and the following notice is retained:
+#
+# This work is provided "as is", with no explicit or implicit warranty what-
+# soever. Use it only at your own risk. In no event may an author or contri-
+# butor be held liable for any damage, directly or indirectly, that origina-
+# ted through or is caused by creation or modification of this work.
+
+MirBSD is my private tree. MirBSD does not differ very much from OpenBSD
+and intentionally tracks OpenBSD. That's why it _is_ OpenBSD, just not the
+official one. It's like with DarrenBSD.
+
+At time of this writing, no advertising for MirBSD must be done,
+because the advertising clause has not yet been sorted out.
+
+http://templeofhate.com/tglaser/MirBSD/index.php
+@
+text
+@@
+
+
+1.1.1.2
+log
+@That's what OpenBSD will, probably, ship as XF4 in 3.5
+their last sync against XFree86 4.3-current has been
+imported into our vendor branch, too
+@
+text
+@d36 1
+a36 1
+/* $XFree86: xc/lib/X11/LuvMxC.c,v 1.4 2003/04/13 19:22:17 dawes Exp $ */
+a40 1
+#include "Cv.h"
+d49 7
+@
+

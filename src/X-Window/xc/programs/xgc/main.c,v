@@ -1,0 +1,713 @@
+head	1.1;
+branch	1.1.1;
+access;
+symbols
+	tg-mergetmp-2:1.1.1.2
+	cvs-200410241530:1.1.1.2
+	cvs-200410012000:1.1.1.2
+	cvs-200407141120:1.1.1.2
+	cvs-200406231010:1.1.1.2
+	MIRBSD_7quater:1.1.1.1
+	cvs-200405271510:1.1.1.2
+	XFree86_4_4_0:1.1.9.1
+	cvs-200403021700:1.1.1.2
+	XFREE86_20040213:1.1.9.1
+	xc:1.1.9
+	cvs-200401291925:1.1.1.1
+	MIRBSD_7_ALPHA:1.1.1.1.0.4
+	MIRBSD_7:1.1.1.1.0.2
+	MIRBSD_7ter:1.1.1.1
+	cvs-20011091815:1.1.1.1
+	cvs-200309162130:1.1.1.1
+	cvs-200308302005:1.1.1.1
+	ctmx-0387:1.1.1.1
+	ctmx-0384:1.1.1.1
+	MIRBSD_5:1.1.1.1
+	ctmx-0375:1.1.1.1
+	ctmx-0373:1.1.1.1
+	ctm-0371:1.1.1.1
+	ctm-0370:1.1.1.1
+	MIRBSD_4:1.1.1.1
+	ctm-0363:1.1.1.1
+	ctm-0359:1.1.1.1
+	ctm-0349:1.1.1.1
+	openbsd:1.1.1;
+locks; strict;
+comment	@ * @;
+
+
+1.1
+date	2003.03.22.20.10.22;	author tg;	state Exp;
+branches
+	1.1.1.1
+	1.1.9.1;
+next	;
+
+1.1.1.1
+date	2003.03.22.20.10.22;	author tg;	state Exp;
+branches;
+next	1.1.1.2;
+
+1.1.1.2
+date	2004.03.02.18.40.15;	author tg;	state Stab;
+branches;
+next	;
+
+1.1.9.1
+date	2004.02.14.19.28.46;	author tg;	state Exp;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@/* $XConsortium: main.c,v 1.22 94/04/17 20:45:30 rws Exp $ */
+/*
+
+Copyright (c) 1991  X Consortium
+
+Permission is hereby granted, free of charge, to any person obtaining
+a copy of this software and associated documentation files (the
+"Software"), to deal in the Software without restriction, including
+without limitation the rights to use, copy, modify, merge, publish,
+distribute, sublicense, and/or sell copies of the Software, and to
+permit persons to whom the Software is furnished to do so, subject to
+the following conditions:
+
+The above copyright notice and this permission notice shall be included
+in all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
+OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
+IN NO EVENT SHALL THE X CONSORTIUM BE LIABLE FOR ANY CLAIM, DAMAGES OR
+OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE,
+ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR
+OTHER DEALINGS IN THE SOFTWARE.
+
+Except as contained in this notice, the name of the X Consortium shall
+not be used in advertising or otherwise to promote the sale, use or
+other dealings in this Software without prior written authorization
+from the X Consortium.
+
+*/
+/* $XFree86: xc/programs/xgc/main.c,v 1.5 2001/10/28 03:34:34 tsi Exp $ */
+
+/* xgc
+**
+** main.c
+**
+** Contains the bare minimum necessary to oversee the whole operation.
+*/
+
+#include <X11/Intrinsic.h>
+#include <X11/StringDefs.h>
+#include <X11/Xaw/Form.h>
+#include <X11/Xaw/Command.h>
+#include <X11/Xaw/AsciiText.h>
+#include <X11/Shell.h>
+#include <stdio.h>
+#include <stdlib.h>
+
+#include "xgc.h"
+#define DEFINE_TILE
+#include "tile"
+#include "main.h"
+
+static void fill_up_commandform();
+extern void run_test();
+static void quit();
+static void quitAction();
+static void clear_test_window();
+static void clear_result_window();
+extern void start_playback();
+extern void read_from_keyboard();
+extern void toggle_recordbutton();
+static void set_foreground_and_background();
+extern ChoiceDesc *create_choice();
+extern void choose_defaults();
+extern void line_up_labels();
+extern Widget create_text_choice();
+extern void create_planemask_choice();
+extern void create_dashlist_choice();
+extern void create_testfrac_choice();
+extern void GC_change_foreground();
+extern void GC_change_background();
+extern void GC_change_font();
+extern void close_file_if_recording();
+extern void set_text (Widget ww, char *string);
+
+#ifdef notdef
+int fildes[2];			/* for pipe */
+FILE *outend;
+#endif
+
+XStuff X;			/* GC stuff plus some global variables */
+Boolean recording = FALSE;	/* Whether we're recording into a file */
+XtAppContext appcontext;	/* To make Xt happy */
+static Atom wm_delete_window;
+static XtActionsRec actions[] = {
+    {"quit",	quitAction}
+};
+
+static Widget bigdaddy;		/* the top level widget */
+       Widget topform;		/* form surrounding the whole thing */
+       Widget GCform;		/* form in which you choose the GC */
+static Widget Testform;		/* form in which you choose the test */
+       Widget testchoiceform;   /* form inside that */
+  ChoiceDesc *testchoicedesc;	/* record of what widgets are in the
+				   test choice form */
+static Widget commandform;	/* form with run, quit, clear, etc. */
+       Widget test;		/* where the test is run */
+       Widget result;           /* where the results are displayed */
+static Widget runbutton;	/* command for running */
+static Widget quitbutton;	/* command for quitting */
+static Widget clearbutton;	/* command for clearing the test window */
+       Widget recordbutton;	/* start/stop recording */
+static Widget playbackbutton;	/* playback from file */
+static Widget keyinputbutton;	/* start reading from keyboard */
+static Widget GCchoices[NUMCHOICES]; /* all the forms that contain stuff
+				        for changing GC's*/
+  ChoiceDesc *GCdescs[NUMCHOICES]; /* record of the widgets inside
+				      the choice widgets */
+       Widget planemaskchoice;	/* form for choosing the plane mask */
+       Widget dashlistchoice;	/* form for choosing the dash list */
+static Widget linewidthchoice;	/* form for choosing line width */
+       Widget linewidthtext;	/* text widget within that */
+static Widget fontchoice;	/* form for choosing the font */
+       Widget fonttext;		/* text widget within that */
+static Widget foregroundchoice;	/* form for choosing foreground */
+       Widget foregroundtext;	/* text widget within that */
+static Widget backgroundchoice;	/* form for choosing background */
+       Widget backgroundtext;	/* text widget within that */
+static Widget percentchoice;	/* form for choosing percentage of test */
+
+/* main(argc.argv)
+** ---------------
+** Initializes the toolkit, initializes data, puts up the widgets,
+** starts the event loop.
+*/
+
+int
+main(argc,argv)
+     int argc;
+     char **argv;
+{
+  static Arg shellargs[] = {
+    {XtNinput, 	      (XtArgVal) True}
+  };
+
+  static Arg testformargs[] = {	
+    {XtNfromVert,     (XtArgVal) NULL} /* put it under GCform */
+  };
+
+  static Arg commandformargs[] = {
+    {XtNfromVert,    (XtArgVal) NULL}, /* put it under GCform */
+    {XtNfromHoriz,   (XtArgVal) NULL}  /* and to the right of Testform */
+  };
+
+  static Arg testargs[] = {
+    {XtNheight,     (XtArgVal) 400},
+    {XtNwidth,      (XtArgVal) 400},
+    {XtNfromHoriz,  (XtArgVal) NULL} /* put it to the right of GCform */
+  };
+
+  static Arg resultargs[] = {
+    {XtNheight,     (XtArgVal) 50},
+    {XtNwidth,      (XtArgVal) 400},
+    {XtNfromHoriz,  (XtArgVal) NULL}, /* put it to the right of GCform */
+    {XtNfromVert,   (XtArgVal) NULL} /* and under test */
+  };
+
+  static Arg gcchoiceargs[] = {
+    {XtNfromVert,    (XtArgVal) NULL}, /* put it under the one above it */
+    {XtNfromHoriz,   (XtArgVal) NULL}, /* and next to that one */
+    {XtNborderWidth, (XtArgVal) 0}     /* no ugly borders */
+  };
+
+  static Arg testchoiceargs[] = {
+    {XtNborderWidth, (XtArgVal) 0}
+  };
+
+  int i;			/* counter */
+
+  /* Open the pipe */
+
+#ifdef notdef
+  pipe(fildes);
+  outend = fdopen(fildes[0],"r");
+#endif
+
+  /* Initialize toolkit stuff */
+
+  XtSetLanguageProc(NULL, (XtLanguageProc) NULL, NULL);
+
+  bigdaddy = XtAppInitialize(&appcontext, "Xgc", (XrmOptionDescList) NULL,
+			     (Cardinal) 0, &argc, argv, (String *) NULL,
+			     shellargs, XtNumber(shellargs));
+  X.dpy = XtDisplay(bigdaddy);
+  XtAppAddActions(appcontext, actions, XtNumber(actions));
+  XtOverrideTranslations
+      (bigdaddy, XtParseTranslationTable("<Message>WM_PROTOCOLS: quit()"));
+
+  /* Initialize GC stuff */
+
+  X.scr = DefaultScreenOfDisplay(X.dpy);
+  X.gc = XCreateGC(X.dpy,RootWindowOfScreen(X.scr),0,(XGCValues *) NULL);
+  X.miscgc = XCreateGC(X.dpy,RootWindowOfScreen(X.scr),0,(XGCValues *) NULL);
+
+  /* Find out what the foreground & background are, and update the GC
+  ** accordingly */
+
+  set_foreground_and_background();
+
+  topform = XtCreateManagedWidget("topform",formWidgetClass,bigdaddy,
+				  NULL,0);
+
+  GCform = XtCreateManagedWidget("GCform",formWidgetClass,topform,
+				NULL,0);
+
+  /* create all the GCchoices forms */
+
+  for (i=0;i<NUMCHOICES;++i) {
+    if (i==0)			/* on top */
+      gcchoiceargs[0].value = (XtArgVal) NULL;
+    else			/* under the last one */
+      gcchoiceargs[0].value = (XtArgVal) GCchoices[i-1];
+
+    GCchoices[i] = XtCreateManagedWidget(Everything[i]->choice.text,
+					 formWidgetClass,GCform,
+					 gcchoiceargs,XtNumber(gcchoiceargs));
+
+    /* now fill up that form */
+    GCdescs[i] = create_choice(GCchoices[i],Everything[i]);
+  }
+
+  /* put the planemask choice under the bottom GC choice */
+  gcchoiceargs[0].value = (XtArgVal) GCchoices[NUMCHOICES-1];
+  planemaskchoice = XtCreateManagedWidget("planemask",formWidgetClass,GCform,
+				  gcchoiceargs,XtNumber(gcchoiceargs));
+  /* fill it up */
+  create_planemask_choice(planemaskchoice);
+
+  /* put the dashlist choice under the planemask choice */
+  gcchoiceargs[0].value = (XtArgVal) planemaskchoice;
+  dashlistchoice = XtCreateManagedWidget("dashlist",formWidgetClass,GCform,
+				  gcchoiceargs,XtNumber(gcchoiceargs));
+  /* fill it up */
+  create_dashlist_choice(dashlistchoice);
+
+  /* put the linewidth choice under the dashlist choice */
+  gcchoiceargs[0].value = (XtArgVal) dashlistchoice;
+  linewidthchoice = XtCreateManagedWidget("linewidth",formWidgetClass,GCform,
+				  gcchoiceargs,XtNumber(gcchoiceargs));
+  /* fill it up */
+  linewidthtext = create_text_choice(linewidthchoice,TLineWidth,2,30);
+
+  /* put the font choice under the linewidth choice */
+  gcchoiceargs[0].value = (XtArgVal) linewidthchoice;
+  fontchoice = XtCreateManagedWidget("font",formWidgetClass,GCform,
+				     gcchoiceargs,XtNumber(gcchoiceargs));
+  /* fill it up */
+  fonttext = create_text_choice(fontchoice,TFont,80,300);
+
+  gcchoiceargs[0].value = (XtArgVal) fontchoice;
+  foregroundchoice = XtCreateManagedWidget("foreground",formWidgetClass,GCform,
+				   gcchoiceargs,XtNumber(gcchoiceargs));
+  foregroundtext = create_text_choice(foregroundchoice,TForeground,4,50);
+
+  gcchoiceargs[1].value = (XtArgVal) foregroundchoice;
+  backgroundchoice = XtCreateManagedWidget("background",formWidgetClass,GCform,
+				   gcchoiceargs,XtNumber(gcchoiceargs));
+  backgroundtext = create_text_choice(backgroundchoice,TBackground,4,50);
+  
+  gcchoiceargs[1].value = (XtArgVal) NULL;
+  gcchoiceargs[0].value = (XtArgVal) foregroundchoice;
+  percentchoice = XtCreateManagedWidget("testpercent",formWidgetClass,GCform,
+				 gcchoiceargs,XtNumber(gcchoiceargs));
+  X.percent = 1.0;
+  create_testfrac_choice(percentchoice);
+
+  /* make all the labels inside the choices line up nicely */
+  line_up_labels(GCdescs,(int) XtNumber(GCdescs));
+
+  /* put the test form under the GC form */
+  testformargs[0].value = (XtArgVal) GCform;
+  Testform = XtCreateManagedWidget("Testform",formWidgetClass,topform,
+				   testformargs,XtNumber(testformargs));
+  
+  testchoiceform = XtCreateManagedWidget("testchoiceform",formWidgetClass,
+			     Testform,testchoiceargs,XtNumber(testchoiceargs));
+  testchoicedesc = create_choice(testchoiceform,Everything[CTest]);
+
+  commandformargs[0].value = (XtArgVal) GCform;
+  commandformargs[1].value = (XtArgVal) Testform;
+  commandform = XtCreateManagedWidget("commandform",formWidgetClass,topform,
+			      commandformargs,XtNumber(commandformargs));
+
+  /* Put the appropriate command buttons in the command form */
+
+  fill_up_commandform(commandform);
+
+  testargs[2].value = (XtArgVal) GCform;    /* to the right of */
+  test = XtCreateManagedWidget("test",widgetClass,topform,
+			       testargs,XtNumber(testargs));
+
+  resultargs[2].value = (XtArgVal) GCform; /* to the right of */
+  resultargs[3].value = (XtArgVal) test; /* under */
+  result = XtCreateManagedWidget("result",asciiTextWidgetClass,topform,
+				 resultargs,XtNumber(resultargs));
+
+  /* Now realize all the widgets */
+
+  XtRealizeWidget(bigdaddy);
+
+  /* Now do things we couldn't do until we had a window available */
+
+  X.win = XtWindow(test);
+  X.tile = XCreatePixmap(X.dpy,X.win,tile_width,tile_height,
+			 DefaultDepthOfScreen(X.scr));
+
+  X.tile = XCreatePixmapFromBitmapData(X.dpy,X.win,
+				       (char *)tile_bits,tile_width,
+				       tile_height,Black,White,
+				       DefaultDepthOfScreen(X.scr));
+  X.stipple = XCreateBitmapFromData(X.dpy,X.win,(char *)tile_bits,tile_width,
+				    tile_height);
+
+  XSetStipple(X.dpy,X.gc,X.stipple);
+  XSetStipple(X.dpy,X.miscgc,X.stipple);
+
+  GC_change_foreground(X.foreground,TRUE);
+  GC_change_background(X.background,TRUE);
+
+  wm_delete_window = XInternAtom(X.dpy, "WM_DELETE_WINDOW", False);
+  (void) XSetWMProtocols(X.dpy, XtWindow(bigdaddy), &wm_delete_window, 1);
+
+  /* Act like the user picked the first choice in each group */
+
+  choose_defaults(GCdescs,(int)XtNumber(GCdescs));
+  choose_defaults(&testchoicedesc,1);
+  
+  /* Loop forever, dealing with events */
+
+  XtAppMainLoop(appcontext);
+
+  return 0;
+}
+
+/* fill_up_commandform(w)
+** ----------------------
+** Put the appropriate command buttons in the command form (w).
+*/
+
+static void
+fill_up_commandform(w)
+     Widget w;
+{
+  static XtCallbackRec runcallbacklist[] = {
+    {(XtCallbackProc) run_test,  NULL},
+    {NULL,                       NULL}
+  };
+
+  static XtCallbackRec quitcallbacklist[] = {
+    {(XtCallbackProc) quit,      NULL},
+    {NULL,                       NULL}
+  };
+
+  static XtCallbackRec clearcallbacklist[] = {
+    {(XtCallbackProc) clear_test_window,    NULL},
+    {(XtCallbackProc) clear_result_window,  NULL},
+    {NULL,                                  NULL}
+  };
+
+  static XtCallbackRec playbackcallbacklist[] = {
+    {(XtCallbackProc) start_playback,       NULL},
+    {NULL,                                  NULL}
+  };
+
+  static XtCallbackRec keyinputcallbacklist[] = {
+    {(XtCallbackProc) read_from_keyboard,   NULL},
+    {NULL,                                  NULL}
+  };
+
+  static XtCallbackRec recordcallbacklist[] = {
+    {(XtCallbackProc) toggle_recordbutton,  NULL},
+    {NULL,                                  NULL}
+  };
+
+  static Arg runargs[] = {
+    {XtNcallback,    (XtArgVal) NULL}
+  };
+
+  static Arg clearargs[] = {
+    {XtNcallback,    (XtArgVal) NULL},
+    {XtNfromVert,    (XtArgVal) NULL}, /* put it under runbutton */
+    {XtNvertDistance,(XtArgVal) 10}
+  };
+
+  static Arg recordargs[] = {
+    {XtNcallback,    (XtArgVal) NULL},
+    {XtNfromVert,    (XtArgVal) NULL}, /* put it under clearbutton */
+    {XtNvertDistance,(XtArgVal) 10},
+    {XtNresizable,   (XtArgVal) True} /* so we can change the name */
+  };
+
+  static Arg playbackargs[] = {
+    {XtNcallback,    (XtArgVal) NULL},
+    {XtNfromVert,    (XtArgVal) NULL} /* put it under recordbutton */
+  };
+
+  static Arg keyinputargs[] = {
+    {XtNcallback,     (XtArgVal) NULL},
+    {XtNfromVert,    (XtArgVal) NULL} /* put it under playbackbutton */
+  };
+
+  static Arg quitargs[] = {
+    {XtNcallback,    (XtArgVal) NULL},
+    {XtNfromVert,    (XtArgVal) NULL}, /* put it under keyinputbutton */
+    {XtNvertDistance,(XtArgVal) 10}
+  };
+
+  runargs[0].value = (XtArgVal) runcallbacklist;
+  runbutton = XtCreateManagedWidget("Run",commandWidgetClass,
+			      w,runargs,XtNumber(runargs));
+
+  clearargs[0].value = (XtArgVal) clearcallbacklist;
+  clearargs[1].value = (XtArgVal) runbutton; /* under */
+  clearbutton = XtCreateManagedWidget("Clear window",commandWidgetClass,
+         		      w,clearargs,XtNumber(clearargs));
+
+  recordargs[0].value = (XtArgVal) recordcallbacklist;
+  recordargs[1].value = (XtArgVal) clearbutton;	/* under */
+  recordbutton = XtCreateManagedWidget("Record",commandWidgetClass,
+			      w,recordargs,XtNumber(recordargs));
+
+  playbackargs[0].value = (XtArgVal) playbackcallbacklist;
+  playbackargs[1].value = (XtArgVal) recordbutton; /* under */
+  playbackbutton = XtCreateManagedWidget("Playback",commandWidgetClass,
+			      w,playbackargs,XtNumber(playbackargs));
+
+  keyinputargs[0].value = (XtArgVal) keyinputcallbacklist;
+  keyinputargs[1].value = (XtArgVal) playbackbutton;
+  keyinputbutton = XtCreateManagedWidget("Read Input",commandWidgetClass,
+			      w,keyinputargs,XtNumber(keyinputargs));
+
+  quitargs[0].value = (XtArgVal) quitcallbacklist;
+  quitargs[1].value = (XtArgVal) keyinputbutton; /* under */
+  quitbutton = XtCreateManagedWidget("Quit",commandWidgetClass,
+   			      w,quitargs,XtNumber(quitargs));
+    
+}    
+/* quit()
+** ------
+** Leave the program nicely.
+*/
+
+static void
+quit()
+{
+  close_file_if_recording();
+  exit(0);
+}
+
+static void quitAction(w, e, p, n)
+    Widget w;
+    XEvent *e;
+    String *p;
+    Cardinal *n;
+{
+    if (e->type == ClientMessage && e->xclient.data.l[0] != wm_delete_window)
+	XBell(XtDisplay(w), 0);
+    else 
+	quit();
+}
+
+/* clear_test_window()
+** -------------------
+** Clear the test window.
+*/
+
+static void
+clear_test_window()
+{
+  XClearWindow(X.dpy,XtWindow(test));
+}
+
+/* clear_result_window()
+** ---------------------
+** Clear the result window.
+*/
+
+static void
+clear_result_window()
+{
+  set_text(result, "");
+}
+
+/* set_foreground_and_background()
+** -------------------------------
+** Finds the user-specified foreground and background by querying
+** the resource manager, and sets state accordingly.  Also specifies
+** the initial font for text tests.
+*/
+
+static void
+set_foreground_and_background()
+{
+  static XtResource resources[] = {
+    {XtNforeground, XtCForeground, XtRPixel, sizeof(Pixel),
+       XtOffsetOf(XStuff, foreground), XtRString, XtDefaultForeground},
+    {XtNbackground, XtCBackground, XtRPixel, sizeof(Pixel),
+       XtOffsetOf(XStuff, background), XtRString, XtDefaultBackground}
+  };
+  
+  XtGetApplicationResources(bigdaddy, (XtPointer) &X, resources,
+			    XtNumber(resources), NULL, (Cardinal) 0);
+
+  X.gcv.foreground = X.foreground;
+  X.gcv.background = X.background;
+
+  X.fontname = "6x10";
+  GC_change_font(X.fontname,FALSE);
+}
+@
+
+
+1.1.9.1
+log
+@OpenBSD just has imported exactly this tree into their vendor branch,
+called the same tag, in XF4/xc
+This is, apparently, the last XFree86 snapshot before the licence change
+(ie, addition of the advertising clause)
+
+Since the developers don't see any problems with that, and we would like
+to integrate improvements done by the remaining one or two (or so) XFree86
+developers (j/k), this prepares enabling us to update X-Window in the future.
+@
+text
+@d31 1
+a31 1
+/* $XFree86: xc/programs/xgc/main.c,v 1.7 2003/05/27 22:27:06 tsi Exp $ */
+d54 22
+a75 6
+static void fill_up_commandform(Widget);
+static void quit(void);
+static void quitAction(Widget, XEvent *, String *, Cardinal *);
+static void clear_test_window(void);
+static void clear_result_window(void);
+static void set_foreground_and_background(void);
+d101 1
+d129 3
+a131 1
+main(int argc, char *argv[])
+d342 2
+a343 1
+fill_up_commandform(Widget w)
+d435 2
+a436 2
+  (void) XtCreateManagedWidget("Quit",commandWidgetClass,
+			       w,quitargs,XtNumber(quitargs));
+d445 1
+a445 1
+quit(void)
+d451 5
+a455 1
+static void quitAction(Widget w, XEvent *e, String *p, Cardinal *n)
+d469 1
+a469 1
+clear_test_window(void)
+d480 1
+a480 1
+clear_result_window(void)
+d493 1
+a493 1
+set_foreground_and_background(void)
+@
+
+
+1.1.1.1
+log
+@Import OpenBSD 3.3 XF4 repository from CTM 3132 the first time
+This finalizes starting an OpenBSD-mirabile (aka MirBSD) repository.
+
+### MirBSD is:
+# Copyright (c) 1982-2003 by Thorsten "mirabile" Glaser <x86@@ePost.de>
+# Copyright © 1968-2003  The authors of And contributors to UNIX®, the
+#       C Language, BSD/Berkeley Unix; 386BSD, NetBSD 1.1 and OpenBSD.
+#
+# Anyone who obtained a copy of this work is hereby permitted to freely use,
+# distribute, modify, merge, sublicence, give away or sell it as long as the
+# authors are given due credit and the following notice is retained:
+#
+# This work is provided "as is", with no explicit or implicit warranty what-
+# soever. Use it only at your own risk. In no event may an author or contri-
+# butor be held liable for any damage, directly or indirectly, that origina-
+# ted through or is caused by creation or modification of this work.
+
+MirBSD is my private tree. MirBSD does not differ very much from OpenBSD
+and intentionally tracks OpenBSD. That's why it _is_ OpenBSD, just not the
+official one. It's like with DarrenBSD.
+
+At time of this writing, no advertising for MirBSD must be done,
+because the advertising clause has not yet been sorted out.
+
+http://templeofhate.com/tglaser/MirBSD/index.php
+@
+text
+@@
+
+
+1.1.1.2
+log
+@That's what OpenBSD will, probably, ship as XF4 in 3.5
+their last sync against XFree86 4.3-current has been
+imported into our vendor branch, too
+@
+text
+@d31 1
+a31 1
+/* $XFree86: xc/programs/xgc/main.c,v 1.7 2003/05/27 22:27:06 tsi Exp $ */
+d54 22
+a75 6
+static void fill_up_commandform(Widget);
+static void quit(void);
+static void quitAction(Widget, XEvent *, String *, Cardinal *);
+static void clear_test_window(void);
+static void clear_result_window(void);
+static void set_foreground_and_background(void);
+d101 1
+d129 3
+a131 1
+main(int argc, char *argv[])
+d342 2
+a343 1
+fill_up_commandform(Widget w)
+d435 2
+a436 2
+  (void) XtCreateManagedWidget("Quit",commandWidgetClass,
+			       w,quitargs,XtNumber(quitargs));
+d445 1
+a445 1
+quit(void)
+d451 5
+a455 1
+static void quitAction(Widget w, XEvent *e, String *p, Cardinal *n)
+d469 1
+a469 1
+clear_test_window(void)
+d480 1
+a480 1
+clear_result_window(void)
+d493 1
+a493 1
+set_foreground_and_background(void)
+@
+

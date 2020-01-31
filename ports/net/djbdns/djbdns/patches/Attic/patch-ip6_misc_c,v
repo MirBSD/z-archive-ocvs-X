@@ -1,0 +1,176 @@
+head	1.2;
+access;
+symbols
+	MIRBSD_5:1.1
+	MIRBSD_4:1.1;
+locks; strict;
+comment	@# @;
+
+
+1.2
+date	2003.06.13.18.08.12;	author tg;	state dead;
+branches;
+next	1.1;
+
+1.1
+date	2003.03.23.14.43.00;	author tg;	state Exp;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.2
+log
+@remove all traces of the "old" djbdns port triplet
+@
+text
+@$MirBSD: patch-ip6_misc_c,v 1.1 2003/03/23 14:43:00 tg Exp $
+--- ip6_misc.c.orig	Sat Aug 24 23:08:56 2002
++++ ip6_misc.c	Sat Aug 24 23:16:33 2002
+@@@@ -0,0 +1,119 @@@@
++#include "fmt.h"
++#include "byte.h"
++#include "ip4.h"
++#include "dns.h"
++#include <stdio.h>
++
++unsigned int ip6_fmt(char *s,const char ip[16])
++{
++  unsigned int len;
++  unsigned int i;
++  unsigned int temp;
++  unsigned int compressing;
++  int j;
++
++  len = 0; compressing = 0;
++  for (j=0; j<16; j+=2) {
++    temp = ((unsigned long) (unsigned char) ip[j] << 8) +
++            (unsigned long) (unsigned char) ip[j+1];
++    if (temp == 0) {
++      if (!compressing) {
++	compressing=1;
++	if (j==0) {
++	  if (s) *s++=':'; ++len;
++	}
++      }
++    } else {
++      if (compressing) {
++	compressing=0;
++	if (s) *s++=':'; ++len;
++      }
++      i = fmt_xlong(s,temp); len += i; if (s) s += i;
++      if (j<14) {
++	if (s) *s++ = ':';
++	++len;
++      }
++    }
++  }
++  if (compressing) { *s++=':'; ++len; }
++
++  return len;
++}
++
++static char tohex(char num)
++{
++  if (num<10)
++    return num+'0';
++  else if (num<16)
++    return num-10+'a';
++  else
++    return -1;
++}
++
++unsigned int ip6_fmt_flat(char *s,char ip[16])
++{
++  int i;
++  for (i=0; i<16; i++) {
++    *s++=tohex((unsigned char)ip[i] >> 4);
++    *s++=tohex((unsigned char)ip[i] & 15);
++  }
++  return 32;
++}
++
++/* from ip6_scan.c */
++
++static long int fromhex(unsigned char c)
++{
++  if (c>='0' && c<='9')
++    return c-'0';
++  else if (c>='A' && c<='F')
++    return c-'A'+10;
++  else if (c>='a' && c<='f')
++    return c-'a'+10;
++  return -1;
++}
++
++unsigned int ip6_scan_flat(const char *s,char ip[16])
++{
++  int i;
++  for (i=0; i<16; i++) {
++    int tmp;
++    tmp=fromhex(*s++);
++    if (tmp<0) return 0;
++    ip[i]=tmp << 4;
++    tmp=fromhex(*s++);
++    if (tmp<0) return 0;
++    ip[i]+=tmp;
++  }
++  return 32;
++}
++
++/* from dns_nd6.c */
++
++int dns_name6_domain(char name[DNS_NAME6_DOMAIN],char ip[16])
++{
++  unsigned int j;
++
++  for (j=0; j<16; j++) {
++    name[j*4]=1;
++    name[j*4+1]=tohex(ip[15-j] & 15);
++    name[j*4+2]=1;
++    name[j*4+3]=tohex((unsigned char)ip[15-j] >> 4);
++  }
++  byte_copy(name + 4*16,9,"\3ip6\3int\0");
++  return 4*16+9;
++}
++
++/* from fmt_xlong.c */
++
++unsigned int fmt_xlong(register char *s,register unsigned long u)
++{
++  register unsigned int len; register unsigned long q;
++  len = 1; q = u;
++  while (q > 15) { ++len; q /= 16; }
++  if (s) {
++    s += len;
++    do { *--s = tohex(u % 16); u /= 16; } while(u); /* handles u == 0 */
++  }
++  return len;
++}
+@
+
+
+1.1
+log
+@Add DJBDNS port and UCSPI-TCP (dependant)
+
+DJBDNS (http://cr.yp.to/djbdns.hml) is a Domain Name Server.
+We have three flavours:
+ - stable
+	The original.
+ - djbdns
+ - djbdns6
+	The versions with IPv6 RR support. djbdns handles
+	queries via IPv4 and djbdns6 handles queries via
+	IPv6, but does not include manual pages and other
+	supplementary files.
+@
+text
+@d1 1
+a1 1
+$MirBSD: obsd.ports,v 1.62 2003/03/22 22:33:27 tg Exp $
+@
+

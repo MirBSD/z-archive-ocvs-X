@@ -1,0 +1,403 @@
+head	1.1;
+branch	1.1.1;
+access;
+symbols
+	tg-mergetmp-2:1.1.1.3
+	cvs-200410241530:1.1.1.3
+	cvs-200410012000:1.1.1.3
+	cvs-200407221130:1.1.1.3
+	cvs-200407141120:1.1.1.3
+	cvs-200406231010:1.1.1.3
+	MIRBSD_7quater:1.1.1.2
+	cvs-200405271510:1.1.1.3
+	XFree86_4_4_0:1.1.9.1
+	cvs-200403021700:1.1.1.3
+	XFREE86_20040213:1.1.9.1
+	xc:1.1.9
+	cvs-200401291925:1.1.1.2
+	MIRBSD_7_ALPHA:1.1.1.2.0.4
+	MIRBSD_7:1.1.1.2.0.2
+	MIRBSD_7ter:1.1.1.2
+	cvs-20011091815:1.1.1.2
+	cvs-200309162130:1.1.1.2
+	cvs-200308302005:1.1.1.2
+	ctmx-0387:1.1.1.2
+	ctmx-0384:1.1.1.2
+	MIRBSD_5:1.1.1.2
+	ctmx-0375:1.1.1.2
+	ctmx-0373:1.1.1.2
+	ctm-0371:1.1.1.2
+	ctm-0370:1.1.1.2
+	MIRBSD_4:1.1.1.2
+	ctm-0363:1.1.1.2
+	ctm-0359:1.1.1.2
+	ctm-0349:1.1.1.1
+	openbsd:1.1.1;
+locks; strict;
+comment	@ * @;
+
+
+1.1
+date	2003.03.22.20.08.43;	author tg;	state Exp;
+branches
+	1.1.1.1
+	1.1.9.1;
+next	;
+
+1.1.1.1
+date	2003.03.22.20.08.43;	author tg;	state Exp;
+branches;
+next	1.1.1.2;
+
+1.1.1.2
+date	2003.04.08.18.37.31;	author tg;	state Exp;
+branches;
+next	1.1.1.3;
+
+1.1.1.3
+date	2004.03.02.18.25.10;	author tg;	state Stab;
+branches;
+next	;
+
+1.1.9.1
+date	2004.02.14.19.25.12;	author tg;	state Exp;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@/* ati_pcigart.h -- ATI PCI GART support -*- linux-c -*-
+ * Created: Wed Dec 13 21:52:19 2000 by gareth@@valinux.com
+ *
+ * Copyright 2000 VA Linux Systems, Inc., Sunnyvale, California.
+ * All Rights Reserved.
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a
+ * copy of this software and associated documentation files (the "Software"),
+ * to deal in the Software without restriction, including without limitation
+ * the rights to use, copy, modify, merge, publish, distribute, sublicense,
+ * and/or sell copies of the Software, and to permit persons to whom the
+ * Software is furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice (including the next
+ * paragraph) shall be included in all copies or substantial portions of the
+ * Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL
+ * PRECISION INSIGHT AND/OR ITS SUPPLIERS BE LIABLE FOR ANY CLAIM, DAMAGES OR
+ * OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE,
+ * ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+ * DEALINGS IN THE SOFTWARE.
+ *
+ * Authors:
+ *   Gareth Hughes <gareth@@valinux.com>
+ */
+
+#define __NO_VERSION__
+#include "drmP.h"
+
+#if PAGE_SIZE == 8192
+# define ATI_PCIGART_TABLE_ORDER 	2
+# define ATI_PCIGART_TABLE_PAGES 	(1 << 2)
+#elif PAGE_SIZE == 4096
+# define ATI_PCIGART_TABLE_ORDER 	3
+# define ATI_PCIGART_TABLE_PAGES 	(1 << 3)
+#else
+# error - PAGE_SIZE not 8K or 4K
+#endif
+
+# define ATI_MAX_PCIGART_PAGES		8192	/* 32 MB aperture, 4K pages */
+# define ATI_PCIGART_PAGE_SIZE		4096	/* PCI GART page size */
+
+static unsigned long DRM(ati_alloc_pcigart_table)( void )
+{
+	unsigned long address;
+	struct page *page;
+	int i;
+	DRM_DEBUG( "%s\n", __FUNCTION__ );
+
+	address = __get_free_pages( GFP_KERNEL, ATI_PCIGART_TABLE_ORDER );
+	if ( address == 0UL ) {
+		return 0;
+	}
+
+	page = virt_to_page( address );
+
+	for ( i = 0 ; i < ATI_PCIGART_TABLE_PAGES ; i++, page++ ) {
+		atomic_inc( &page->count );
+		SetPageReserved( page );
+	}
+
+	DRM_DEBUG( "%s: returning 0x%08lx\n", __FUNCTION__, address );
+	return address;
+}
+
+static void DRM(ati_free_pcigart_table)( unsigned long address )
+{
+	struct page *page;
+	int i;
+	DRM_DEBUG( "%s\n", __FUNCTION__ );
+
+	page = virt_to_page( address );
+
+	for ( i = 0 ; i < ATI_PCIGART_TABLE_PAGES ; i++, page++ ) {
+		atomic_dec( &page->count );
+		ClearPageReserved( page );
+	}
+
+	free_pages( address, ATI_PCIGART_TABLE_ORDER );
+}
+
+int DRM(ati_pcigart_init)( drm_device_t *dev,
+			   unsigned long *addr,
+			   dma_addr_t *bus_addr)
+{
+	drm_sg_mem_t *entry = dev->sg;
+	unsigned long address = 0;
+	unsigned long pages;
+	u32 *pci_gart, page_base, bus_address = 0;
+	int i, j, ret = 0;
+
+	if ( !entry ) {
+		DRM_ERROR( "no scatter/gather memory!\n" );
+		goto done;
+	}
+
+	address = DRM(ati_alloc_pcigart_table)();
+	if ( !address ) {
+		DRM_ERROR( "cannot allocate PCI GART page!\n" );
+		goto done;
+	}
+
+	if ( !dev->pdev ) {
+		DRM_ERROR( "PCI device unknown!\n" );
+		goto done;
+	}
+
+	bus_address = pci_map_single(dev->pdev, (void *)address,
+				  ATI_PCIGART_TABLE_PAGES * PAGE_SIZE,
+				  PCI_DMA_TODEVICE);
+	if (bus_address == 0) {
+		DRM_ERROR( "unable to map PCIGART pages!\n" );
+		DRM(ati_free_pcigart_table)( address );
+		address = 0;
+		goto done;
+	}
+
+	pci_gart = (u32 *)address;
+
+	pages = ( entry->pages <= ATI_MAX_PCIGART_PAGES )
+		? entry->pages : ATI_MAX_PCIGART_PAGES;
+
+	memset( pci_gart, 0, ATI_MAX_PCIGART_PAGES * sizeof(u32) );
+
+	for ( i = 0 ; i < pages ; i++ ) {
+		/* we need to support large memory configurations */
+		entry->busaddr[i] = pci_map_single(dev->pdev,
+					   page_address( entry->pagelist[i] ),
+					   PAGE_SIZE,
+					   PCI_DMA_TODEVICE);
+		if (entry->busaddr[i] == 0) {
+			DRM_ERROR( "unable to map PCIGART pages!\n" );
+			DRM(ati_pcigart_cleanup)( dev, address, bus_address );
+			address = 0;
+			bus_address = 0;
+			goto done;
+		}
+		page_base = (u32) entry->busaddr[i];
+
+		for (j = 0; j < (PAGE_SIZE / ATI_PCIGART_PAGE_SIZE); j++) {
+			*pci_gart++ = cpu_to_le32( page_base );
+			page_base += ATI_PCIGART_PAGE_SIZE;
+		}
+	}
+
+	ret = 1;
+
+#if defined(__i386__) || defined(__x86_64__)
+	asm volatile ( "wbinvd" ::: "memory" );
+#else
+	mb();
+#endif
+
+done:
+	*addr = address;
+	*bus_addr = bus_address;
+	return ret;
+}
+
+int DRM(ati_pcigart_cleanup)( drm_device_t *dev,
+			      unsigned long addr,
+			      dma_addr_t bus_addr)
+{
+	drm_sg_mem_t *entry = dev->sg;
+	unsigned long pages;
+	int i;
+
+	/* we need to support large memory configurations */
+	if ( !entry ) {
+		DRM_ERROR( "no scatter/gather memory!\n" );
+		return 0;
+	}
+
+	if ( bus_addr ) {
+		pci_unmap_single(dev->pdev, bus_addr,
+				 ATI_PCIGART_TABLE_PAGES * PAGE_SIZE,
+				 PCI_DMA_TODEVICE);
+
+		pages = ( entry->pages <= ATI_MAX_PCIGART_PAGES )
+		        ? entry->pages : ATI_MAX_PCIGART_PAGES;
+
+		for ( i = 0 ; i < pages ; i++ ) {
+			if ( !entry->busaddr[i] ) break;
+			pci_unmap_single(dev->pdev, entry->busaddr[i],
+					 PAGE_SIZE, PCI_DMA_TODEVICE);
+		}
+	}
+
+	if ( addr ) {
+		DRM(ati_free_pcigart_table)( addr );
+	}
+
+	return 1;
+}
+@
+
+
+1.1.9.1
+log
+@OpenBSD just has imported exactly this tree into their vendor branch,
+called the same tag, in XF4/xc
+This is, apparently, the last XFree86 snapshot before the licence change
+(ie, addition of the advertising clause)
+
+Since the developers don't see any problems with that, and we would like
+to integrate improvements done by the remaining one or two (or so) XFree86
+developers (j/k), this prepares enabling us to update X-Window in the future.
+@
+text
+@d1 1
+a1 8
+/**
+ * \file ati_pcigart.h 
+ * ATI PCI GART support
+ *
+ * \author Gareth Hughes <gareth@@valinux.com>
+ */
+
+/*
+d25 3
+d33 1
+a33 7
+#if PAGE_SIZE == 65536
+# define ATI_PCIGART_TABLE_ORDER	0
+# define ATI_PCIGART_TABLE_PAGES	(1 << 0)
+#elif PAGE_SIZE == 16384
+# define ATI_PCIGART_TABLE_ORDER	1
+# define ATI_PCIGART_TABLE_PAGES	(1 << 1)
+#elif PAGE_SIZE == 8192
+d40 1
+a40 1
+# error - PAGE_SIZE not 64K, 16K, 8K or 4K
+d43 2
+a44 2
+# define ATI_MAX_PCIGART_PAGES		8192	/**< 32 MB aperture, 4K pages */
+# define ATI_PCIGART_PAGE_SIZE		4096	/**< PCI GART page size */
+d151 1
+a151 1
+#if defined(__i386__) || defined(__AMD64__)
+@
+
+
+1.1.1.1
+log
+@Import OpenBSD 3.3 XF4 repository from CTM 3132 the first time
+This finalizes starting an OpenBSD-mirabile (aka MirBSD) repository.
+
+### MirBSD is:
+# Copyright (c) 1982-2003 by Thorsten "mirabile" Glaser <x86@@ePost.de>
+# Copyright © 1968-2003  The authors of And contributors to UNIX®, the
+#       C Language, BSD/Berkeley Unix; 386BSD, NetBSD 1.1 and OpenBSD.
+#
+# Anyone who obtained a copy of this work is hereby permitted to freely use,
+# distribute, modify, merge, sublicence, give away or sell it as long as the
+# authors are given due credit and the following notice is retained:
+#
+# This work is provided "as is", with no explicit or implicit warranty what-
+# soever. Use it only at your own risk. In no event may an author or contri-
+# butor be held liable for any damage, directly or indirectly, that origina-
+# ted through or is caused by creation or modification of this work.
+
+MirBSD is my private tree. MirBSD does not differ very much from OpenBSD
+and intentionally tracks OpenBSD. That's why it _is_ OpenBSD, just not the
+official one. It's like with DarrenBSD.
+
+At time of this writing, no advertising for MirBSD must be done,
+because the advertising clause has not yet been sorted out.
+
+http://templeofhate.com/tglaser/MirBSD/index.php
+@
+text
+@@
+
+
+1.1.1.2
+log
+@The X-Windowing System
+
+Import XFree86 4.3 from OpenBSD by CTM, in the hope it's stable
+@
+text
+@d33 1
+a33 7
+#if PAGE_SIZE == 65536
+# define ATI_PCIGART_TABLE_ORDER	0
+# define ATI_PCIGART_TABLE_PAGES	(1 << 0)
+#elif PAGE_SIZE == 16384
+# define ATI_PCIGART_TABLE_ORDER	1
+# define ATI_PCIGART_TABLE_PAGES	(1 << 1)
+#elif PAGE_SIZE == 8192
+d40 1
+a40 1
+# error - PAGE_SIZE not 64K, 16K, 8K or 4K
+@
+
+
+1.1.1.3
+log
+@That's what OpenBSD will, probably, ship as XF4 in 3.5
+their last sync against XFree86 4.3-current has been
+imported into our vendor branch, too
+@
+text
+@d1 1
+a1 8
+/**
+ * \file ati_pcigart.h 
+ * ATI PCI GART support
+ *
+ * \author Gareth Hughes <gareth@@valinux.com>
+ */
+
+/*
+d25 3
+d49 2
+a50 2
+# define ATI_MAX_PCIGART_PAGES		8192	/**< 32 MB aperture, 4K pages */
+# define ATI_PCIGART_PAGE_SIZE		4096	/**< PCI GART page size */
+d157 1
+a157 1
+#if defined(__i386__) || defined(__AMD64__)
+@
+
+

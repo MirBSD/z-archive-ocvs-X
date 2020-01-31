@@ -1,0 +1,492 @@
+head	1.1;
+branch	1.1.1;
+access;
+symbols
+	tg-mergetmp-2:1.1.1.3
+	cvs-200410241530:1.1.1.3
+	cvs-200410012000:1.1.1.3
+	cvs-200407221130:1.1.1.3
+	cvs-200407141120:1.1.1.3
+	cvs-200406231010:1.1.1.3
+	MIRBSD_7quater:1.1.1.2
+	cvs-200405271510:1.1.1.3
+	XFree86_4_4_0:1.1.9.1
+	cvs-200403021700:1.1.1.3
+	XFREE86_20040213:1.1.9.1
+	xc:1.1.9
+	cvs-200401291925:1.1.1.2
+	MIRBSD_7_ALPHA:1.1.1.2.0.4
+	MIRBSD_7:1.1.1.2.0.2
+	MIRBSD_7ter:1.1.1.2
+	cvs-20011091815:1.1.1.2
+	cvs-200309162130:1.1.1.2
+	cvs-200308302005:1.1.1.2
+	ctmx-0387:1.1.1.2
+	ctmx-0384:1.1.1.2
+	MIRBSD_5:1.1.1.2
+	ctmx-0375:1.1.1.2
+	ctmx-0373:1.1.1.2
+	ctm-0371:1.1.1.2
+	ctm-0370:1.1.1.2
+	MIRBSD_4:1.1.1.2
+	ctm-0363:1.1.1.2
+	ctm-0359:1.1.1.2
+	ctm-0349:1.1.1.1
+	openbsd:1.1.1;
+locks; strict;
+comment	@ * @;
+
+
+1.1
+date	2003.03.22.20.09.10;	author tg;	state Exp;
+branches
+	1.1.1.1
+	1.1.9.1;
+next	;
+
+1.1.1.1
+date	2003.03.22.20.09.10;	author tg;	state Exp;
+branches;
+next	1.1.1.2;
+
+1.1.1.2
+date	2003.04.08.18.37.50;	author tg;	state Exp;
+branches;
+next	1.1.1.3;
+
+1.1.1.3
+date	2004.03.02.18.27.24;	author tg;	state Stab;
+branches;
+next	;
+
+1.1.9.1
+date	2004.02.14.19.25.50;	author tg;	state Exp;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@/* $XFree86: xc/programs/Xserver/hw/xfree86/xf4bpp/mfbfillarc.c,v 1.4 1999/09/25 14:38:15 dawes Exp $ */
+/************************************************************
+
+Copyright (c) 1989  X Consortium
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
+X CONSORTIUM BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN
+AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
+CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+Except as contained in this notice, the name of the X Consortium shall not be
+used in advertising or otherwise to promote the sale, use or other dealings
+in this Software without prior written authorization from the X Consortium.
+
+********************************************************/
+
+/* GJA -- Took mfb code and modified it. */
+
+/* $XConsortium: mfbfillarc.c /main/4 1996/02/21 17:56:37 kaleb $ */
+
+#include "xf4bpp.h"
+#include "OScompiler.h"
+#include "mfbmap.h"
+#include "mfb.h"
+#include "maskbits.h"
+#include "mi.h"
+#include "mifillarc.h"
+#include "wm3.h"
+
+#include "xf86str.h" /* for pScrn->vtSema */
+extern ScrnInfoPtr *xf86Screens;
+
+static void
+v16FillEllipseSolid
+(
+    DrawablePtr pDraw,
+    xArc *arc
+)
+{
+    int x, y, e;
+    int yk, xk, ym, xm, dx, dy, xorg, yorg;
+    register int slw;
+    miFillArcRec info;
+    int *addrlt, *addrlb;
+    register int *addrl;
+    register int n;
+    int nlwidth;
+    register int xpos;
+    int startmask, endmask, nlmiddle;
+
+    if (pDraw->type == DRAWABLE_WINDOW)
+    {
+	addrlt = (int *)
+	       (((PixmapPtr)(pDraw->pScreen->devPrivate))->devPrivate.ptr);
+	nlwidth = (int)
+	       (((PixmapPtr)(pDraw->pScreen->devPrivate))->devKind) >> 2;
+    }
+    else
+    {
+	addrlt = (int *)(((PixmapPtr)pDraw)->devPrivate.ptr);
+	nlwidth = (int)(((PixmapPtr)pDraw)->devKind) >> 2;
+    }
+
+    miFillArcSetup(arc, &info);
+    MIFILLARCSETUP();
+    xorg += pDraw->x;
+    yorg += pDraw->y;
+    addrlb = addrlt;
+    addrlt += nlwidth * (yorg - y);
+    addrlb += nlwidth * (yorg + y + dy);
+    while (y)
+    {
+	addrlt += nlwidth;
+	addrlb -= nlwidth;
+	MIFILLARCSTEP(slw);
+	if (!slw)
+	    continue;
+	xpos = xorg - x;
+	addrl = addrlt + (xpos >> 5);
+	if (((xpos & 0x1f) + slw) < 32)
+	{
+	    maskpartialbits(xpos, slw, startmask);
+	    UPDRW(addrl,startmask);
+	    if (miFillArcLower(slw))
+	    {
+		addrl = addrlb + (xpos >> 5);
+		UPDRW(addrl,startmask);
+	    }
+	    continue;
+	}
+	maskbits(xpos, slw, startmask, endmask, nlmiddle);
+	if (startmask)
+	{
+	    UPDRW(addrl,startmask); addrl++;
+	}
+	n = nlmiddle;
+	while (n--) {
+	    UPDRW(addrl,~0); addrl++;
+	}
+	if (endmask)
+	{
+	    UPDRW(addrl,endmask);
+	}
+	if (!miFillArcLower(slw))
+	    continue;
+	addrl = addrlb + (xpos >> 5);
+	if (startmask)
+	{
+	    UPDRW(addrl,startmask); addrl++;
+	}
+	n = nlmiddle;
+	while (n--) {
+	    UPDRW(addrl,~0); addrl++;
+	}
+	if (endmask)
+	{
+	    UPDRW(addrl,endmask);
+	}
+    }
+}
+
+#define FILLSPAN(xl,xr,addr) \
+    if (xr >= xl) \
+    { \
+	width = xr - xl + 1; \
+	addrl = addr + (xl >> 5); \
+	if (((xl & 0x1f) + width) < 32) \
+	{ \
+	    maskpartialbits(xl, width, startmask); \
+	    UPDRW(addrl,startmask); \
+	} \
+	else \
+	{ \
+	    maskbits(xl, width, startmask, endmask, nlmiddle); \
+	    if (startmask) \
+	    { \
+		UPDRW(addrl,startmask); addrl++; \
+	    } \
+	    n = nlmiddle; \
+		while (n--) { \
+		    UPDRW(addrl,~0); addrl++; \
+		} \
+	    if (endmask) \
+	    { \
+		UPDRW(addrl,endmask); \
+	    } \
+	} \
+    }
+
+#define FILLSLICESPANS(flip,addr) \
+    if (!flip) \
+    { \
+	FILLSPAN(xl, xr, addr); \
+    } \
+    else \
+    { \
+	xc = xorg - x; \
+	FILLSPAN(xc, xr, addr); \
+	xc += slw - 1; \
+	FILLSPAN(xl, xc, addr); \
+    }
+
+static void
+v16FillArcSliceSolidCopy
+(
+    DrawablePtr pDraw,
+    GCPtr pGC,
+    xArc *arc
+)
+{
+    register int *addrl;
+    register int n;
+    int yk, xk, ym, xm, dx, dy, xorg, yorg, slw;
+    register int x, y, e;
+    miFillArcRec info;
+    miArcSliceRec slice;
+    int xl, xr, xc;
+    int *addrlt, *addrlb;
+    int nlwidth;
+    int width;
+    int startmask, endmask, nlmiddle;
+
+    if (pDraw->type == DRAWABLE_WINDOW)
+    {
+	addrlt = (int *)
+	       (((PixmapPtr)(pDraw->pScreen->devPrivate))->devPrivate.ptr);
+	nlwidth = (int)
+	       (((PixmapPtr)(pDraw->pScreen->devPrivate))->devKind) >> 2;
+    }
+    else
+    {
+	addrlt = (int *)(((PixmapPtr)pDraw)->devPrivate.ptr);
+	nlwidth = (int)(((PixmapPtr)pDraw)->devKind) >> 2;
+    }
+
+    miFillArcSetup(arc, &info);
+    miFillArcSliceSetup(arc, &slice, pGC);
+    MIFILLARCSETUP();
+    xorg += pDraw->x;
+    yorg += pDraw->y;
+    addrlb = addrlt;
+    addrlt += nlwidth * (yorg - y);
+    addrlb += nlwidth * (yorg + y + dy);
+    slice.edge1.x += pDraw->x;
+    slice.edge2.x += pDraw->x;
+    while (y > 0)
+    {
+	addrlt += nlwidth;
+	addrlb -= nlwidth;
+	MIFILLARCSTEP(slw);
+	MIARCSLICESTEP(slice.edge1);
+	MIARCSLICESTEP(slice.edge2);
+	if (miFillSliceUpper(slice))
+	{
+	    MIARCSLICEUPPER(xl, xr, slice, slw);
+	    FILLSLICESPANS(slice.flip_top, addrlt);
+	}
+	if (miFillSliceLower(slice))
+	{
+	    MIARCSLICELOWER(xl, xr, slice, slw);
+	    FILLSLICESPANS(slice.flip_bot, addrlb);
+	}
+    }
+}
+
+static void
+xf4bppPolyFillArcSolid
+(
+    register DrawablePtr pDraw,
+    GCPtr	pGC,
+    int		narcs,
+    xArc	*parcs
+)
+{
+    mfbPrivGC *priv;
+    register xArc *arc;
+    register int i;
+    BoxRec box;
+    RegionPtr cclip;
+    int rop;
+
+    priv = (mfbPrivGC *) pGC->devPrivates[mfbGCPrivateIndex].ptr;
+    rop = priv->rop;
+#if 0
+    if ((rop == RROP_NOP) || !(pGC->planemask & 1))
+#else
+    if ( !(pGC->planemask & 0x0F))
+#endif
+	return;
+    cclip = pGC->pCompositeClip;
+    for (arc = parcs, i = narcs; --i >= 0; arc++)
+    {
+	if (miFillArcEmpty(arc))
+	    continue;
+	if (miCanFillArc(arc))
+	{
+	    box.x1 = arc->x + pDraw->x;
+	    box.y1 = arc->y + pDraw->y;
+	    box.x2 = box.x1 + (int)arc->width + 1;
+	    box.y2 = box.y1 + (int)arc->height + 1;
+	    if (RECT_IN_REGION(pDraw->pScreen, cclip, &box) == rgnIN)
+	    {
+		if ((arc->angle2 >= FULLCIRCLE) ||
+		    (arc->angle2 <= -FULLCIRCLE))
+		    DO_WM3(pGC,v16FillEllipseSolid(pDraw, arc))
+		else
+		    DO_WM3(pGC,v16FillArcSliceSolidCopy(pDraw, pGC, arc)) 
+		continue;
+	    }
+	}
+	miPolyFillArc(pDraw, pGC, 1, arc);
+    }
+}
+
+void
+xf4bppPolyFillArc(pDraw, pGC, narcs, parcs)
+    register DrawablePtr pDraw;
+    GCPtr	pGC;
+    int		narcs;
+    xArc	*parcs;
+{
+    if ( !xf86Screens[pDraw->pScreen->myNum]->vtSema || (pGC->fillStyle != FillSolid) ) {
+	miPolyFillArc(pDraw, pGC, narcs, parcs);
+    } else {
+        xf4bppPolyFillArcSolid(pDraw, pGC, narcs, parcs);
+    }
+}
+@
+
+
+1.1.9.1
+log
+@OpenBSD just has imported exactly this tree into their vendor branch,
+called the same tag, in XF4/xc
+This is, apparently, the last XFree86 snapshot before the licence change
+(ie, addition of the advertising clause)
+
+Since the developers don't see any problems with that, and we would like
+to integrate improvements done by the remaining one or two (or so) XFree86
+developers (j/k), this prepares enabling us to update X-Window in the future.
+@
+text
+@d1 1
+a1 1
+/* $XFree86: xc/programs/Xserver/hw/xfree86/xf4bpp/mfbfillarc.c,v 1.6 2003/11/03 05:11:56 tsi Exp $ */
+d91 2
+a92 2
+	addrl = addrlt + (xpos >> PWSH);
+	if (((xpos & PIM) + slw) < PPW)
+d98 1
+a98 1
+		addrl = addrlb + (xpos >> PWSH);
+d118 1
+a118 1
+	addrl = addrlb + (xpos >> PWSH);
+d138 2
+a139 2
+	addrl = addr + (xl >> PWSH); \
+	if (((xl & PIM) + width) < PPW) \
+d247 1
+a251 2
+#if 0
+    mfbPrivGC *priv;
+d256 1
+@
+
+
+1.1.1.1
+log
+@Import OpenBSD 3.3 XF4 repository from CTM 3132 the first time
+This finalizes starting an OpenBSD-mirabile (aka MirBSD) repository.
+
+### MirBSD is:
+# Copyright (c) 1982-2003 by Thorsten "mirabile" Glaser <x86@@ePost.de>
+# Copyright © 1968-2003  The authors of And contributors to UNIX®, the
+#       C Language, BSD/Berkeley Unix; 386BSD, NetBSD 1.1 and OpenBSD.
+#
+# Anyone who obtained a copy of this work is hereby permitted to freely use,
+# distribute, modify, merge, sublicence, give away or sell it as long as the
+# authors are given due credit and the following notice is retained:
+#
+# This work is provided "as is", with no explicit or implicit warranty what-
+# soever. Use it only at your own risk. In no event may an author or contri-
+# butor be held liable for any damage, directly or indirectly, that origina-
+# ted through or is caused by creation or modification of this work.
+
+MirBSD is my private tree. MirBSD does not differ very much from OpenBSD
+and intentionally tracks OpenBSD. That's why it _is_ OpenBSD, just not the
+official one. It's like with DarrenBSD.
+
+At time of this writing, no advertising for MirBSD must be done,
+because the advertising clause has not yet been sorted out.
+
+http://templeofhate.com/tglaser/MirBSD/index.php
+@
+text
+@@
+
+
+1.1.1.2
+log
+@The X-Windowing System
+
+Import XFree86 4.3 from OpenBSD by CTM, in the hope it's stable
+@
+text
+@d1 1
+a1 1
+/* $XFree86: xc/programs/Xserver/hw/xfree86/xf4bpp/mfbfillarc.c,v 1.5 2003/02/18 21:29:59 tsi Exp $ */
+d91 2
+a92 2
+	addrl = addrlt + (xpos >> PWSH);
+	if (((xpos & PIM) + slw) < PPW)
+d98 1
+a98 1
+		addrl = addrlb + (xpos >> PWSH);
+d118 1
+a118 1
+	addrl = addrlb + (xpos >> PWSH);
+d138 2
+a139 2
+	addrl = addr + (xl >> PWSH); \
+	if (((xl & PIM) + width) < PPW) \
+@
+
+
+1.1.1.3
+log
+@That's what OpenBSD will, probably, ship as XF4 in 3.5
+their last sync against XFree86 4.3-current has been
+imported into our vendor branch, too
+@
+text
+@d1 1
+a1 1
+/* $XFree86: xc/programs/Xserver/hw/xfree86/xf4bpp/mfbfillarc.c,v 1.6 2003/11/03 05:11:56 tsi Exp $ */
+d247 1
+a251 2
+#if 0
+    mfbPrivGC *priv;
+d256 1
+@
+
+

@@ -1,0 +1,815 @@
+head	1.1;
+branch	1.1.1;
+access;
+symbols
+	tg-mergetmp-2:1.1.1.2
+	cvs-200410241530:1.1.1.2
+	cvs-200410012000:1.1.1.2
+	cvs-200407141120:1.1.1.2
+	cvs-200406231010:1.1.1.2
+	MIRBSD_7quater:1.1.1.2
+	cvs-200405271510:1.1.1.2
+	XFree86_4_4_0:1.1.9.1
+	cvs-200403021700:1.1.1.2
+	XFREE86_20040213:1.1.9.1
+	xc:1.1.9
+	cvs-200401291925:1.1.1.2
+	MIRBSD_7_ALPHA:1.1.1.2.0.4
+	MIRBSD_7:1.1.1.2.0.2
+	MIRBSD_7ter:1.1.1.2
+	cvs-20011091815:1.1.1.2
+	cvs-200309162130:1.1.1.2
+	cvs-200308302005:1.1.1.2
+	ctmx-0387:1.1.1.2
+	ctmx-0384:1.1.1.2
+	MIRBSD_5:1.1.1.2
+	ctmx-0375:1.1.1.2
+	ctmx-0373:1.1.1.2
+	ctm-0371:1.1.1.2
+	ctm-0370:1.1.1.2
+	MIRBSD_4:1.1.1.2
+	ctm-0363:1.1.1.2
+	ctm-0359:1.1.1.2
+	ctm-0349:1.1.1.1
+	openbsd:1.1.1;
+locks; strict;
+comment	@ * @;
+
+
+1.1
+date	2003.03.22.20.04.11;	author tg;	state Exp;
+branches
+	1.1.1.1
+	1.1.9.1;
+next	;
+
+1.1.1.1
+date	2003.03.22.20.04.11;	author tg;	state Exp;
+branches;
+next	1.1.1.2;
+
+1.1.1.2
+date	2003.04.08.18.31.20;	author tg;	state Stab;
+branches;
+next	;
+
+1.1.9.1
+date	2004.02.14.19.17.48;	author tg;	state Exp;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@/* $XFree86: xc/lib/GL/mesa/src/drv/ffb/ffb_tritmp.h,v 1.1 2000/06/20 05:08:40 dawes Exp $ */
+
+static void TAG(ffb_triangle)(GLcontext *ctx, GLuint e0, GLuint e1, GLuint e2, GLuint pv)
+{
+	ffbContextPtr fmesa = FFB_CONTEXT(ctx);
+	ffb_fbcPtr ffb = fmesa->regs;
+	struct vertex_buffer *VB = ctx->VB;
+	ffb_vertex *ffbVB = FFB_DRIVER_DATA(VB)->verts;
+	const ffb_vertex *v0 = &ffbVB[e0];
+	const ffb_vertex *v1 = &ffbVB[e1];
+	const ffb_vertex *v2 = &ffbVB[e2];
+#if (IND & FFB_TRI_OFFSET_BIT)
+	GLuint ffb_zoffset = FFB_Z_FROM_FLOAT(ctx->PolygonZoffset);
+#endif
+#if (IND & FFB_TRI_FLAT_BIT)
+	GLuint const_fg;
+#endif
+#if (IND & FFB_TRI_TWOSIDE_BIT)
+	int which_color = (VB->ColorPtr == VB->Color[0]) ? 0 : 1;
+#else
+	const int which_color = 0;
+#endif
+
+#if (IND & FFB_TRI_CULL_BIT)
+	{
+		GLfloat (*win)[4] = VB->Win.data;
+		GLfloat ex = win[e1][0] - win[e0][0];
+		GLfloat ey = win[e1][1] - win[e0][1];
+		GLfloat fx = win[e2][0] - win[e0][0];
+		GLfloat fy = win[e2][1] - win[e0][1];
+		GLfloat c = ex*fy-ey*fx;
+
+		/* Culled... */
+		if (c * ctx->backface_sign > 0)
+			return;
+	}
+#endif
+
+#if (IND & FFB_TRI_FLAT_BIT)
+	const_fg = (((GLuint)VB->Color[which_color]->data[pv][0] << 0) |
+		    ((GLuint)VB->Color[which_color]->data[pv][1] << 8) |
+		    ((GLuint)VB->Color[which_color]->data[pv][2] << 16) |
+		    ((GLuint)VB->Color[which_color]->data[pv][3] << 24));
+#endif
+
+	FFB_DUMP_PRIM(TRIANGLE);
+
+#if (IND & FFB_TRI_FLAT_BIT)
+	FFBFifo(fmesa, 1);
+	ffb->fg = const_fg;
+#endif
+
+	/* First, check for a triangle strip/fan sequences.
+	 * These checks rely on how MESA sends these primitives
+	 * down to us in render_tmp.h
+	 */
+	if (v0 == fmesa->vtx_cache[1] &&
+	    v1 == fmesa->vtx_cache[2] &&
+	    v2 != fmesa->vtx_cache[0]) {
+#if (IND & FFB_TRI_FLAT_BIT)
+		FFBFifo(fmesa, 3);
+#else
+#if (IND & FFB_TRI_ALPHA_BIT)
+		FFBFifo(fmesa, 7);
+#else
+		FFBFifo(fmesa, 6);
+#endif
+#endif
+		FFB_DUMP_VERTEX(v2);
+#if !(IND & FFB_TRI_FLAT_BIT)
+#if (IND & FFB_TRI_ALPHA_BIT)
+		ffb->alpha = v2->color[which_color].alpha;
+#endif
+		ffb->red = v2->color[which_color].red;
+		ffb->green = v2->color[which_color].green;
+		ffb->blue = v2->color[which_color].blue;
+#endif
+#if (IND & FFB_TRI_OFFSET_BIT)
+		ffb->z = v2->z + ffb_zoffset;
+#else
+		ffb->z = v2->z;
+#endif
+		ffb->y = v2->y;
+		ffb->x = v2->x;
+
+		goto update_vcache;
+	} else if (v0 == fmesa->vtx_cache[0] &&
+		   v1 == fmesa->vtx_cache[2] &&
+		   v2 != fmesa->vtx_cache[1]) {
+#if (IND & FFB_TRI_FLAT_BIT)
+		FFBFifo(fmesa, 3);
+#else
+#if (IND & FFB_TRI_ALPHA_BIT)
+		FFBFifo(fmesa, 7);
+#else
+		FFBFifo(fmesa, 6);
+#endif
+#endif
+		FFB_DUMP_VERTEX(v2);
+#if !(IND & FFB_TRI_FLAT_BIT)
+#if (IND & FFB_TRI_ALPHA_BIT)
+		ffb->alpha = v2->color[which_color].alpha;
+#endif
+		ffb->red = v2->color[which_color].red;
+		ffb->green = v2->color[which_color].green;
+		ffb->blue = v2->color[which_color].blue;
+#endif
+#if (IND & FFB_TRI_OFFSET_BIT)
+		ffb->z = v2->z + ffb_zoffset;
+#else
+		ffb->z = v2->z;
+#endif
+		ffb->dmyf = v2->y;
+		ffb->dmxf = v2->x;
+
+		goto update_vcache;
+	}
+
+#if (IND & FFB_TRI_FLAT_BIT)
+	FFBFifo(fmesa, 9);
+#else
+#if (IND & FFB_TRI_ALPHA_BIT)
+	FFBFifo(fmesa, 21);
+#else
+	FFBFifo(fmesa, 18);
+#endif
+#endif
+
+	FFB_DUMP_VERTEX(v0);
+#if !(IND & FFB_TRI_FLAT_BIT)
+#if (IND & FFB_TRI_ALPHA_BIT)
+	ffb->alpha = v0->color[which_color].alpha;
+#endif
+	ffb->red = v0->color[which_color].red;
+	ffb->green = v0->color[which_color].green;
+	ffb->blue = v0->color[which_color].blue;
+#endif
+#if (IND & FFB_TRI_OFFSET_BIT)
+	ffb->z = v0->z + ffb_zoffset;
+#else
+	ffb->z = v0->z;
+#endif
+	ffb->ryf = v0->y;
+	ffb->rxf = v0->x;
+
+	FFB_DUMP_VERTEX(v1);
+#if !(IND & FFB_TRI_FLAT_BIT)
+#if (IND & FFB_TRI_ALPHA_BIT)
+	ffb->alpha = v1->color[which_color].alpha;
+#endif
+	ffb->red = v1->color[which_color].red;
+	ffb->green = v1->color[which_color].green;
+	ffb->blue = v1->color[which_color].blue;
+#endif
+#if (IND & FFB_TRI_OFFSET_BIT)
+	ffb->z = v1->z + ffb_zoffset;
+#else
+	ffb->z = v1->z;
+#endif
+	ffb->y = v1->y;
+	ffb->x = v1->x;
+
+	FFB_DUMP_VERTEX(v2);
+#if !(IND & FFB_TRI_FLAT_BIT)
+#if (IND & FFB_TRI_ALPHA_BIT)
+	ffb->alpha = v2->color[which_color].alpha;
+#endif
+	ffb->red = v2->color[which_color].red;
+	ffb->green = v2->color[which_color].green;
+	ffb->blue = v2->color[which_color].blue;
+#endif
+#if (IND & FFB_TRI_OFFSET_BIT)
+	ffb->z = v2->z + ffb_zoffset;
+#else
+	ffb->z = v2->z;
+#endif
+	ffb->y = v2->y;
+	ffb->x = v2->x;
+
+update_vcache:
+	fmesa->vtx_cache[0] = (void *)v0;
+	fmesa->vtx_cache[1] = (void *)v1;
+	fmesa->vtx_cache[2] = (void *)v2;
+
+	fmesa->ffbScreen->rp_active = 1;
+}
+
+
+static void TAG(ffb_quad)(GLcontext *ctx, GLuint e0, GLuint e1, GLuint e2, GLuint e3, GLuint pv)
+{
+	ffbContextPtr fmesa = FFB_CONTEXT(ctx);
+	ffb_fbcPtr ffb = fmesa->regs;
+	struct vertex_buffer *VB = ctx->VB;
+	ffb_vertex *ffbVB = FFB_DRIVER_DATA(VB)->verts;
+	const ffb_vertex *v0 = &ffbVB[e0];
+	const ffb_vertex *v1 = &ffbVB[e1];
+	const ffb_vertex *v2 = &ffbVB[e2];
+	const ffb_vertex *v3 = &ffbVB[e3];
+#if (IND & FFB_TRI_OFFSET_BIT)
+	GLuint ffb_zoffset = FFB_Z_FROM_FLOAT(ctx->PolygonZoffset);
+#endif
+#if (IND & FFB_TRI_FLAT_BIT)
+	GLuint const_fg;
+#endif
+#if (IND & FFB_TRI_TWOSIDE_BIT)
+	int which_color = (VB->ColorPtr == VB->Color[0]) ? 0 : 1;
+#else
+	const int which_color = 0;
+#endif
+
+#if (IND & FFB_TRI_CULL_BIT)
+	{
+		GLfloat (*win)[4] = VB->Win.data;
+		GLfloat ex = win[e2][0] - win[e0][0];
+		GLfloat ey = win[e2][1] - win[e0][1];
+		GLfloat fx = win[e3][0] - win[e1][0];
+		GLfloat fy = win[e3][1] - win[e1][1];
+		GLfloat c = ex*fy-ey*fx;
+
+		/* Culled... */
+		if (c * ctx->backface_sign > 0)
+			return;
+	}
+#endif
+
+#if (IND & FFB_TRI_FLAT_BIT)
+	const_fg = (((GLuint)VB->Color[which_color]->data[pv][0] << 0) |
+		    ((GLuint)VB->Color[which_color]->data[pv][1] << 8) |
+		    ((GLuint)VB->Color[which_color]->data[pv][2] << 16) |
+		    ((GLuint)VB->Color[which_color]->data[pv][3] << 24));
+#endif
+
+	FFB_DUMP_PRIM(QUAD);
+
+#if (IND & FFB_TRI_FLAT_BIT)
+	FFBFifo(fmesa, 13);
+	ffb->fg = const_fg;
+#else
+#if (IND & FFB_TRI_ALPHA_BIT)
+	FFBFifo(fmesa, 28);
+#else
+	FFBFifo(fmesa, 24);
+#endif
+#endif
+
+	FFB_DUMP_VERTEX(v0);
+#if !(IND & FFB_TRI_FLAT_BIT)
+#if (IND & FFB_TRI_ALPHA_BIT)
+	ffb->alpha = v0->color[which_color].alpha;
+#endif
+	ffb->red = v0->color[which_color].red;
+	ffb->green = v0->color[which_color].green;
+	ffb->blue = v0->color[which_color].blue;
+#endif
+#if (IND & FFB_TRI_OFFSET_BIT)
+	ffb->z = v0->z + ffb_zoffset;
+#else
+	ffb->z = v0->z;
+#endif
+	ffb->ryf = v0->y;
+	ffb->rxf = v0->x;
+
+	FFB_DUMP_VERTEX(v1);
+#if !(IND & FFB_TRI_FLAT_BIT)
+#if (IND & FFB_TRI_ALPHA_BIT)
+	ffb->alpha = v1->color[which_color].alpha;
+#endif
+	ffb->red = v1->color[which_color].red;
+	ffb->green = v1->color[which_color].green;
+	ffb->blue = v1->color[which_color].blue;
+#endif
+#if (IND & FFB_TRI_OFFSET_BIT)
+	ffb->z = v1->z + ffb_zoffset;
+#else
+	ffb->z = v1->z;
+#endif
+	ffb->y = v1->y;
+	ffb->x = v1->x;
+
+	FFB_DUMP_VERTEX(v2);
+#if !(IND & FFB_TRI_FLAT_BIT)
+#if (IND & FFB_TRI_ALPHA_BIT)
+	ffb->alpha = v2->color[which_color].alpha;
+#endif
+	ffb->red = v2->color[which_color].red;
+	ffb->green = v2->color[which_color].green;
+	ffb->blue = v2->color[which_color].blue;
+#endif
+#if (IND & FFB_TRI_OFFSET_BIT)
+	ffb->z = v2->z + ffb_zoffset;
+#else
+	ffb->z = v2->z;
+#endif
+	ffb->y = v2->y;
+	ffb->x = v2->x;
+
+	FFB_DUMP_VERTEX(v3);
+#if !(IND & FFB_TRI_FLAT_BIT)
+#if (IND & FFB_TRI_ALPHA_BIT)
+	ffb->alpha = v3->color[which_color].alpha;
+#endif
+	ffb->red = v3->color[which_color].red;
+	ffb->green = v3->color[which_color].green;
+	ffb->blue = v3->color[which_color].blue;
+#endif
+#if (IND & FFB_TRI_OFFSET_BIT)
+	ffb->z = v3->z + ffb_zoffset;
+#else
+	ffb->z = v3->z;
+#endif
+	ffb->dmyf = v3->y;
+	ffb->dmxf = v3->x;
+
+	fmesa->ffbScreen->rp_active = 1;
+}
+
+static void TAG(init)(void)
+{
+	ffb_tri_tab[IND]	= TAG(ffb_triangle);
+	ffb_quad_tab[IND]	= TAG(ffb_quad);
+}
+
+#undef IND
+#undef TAG
+@
+
+
+1.1.9.1
+log
+@OpenBSD just has imported exactly this tree into their vendor branch,
+called the same tag, in XF4/xc
+This is, apparently, the last XFree86 snapshot before the licence change
+(ie, addition of the advertising clause)
+
+Since the developers don't see any problems with that, and we would like
+to integrate improvements done by the remaining one or two (or so) XFree86
+developers (j/k), this prepares enabling us to update X-Window in the future.
+@
+text
+@d1 1
+a1 1
+/* $XFree86: xc/lib/GL/mesa/src/drv/ffb/ffb_tritmp.h,v 1.2 2002/02/22 21:32:59 dawes Exp $ */
+d3 1
+a3 4
+static void TAG(ffb_triangle)( GLcontext *ctx, 	
+			       ffb_vertex *v0,
+			       ffb_vertex *v1,
+			       ffb_vertex *v2 )
+d7 8
+d18 4
+a21 14
+	FFB_DELAYED_VIEWPORT_VARS;
+
+#ifdef TRI_DEBUG
+	fprintf(stderr, "FFB: ffb_triangle ["
+#if (IND & FFB_TRI_CULL_BIT)
+		" CULL"
+#endif
+#if (IND & FFB_TRI_FLAT_BIT)
+		" FLAT"
+#endif
+#if (IND & FFB_TRI_ALPHA_BIT)
+		" ALPHA"
+#endif
+		" ]\n");
+d25 6
+a30 5
+	{	/* NOTE: These are not viewport transformed yet. */
+		GLfloat ex = v1->x - v0->x;
+		GLfloat ey = v1->y - v0->y;
+		GLfloat fx = v2->x - v0->x;
+		GLfloat fy = v2->y - v0->y;
+d34 1
+a34 1
+		if (c * fmesa->backface_sign > fmesa->ffb_zero)
+d40 4
+a43 8
+	const_fg = FFB_PACK_CONST_UBYTE_ARGB_COLOR( v2->color[0] );
+#ifdef TRI_DEBUG
+	fprintf(stderr, "FFB_tri: const_fg %08x (B[%f] G[%f] R[%f])\n",
+		const_fg,
+		FFB_2_30_FIXED_TO_FLOAT(v2->color[0].blue),
+		FFB_2_30_FIXED_TO_FLOAT(v2->color[0].green),
+		FFB_2_30_FIXED_TO_FLOAT(v2->color[0].red));
+#endif
+d46 1
+d53 66
+d132 1
+a132 1
+	ffb->alpha = FFB_GET_ALPHA(v0);
+d134 11
+a144 7
+	ffb->red   = FFB_GET_RED(v0);
+	ffb->green = FFB_GET_GREEN(v0);
+	ffb->blue  = FFB_GET_BLUE(v0);
+#endif
+	ffb->z     = FFB_GET_Z(v0);
+	ffb->ryf   = FFB_GET_Y(v0);
+	ffb->rxf   = FFB_GET_X(v0);
+d149 10
+a158 1
+	ffb->alpha = FFB_GET_ALPHA(v1);
+d160 2
+a161 7
+	ffb->red   = FFB_GET_RED(v1);
+	ffb->green = FFB_GET_GREEN(v1);
+	ffb->blue  = FFB_GET_BLUE(v1);
+#endif
+	ffb->z     = FFB_GET_Z(v1);
+	ffb->y     = FFB_GET_Y(v1);
+	ffb->x     = FFB_GET_X(v1);
+d166 1
+a166 1
+	ffb->alpha = FFB_GET_ALPHA(v2);
+d168 16
+a183 7
+	ffb->red   = FFB_GET_RED(v2);
+	ffb->green = FFB_GET_GREEN(v2);
+	ffb->blue  = FFB_GET_BLUE(v2);
+#endif
+	ffb->z     = FFB_GET_Z(v2);
+	ffb->y     = FFB_GET_Y(v2);
+	ffb->x     = FFB_GET_X(v2);
+d189 1
+a189 5
+static void TAG(ffb_quad)(GLcontext *ctx, 			      
+			  ffb_vertex *v0,
+			  ffb_vertex *v1,
+			  ffb_vertex *v2,
+			  ffb_vertex *v3 )
+d193 9
+d205 4
+a208 6
+	FFB_DELAYED_VIEWPORT_VARS;
+
+#ifdef TRI_DEBUG
+	fprintf(stderr, "FFB: ffb_quad ["
+#if (IND & FFB_TRI_CULL_BIT)
+		" CULL"
+a209 8
+#if (IND & FFB_TRI_FLAT_BIT)
+		" FLAT"
+#endif
+#if (IND & FFB_TRI_ALPHA_BIT)
+		" ALPHA"
+#endif
+		" ]\n");
+#endif /* TRI_DEBUG */
+d212 6
+a217 5
+	{	/* NOTE: These are not viewport transformed yet. */
+		GLfloat ex = v2->x - v0->x;
+		GLfloat ey = v2->y - v0->y;
+		GLfloat fx = v3->x - v1->x;
+		GLfloat fy = v3->y - v1->y;
+d221 1
+a221 1
+		if (c * fmesa->backface_sign > fmesa->ffb_zero)
+d227 4
+a230 8
+	const_fg = FFB_PACK_CONST_UBYTE_ARGB_COLOR( v3->color[0] );
+#ifdef TRI_DEBUG
+	fprintf(stderr, "FFB_quad: const_fg %08x (B[%f] G[%f] R[%f])\n",
+		const_fg,
+		FFB_2_30_FIXED_TO_FLOAT(v3->color[0].blue),
+		FFB_2_30_FIXED_TO_FLOAT(v3->color[0].green),
+		FFB_2_30_FIXED_TO_FLOAT(v3->color[0].red));
+#endif
+d233 1
+d249 1
+a249 1
+	ffb->alpha = FFB_GET_ALPHA(v0);
+d251 11
+a261 7
+	ffb->red   = FFB_GET_RED(v0);
+	ffb->green = FFB_GET_GREEN(v0);
+	ffb->blue  = FFB_GET_BLUE(v0);
+#endif
+	ffb->z     = FFB_GET_Z(v0);
+	ffb->ryf   = FFB_GET_Y(v0);
+	ffb->rxf   = FFB_GET_X(v0);
+d266 5
+a270 1
+	ffb->alpha = FFB_GET_ALPHA(v1);
+d272 7
+a278 7
+	ffb->red   = FFB_GET_RED(v1);
+	ffb->green = FFB_GET_GREEN(v1);
+	ffb->blue  = FFB_GET_BLUE(v1);
+#endif
+	ffb->z     = FFB_GET_Z(v1);
+	ffb->y     = FFB_GET_Y(v1);
+	ffb->x     = FFB_GET_X(v1);
+d283 10
+a292 1
+	ffb->alpha = FFB_GET_ALPHA(v2);
+d294 2
+a295 7
+	ffb->red   = FFB_GET_RED(v2);
+	ffb->green = FFB_GET_GREEN(v2);
+	ffb->blue  = FFB_GET_BLUE(v2);
+#endif
+	ffb->z     = FFB_GET_Z(v2);
+	ffb->y     = FFB_GET_Y(v2);
+	ffb->x     = FFB_GET_X(v2);
+d300 10
+a309 1
+	ffb->alpha = FFB_GET_ALPHA(v3);
+d311 2
+a312 7
+	ffb->red   = FFB_GET_RED(v3);
+	ffb->green = FFB_GET_GREEN(v3);
+	ffb->blue  = FFB_GET_BLUE(v3);
+#endif
+	ffb->z     = FFB_GET_Z(v3);
+	ffb->dmyf  = FFB_GET_Y(v3);
+	ffb->dmxf  = FFB_GET_X(v3);
+d317 1
+a317 1
+static void TAG(ffb_init)(void)
+@
+
+
+1.1.1.1
+log
+@Import OpenBSD 3.3 XF4 repository from CTM 3132 the first time
+This finalizes starting an OpenBSD-mirabile (aka MirBSD) repository.
+
+### MirBSD is:
+# Copyright (c) 1982-2003 by Thorsten "mirabile" Glaser <x86@@ePost.de>
+# Copyright © 1968-2003  The authors of And contributors to UNIX®, the
+#       C Language, BSD/Berkeley Unix; 386BSD, NetBSD 1.1 and OpenBSD.
+#
+# Anyone who obtained a copy of this work is hereby permitted to freely use,
+# distribute, modify, merge, sublicence, give away or sell it as long as the
+# authors are given due credit and the following notice is retained:
+#
+# This work is provided "as is", with no explicit or implicit warranty what-
+# soever. Use it only at your own risk. In no event may an author or contri-
+# butor be held liable for any damage, directly or indirectly, that origina-
+# ted through or is caused by creation or modification of this work.
+
+MirBSD is my private tree. MirBSD does not differ very much from OpenBSD
+and intentionally tracks OpenBSD. That's why it _is_ OpenBSD, just not the
+official one. It's like with DarrenBSD.
+
+At time of this writing, no advertising for MirBSD must be done,
+because the advertising clause has not yet been sorted out.
+
+http://templeofhate.com/tglaser/MirBSD/index.php
+@
+text
+@@
+
+
+1.1.1.2
+log
+@The X-Windowing System
+
+Import XFree86 4.3 from OpenBSD by CTM, in the hope it's stable
+@
+text
+@d1 1
+a1 1
+/* $XFree86: xc/lib/GL/mesa/src/drv/ffb/ffb_tritmp.h,v 1.2 2002/02/22 21:32:59 dawes Exp $ */
+d3 1
+a3 4
+static void TAG(ffb_triangle)( GLcontext *ctx, 	
+			       ffb_vertex *v0,
+			       ffb_vertex *v1,
+			       ffb_vertex *v2 )
+d7 8
+d18 4
+a21 14
+	FFB_DELAYED_VIEWPORT_VARS;
+
+#ifdef TRI_DEBUG
+	fprintf(stderr, "FFB: ffb_triangle ["
+#if (IND & FFB_TRI_CULL_BIT)
+		" CULL"
+#endif
+#if (IND & FFB_TRI_FLAT_BIT)
+		" FLAT"
+#endif
+#if (IND & FFB_TRI_ALPHA_BIT)
+		" ALPHA"
+#endif
+		" ]\n");
+d25 6
+a30 5
+	{	/* NOTE: These are not viewport transformed yet. */
+		GLfloat ex = v1->x - v0->x;
+		GLfloat ey = v1->y - v0->y;
+		GLfloat fx = v2->x - v0->x;
+		GLfloat fy = v2->y - v0->y;
+d34 1
+a34 1
+		if (c * fmesa->backface_sign > fmesa->ffb_zero)
+d40 4
+a43 8
+	const_fg = FFB_PACK_CONST_UBYTE_ARGB_COLOR( v2->color[0] );
+#ifdef TRI_DEBUG
+	fprintf(stderr, "FFB_tri: const_fg %08x (B[%f] G[%f] R[%f])\n",
+		const_fg,
+		FFB_2_30_FIXED_TO_FLOAT(v2->color[0].blue),
+		FFB_2_30_FIXED_TO_FLOAT(v2->color[0].green),
+		FFB_2_30_FIXED_TO_FLOAT(v2->color[0].red));
+#endif
+d46 1
+d53 66
+d132 1
+a132 1
+	ffb->alpha = FFB_GET_ALPHA(v0);
+d134 11
+a144 7
+	ffb->red   = FFB_GET_RED(v0);
+	ffb->green = FFB_GET_GREEN(v0);
+	ffb->blue  = FFB_GET_BLUE(v0);
+#endif
+	ffb->z     = FFB_GET_Z(v0);
+	ffb->ryf   = FFB_GET_Y(v0);
+	ffb->rxf   = FFB_GET_X(v0);
+d149 10
+a158 1
+	ffb->alpha = FFB_GET_ALPHA(v1);
+d160 2
+a161 7
+	ffb->red   = FFB_GET_RED(v1);
+	ffb->green = FFB_GET_GREEN(v1);
+	ffb->blue  = FFB_GET_BLUE(v1);
+#endif
+	ffb->z     = FFB_GET_Z(v1);
+	ffb->y     = FFB_GET_Y(v1);
+	ffb->x     = FFB_GET_X(v1);
+d166 1
+a166 1
+	ffb->alpha = FFB_GET_ALPHA(v2);
+d168 16
+a183 7
+	ffb->red   = FFB_GET_RED(v2);
+	ffb->green = FFB_GET_GREEN(v2);
+	ffb->blue  = FFB_GET_BLUE(v2);
+#endif
+	ffb->z     = FFB_GET_Z(v2);
+	ffb->y     = FFB_GET_Y(v2);
+	ffb->x     = FFB_GET_X(v2);
+d189 1
+a189 5
+static void TAG(ffb_quad)(GLcontext *ctx, 			      
+			  ffb_vertex *v0,
+			  ffb_vertex *v1,
+			  ffb_vertex *v2,
+			  ffb_vertex *v3 )
+d193 9
+d205 4
+a208 6
+	FFB_DELAYED_VIEWPORT_VARS;
+
+#ifdef TRI_DEBUG
+	fprintf(stderr, "FFB: ffb_quad ["
+#if (IND & FFB_TRI_CULL_BIT)
+		" CULL"
+a209 8
+#if (IND & FFB_TRI_FLAT_BIT)
+		" FLAT"
+#endif
+#if (IND & FFB_TRI_ALPHA_BIT)
+		" ALPHA"
+#endif
+		" ]\n");
+#endif /* TRI_DEBUG */
+d212 6
+a217 5
+	{	/* NOTE: These are not viewport transformed yet. */
+		GLfloat ex = v2->x - v0->x;
+		GLfloat ey = v2->y - v0->y;
+		GLfloat fx = v3->x - v1->x;
+		GLfloat fy = v3->y - v1->y;
+d221 1
+a221 1
+		if (c * fmesa->backface_sign > fmesa->ffb_zero)
+d227 4
+a230 8
+	const_fg = FFB_PACK_CONST_UBYTE_ARGB_COLOR( v3->color[0] );
+#ifdef TRI_DEBUG
+	fprintf(stderr, "FFB_quad: const_fg %08x (B[%f] G[%f] R[%f])\n",
+		const_fg,
+		FFB_2_30_FIXED_TO_FLOAT(v3->color[0].blue),
+		FFB_2_30_FIXED_TO_FLOAT(v3->color[0].green),
+		FFB_2_30_FIXED_TO_FLOAT(v3->color[0].red));
+#endif
+d233 1
+d249 1
+a249 1
+	ffb->alpha = FFB_GET_ALPHA(v0);
+d251 11
+a261 7
+	ffb->red   = FFB_GET_RED(v0);
+	ffb->green = FFB_GET_GREEN(v0);
+	ffb->blue  = FFB_GET_BLUE(v0);
+#endif
+	ffb->z     = FFB_GET_Z(v0);
+	ffb->ryf   = FFB_GET_Y(v0);
+	ffb->rxf   = FFB_GET_X(v0);
+d266 5
+a270 1
+	ffb->alpha = FFB_GET_ALPHA(v1);
+d272 7
+a278 7
+	ffb->red   = FFB_GET_RED(v1);
+	ffb->green = FFB_GET_GREEN(v1);
+	ffb->blue  = FFB_GET_BLUE(v1);
+#endif
+	ffb->z     = FFB_GET_Z(v1);
+	ffb->y     = FFB_GET_Y(v1);
+	ffb->x     = FFB_GET_X(v1);
+d283 10
+a292 1
+	ffb->alpha = FFB_GET_ALPHA(v2);
+d294 2
+a295 7
+	ffb->red   = FFB_GET_RED(v2);
+	ffb->green = FFB_GET_GREEN(v2);
+	ffb->blue  = FFB_GET_BLUE(v2);
+#endif
+	ffb->z     = FFB_GET_Z(v2);
+	ffb->y     = FFB_GET_Y(v2);
+	ffb->x     = FFB_GET_X(v2);
+d300 10
+a309 1
+	ffb->alpha = FFB_GET_ALPHA(v3);
+d311 2
+a312 7
+	ffb->red   = FFB_GET_RED(v3);
+	ffb->green = FFB_GET_GREEN(v3);
+	ffb->blue  = FFB_GET_BLUE(v3);
+#endif
+	ffb->z     = FFB_GET_Z(v3);
+	ffb->dmyf  = FFB_GET_Y(v3);
+	ffb->dmxf  = FFB_GET_X(v3);
+d317 1
+a317 1
+static void TAG(ffb_init)(void)
+@
+

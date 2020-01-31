@@ -1,0 +1,2604 @@
+head	1.2;
+access;
+symbols
+	tg-mergetmp-2:1.2
+	cvs-200410241530:1.1.1.4
+	cvs-200410012000:1.1.1.4
+	cvs-200407221130:1.1.1.4
+	cvs-200407141120:1.1.1.4
+	cvs-200406231010:1.1.1.4
+	MIRBSD_7quater:1.1.1.2
+	cvs-200405271510:1.1.1.4
+	XFree86_4_4_0:1.1.9.2
+	cvs-200403021700:1.1.1.3
+	XFREE86_20040213:1.1.9.1
+	xc:1.1.9
+	cvs-200401291925:1.1.1.2
+	MIRBSD_7_ALPHA:1.1.1.2.0.4
+	MIRBSD_7:1.1.1.2.0.2
+	MIRBSD_7ter:1.1.1.2
+	cvs-20011091815:1.1.1.2
+	cvs-200309162130:1.1.1.2
+	cvs-200308302005:1.1.1.2
+	ctmx-0387:1.1.1.2
+	ctmx-0384:1.1.1.2
+	MIRBSD_5:1.1.1.2
+	ctmx-0375:1.1.1.2
+	ctmx-0373:1.1.1.2
+	ctm-0371:1.1.1.2
+	ctm-0370:1.1.1.2
+	MIRBSD_4:1.1.1.2
+	ctm-0363:1.1.1.2
+	ctm-0359:1.1.1.2
+	ctm-0349:1.1.1.1
+	openbsd:1.1.1;
+locks; strict;
+comment	@ * @;
+
+
+1.2
+date	2004.03.07.18.37.46;	author tg;	state Stab;
+branches;
+next	1.1;
+
+1.1
+date	2003.03.22.20.07.34;	author tg;	state Exp;
+branches
+	1.1.1.1
+	1.1.9.1;
+next	;
+
+1.1.1.1
+date	2003.03.22.20.07.34;	author tg;	state Exp;
+branches;
+next	1.1.1.2;
+
+1.1.1.2
+date	2003.04.08.18.36.43;	author tg;	state Exp;
+branches;
+next	1.1.1.3;
+
+1.1.1.3
+date	2004.03.02.18.19.56;	author tg;	state Exp;
+branches;
+next	1.1.1.4;
+
+1.1.1.4
+date	2004.05.27.16.33.18;	author tg;	state Exp;
+branches;
+next	;
+
+1.1.9.1
+date	2004.02.14.19.23.56;	author tg;	state Exp;
+branches;
+next	1.1.9.2;
+
+1.1.9.2
+date	2004.03.05.22.30.18;	author tg;	state Exp;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.2
+log
+@semi-automagic merge of these files (ie, I've skipped through the diffs,
+and most of that was done by cvs or that weird script of some minutes ago)
+@
+text
+@/* $XFree86: xc/programs/Xserver/hw/xfree86/drivers/sis/sis_vb.c,v 1.45 2004/02/25 23:22:20 twini Exp $ */
+/*
+ * Video bridge detection and configuration for 300, 315 and 330 series
+ *
+ * Copyright (C) 2001-2004 by Thomas Winischhofer, Vienna, Austria
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ * 1) Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2) Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ * 3) The name of the author may not be used to endorse or promote products
+ *    derived from this software without specific prior written permission.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESSED OR
+ * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
+ * OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
+ * IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT
+ * NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
+ * DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
+ * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+ * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
+ * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ *
+ * Author: 	Thomas Winischhofer <thomas@@winischhofer.net>
+ *		
+ */
+
+#include "xf86.h"
+#include "xf86_ansic.h"
+#include "compiler.h"
+#include "xf86PciInfo.h"
+
+#include "sis.h"
+#include "sis_regs.h"
+#include "sis_vb.h"
+#include "sis_dac.h"
+
+extern void    	     SISWaitRetraceCRT1(ScrnInfoPtr pScrn);
+extern unsigned char SiS_GetSetBIOSScratch(ScrnInfoPtr pScrn, USHORT offset, unsigned char value);
+
+static const SiS_LCD_StStruct SiS300_LCD_Type[]=
+{
+        { VB_LCD_1024x768, 1024,  768, LCD_1024x768 },  /* 0 - invalid */
+	{ VB_LCD_800x600,   800,  600, LCD_800x600  },  /* 1 */
+	{ VB_LCD_1024x768, 1024,  768, LCD_1024x768 },  /* 2 */
+	{ VB_LCD_1280x1024,1280, 1024, LCD_1280x1024},  /* 3 */
+	{ VB_LCD_1280x960, 1280,  960, LCD_1280x960 },  /* 4 */
+	{ VB_LCD_640x480,   640,  480, LCD_640x480  },  /* 5 */
+	{ VB_LCD_1024x600, 1024,  600, LCD_1024x600 },  /* 6 */
+	{ VB_LCD_1152x768, 1152,  768, LCD_1152x768 },  /* 7 */
+	{ VB_LCD_1024x768, 1024,  768, LCD_1024x768 },  /* 8 */
+	{ VB_LCD_1024x768, 1024,  768, LCD_1024x768 },  /* 9 */
+	{ VB_LCD_1280x768, 1280,  768, LCD_1280x768 },  /* a */
+	{ VB_LCD_1024x768, 1024,  768, LCD_1024x768 },  /* b */
+	{ VB_LCD_1024x768, 1024,  768, LCD_1024x768 },  /* c */
+	{ VB_LCD_1024x768, 1024,  768, LCD_1024x768 },  /* d */
+	{ VB_LCD_320x480,   320,  480, LCD_320x480  },  /* e */
+	{ VB_LCD_CUSTOM,      0,    0, LCD_CUSTOM   }   /* f */
+};
+
+static const SiS_LCD_StStruct SiS315_LCD_Type[]=
+{
+        { VB_LCD_1024x768, 1024,  768, LCD_1024x768  },  /* 0 - invalid */
+	{ VB_LCD_800x600,   800,  600, LCD_800x600   },  /* 1 */
+	{ VB_LCD_1024x768, 1024,  768, LCD_1024x768  },  /* 2 */
+	{ VB_LCD_1280x1024,1280, 1024, LCD_1280x1024 },  /* 3 */
+	{ VB_LCD_640x480,   640,  480, LCD_640x480   },  /* 4 */
+	{ VB_LCD_1024x600, 1024,  600, LCD_1024x600  },  /* 5 */
+	{ VB_LCD_1152x864, 1152,  864, LCD_1152x864  },  /* 6 */
+	{ VB_LCD_1280x960, 1280,  960, LCD_1280x960  },  /* 7 */
+	{ VB_LCD_1152x768, 1152,  768, LCD_1152x768  },  /* 8 */
+	{ VB_LCD_1400x1050,1400, 1050, LCD_1400x1050 },  /* 9 */
+	{ VB_LCD_1280x768, 1280,  768, LCD_1280x768  },  /* a */
+	{ VB_LCD_1600x1200,1600, 1200, LCD_1600x1200 },  /* b */
+	{ VB_LCD_640x480_2, 640,  480, LCD_640x480_2 },  /* c DSTN/FSTN */
+	{ VB_LCD_640x480_3, 640,  480, LCD_640x480_3 },  /* d DSTN/FSTN */
+	{ VB_LCD_320x480,   320,  480, LCD_320x480   },  /* e */
+	{ VB_LCD_CUSTOM,      0,    0, LCD_CUSTOM,   }   /* f */
+};
+
+static const SiS_LCD_StStruct SiS661_LCD_Type[]=
+{
+        { VB_LCD_1024x768, 1024,  768, LCD_1024x768  },  /* 0 - invalid */
+	{ VB_LCD_800x600,   800,  600, LCD_800x600   },  /* 1 */
+	{ VB_LCD_1024x768, 1024,  768, LCD_1024x768  },  /* 2 */
+	{ VB_LCD_1280x1024,1280, 1024, LCD_1280x1024 },  /* 3 */
+	{ VB_LCD_640x480,   640,  480, LCD_640x480   },  /* 4 */
+	{ VB_LCD_1024x600, 1024,  600, LCD_1024x600  },  /* 5 */
+	{ VB_LCD_1152x864, 1152,  864, LCD_1152x864  },  /* 6 */
+	{ VB_LCD_1280x960, 1280,  960, LCD_1280x960  },  /* 7 */
+	{ VB_LCD_1152x768, 1152,  768, LCD_1152x768  },  /* 8 */
+	{ VB_LCD_1400x1050,1400, 1050, LCD_1400x1050 },  /* 9 */
+	{ VB_LCD_1280x768, 1280,  768, LCD_1280x768  },  /* a */
+	{ VB_LCD_1600x1200,1600, 1200, LCD_1600x1200 },  /* b */
+	{ VB_LCD_1280x800, 1280,  800, LCD_1280x800  },  /* c */
+	{ VB_LCD_1680x1050,1680, 1050, LCD_1680x1050 },  /* d */
+	{ VB_LCD_1280x720, 1280,  720, LCD_1280x720  },  /* e */
+	{ VB_LCD_CUSTOM,      0,    0, LCD_CUSTOM,   }   /* f */
+};
+
+static Bool
+TestDDC1(ScrnInfoPtr pScrn)
+{
+    SISPtr  pSiS = SISPTR(pScrn);
+    unsigned short old;
+    int count = 48;
+
+    old = SiS_ReadDDC1Bit(pSiS->SiS_Pr);
+    do {
+       if(old != SiS_ReadDDC1Bit(pSiS->SiS_Pr)) break;
+    } while(count--);
+    return (count == -1) ? FALSE : TRUE;
+}
+
+static int
+SiS_SISDetectCRT1(ScrnInfoPtr pScrn)
+{
+    SISPtr  pSiS = SISPTR(pScrn);
+    unsigned short temp = 0xffff;
+    unsigned char SR1F, CR63=0, CR17;
+    int i, ret = 0;
+    Bool mustwait = FALSE;
+
+    inSISIDXREG(SISSR,0x1F,SR1F);
+    orSISIDXREG(SISSR,0x1F,0x04);
+    andSISIDXREG(SISSR,0x1F,0x3F);
+    if(SR1F & 0xc0) mustwait = TRUE;
+
+    if(pSiS->VGAEngine == SIS_315_VGA) {
+       inSISIDXREG(SISCR,pSiS->myCR63,CR63);
+       CR63 &= 0x40;
+       andSISIDXREG(SISCR,pSiS->myCR63,0xBF);
+    }
+
+    inSISIDXREG(SISCR,0x17,CR17);
+    CR17 &= 0x80;
+    if(!CR17) {
+       orSISIDXREG(SISCR,0x17,0x80);
+       mustwait = TRUE;
+       outSISIDXREG(SISSR, 0x00, 0x01);
+       outSISIDXREG(SISSR, 0x00, 0x03);
+    }
+
+    if(mustwait) {
+       for(i=0; i < 10; i++) SISWaitRetraceCRT1(pScrn);
+    }
+
+    i = 3;
+    do {
+       temp = SiS_HandleDDC(pSiS->SiS_Pr, pSiS->VBFlags, pSiS->VGAEngine, 0, 0, NULL);
+    } while(((temp == 0) || (temp == 0xffff)) && i--);
+
+    if((temp == 0) || (temp == 0xffff)) {
+       if(TestDDC1(pScrn)) temp = 1;
+    }
+
+    if((temp) && (temp != 0xffff)) {
+       orSISIDXREG(SISCR,0x32,0x20);
+       ret = 1;
+    }
+
+    if(pSiS->VGAEngine == SIS_315_VGA) {
+       setSISIDXREG(SISCR,pSiS->myCR63,0xBF,CR63);
+    }
+
+    setSISIDXREG(SISCR,0x17,0x7F,CR17);
+
+    outSISIDXREG(SISSR,0x1F,SR1F);
+
+    return ret;
+}
+
+/* Detect CRT1 */
+void SISCRT1PreInit(ScrnInfoPtr pScrn)
+{
+    SISPtr  pSiS = SISPTR(pScrn);
+    unsigned char CR32;
+    unsigned char CRT1Detected = 0;
+    unsigned char OtherDevices = 0;
+
+    if(!(pSiS->VBFlags & VB_VIDEOBRIDGE)) {
+       pSiS->CRT1off = 0;
+       return;
+    }
+
+#ifdef SISDUALHEAD
+    if(pSiS->DualHeadMode) {
+       pSiS->CRT1off = 0;
+       return;
+    }
+#endif
+
+#ifdef SISMERGED
+    if((pSiS->MergedFB) && (!(pSiS->MergedFBAuto))) {
+       pSiS->CRT1off = 0;
+       return;
+    }
+#endif
+
+    inSISIDXREG(SISCR, 0x32, CR32);
+
+    if(CR32 & 0x20)  CRT1Detected = 1;
+    else CRT1Detected = SiS_SISDetectCRT1(pScrn);
+
+    if(CR32 & 0x5F)  OtherDevices = 1;
+
+    if(pSiS->CRT1off == -1) {
+       if(!CRT1Detected) {
+
+          /* No CRT1 detected. */
+	  /* If other devices exist, switch it off */
+	  if(OtherDevices) pSiS->CRT1off = 1;
+	  else             pSiS->CRT1off = 0;
+
+       } else {
+
+          /* CRT1 detected, leave/switch it on */
+	  pSiS->CRT1off = 0;
+
+       }
+    }
+
+    xf86DrvMsg(pScrn->scrnIndex, X_PROBED,
+    		"%sCRT1 (VGA) connection detected\n",
+		CRT1Detected ? "" : "No ");
+}
+
+/* Detect CRT2-LCD and LCD size */
+void SISLCDPreInit(ScrnInfoPtr pScrn)
+{
+    SISPtr  pSiS = SISPTR(pScrn);
+    unsigned char CR32, CR36, CR37, CR7D=0, tmp;
+
+    pSiS->LCDwidth = 0;
+
+    if(!(pSiS->VBFlags & VB_VIDEOBRIDGE)) return;
+
+    inSISIDXREG(SISCR, 0x32, CR32);
+   
+    if(CR32 & 0x08) pSiS->VBFlags |= CRT2_LCD;
+    
+    /* If no panel has been detected by the BIOS during booting,
+     * we try to detect it ourselves at this point. We do that
+     * if forcecrt2redetection was given, too.
+     * This is useful on machines with DVI connectors where the
+     * panel was connected after booting. This is only supported
+     * on the 315/330 series and the 301/30xB/C bridge (because the
+     * 30xLV don't seem to have a DDC port and operate only LVDS
+     * panels which mostly don't support DDC). We only do this if
+     * there was no secondary VGA detected by the BIOS, because LCD
+     * and VGA2 share the same DDC channel and might be misdetected
+     * as the wrong type (especially if the LCD panel only supports
+     * EDID Version 1).
+     *
+     * By default, CRT2 redetection is forced since 12/09/2003, as
+     * I encountered numerous panels which deliver more or less
+     * bogus DDC data confusing the BIOS. Since our DDC detection
+     * is waaaay better, we prefer it instead of the primitive
+     * and buggy BIOS method.
+     */
+#ifdef SISDUALHEAD
+    if((!pSiS->DualHeadMode) || (!pSiS->SecondHead)) {
+#endif
+       if((pSiS->VGAEngine == SIS_315_VGA) &&
+          (pSiS->VBFlags & (VB_301|VB_301B|VB_301C|VB_302B)) &&
+          (!(pSiS->VBFlags & VB_30xBDH))) {
+
+          if(pSiS->forcecrt2redetection) {
+             pSiS->VBFlags &= ~CRT2_LCD;
+          }
+
+          if(!(pSiS->nocrt2ddcdetection)) {
+             if((!(pSiS->VBFlags & CRT2_LCD)) && (!(CR32 & 0x10))) {
+	        xf86DrvMsg(pScrn->scrnIndex, X_INFO,
+	             "%s LCD/plasma panel, sensing via DDC\n",
+		     pSiS->forcecrt2redetection ?
+		        "Forced re-detection of" : "BIOS detected no");
+                if(SiS_SenseLCDDDC(pSiS->SiS_Pr, pSiS)) {
+    	           xf86DrvMsg(pScrn->scrnIndex, X_INFO,
+	              "DDC error during LCD panel detection\n");
+	        } else {
+	           inSISIDXREG(SISCR, 0x32, CR32);
+	           if(CR32 & 0x08) {
+	              pSiS->VBFlags |= CRT2_LCD;
+		      pSiS->postVBCR32 |= 0x08;
+	           } else {
+	              xf86DrvMsg(pScrn->scrnIndex, X_INFO,
+	        	   "No LCD/plasma panel detected\n");
+	           }
+	        }
+             }
+          }
+
+       }
+#ifdef SISDUALHEAD
+    }
+#endif
+
+    if(pSiS->VBFlags & CRT2_LCD) {
+       inSISIDXREG(SISCR, 0x36, CR36);
+       inSISIDXREG(SISCR, 0x37, CR37);
+       inSISIDXREG(SISCR, 0x7D, CR7D);
+       if(pSiS->SiS_Pr->SiS_CustomT == CUT_BARCO1366) {
+          pSiS->VBLCDFlags |= VB_LCD_BARCO1366;
+	  pSiS->LCDwidth = 1360;
+	  pSiS->LCDheight = 1024;
+	  if(CR37 & 0x10) pSiS->VBLCDFlags |= VB_LCD_EXPANDING;
+	  xf86DrvMsg(pScrn->scrnIndex, X_PROBED,
+		"Detected LCD panel (%dx%d, type %d, %sexpanding, RGB%d)\n",
+		pSiS->LCDwidth, pSiS->LCDheight,
+		((CR36 & 0xf0) >> 4),
+		(CR37 & 0x10) ? "" : "non-",
+		(CR37 & 0x01) ? 18 : 24);
+       } else if(pSiS->SiS_Pr->SiS_CustomT == CUT_PANEL848) {
+          pSiS->VBLCDFlags |= VB_LCD_848x480;
+	  pSiS->LCDwidth = pSiS->SiS_Pr->CP_MaxX = 848;
+	  pSiS->LCDheight = pSiS->SiS_Pr->CP_MaxY = 480;
+	  pSiS->VBLCDFlags |= VB_LCD_EXPANDING;
+	  xf86DrvMsg(pScrn->scrnIndex, X_CONFIG,
+	  	"Assuming LCD/plasma panel (848x480, expanding, RGB24)\n");
+       } else {
+	  if((pSiS->VGAEngine == SIS_315_VGA) && (!CR36)) {
+	     /* Old 650/301LV BIOS version "forgot" to set CR36, CR37 */
+	     xf86DrvMsg(pScrn->scrnIndex, X_WARNING,
+	        "BIOS-provided LCD information invalid, probing myself...\n");
+	     if(pSiS->VBFlags & VB_LVDS) pSiS->SiS_Pr->SiS_IF_DEF_LVDS = 1;
+	     else pSiS->SiS_Pr->SiS_IF_DEF_LVDS = 0;
+	     SiS_GetPanelID(pSiS->SiS_Pr, &pSiS->sishw_ext);
+	     inSISIDXREG(SISCR, 0x36, CR36);
+	     inSISIDXREG(SISCR, 0x37, CR37);
+	  }
+	  if(((CR36 & 0x0f) == 0x0f) && (pSiS->SiS_Pr->CP_HaveCustomData)) {
+	     pSiS->VBLCDFlags |= VB_LCD_CUSTOM;
+             pSiS->LCDheight = pSiS->SiS_Pr->CP_MaxY;
+	     pSiS->LCDwidth = pSiS->SiS_Pr->CP_MaxX;
+	     if(CR37 & 0x10) pSiS->VBLCDFlags |= VB_LCD_EXPANDING;
+	     xf86DrvMsg(pScrn->scrnIndex, X_PROBED,
+		"Detected non-standard LCD/Plasma panel (max. X %d Y %d, preferred %dx%d, RGB%d)\n",
+ 		pSiS->SiS_Pr->CP_MaxX, pSiS->SiS_Pr->CP_MaxY,
+		pSiS->SiS_Pr->CP_PreferredX, pSiS->SiS_Pr->CP_PreferredY,
+		(CR37 & 0x01) ? 18 : 24);
+	  } else {
+	     if(pSiS->VGAEngine == SIS_300_VGA) {
+	        pSiS->VBLCDFlags |= SiS300_LCD_Type[(CR36 & 0x0f)].VBLCD_lcdflag;
+                pSiS->LCDheight = SiS300_LCD_Type[(CR36 & 0x0f)].LCDheight;
+	        pSiS->LCDwidth = SiS300_LCD_Type[(CR36 & 0x0f)].LCDwidth;
+	        if(CR37 & 0x10) pSiS->VBLCDFlags |= VB_LCD_EXPANDING;
+	     } else if((pSiS->sishw_ext.jChipType >= SIS_661) || (pSiS->ROM661New)) {
+	        pSiS->VBLCDFlags |= SiS661_LCD_Type[(CR36 & 0x0f)].VBLCD_lcdflag;
+                pSiS->LCDheight = SiS661_LCD_Type[(CR36 & 0x0f)].LCDheight;
+	        pSiS->LCDwidth = SiS661_LCD_Type[(CR36 & 0x0f)].LCDwidth;
+	        if(CR37 & 0x10) pSiS->VBLCDFlags |= VB_LCD_EXPANDING;
+		if(pSiS->sishw_ext.jChipType < SIS_661) {
+		   if(!(pSiS->SiS_Pr->PanelSelfDetected)) {
+		      inSISIDXREG(SISCR,0x35,tmp);
+		      CR37 &= 0xfc;
+		      CR37 |= (tmp & 0x01);
+		   }
+		}
+ 	     } else {
+	        pSiS->VBLCDFlags |= SiS315_LCD_Type[(CR36 & 0x0f)].VBLCD_lcdflag;
+                pSiS->LCDheight = SiS315_LCD_Type[(CR36 & 0x0f)].LCDheight;
+	        pSiS->LCDwidth = SiS315_LCD_Type[(CR36 & 0x0f)].LCDwidth;
+	        if(CR37 & 0x10) pSiS->VBLCDFlags |= VB_LCD_EXPANDING;
+	     }
+	     xf86DrvMsg(pScrn->scrnIndex, X_PROBED,
+			"Detected LCD/plasma panel (%dx%d, %d, %sexp., RGB%d [%02x%02x%02x])\n",
+			pSiS->LCDwidth, pSiS->LCDheight,
+			((pSiS->VGAEngine == SIS_315_VGA) &&
+			 (pSiS->Chipset != PCI_CHIP_SIS660)) ?
+			 	((CR36 & 0x0f) - 1) : ((CR36 & 0xf0) >> 4),
+			(CR37 & 0x10) ? "" : "non-",
+			(CR37 & 0x01) ? 18 : 24,
+			CR36, CR37, CR7D);
+	  }
+       }
+    }
+
+}
+
+/* Detect CRT2-TV connector type and PAL/NTSC flag */
+void SISTVPreInit(ScrnInfoPtr pScrn)
+{
+    SISPtr  pSiS = SISPTR(pScrn);
+    unsigned char SR16, SR38, CR32, CR35=0, CR38=0, CR79, CR39;
+    int temp = 0;
+
+    if(!(pSiS->VBFlags & VB_VIDEOBRIDGE)) return;
+
+    inSISIDXREG(SISCR, 0x32, CR32);
+    inSISIDXREG(SISCR, 0x35, CR35);
+    inSISIDXREG(SISSR, 0x16, SR16);
+    inSISIDXREG(SISSR, 0x38, SR38);
+    switch(pSiS->VGAEngine) {
+    case SIS_300_VGA: 
+       if(pSiS->Chipset == PCI_CHIP_SIS630) temp = 0x35;
+       break;
+    case SIS_315_VGA:
+       temp = 0x38;
+       break;
+    }
+    if(temp) {
+       inSISIDXREG(SISCR, temp, CR38);
+    }
+
+#ifdef TWDEBUG
+    xf86DrvMsg(pScrn->scrnIndex, X_PROBED, 
+    	"(vb.c: CR32=%02x SR16=%02x SR38=%02x)\n", 
+	CR32, SR16, SR38);
+#endif
+
+    if(CR32 & 0x47) pSiS->VBFlags |= CRT2_TV;
+
+    if(pSiS->SiS_SD_Flags & SiS_SD_SUPPORTYPBPR) {
+       if(CR32 & 0x80) pSiS->VBFlags |= CRT2_TV;
+    } else {
+       CR32 &= 0x7f;
+    }
+
+    if(CR32 & 0x01)
+       pSiS->VBFlags |= TV_AVIDEO;
+    else if(CR32 & 0x02)
+       pSiS->VBFlags |= TV_SVIDEO;
+    else if(CR32 & 0x04)
+       pSiS->VBFlags |= TV_SCART;
+    else if((CR32 & 0x40) && (pSiS->SiS_SD_Flags & SiS_SD_SUPPORTHIVISION))
+       pSiS->VBFlags |= (TV_HIVISION | TV_PAL);
+    else if((CR32 & 0x80) && (pSiS->SiS_SD_Flags & SiS_SD_SUPPORTYPBPR)) {
+       pSiS->VBFlags |= TV_YPBPR;
+       if(pSiS->Chipset == PCI_CHIP_SIS660) {
+          if(CR38 & 0x04) {
+             switch(CR35 & 0xE0) {
+             case 0x20: pSiS->VBFlags |= TV_YPBPR525P; break;
+	     case 0x40: pSiS->VBFlags |= TV_YPBPR750P; break;
+	     case 0x60: pSiS->VBFlags |= TV_YPBPR1080I; break;
+	     default:   pSiS->VBFlags |= TV_YPBPR525I;
+	     }
+          } else        pSiS->VBFlags |= TV_YPBPR525I;
+          inSISIDXREG(SISCR,0x39,CR39);
+	  CR39 &= 0x03;
+	  if(CR39 == 0x00)      pSiS->VBFlags |= TV_YPBPR43LB;
+	  else if(CR39 == 0x01) pSiS->VBFlags |= TV_YPBPR43;
+	  else if(CR39 == 0x02) pSiS->VBFlags |= TV_YPBPR169;
+	  else			pSiS->VBFlags |= TV_YPBPR43;
+       } else if(pSiS->SiS_SD_Flags & SiS_SD_SUPPORTYPBPR) {
+          if(CR38 & 0x08) {
+	     switch(CR38 & 0x30) {
+	     case 0x10: pSiS->VBFlags |= TV_YPBPR525P; break;
+	     case 0x20: pSiS->VBFlags |= TV_YPBPR750P; break;
+	     case 0x30: pSiS->VBFlags |= TV_YPBPR1080I; break;
+	     default:   pSiS->VBFlags |= TV_YPBPR525I;
+	     }
+	  } else        pSiS->VBFlags |= TV_YPBPR525I;
+	  if(pSiS->SiS_SD_Flags & SiS_SD_SUPPORTYPBPRAR) {
+             inSISIDXREG(SISCR,0x3B,CR39);
+	     CR39 &= 0x03;
+	     if(CR39 == 0x00)      pSiS->VBFlags |= TV_YPBPR43LB;
+	     else if(CR39 == 0x01) pSiS->VBFlags |= TV_YPBPR169;
+	     else if(CR39 == 0x03) pSiS->VBFlags |= TV_YPBPR43;
+	  }
+       }
+    } else if((CR38 & 0x04) && (pSiS->VBFlags & VB_CHRONTEL))
+       pSiS->VBFlags |= (TV_CHSCART | TV_PAL);
+    else if((CR38 & 0x08) && (pSiS->VBFlags & VB_CHRONTEL))
+       pSiS->VBFlags |= (TV_CHYPBPR525I | TV_NTSC);
+
+    if(pSiS->VBFlags & (TV_SCART | TV_SVIDEO | TV_AVIDEO)) {
+       if(pSiS->VGAEngine == SIS_300_VGA) {
+	  /* Should be SR38, but this does not work. */
+	  if(SR16 & 0x20)
+	     pSiS->VBFlags |= TV_PAL;
+          else
+	     pSiS->VBFlags |= TV_NTSC;
+       } else if(pSiS->Chipset == PCI_CHIP_SIS550) {
+          inSISIDXREG(SISCR, 0x7a, CR79);
+	  if(CR79 & 0x08) {
+             inSISIDXREG(SISCR, 0x79, CR79);
+	     CR79 >>= 5;
+	  }
+	  if(CR79 & 0x01) {
+             pSiS->VBFlags |= TV_PAL;
+	     if(CR38 & 0x40)      pSiS->VBFlags |= TV_PALM;
+	     else if(CR38 & 0x80) pSiS->VBFlags |= TV_PALN;
+ 	  } else
+	     pSiS->VBFlags |= TV_NTSC;
+       } else if(pSiS->Chipset == PCI_CHIP_SIS650) {
+	  inSISIDXREG(SISCR, 0x79, CR79);
+	  if(CR79 & 0x20) {
+             pSiS->VBFlags |= TV_PAL;
+	     if(CR38 & 0x40)      pSiS->VBFlags |= TV_PALM;
+	     else if(CR38 & 0x80) pSiS->VBFlags |= TV_PALN;
+ 	  } else
+	     pSiS->VBFlags |= TV_NTSC;
+       } else if(pSiS->Chipset == PCI_CHIP_SIS660) {
+          if(SR38 & 0x01) {
+	     pSiS->VBFlags |= TV_PAL;
+	     if(CR35 & 0x04)      pSiS->VBFlags |= TV_PALM;
+	     else if(CR35 & 0x08) pSiS->VBFlags |= TV_PALN;
+	  } else {
+	     pSiS->VBFlags |= TV_NTSC;
+	     if(CR35 & 0x02)      pSiS->VBFlags |= TV_NTSCJ;
+	  }
+       } else {	/* 315, 330 */
+	  if(SR38 & 0x01) {
+             pSiS->VBFlags |= TV_PAL;
+	     if(CR38 & 0x40)      pSiS->VBFlags |= TV_PALM;
+	     else if(CR38 & 0x80) pSiS->VBFlags |= TV_PALN;
+ 	  } else
+	     pSiS->VBFlags |= TV_NTSC;
+       }
+    }
+
+    if(pSiS->VBFlags & (TV_SCART|TV_SVIDEO|TV_AVIDEO)) {
+       xf86DrvMsg(pScrn->scrnIndex, X_PROBED, "Detected default TV standard %s\n",
+          (pSiS->VBFlags & TV_NTSC) ?
+	     ((pSiS->VBFlags & TV_NTSCJ) ? "NTSCJ" : "NTSC") :
+	         ((pSiS->VBFlags & TV_PALM) ? "PALM" :
+		     ((pSiS->VBFlags & TV_PALN) ? "PALN" : "PAL")));
+    }
+
+    if(pSiS->VBFlags & TV_HIVISION) {
+       xf86DrvMsg(pScrn->scrnIndex, X_PROBED, "BIOS reports HiVision TV\n");
+    }
+
+    if((pSiS->VBFlags & VB_CHRONTEL) && (pSiS->VBFlags & (TV_CHSCART|TV_CHYPBPR525I))) {
+       xf86DrvMsg(pScrn->scrnIndex, X_PROBED, "Chrontel: %s forced\n",
+       	(pSiS->VBFlags & TV_CHSCART) ? "SCART (PAL)" : "YPbPr (480i)");
+    }
+
+    if(pSiS->VBFlags & TV_YPBPR) {
+       xf86DrvMsg(pScrn->scrnIndex, X_PROBED, "Detected YPbPr TV (by default %s)\n",
+         (pSiS->VBFlags & TV_YPBPR525I) ? "480i" :
+	     ((pSiS->VBFlags & TV_YPBPR525P) ? "480p" :
+	        ((pSiS->VBFlags & TV_YPBPR750P) ? "720p" : "1080i")));
+    }
+}
+
+/* Detect CRT2-VGA */
+void SISCRT2PreInit(ScrnInfoPtr pScrn)
+{
+    SISPtr  pSiS = SISPTR(pScrn);
+    unsigned char CR32; 
+
+    if(!(pSiS->VBFlags & VB_VIDEOBRIDGE))  return;
+
+    /* CRT2-VGA not supported on LVDS and 30xLV */
+    if(pSiS->VBFlags & (VB_LVDS|VB_301LV|VB_302LV|VB_302ELV))
+       return;
+
+    inSISIDXREG(SISCR, 0x32, CR32);
+    
+    if(CR32 & 0x10)  pSiS->VBFlags |= CRT2_VGA;
+
+#ifdef SISDUALHEAD
+    if((!pSiS->DualHeadMode) || (!pSiS->SecondHead)) {
+#endif
+
+       if(pSiS->forcecrt2redetection) {
+          pSiS->VBFlags &= ~CRT2_VGA;
+       }
+
+       /* We don't trust the normal sensing method for VGA2 since
+        * it is performed by the BIOS during POST, and it is
+        * impossible to sense VGA2 if the bridge is disabled.
+        * Therefore, we try sensing VGA2 by DDC as well (if not
+        * detected otherwise and only if there is no LCD panel
+        * which is prone to be misdetected as a secondary VGA)
+        */
+       if(!(pSiS->nocrt2ddcdetection)) {
+          if(pSiS->VBFlags & (VB_301|VB_301B|VB_301C|VB_302B)) {
+             if(!(pSiS->VBFlags & (CRT2_VGA | CRT2_LCD))) {
+	        xf86DrvMsg(pScrn->scrnIndex, X_INFO,
+	           "%s secondary VGA, sensing via DDC\n",
+	           pSiS->forcecrt2redetection ?
+		      "Forced re-detection of" : "BIOS detected no");
+                if(SiS_SenseVGA2DDC(pSiS->SiS_Pr, pSiS)) {
+    	           xf86DrvMsg(pScrn->scrnIndex, X_ERROR,
+	              "DDC error during secondary VGA detection\n");
+	        } else {
+	           inSISIDXREG(SISCR, 0x32, CR32);
+	           if(CR32 & 0x10) {
+	              pSiS->VBFlags |= CRT2_VGA;
+	              pSiS->postVBCR32 |= 0x10;
+		      xf86DrvMsg(pScrn->scrnIndex, X_PROBED,
+		         "Detected secondary VGA connection\n");
+	           } else {
+	              xf86DrvMsg(pScrn->scrnIndex, X_PROBED,
+		         "No secondary VGA connection detected\n");
+	           }
+	        }
+             }
+          }
+       }
+#ifdef SISDUALHEAD
+    }
+#endif    
+}
+
+
+
+@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@d1 31
+a31 1
+/* $XFree86: xc/programs/Xserver/hw/xfree86/drivers/sis/sis_vb.c,v 1.6 2002/01/17 09:57:30 eich Exp $ */
+d41 1
+d43 191
+a233 1
+/* TW: Detect CRT2-LCD and LCD size */
+d237 145
+a381 60
+    int CR32, SR17, CR36;
+  
+    if (!(pSiS->VBFlags & VB_VIDEOBRIDGE))
+	return;
+  
+    inSISIDXREG(pSiS->RelIO+CROFFSET, 0x32, CR32);
+    inSISIDXREG(pSiS->RelIO+SROFFSET, 0x17, SR17);
+ 
+    if ( (SR17 & 0x0F) && (pSiS->Chipset != PCI_CHIP_SIS300) ) {
+	if ( (SR17 & 0x01) && (!pSiS->CRT1off) )
+	    pSiS->CRT1off = 0;
+	else {
+	    if (SR17 & 0x0E)
+		pSiS->CRT1off = 1;
+	    else
+		pSiS->CRT1off = 0;
+	}
+ 	if (SR17 & 0x02)
+	    pSiS->VBFlags |= CRT2_LCD;
+    } else {
+	if ( (CR32 & 0x20) && (!pSiS->CRT1off) )
+	    pSiS->CRT1off = 0;
+ 	else {
+	    if (CR32 & 0x5F)
+		pSiS->CRT1off = 1;
+	    else
+		pSiS->CRT1off = 0;
+ 	}
+     	if (CR32 & 0x08)
+            pSiS->VBFlags |= CRT2_LCD;
+    }
+ 
+    if (pSiS->VBFlags & CRT2_LCD) {
+	inSISIDXREG(pSiS->RelIO+CROFFSET, 0x36, CR36);
+	switch (CR36) {
+	case 1:
+	    pSiS->VBFlags |= LCD_800x600;
+ 	    pSiS->LCDheight = 600;
+ 	    break;
+	case 2:
+	    pSiS->VBFlags |= LCD_1024x768;
+ 	    pSiS->LCDheight = 768;
+ 	    break;
+	case 3:
+	    pSiS->VBFlags |= LCD_1280x1024;
+ 	    pSiS->LCDheight = 1024;
+ 	    break;
+	case 4:
+	    pSiS->VBFlags |= LCD_1280x960;  /* TW */
+ 	    pSiS->LCDheight = 960;
+ 	    break;
+	case 5:
+	    pSiS->VBFlags |= LCD_640x480;   /* TW */
+ 	    pSiS->LCDheight = 480;
+ 	    break;
+	default:
+ 	    pSiS->VBFlags |= LCD_1024x768;  /* TW */
+ 	    pSiS->LCDheight = 768;
+ 	    break;
+	}
+d383 1
+d385 2
+a386 2
+ 
+/* TW: Detect CRT2-TV connector type and PAL/NTSC flag */
+d390 31
+a420 22
+    int CR32, CR38, SR16, SR17;
+ 
+    if (!(pSiS->VBFlags & VB_VIDEOBRIDGE))
+	return;
+ 
+    inSISIDXREG(pSiS->RelIO+CROFFSET, 0x32, CR32);
+    inSISIDXREG(pSiS->RelIO+SROFFSET, 0x17, SR17);
+ 
+    if ( (SR17 & 0x0F) && (pSiS->Chipset != PCI_CHIP_SIS300) ) {
+	if (SR17 & 0x04) /* { */ /* TW: Determine TV type even if not using TV output */
+ 	    pSiS->VBFlags |= CRT2_TV;
+ 
+	if (SR17 & 0x20)
+	    pSiS->VBFlags |= TV_SVIDEO;
+	else if (SR17 & 0x10)
+	    pSiS->VBFlags |= TV_AVIDEO;
+	inSISIDXREG(pSiS->RelIO+SROFFSET, 0x16, SR16);
+	if (SR16 & 0x20)
+	    pSiS->VBFlags |= TV_PAL;
+	else
+	    pSiS->VBFlags |= TV_NTSC;
+	/* } */
+d422 178
+a599 49
+	if (CR32 & 0x47) /* { */
+ 	    pSiS->VBFlags |= CRT2_TV;
+	if (CR32 & 0x04)
+	    pSiS->VBFlags |= TV_SCART;
+	else if (CR32 & 0x02)
+	    pSiS->VBFlags |= TV_SVIDEO;
+	else if (CR32 & 0x01)
+	    pSiS->VBFlags |= TV_AVIDEO;
+	else if (CR32 & 0x40)
+	    pSiS->VBFlags |= (TV_SVIDEO | TV_HIVISION);
+	inSISIDXREG(pSiS->RelIO+SROFFSET, 0x38, CR38);
+	if (CR38 & 0x01)
+	    pSiS->VBFlags |= TV_PAL;
+	else
+	    pSiS->VBFlags |= TV_NTSC;
+	/* } */
+    }
+ 
+    /* TW: This is old code: */
+  
+    /* TW: Reading PAL/NTSC flag from 0x31 is not a good idea. We'd
+     *     better read this from POWER_ON_TRAP (0x38) some day. */
+#if 0
+    inSISIDXREG(pSiS->RelIO+CROFFSET, 0x31, temp);
+    if (temp & 0x01)
+	pSiS->VBFlags |= TV_PAL;
+    else
+	pSiS->VBFlags |= TV_NTSC;
+#endif
+}
+  
+ /* TW: Detect CRT2-VGA */
+  void SISCRT2PreInit(ScrnInfoPtr pScrn)
+{
+    SISPtr  pSiS = SISPTR(pScrn);
+    int SR17, CR32;
+  
+    if (!(pSiS->VBFlags & VB_VIDEOBRIDGE))
+	return;
+  
+    inSISIDXREG(pSiS->RelIO+CROFFSET, 0x32, CR32);
+    inSISIDXREG(pSiS->RelIO+SROFFSET, 0x17, SR17);
+ 
+    if ( (SR17 & 0x0F) && (pSiS->Chipset != PCI_CHIP_SIS300) ) {
+	if (SR17 & 0x08)
+	    pSiS->VBFlags |= CRT2_VGA;
+    } else {
+	if (CR32 & 0x10)
+	    pSiS->VBFlags |= CRT2_VGA;
+d601 1
+d603 3
+@
+
+
+1.1.9.1
+log
+@OpenBSD just has imported exactly this tree into their vendor branch,
+called the same tag, in XF4/xc
+This is, apparently, the last XFree86 snapshot before the licence change
+(ie, addition of the advertising clause)
+
+Since the developers don't see any problems with that, and we would like
+to integrate improvements done by the remaining one or two (or so) XFree86
+developers (j/k), this prepares enabling us to update X-Window in the future.
+@
+text
+@d1 1
+a1 34
+/* $XFree86: xc/programs/Xserver/hw/xfree86/drivers/sis/sis_vb.c,v 1.41 2004/01/23 22:29:06 twini Exp $ */
+/*
+ * Video bridge detection and configuration for 300, 315 and 330 series
+ *
+ * Copyright (C) 2001-2004 by Thomas Winischhofer, Vienna, Austria
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ * 1) Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2) Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ * 3) All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement: "This product includes
+ *    software developed by Thomas Winischhofer, Vienna, Austria."
+ * 4) The name of the author may not be used to endorse or promote products
+ *    derived from this software without specific prior written permission.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESSED OR
+ * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
+ * OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
+ * IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT
+ * NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
+ * DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
+ * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+ * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
+ * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ *
+ * Author: 	Thomas Winischhofer <thomas@@winischhofer.net>
+ *		
+ */
+a10 1
+#include "sis_dac.h"
+d12 1
+a12 191
+extern void    	     SISWaitRetraceCRT1(ScrnInfoPtr pScrn);
+extern unsigned char SiS_GetSetBIOSScratch(ScrnInfoPtr pScrn, USHORT offset, unsigned char value);
+
+static const SiS_LCD_StStruct SiS300_LCD_Type[]=
+{
+        { VB_LCD_1024x768, 1024,  768, LCD_1024x768 },  /* 0 - invalid */
+	{ VB_LCD_800x600,   800,  600, LCD_800x600  },  /* 1 */
+	{ VB_LCD_1024x768, 1024,  768, LCD_1024x768 },  /* 2 */
+	{ VB_LCD_1280x1024,1280, 1024, LCD_1280x1024},  /* 3 */
+	{ VB_LCD_1280x960, 1280,  960, LCD_1280x960 },  /* 4 */
+	{ VB_LCD_640x480,   640,  480, LCD_640x480  },  /* 5 */
+	{ VB_LCD_1024x600, 1024,  600, LCD_1024x600 },  /* 6 */
+	{ VB_LCD_1152x768, 1152,  768, LCD_1152x768 },  /* 7 */
+	{ VB_LCD_1024x768, 1024,  768, LCD_1024x768 },  /* 8 */
+	{ VB_LCD_1024x768, 1024,  768, LCD_1024x768 },  /* 9 */
+	{ VB_LCD_1280x768, 1280,  768, LCD_1280x768 },  /* a */
+	{ VB_LCD_1024x768, 1024,  768, LCD_1024x768 },  /* b */
+	{ VB_LCD_1024x768, 1024,  768, LCD_1024x768 },  /* c */
+	{ VB_LCD_1024x768, 1024,  768, LCD_1024x768 },  /* d */
+	{ VB_LCD_320x480,   320,  480, LCD_320x480  },  /* e */
+	{ VB_LCD_CUSTOM,      0,    0, LCD_CUSTOM   }   /* f */
+};
+
+static const SiS_LCD_StStruct SiS315_LCD_Type[]=
+{
+        { VB_LCD_1024x768, 1024,  768, LCD_1024x768  },  /* 0 - invalid */
+	{ VB_LCD_800x600,   800,  600, LCD_800x600   },  /* 1 */
+	{ VB_LCD_1024x768, 1024,  768, LCD_1024x768  },  /* 2 */
+	{ VB_LCD_1280x1024,1280, 1024, LCD_1280x1024 },  /* 3 */
+	{ VB_LCD_640x480,   640,  480, LCD_640x480   },  /* 4 */
+	{ VB_LCD_1024x600, 1024,  600, LCD_1024x600  },  /* 5 */
+	{ VB_LCD_1152x864, 1152,  864, LCD_1152x864  },  /* 6 */
+	{ VB_LCD_1280x960, 1280,  960, LCD_1280x960  },  /* 7 */
+	{ VB_LCD_1152x768, 1152,  768, LCD_1152x768  },  /* 8 */
+	{ VB_LCD_1400x1050,1400, 1050, LCD_1400x1050 },  /* 9 */
+	{ VB_LCD_1280x768, 1280,  768, LCD_1280x768  },  /* a */
+	{ VB_LCD_1600x1200,1600, 1200, LCD_1600x1200 },  /* b */
+	{ VB_LCD_640x480_2, 640,  480, LCD_640x480_2 },  /* c DSTN/FSTN */
+	{ VB_LCD_640x480_3, 640,  480, LCD_640x480_3 },  /* d DSTN/FSTN */
+	{ VB_LCD_320x480,   320,  480, LCD_320x480   },  /* e */
+	{ VB_LCD_CUSTOM,      0,    0, LCD_CUSTOM,   }   /* f */
+};
+
+static const SiS_LCD_StStruct SiS661_LCD_Type[]=
+{
+        { VB_LCD_1024x768, 1024,  768, LCD_1024x768  },  /* 0 - invalid */
+	{ VB_LCD_800x600,   800,  600, LCD_800x600   },  /* 1 */
+	{ VB_LCD_1024x768, 1024,  768, LCD_1024x768  },  /* 2 */
+	{ VB_LCD_1280x1024,1280, 1024, LCD_1280x1024 },  /* 3 */
+	{ VB_LCD_640x480,   640,  480, LCD_640x480   },  /* 4 */
+	{ VB_LCD_1024x600, 1024,  600, LCD_1024x600  },  /* 5 */
+	{ VB_LCD_1152x864, 1152,  864, LCD_1152x864  },  /* 6 */
+	{ VB_LCD_1280x960, 1280,  960, LCD_1280x960  },  /* 7 */
+	{ VB_LCD_1152x768, 1152,  768, LCD_1152x768  },  /* 8 */
+	{ VB_LCD_1400x1050,1400, 1050, LCD_1400x1050 },  /* 9 */
+	{ VB_LCD_1280x768, 1280,  768, LCD_1280x768  },  /* a */
+	{ VB_LCD_1600x1200,1600, 1200, LCD_1600x1200 },  /* b */
+	{ VB_LCD_1280x800, 1280,  800, LCD_1280x800  },  /* c */
+	{ VB_LCD_1680x1050,1680, 1050, LCD_1680x1050 },  /* d */
+	{ VB_LCD_320x480,   320,  480, LCD_320x480   },  /* e */
+	{ VB_LCD_CUSTOM,      0,    0, LCD_CUSTOM,   }   /* f */
+};
+
+static Bool
+TestDDC1(ScrnInfoPtr pScrn)
+{
+    SISPtr  pSiS = SISPTR(pScrn);
+    unsigned short old;
+    int count = 48;
+
+    old = SiS_ReadDDC1Bit(pSiS->SiS_Pr);
+    do {
+       if(old != SiS_ReadDDC1Bit(pSiS->SiS_Pr)) break;
+    } while(count--);
+    return (count == -1) ? FALSE : TRUE;
+}
+
+static int
+SiS_SISDetectCRT1(ScrnInfoPtr pScrn)
+{
+    SISPtr  pSiS = SISPTR(pScrn);
+    unsigned short temp = 0xffff;
+    unsigned char SR1F, CR63=0, CR17;
+    int i, ret = 0;
+    Bool mustwait = FALSE;
+
+    inSISIDXREG(SISSR,0x1F,SR1F);
+    orSISIDXREG(SISSR,0x1F,0x04);
+    andSISIDXREG(SISSR,0x1F,0x3F);
+    if(SR1F & 0xc0) mustwait = TRUE;
+
+    if(pSiS->VGAEngine == SIS_315_VGA) {
+       inSISIDXREG(SISCR,pSiS->myCR63,CR63);
+       CR63 &= 0x40;
+       andSISIDXREG(SISCR,pSiS->myCR63,0xBF);
+    }
+
+    inSISIDXREG(SISCR,0x17,CR17);
+    CR17 &= 0x80;
+    if(!CR17) {
+       orSISIDXREG(SISCR,0x17,0x80);
+       mustwait = TRUE;
+       outSISIDXREG(SISSR, 0x00, 0x01);
+       outSISIDXREG(SISSR, 0x00, 0x03);
+    }
+
+    if(mustwait) {
+       for(i=0; i < 10; i++) SISWaitRetraceCRT1(pScrn);
+    }
+
+    i = 3;
+    do {
+       temp = SiS_HandleDDC(pSiS->SiS_Pr, pSiS->VBFlags, pSiS->VGAEngine, 0, 0, NULL);
+    } while(((temp == 0) || (temp == 0xffff)) && i--);
+
+    if((temp == 0) || (temp == 0xffff)) {
+       if(TestDDC1(pScrn)) temp = 1;
+    }
+
+    if((temp) && (temp != 0xffff)) {
+       orSISIDXREG(SISCR,0x32,0x20);
+       ret = 1;
+    }
+
+    if(pSiS->VGAEngine == SIS_315_VGA) {
+       setSISIDXREG(SISCR,pSiS->myCR63,0xBF,CR63);
+    }
+
+    setSISIDXREG(SISCR,0x17,0x7F,CR17);
+
+    outSISIDXREG(SISSR,0x1F,SR1F);
+
+    return ret;
+}
+
+/* Detect CRT1 */
+void SISCRT1PreInit(ScrnInfoPtr pScrn)
+{
+    SISPtr  pSiS = SISPTR(pScrn);
+    unsigned char CR32;
+    unsigned char CRT1Detected = 0;
+    unsigned char OtherDevices = 0;
+
+    if(!(pSiS->VBFlags & VB_VIDEOBRIDGE)) {
+       pSiS->CRT1off = 0;
+       return;
+    }
+
+#ifdef SISDUALHEAD
+    if(pSiS->DualHeadMode) {
+       pSiS->CRT1off = 0;
+       return;
+    }
+#endif
+
+#ifdef SISMERGED
+    if((pSiS->MergedFB) && (!(pSiS->MergedFBAuto))) {
+       pSiS->CRT1off = 0;
+       return;
+    }
+#endif
+
+    inSISIDXREG(SISCR, 0x32, CR32);
+
+    if(CR32 & 0x20)  CRT1Detected = 1;
+    else CRT1Detected = SiS_SISDetectCRT1(pScrn);
+
+    if(CR32 & 0x5F)  OtherDevices = 1;
+
+    if(pSiS->CRT1off == -1) {
+       if(!CRT1Detected) {
+
+          /* No CRT1 detected. */
+	  /* If other devices exist, switch it off */
+	  if(OtherDevices) pSiS->CRT1off = 1;
+	  else             pSiS->CRT1off = 0;
+
+       } else {
+
+          /* CRT1 detected, leave/switch it on */
+	  pSiS->CRT1off = 0;
+
+       }
+    }
+
+    xf86DrvMsg(pScrn->scrnIndex, X_PROBED,
+    		"%sCRT1 (VGA) connection detected\n",
+		CRT1Detected ? "" : "No ");
+}
+
+/* Detect CRT2-LCD and LCD size */
+d16 60
+a75 142
+    unsigned char CR32, CR36, CR37;
+
+    pSiS->LCDwidth = 0;
+
+    if(!(pSiS->VBFlags & VB_VIDEOBRIDGE)) return;
+
+    inSISIDXREG(SISCR, 0x32, CR32);
+   
+    if(CR32 & 0x08) pSiS->VBFlags |= CRT2_LCD;
+    
+    /* If no panel has been detected by the BIOS during booting,
+     * we try to detect it ourselves at this point. We do that
+     * if forcecrt2redetection was given, too.
+     * This is useful on machines with DVI connectors where the
+     * panel was connected after booting. This is only supported
+     * on the 315/330 series and the 301/30xB bridge (because the
+     * 30xLV don't seem to have a DDC port and operate only LVDS
+     * panels which mostly don't support DDC). We only do this if
+     * there was no secondary VGA detected by the BIOS, because LCD
+     * and VGA2 share the same DDC channel and might be misdetected
+     * as the wrong type (especially if the LCD panel only supports
+     * EDID Version 1).
+     *
+     * By default, CRT2 redetection is forced since 12/09/2003, as
+     * I encountered numerous panels which deliver more or less
+     * bogus DDC data confusing the BIOS. Since our DDC detection
+     * is waaaay better, we prefer it instead of the primitive
+     * and buggy BIOS method.
+     */
+#ifdef SISDUALHEAD
+    if((!pSiS->DualHeadMode) || (!pSiS->SecondHead)) {
+#endif
+       if((pSiS->VGAEngine == SIS_315_VGA) &&
+          (pSiS->VBFlags & (VB_301|VB_301B|VB_301C|VB_302B)) &&
+          (!(pSiS->VBFlags & VB_30xBDH))) {
+
+          if(pSiS->forcecrt2redetection) {
+             pSiS->VBFlags &= ~CRT2_LCD;
+          }
+
+          if(!(pSiS->nocrt2ddcdetection)) {
+             if((!(pSiS->VBFlags & CRT2_LCD)) && (!(CR32 & 0x10))) {
+	        xf86DrvMsg(pScrn->scrnIndex, X_INFO,
+	             "%s LCD/Plasma panel, sensing via DDC\n",
+		     pSiS->forcecrt2redetection ?
+		        "Forced re-detection of" : "BIOS detected no");
+                if(SiS_SenseLCDDDC(pSiS->SiS_Pr, pSiS)) {
+    	           xf86DrvMsg(pScrn->scrnIndex, X_INFO,
+	              "DDC error during LCD panel detection\n");
+	        } else {
+	           inSISIDXREG(SISCR, 0x32, CR32);
+	           if(CR32 & 0x08) {
+	              pSiS->VBFlags |= CRT2_LCD;
+		      pSiS->postVBCR32 |= 0x08;
+	           } else {
+	              xf86DrvMsg(pScrn->scrnIndex, X_INFO,
+	        	   "No LCD/Plasma panel detected\n");
+	           }
+	        }
+             }
+          }
+
+       }
+#ifdef SISDUALHEAD
+    }
+#endif
+
+    if(pSiS->VBFlags & CRT2_LCD) {
+       inSISIDXREG(SISCR, 0x36, CR36);
+       inSISIDXREG(SISCR, 0x37, CR37);
+       if(pSiS->SiS_Pr->SiS_CustomT == CUT_BARCO1366) {
+          pSiS->VBLCDFlags |= VB_LCD_BARCO1366;
+	  pSiS->LCDwidth = 1360;
+	  pSiS->LCDheight = 1024;
+	  if(CR37 & 0x10) pSiS->VBLCDFlags |= VB_LCD_EXPANDING;
+	  xf86DrvMsg(pScrn->scrnIndex, X_PROBED,
+		"Detected LCD panel (%dx%d, type %d, %sexpanding, RGB%d)\n",
+		pSiS->LCDwidth, pSiS->LCDheight,
+		((CR36 & 0xf0) >> 4),
+		(CR37 & 0x10) ? "" : "non-",
+		(CR37 & 0x01) ? 18 : 24);
+       } else if(pSiS->SiS_Pr->SiS_CustomT == CUT_PANEL848) {
+          pSiS->VBLCDFlags |= VB_LCD_848x480;
+	  pSiS->LCDwidth = pSiS->SiS_Pr->CP_MaxX = 848;
+	  pSiS->LCDheight = pSiS->SiS_Pr->CP_MaxY = 480;
+	  pSiS->VBLCDFlags |= VB_LCD_EXPANDING;
+	  pSiS->sishw_ext.ulCRT2LCDType = LCD_848x480;
+	  xf86DrvMsg(pScrn->scrnIndex, X_CONFIG,
+	  	"Assuming LCD/plasma panel (848x480, expanding, RGB24)\n");
+       } else {
+	  if((pSiS->VGAEngine == SIS_315_VGA) && (!CR36)) {
+	     /* TW: Old 650/301LV BIOS version "forgot" to set CR36, CR37 */
+	     xf86DrvMsg(pScrn->scrnIndex, X_WARNING,
+	        "BIOS-provided LCD information invalid, probing myself...\n");
+	     if(pSiS->VBFlags & VB_LVDS) pSiS->SiS_Pr->SiS_IF_DEF_LVDS = 1;
+	     else pSiS->SiS_Pr->SiS_IF_DEF_LVDS = 0;
+	     SiS_GetPanelID(pSiS->SiS_Pr, &pSiS->sishw_ext);
+	     inSISIDXREG(SISCR, 0x36, CR36);
+	     inSISIDXREG(SISCR, 0x37, CR37);
+	  }
+	  if(((CR36 & 0x0f) == 0x0f) && (pSiS->SiS_Pr->CP_HaveCustomData)) {
+	     pSiS->VBLCDFlags |= VB_LCD_CUSTOM;
+             pSiS->LCDheight = pSiS->SiS_Pr->CP_MaxY;
+	     pSiS->LCDwidth = pSiS->SiS_Pr->CP_MaxX;
+             pSiS->sishw_ext.ulCRT2LCDType = LCD_CUSTOM;
+	     if(CR37 & 0x10) pSiS->VBLCDFlags |= VB_LCD_EXPANDING;
+	     xf86DrvMsg(pScrn->scrnIndex, X_PROBED,
+		"Detected non-standard LCD/Plasma panel (max. X %d Y %d, preferred %dx%d, RGB%d)\n",
+ 		pSiS->SiS_Pr->CP_MaxX, pSiS->SiS_Pr->CP_MaxY,
+		pSiS->SiS_Pr->CP_PreferredX, pSiS->SiS_Pr->CP_PreferredY,
+		(CR37 & 0x01) ? 18 : 24);
+	  } else {
+	     if(pSiS->VGAEngine == SIS_300_VGA) {
+	        pSiS->VBLCDFlags |= SiS300_LCD_Type[(CR36 & 0x0f)].VBLCD_lcdflag;
+                pSiS->LCDheight = SiS300_LCD_Type[(CR36 & 0x0f)].LCDheight;
+	        pSiS->LCDwidth = SiS300_LCD_Type[(CR36 & 0x0f)].LCDwidth;
+                pSiS->sishw_ext.ulCRT2LCDType = SiS300_LCD_Type[(CR36 & 0x0f)].LCDtype;
+	        if(CR37 & 0x10) pSiS->VBLCDFlags |= VB_LCD_EXPANDING;
+	     } else if(pSiS->sishw_ext.jChipType < SIS_661) {
+	        pSiS->VBLCDFlags |= SiS315_LCD_Type[(CR36 & 0x0f)].VBLCD_lcdflag;
+                pSiS->LCDheight = SiS315_LCD_Type[(CR36 & 0x0f)].LCDheight;
+	        pSiS->LCDwidth = SiS315_LCD_Type[(CR36 & 0x0f)].LCDwidth;
+                pSiS->sishw_ext.ulCRT2LCDType = SiS315_LCD_Type[(CR36 & 0x0f)].LCDtype;
+	        if(CR37 & 0x10) pSiS->VBLCDFlags |= VB_LCD_EXPANDING;
+	     } else {
+		pSiS->VBLCDFlags |= SiS661_LCD_Type[(CR36 & 0x0f)].VBLCD_lcdflag;
+                pSiS->LCDheight = SiS661_LCD_Type[(CR36 & 0x0f)].LCDheight;
+	        pSiS->LCDwidth = SiS661_LCD_Type[(CR36 & 0x0f)].LCDwidth;
+                pSiS->sishw_ext.ulCRT2LCDType = SiS661_LCD_Type[(CR36 & 0x0f)].LCDtype;
+	        if(CR37 & 0x10) pSiS->VBLCDFlags |= VB_LCD_EXPANDING;
+	     }
+	     xf86DrvMsg(pScrn->scrnIndex, X_PROBED,
+			"Detected LCD/Plasma panel (%dx%d, %d, %sexp., RGB%d [%02x%02x])\n",
+			pSiS->LCDwidth, pSiS->LCDheight,
+			((pSiS->VGAEngine == SIS_315_VGA) &&
+			 (pSiS->Chipset != PCI_CHIP_SIS660)) ?
+			 	((CR36 & 0x0f) - 1) : ((CR36 & 0xf0) >> 4),
+			(CR37 & 0x10) ? "" : "non-",
+			(CR37 & 0x01) ? 18 : 24,
+			CR36, CR37);
+	  }
+       }
+a76 1
+
+d78 2
+a79 2
+
+/* Detect CRT2-TV connector type and PAL/NTSC flag */
+d83 69
+a151 31
+    unsigned char SR16, SR38, CR32, CR35=0, CR38=0, CR79, CR39;
+    int temp = 0;
+
+    if(!(pSiS->VBFlags & VB_VIDEOBRIDGE)) return;
+
+    inSISIDXREG(SISCR, 0x32, CR32);
+    inSISIDXREG(SISCR, 0x35, CR35);
+    inSISIDXREG(SISSR, 0x16, SR16);
+    inSISIDXREG(SISSR, 0x38, SR38);
+    switch(pSiS->VGAEngine) {
+    case SIS_300_VGA: 
+       if(pSiS->Chipset == PCI_CHIP_SIS630) temp = 0x35;
+       break;
+    case SIS_315_VGA:
+       temp = 0x38;
+       break;
+    }
+    if(temp) {
+       inSISIDXREG(SISCR, temp, CR38);
+    }
+
+#ifdef TWDEBUG
+    xf86DrvMsg(pScrn->scrnIndex, X_PROBED, 
+    	"(vb.c: CR32=%02x SR16=%02x SR38=%02x)\n", 
+	CR32, SR16, SR38);
+#endif
+
+    if(CR32 & 0x47) pSiS->VBFlags |= CRT2_TV;
+
+    if(pSiS->SiS_SD_Flags & SiS_SD_SUPPORTYPBPR) {
+       if(CR32 & 0x80) pSiS->VBFlags |= CRT2_TV;
+d153 2
+a154 118
+       CR32 &= 0x7f;
+    }
+
+    if(CR32 & 0x01)
+       pSiS->VBFlags |= TV_AVIDEO;
+    else if(CR32 & 0x02)
+       pSiS->VBFlags |= TV_SVIDEO;
+    else if(CR32 & 0x04)
+       pSiS->VBFlags |= TV_SCART;
+    else if((CR32 & 0x40) && (pSiS->SiS_SD_Flags & SiS_SD_SUPPORTHIVISION))
+       pSiS->VBFlags |= (TV_HIVISION | TV_PAL);
+    else if((CR32 & 0x80) && (pSiS->SiS_SD_Flags & SiS_SD_SUPPORTYPBPR)) {
+       pSiS->VBFlags |= TV_YPBPR;
+       if(pSiS->Chipset == PCI_CHIP_SIS660) {
+          if(CR38 & 0x04) {
+             switch((CR35 & 0xE0)) {
+             case 0x20: pSiS->VBFlags |= TV_YPBPR525P; break;
+	     case 0x40: pSiS->VBFlags |= TV_YPBPR750P; break;
+	     case 0x60: pSiS->VBFlags |= TV_YPBPR1080I; break;
+	     default:   pSiS->VBFlags |= TV_YPBPR525I;
+	     }
+          }
+          inSISIDXREG(SISCR,0x39,CR39);
+	  CR39 &= 0x03;
+	  if(CR39 == 0x00)      pSiS->VBFlags |= TV_YPBPR43LB;
+	  else if(CR39 == 0x01) pSiS->VBFlags |= TV_YPBPR43;
+	  else if(CR39 == 0x02) pSiS->VBFlags |= TV_YPBPR169;
+	  else			pSiS->VBFlags |= TV_YPBPR43;
+       } else if(pSiS->SiS_SD_Flags & SiS_SD_SUPPORTYPBPR) {
+          if(CR38 & 0x08) {
+	     switch((CR38 & 0x30)) {
+	     case 0x10: pSiS->VBFlags |= TV_YPBPR525P; break;
+	     case 0x20: pSiS->VBFlags |= TV_YPBPR750P; break;
+	     case 0x30: pSiS->VBFlags |= TV_YPBPR1080I; break;
+	     default:   pSiS->VBFlags |= TV_YPBPR525I;
+	     }
+	  }
+	  if(pSiS->SiS_SD_Flags & SiS_SD_SUPPORTYPBPRAR) {
+             inSISIDXREG(SISCR,0x3B,CR39);
+	     CR39 &= 0x03;
+	     if(CR39 == 0x00)      pSiS->VBFlags |= TV_YPBPR43LB;
+	     else if(CR39 == 0x01) pSiS->VBFlags |= TV_YPBPR169;
+	     else if(CR39 == 0x03) pSiS->VBFlags |= TV_YPBPR43;
+	  }
+       }
+    } else if((CR38 & 0x04) && (pSiS->VBFlags & VB_CHRONTEL))
+       pSiS->VBFlags |= (TV_CHSCART | TV_PAL);
+    else if((CR38 & 0x08) && (pSiS->VBFlags & VB_CHRONTEL))
+       pSiS->VBFlags |= (TV_CHYPBPR525I | TV_NTSC);
+
+    if(pSiS->VBFlags & (TV_SCART | TV_SVIDEO | TV_AVIDEO)) {
+       if(pSiS->VGAEngine == SIS_300_VGA) {
+	  /* Should be SR38, but this does not work. */
+	  if(SR16 & 0x20)
+	     pSiS->VBFlags |= TV_PAL;
+          else
+	     pSiS->VBFlags |= TV_NTSC;
+       } else if(pSiS->Chipset == PCI_CHIP_SIS550) {
+          inSISIDXREG(SISCR, 0x7a, CR79);
+	  if(CR79 & 0x08) {
+             inSISIDXREG(SISCR, 0x79, CR79);
+	     CR79 >>= 5;
+	  }
+	  if(CR79 & 0x01) {
+             pSiS->VBFlags |= TV_PAL;
+	     if(CR38 & 0x40)      pSiS->VBFlags |= TV_PALM;
+	     else if(CR38 & 0x80) pSiS->VBFlags |= TV_PALN;
+ 	  } else
+	     pSiS->VBFlags |= TV_NTSC;
+       } else if(pSiS->Chipset == PCI_CHIP_SIS650) {
+	  inSISIDXREG(SISCR, 0x79, CR79);
+	  if(CR79 & 0x20) {
+             pSiS->VBFlags |= TV_PAL;
+	     if(CR38 & 0x40)      pSiS->VBFlags |= TV_PALM;
+	     else if(CR38 & 0x80) pSiS->VBFlags |= TV_PALN;
+ 	  } else
+	     pSiS->VBFlags |= TV_NTSC;
+       } else if(pSiS->Chipset == PCI_CHIP_SIS660) {
+          if(SR38 & 0x01) {
+	     pSiS->VBFlags |= TV_PAL;
+	     if(CR35 & 0x04)      pSiS->VBFlags |= TV_PALM;
+	     else if(CR35 & 0x08) pSiS->VBFlags |= TV_PALN;
+	  } else {
+	     pSiS->VBFlags |= TV_NTSC;
+	     if(CR35 & 0x02)      pSiS->VBFlags |= TV_NTSCJ;
+	  }
+       } else {	/* 315, 330 */
+	  if(SR38 & 0x01) {
+             pSiS->VBFlags |= TV_PAL;
+	     if(CR38 & 0x40)      pSiS->VBFlags |= TV_PALM;
+	     else if(CR38 & 0x80) pSiS->VBFlags |= TV_PALN;
+ 	  } else
+	     pSiS->VBFlags |= TV_NTSC;
+       }
+    }
+
+    if(pSiS->VBFlags & (TV_SCART|TV_SVIDEO|TV_AVIDEO)) {
+       xf86DrvMsg(pScrn->scrnIndex, X_PROBED, "Detected default TV standard %s\n",
+          (pSiS->VBFlags & TV_NTSC) ?
+	     ((pSiS->VBFlags & TV_NTSCJ) ? "NTSCJ" : "NTSC") :
+	         ((pSiS->VBFlags & TV_PALM) ? "PALM" :
+		     ((pSiS->VBFlags & TV_PALN) ? "PALN" : "PAL")));
+    }
+
+    if(pSiS->VBFlags & TV_HIVISION) {
+       xf86DrvMsg(pScrn->scrnIndex, X_PROBED, "BIOS reports HiVision TV\n");
+    }
+
+    if((pSiS->VBFlags & VB_CHRONTEL) && (pSiS->VBFlags & (TV_CHSCART|TV_CHYPBPR525I))) {
+       xf86DrvMsg(pScrn->scrnIndex, X_PROBED, "Chrontel: %s forced\n",
+       	(pSiS->VBFlags & TV_CHSCART) ? "SCART (PAL)" : "YPbPr (480i)");
+    }
+
+    if(pSiS->VBFlags & TV_YPBPR) {
+       xf86DrvMsg(pScrn->scrnIndex, X_PROBED, "Detected YPbPr TV (%s)\n",
+         (pSiS->VBFlags & TV_YPBPR525I) ? "480i" :
+	     ((pSiS->VBFlags & TV_YPBPR525P) ? "480p" :
+	        ((pSiS->VBFlags & TV_YPBPR750P) ? "720p" : "1080i")));
+a156 64
+
+/* Detect CRT2-VGA */
+void SISCRT2PreInit(ScrnInfoPtr pScrn)
+{
+    SISPtr  pSiS = SISPTR(pScrn);
+    unsigned char CR32; 
+
+    if(!(pSiS->VBFlags & VB_VIDEOBRIDGE))  return;
+
+    /* CRT2-VGA not supported on LVDS and 30xLV */
+    if(pSiS->VBFlags & (VB_LVDS|VB_301LV|VB_302LV|VB_302ELV))
+       return;
+
+    inSISIDXREG(SISCR, 0x32, CR32);
+    
+    if(CR32 & 0x10)  pSiS->VBFlags |= CRT2_VGA;
+
+#ifdef SISDUALHEAD
+    if((!pSiS->DualHeadMode) || (!pSiS->SecondHead)) {
+#endif
+
+       if(pSiS->forcecrt2redetection) {
+          pSiS->VBFlags &= ~CRT2_VGA;
+       }
+
+       /* We don't trust the normal sensing method for VGA2 since
+        * it is performed by the BIOS during POST, and it is
+        * impossible to sense VGA2 if the bridge is disabled.
+        * Therefore, we try sensing VGA2 by DDC as well (if not
+        * detected otherwise and only if there is no LCD panel
+        * which is prone to be misdetected as a secondary VGA)
+        */
+       if(!(pSiS->nocrt2ddcdetection)) {
+          if(pSiS->VBFlags & (VB_301|VB_301B|VB_301C|VB_302B)) {
+             if(!(pSiS->VBFlags & (CRT2_VGA | CRT2_LCD))) {
+	        xf86DrvMsg(pScrn->scrnIndex, X_INFO,
+	           "%s secondary VGA, sensing via DDC\n",
+	           pSiS->forcecrt2redetection ?
+		      "Forced re-detection of" : "BIOS detected no");
+                if(SiS_SenseVGA2DDC(pSiS->SiS_Pr, pSiS)) {
+    	           xf86DrvMsg(pScrn->scrnIndex, X_ERROR,
+	              "DDC error during secondary VGA detection\n");
+	        } else {
+	           inSISIDXREG(SISCR, 0x32, CR32);
+	           if(CR32 & 0x10) {
+	              pSiS->VBFlags |= CRT2_VGA;
+	              pSiS->postVBCR32 |= 0x10;
+		      xf86DrvMsg(pScrn->scrnIndex, X_PROBED,
+		         "Detected secondary VGA connection\n");
+	           } else {
+	              xf86DrvMsg(pScrn->scrnIndex, X_PROBED,
+		         "No secondary VGA connection detected\n");
+	           }
+	        }
+             }
+          }
+       }
+#ifdef SISDUALHEAD
+    }
+#endif    
+}
+
+
+
+@
+
+
+1.1.9.2
+log
+@Import XFree86 4.4 from The XFree86(TM) Project, Inc.
+(integrity cannot be checked)
+
+got via cvs -qd anoncvs@@anoncvs.xfree86.org:/cvs co -Prxf-4_4_0 xc
+@
+text
+@d1 1
+a1 1
+/* $XFree86: xc/programs/Xserver/hw/xfree86/drivers/sis/sis_vb.c,v 1.45 2004/02/25 23:22:20 twini Exp $ */
+d15 4
+a18 1
+ * 3) The name of the author may not be used to endorse or promote products
+d105 1
+a105 1
+	{ VB_LCD_1280x720, 1280,  720, LCD_1280x720  },  /* e */
+d240 1
+a240 1
+    unsigned char CR32, CR36, CR37, CR7D=0, tmp;
+d255 1
+a255 1
+     * on the 315/330 series and the 301/30xB/C bridge (because the
+d283 1
+a283 1
+	             "%s LCD/plasma panel, sensing via DDC\n",
+d296 1
+a296 1
+	        	   "No LCD/plasma panel detected\n");
+a309 1
+       inSISIDXREG(SISCR, 0x7D, CR7D);
+d326 1
+d331 1
+a331 1
+	     /* Old 650/301LV BIOS version "forgot" to set CR36, CR37 */
+d344 1
+d356 1
+d358 1
+a358 13
+	     } else if((pSiS->sishw_ext.jChipType >= SIS_661) || (pSiS->ROM661New)) {
+	        pSiS->VBLCDFlags |= SiS661_LCD_Type[(CR36 & 0x0f)].VBLCD_lcdflag;
+                pSiS->LCDheight = SiS661_LCD_Type[(CR36 & 0x0f)].LCDheight;
+	        pSiS->LCDwidth = SiS661_LCD_Type[(CR36 & 0x0f)].LCDwidth;
+	        if(CR37 & 0x10) pSiS->VBLCDFlags |= VB_LCD_EXPANDING;
+		if(pSiS->sishw_ext.jChipType < SIS_661) {
+		   if(!(pSiS->SiS_Pr->PanelSelfDetected)) {
+		      inSISIDXREG(SISCR,0x35,tmp);
+		      CR37 &= 0xfc;
+		      CR37 |= (tmp & 0x01);
+		   }
+		}
+ 	     } else {
+d362 7
+d372 1
+a372 1
+			"Detected LCD/plasma panel (%dx%d, %d, %sexp., RGB%d [%02x%02x%02x])\n",
+d379 1
+a379 1
+			CR36, CR37, CR7D);
+d437 1
+a437 1
+             switch(CR35 & 0xE0) {
+d443 1
+a443 1
+          } else        pSiS->VBFlags |= TV_YPBPR525I;
+d452 1
+a452 1
+	     switch(CR38 & 0x30) {
+d458 1
+a458 1
+	  } else        pSiS->VBFlags |= TV_YPBPR525I;
+d536 1
+a536 1
+       xf86DrvMsg(pScrn->scrnIndex, X_PROBED, "Detected YPbPr TV (by default %s)\n",
+@
+
+
+1.1.1.1
+log
+@Import OpenBSD 3.3 XF4 repository from CTM 3132 the first time
+This finalizes starting an OpenBSD-mirabile (aka MirBSD) repository.
+
+### MirBSD is:
+# Copyright (c) 1982-2003 by Thorsten "mirabile" Glaser <x86@@ePost.de>
+# Copyright © 1968-2003  The authors of And contributors to UNIX®, the
+#       C Language, BSD/Berkeley Unix; 386BSD, NetBSD 1.1 and OpenBSD.
+#
+# Anyone who obtained a copy of this work is hereby permitted to freely use,
+# distribute, modify, merge, sublicence, give away or sell it as long as the
+# authors are given due credit and the following notice is retained:
+#
+# This work is provided "as is", with no explicit or implicit warranty what-
+# soever. Use it only at your own risk. In no event may an author or contri-
+# butor be held liable for any damage, directly or indirectly, that origina-
+# ted through or is caused by creation or modification of this work.
+
+MirBSD is my private tree. MirBSD does not differ very much from OpenBSD
+and intentionally tracks OpenBSD. That's why it _is_ OpenBSD, just not the
+official one. It's like with DarrenBSD.
+
+At time of this writing, no advertising for MirBSD must be done,
+because the advertising clause has not yet been sorted out.
+
+http://templeofhate.com/tglaser/MirBSD/index.php
+@
+text
+@@
+
+
+1.1.1.2
+log
+@The X-Windowing System
+
+Import XFree86 4.3 from OpenBSD by CTM, in the hope it's stable
+@
+text
+@d1 1
+a1 27
+/* $XFree86: xc/programs/Xserver/hw/xfree86/drivers/sis/sis_vb.c,v 1.10 2003/01/29 15:42:17 eich Exp $ */
+/*
+ * Video bridge detection and configuration for 300 and 310/325 series
+ *
+ * Copyright 2002 by Thomas Winischhofer, Vienna, Austria
+ *
+ * Permission to use, copy, modify, distribute, and sell this software and its
+ * documentation for any purpose is hereby granted without fee, provided that
+ * the above copyright notice appear in all copies and that both that
+ * copyright notice and this permission notice appear in supporting
+ * documentation, and that the name of Thomas Winischhofer not be used in
+ * advertising or publicity pertaining to distribution of the software without
+ * specific, written prior permission.  Thomas Winischhofer makes no representations
+ * about the suitability of this software for any purpose.  It is provided
+ * "as is" without express or implied warranty.
+ *
+ * THOMAS WINISCHHOFER DISCLAIMS ALL WARRANTIES WITH REGARD TO THIS SOFTWARE,
+ * INCLUDING ALL IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS, IN NO
+ * EVENT SHALL THOMAS WINISCHHOFER BE LIABLE FOR ANY SPECIAL, INDIRECT OR
+ * CONSEQUENTIAL DAMAGES OR ANY DAMAGES WHATSOEVER RESULTING FROM LOSS OF USE,
+ * DATA OR PROFITS, WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER
+ * TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR
+ * PERFORMANCE OF THIS SOFTWARE.
+ *
+ * Author: 	Thomas Winischhofer <thomas@@winischhofer.net>
+ *		(Completely rewritten)
+ */
+d12 1
+a12 114
+static const SiS_LCD_StStruct SiS300_LCD_Type[]=
+{
+        { VB_LCD_1024x768, 1024,  768, LCD_1024x768,  1},  /* 0 - invalid */
+	{ VB_LCD_800x600,   800,  600, LCD_800x600,   0},  /* 1 */
+	{ VB_LCD_1024x768, 1024,  768, LCD_1024x768,  1},  /* 2 */
+	{ VB_LCD_1280x1024,1280, 1024, LCD_1280x1024, 2},  /* 3 */
+	{ VB_LCD_1280x960, 1280,  960, LCD_1280x960,  3},  /* 4 */
+	{ VB_LCD_640x480,   640,  480, LCD_640x480,   4},  /* 5 */
+	{ VB_LCD_1024x600, 1024,  600, LCD_1024x600, 10},  /* 6 */
+	{ VB_LCD_1152x768, 1152,  768, LCD_1152x768,  7},  /* 7 */
+	{ VB_LCD_320x480,   320,  480, LCD_320x480,   6},  /* 8 */
+	{ VB_LCD_1024x768, 1024,  768, LCD_1024x768,  1},  /* 9 */
+	{ VB_LCD_1024x768, 1024,  768, LCD_1024x768,  1},  /* a */
+	{ VB_LCD_1024x768, 1024,  768, LCD_1024x768,  1},  /* b */
+	{ VB_LCD_1024x768, 1024,  768, LCD_1024x768,  1},  /* c */
+	{ VB_LCD_1024x768, 1024,  768, LCD_1024x768,  1},  /* d */
+	{ VB_LCD_1024x768, 1024,  768, LCD_1024x768,  1},  /* e */
+	{ VB_LCD_1024x768, 1024,  768, LCD_1024x768,  1},  /* f */
+};
+
+static const SiS_LCD_StStruct SiS310_LCD_Type[]=
+{
+        { VB_LCD_1024x768,  1024, 768, LCD_1024x768,  1},  /* 0 - invalid */
+	{ VB_LCD_800x600,    800, 600, LCD_800x600,   0},  /* 1 */
+	{ VB_LCD_1024x768,  1024, 768, LCD_1024x768,  1},  /* 2 */
+	{ VB_LCD_1280x1024, 1280,1024, LCD_1280x1024, 2},  /* 3 */
+	{ VB_LCD_640x480,    640, 480, LCD_640x480,   4},  /* 4 */
+	{ VB_LCD_1024x600,  1024, 600, LCD_1024x600, 10},  /* 5 */
+	{ VB_LCD_1152x864,  1152, 864, LCD_1152x864, 11},  /* 6 */
+	{ VB_LCD_1280x960,  1280, 960, LCD_1280x960,  3},  /* 7 */
+	{ VB_LCD_1152x768,  1152, 768, LCD_1152x768,  7},  /* 8 */
+	{ VB_LCD_1400x1050, 1400,1050, LCD_1400x1050, 8},  /* 9 */
+	{ VB_LCD_1280x768,  1280, 768, LCD_1280x768,  9},  /* a */
+	{ VB_LCD_1600x1200, 1600,1200, LCD_1600x1200, 5},  /* b */
+	{ VB_LCD_320x480,    320, 480, LCD_320x480,   6},  /* c */
+	{ VB_LCD_1024x768,  1024, 768, LCD_1024x768,  1},  /* d */
+	{ VB_LCD_1024x768,  1024, 768, LCD_1024x768,  1},  /* e */
+	{ VB_LCD_1024x768,  1024, 768, LCD_1024x768,  1}   /* f */
+};
+
+static const char  *panelres[] = {
+	"800x600",
+	"1024x768",
+	"1280x1024",
+	"1280x960",
+	"640x480",
+	"1600x1200",
+	"320x480",
+	"1152x768",
+	"1400x1050",
+	"1280x768",
+	"1024x600",
+	"1152x864"
+};
+
+/* Detect CRT1 */
+void SISCRT1PreInit(ScrnInfoPtr pScrn)
+{
+    SISPtr  pSiS = SISPTR(pScrn);
+    unsigned char CR32, SR17;
+    unsigned char CRT1Detected = 0;
+    unsigned char OtherDevices = 0;
+
+    if(!(pSiS->VBFlags & VB_VIDEOBRIDGE)) {
+        pSiS->CRT1off = 0;
+        return;
+    }
+
+#ifdef SISDUALHEAD
+    if(pSiS->DualHeadMode && pSiS->SecondHead) {
+        pSiS->CRT1off = 0;
+    	return;
+    }
+#endif
+
+    inSISIDXREG(SISCR, 0x32, CR32);
+    inSISIDXREG(SISSR, 0x17, SR17);
+
+    if ( (pSiS->VGAEngine == SIS_300_VGA) &&
+         (pSiS->Chipset != PCI_CHIP_SIS300) &&
+         (SR17 & 0x0F) ) {
+
+        if(SR17 & 0x01)  CRT1Detected = 1;
+	if(SR17 & 0x0E)  OtherDevices = 1;
+
+    } else {
+
+        if(CR32 & 0x20)  CRT1Detected = 1;
+	if(CR32 & 0x5F)  OtherDevices = 1;
+
+    }
+
+    if(pSiS->CRT1off == -1) {
+            if(!CRT1Detected) {
+
+                /* BIOS detected no CRT1. */
+	        /* If other devices exist, switch it off */
+	        if(OtherDevices) pSiS->CRT1off = 1;
+		else             pSiS->CRT1off = 0;
+
+    	    } else {
+
+    	        /* BIOS detected CRT1, leave/switch it on */
+	        pSiS->CRT1off = 0;
+
+	    }
+    }
+
+    xf86DrvMsg(pScrn->scrnIndex, X_PROBED,
+    		"%sCRT1 connection detected\n",
+		CRT1Detected ? "" : "No ");
+}
+
+/* Detect CRT2-LCD and LCD size */
+d16 19
+a34 15
+    unsigned char CR32, SR17, CR36, CR37;
+    USHORT textindex;
+
+    if(!(pSiS->VBFlags & VB_VIDEOBRIDGE)) {
+        return;
+    }
+
+    inSISIDXREG(SISCR, 0x32, CR32);
+    inSISIDXREG(SISSR, 0x17, SR17);
+
+    if( (pSiS->VGAEngine == SIS_300_VGA) &&
+        (pSiS->Chipset != PCI_CHIP_SIS300) &&
+	(SR17 & 0x0F) ) {
+	if(SR17 & 0x02)
+	   pSiS->VBFlags |= CRT2_LCD;
+d36 39
+a74 29
+    	if(CR32 & 0x08)
+           pSiS->VBFlags |= CRT2_LCD;
+    }
+
+    if(pSiS->VBFlags & CRT2_LCD) {
+        inSISIDXREG(SISCR, 0x36, CR36);
+	inSISIDXREG(SISCR, 0x37, CR37);
+	if((pSiS->VGAEngine == SIS_315_VGA) && (!CR36)) {
+	    /* TW: Old 650/301LV BIOS version "forgot" to set CR36, CR37 */
+	    xf86DrvMsg(pScrn->scrnIndex, X_WARNING,
+	       "BIOS-provided LCD information invalid, probing myself...\n");
+	    if(pSiS->VBFlags & VB_LVDS) pSiS->SiS_Pr->SiS_IF_DEF_LVDS = 1;
+	    else pSiS->SiS_Pr->SiS_IF_DEF_LVDS = 0;
+	    SiS_GetPanelID(pSiS->SiS_Pr, &pSiS->sishw_ext);
+	    inSISIDXREG(SISCR, 0x36, CR36);
+	    inSISIDXREG(SISCR, 0x37, CR37);
+	}
+	if(pSiS->VGAEngine == SIS_300_VGA) {
+	    pSiS->VBLCDFlags |= SiS300_LCD_Type[(CR36 & 0x0f)].VBLCD_lcdflag;
+            pSiS->LCDheight = SiS300_LCD_Type[(CR36 & 0x0f)].LCDheight;
+	    pSiS->LCDwidth = SiS300_LCD_Type[(CR36 & 0x0f)].LCDwidth;
+            pSiS->sishw_ext.ulCRT2LCDType = SiS300_LCD_Type[(CR36 & 0x0f)].LCDtype;
+	    textindex = SiS300_LCD_Type[(CR36 & 0x0f)].LCDrestextindex;
+	} else {
+	    pSiS->VBLCDFlags |= SiS310_LCD_Type[(CR36 & 0x0f)].VBLCD_lcdflag;
+            pSiS->LCDheight = SiS310_LCD_Type[(CR36 & 0x0f)].LCDheight;
+	    pSiS->LCDwidth = SiS310_LCD_Type[(CR36 & 0x0f)].LCDwidth;
+            pSiS->sishw_ext.ulCRT2LCDType = SiS310_LCD_Type[(CR36 & 0x0f)].LCDtype;
+	    textindex = SiS310_LCD_Type[(CR36 & 0x0f)].LCDrestextindex;
+a75 10
+	xf86DrvMsg(pScrn->scrnIndex, X_PROBED,
+			"Detected LCD panel resolution %s (type %d, %s%s)\n",
+			panelres[textindex],
+			(pSiS->VGAEngine == SIS_315_VGA) ? ((CR36 & 0x0f) - 1) : ((CR36 & 0xf0) >> 4),
+			(pSiS->VBFlags & VB_LVDS) ?
+			      (CR37 & 0x10 ? "non-expanding, " : "expanding, ") :
+			      ( ((pSiS->VBFlags & VB_301B) && (pSiS->VGAEngine == SIS_300_VGA)) ?
+			            (CR37 & 0x10 ? "non-expanding, " : "expanding, ") :
+			            (CR37 & 0x10 ? "self-scaling, " : "non-self-scaling, ") ),
+			CR37 & 0x01 ? "RGB18" : "RGB24");
+d78 2
+a79 2
+
+/* Detect CRT2-TV connector type and PAL/NTSC flag */
+d83 51
+a133 25
+    unsigned char SR16, SR17, SR38, CR32, CR38=0, CR79;
+    int temp = 0;
+
+    if(!(pSiS->VBFlags & VB_VIDEOBRIDGE))
+        return;
+
+    inSISIDXREG(SISCR, 0x32, CR32);
+    inSISIDXREG(SISSR, 0x17, SR17);
+    inSISIDXREG(SISSR, 0x16, SR16);
+    inSISIDXREG(SISSR, 0x38, SR38);
+    switch(pSiS->VGAEngine) {
+    case SIS_300_VGA: 
+       if(pSiS->Chipset != PCI_CHIP_SIS300) temp = 0x35;
+       break;
+    case SIS_315_VGA:
+       temp = 0x38;
+       break;
+    }
+    if(temp) {
+       inSISIDXREG(SISCR, temp, CR38);
+    }
+
+#ifdef TWDEBUG
+    xf86DrvMsg(pScrn->scrnIndex, X_PROBED, "(vb.c: SR17=%02x CR32=%02x)\n", SR17, CR32);
+    xf86DrvMsg(pScrn->scrnIndex, X_PROBED, "(vb.c: SR16=%02x SR38=%02x)\n", SR16, SR38);
+a134 75
+
+    if( (pSiS->VGAEngine == SIS_300_VGA) &&
+        (pSiS->Chipset != PCI_CHIP_SIS300) &&
+        (SR17 & 0x0F) ) {
+
+        if(SR17 & 0x04)
+	    	pSiS->VBFlags |= CRT2_TV;
+
+	if(SR17 & 0x20)
+	        pSiS->VBFlags |= TV_SVIDEO;
+        else if (SR17 & 0x10)
+	        pSiS->VBFlags |= TV_AVIDEO;
+
+	if(pSiS->VBFlags & (TV_SVIDEO | TV_AVIDEO)) {
+	   if(SR16 & 0x20)
+	     	pSiS->VBFlags |= TV_PAL;
+           else
+	        pSiS->VBFlags |= TV_NTSC;
+	}
+
+    } else {
+
+        if(CR32 & 0x47)
+	    	pSiS->VBFlags |= CRT2_TV;
+
+     	if(CR32 & 0x04)
+            	pSiS->VBFlags |= TV_SCART;
+      	else if(CR32 & 0x02)
+                pSiS->VBFlags |= TV_SVIDEO;
+        else if(CR32 & 0x01)
+                pSiS->VBFlags |= TV_AVIDEO;
+        else if(CR32 & 0x40)
+                pSiS->VBFlags |= (TV_SVIDEO | TV_HIVISION);
+	else if((CR38 & 0x04) && (pSiS->VBFlags & VB_CHRONTEL)) 
+		pSiS->VBFlags |= (TV_CHSCART | TV_PAL);
+	else if((CR38 & 0x08) && (pSiS->VBFlags & VB_CHRONTEL))
+		pSiS->VBFlags |= (TV_CHHDTV | TV_NTSC);
+	        
+	if(pSiS->VBFlags & (TV_SCART | TV_SVIDEO | TV_AVIDEO | TV_HIVISION)) {
+	   if( (pSiS->Chipset == PCI_CHIP_SIS550) ||   /* TW: ? */
+	       (pSiS->Chipset == PCI_CHIP_SIS650) ) {
+	      inSISIDXREG(SISCR, 0x79, CR79);
+	      if(CR79 & 0x20) {
+                  pSiS->VBFlags |= TV_PAL;
+		  if(CR38 & 0x40)      pSiS->VBFlags |= TV_PALM;
+		  else if(CR38 & 0x80) pSiS->VBFlags |= TV_PALN;
+ 	      } else
+	          pSiS->VBFlags |= TV_NTSC;
+	   } else if(pSiS->VGAEngine == SIS_300_VGA) {
+	      /* TW: Should be SR38 here as well, but this
+	       *     does not work. Looks like a BIOS bug (2.04.5c).
+	       */
+	      if(SR16 & 0x20)
+	     	  pSiS->VBFlags |= TV_PAL;
+              else
+	          pSiS->VBFlags |= TV_NTSC;
+	   } else {	/* 315, 330 */
+	      if(SR38 & 0x01) {
+                  pSiS->VBFlags |= TV_PAL;
+		  if(CR38 & 0x40)      pSiS->VBFlags |= TV_PALM;
+		  else if(CR38 & 0x80) pSiS->VBFlags |= TV_PALN;
+ 	      } else
+	          pSiS->VBFlags |= TV_NTSC;
+	   }
+	}
+    }
+    if(pSiS->VBFlags & (TV_SCART | TV_SVIDEO | TV_AVIDEO | TV_HIVISION | TV_CHSCART | TV_CHHDTV)) {
+       xf86DrvMsg(pScrn->scrnIndex, X_PROBED,
+			"%sTV standard %s\n",
+			(pSiS->VBFlags & (TV_CHSCART | TV_CHHDTV)) ? "Using " : "Detected default ",
+			(pSiS->VBFlags & TV_NTSC) ? 
+			   ((pSiS->VBFlags & TV_CHHDTV) ? "480i HDTV" : "NTSC") :
+			   ((pSiS->VBFlags & TV_PALM) ? "PALM" :
+			   	((pSiS->VBFlags & TV_PALN) ? "PALN" : "PAL")));
+    }
+d136 3
+a138 3
+
+/* Detect CRT2-VGA */
+void SISCRT2PreInit(ScrnInfoPtr pScrn)
+d141 2
+a142 2
+    unsigned char SR17, CR32;
+
+d144 8
+a151 16
+        return;
+
+    /* CRT2-VGA not supported on LVDS and 30xLV(X) */
+    if (pSiS->VBFlags & (VB_LVDS|VB_30xLV|VB_30xLVX))
+        return;
+
+    inSISIDXREG(SISCR, 0x32, CR32);
+    inSISIDXREG(SISSR, 0x17, SR17);
+
+    if( (pSiS->VGAEngine == SIS_300_VGA) &&
+        (pSiS->Chipset != PCI_CHIP_SIS300) &&
+	(SR17 & 0x0F) ) {
+
+	 if(SR17 & 0x08)
+	     pSiS->VBFlags |= CRT2_VGA;
+
+d153 2
+a154 4
+
+         if(CR32 & 0x10)
+             pSiS->VBFlags |= CRT2_VGA;
+	     
+a156 3
+
+
+
+@
+
+
+1.1.1.3
+log
+@That's what OpenBSD will, probably, ship as XF4 in 3.5
+their last sync against XFree86 4.3-current has been
+imported into our vendor branch, too
+@
+text
+@d1 1
+a1 1
+/* $XFree86: xc/programs/Xserver/hw/xfree86/drivers/sis/sis_vb.c,v 1.41 2004/01/23 22:29:06 twini Exp $ */
+d3 1
+a3 1
+ * Video bridge detection and configuration for 300, 315 and 330 series
+d5 1
+a5 1
+ * Copyright (C) 2001-2004 by Thomas Winischhofer, Vienna, Austria
+d7 9
+a15 13
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ * 1) Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2) Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ * 3) All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement: "This product includes
+ *    software developed by Thomas Winischhofer, Vienna, Austria."
+ * 4) The name of the author may not be used to endorse or promote products
+ *    derived from this software without specific prior written permission.
+d17 7
+a23 10
+ * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESSED OR
+ * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
+ * OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
+ * IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT
+ * NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
+ * DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
+ * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+ * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
+ * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+d26 1
+a26 1
+ *		
+a36 4
+#include "sis_dac.h"
+
+extern void    	     SISWaitRetraceCRT1(ScrnInfoPtr pScrn);
+extern unsigned char SiS_GetSetBIOSScratch(ScrnInfoPtr pScrn, USHORT offset, unsigned char value);
+d40 16
+a55 16
+        { VB_LCD_1024x768, 1024,  768, LCD_1024x768 },  /* 0 - invalid */
+	{ VB_LCD_800x600,   800,  600, LCD_800x600  },  /* 1 */
+	{ VB_LCD_1024x768, 1024,  768, LCD_1024x768 },  /* 2 */
+	{ VB_LCD_1280x1024,1280, 1024, LCD_1280x1024},  /* 3 */
+	{ VB_LCD_1280x960, 1280,  960, LCD_1280x960 },  /* 4 */
+	{ VB_LCD_640x480,   640,  480, LCD_640x480  },  /* 5 */
+	{ VB_LCD_1024x600, 1024,  600, LCD_1024x600 },  /* 6 */
+	{ VB_LCD_1152x768, 1152,  768, LCD_1152x768 },  /* 7 */
+	{ VB_LCD_1024x768, 1024,  768, LCD_1024x768 },  /* 8 */
+	{ VB_LCD_1024x768, 1024,  768, LCD_1024x768 },  /* 9 */
+	{ VB_LCD_1280x768, 1280,  768, LCD_1280x768 },  /* a */
+	{ VB_LCD_1024x768, 1024,  768, LCD_1024x768 },  /* b */
+	{ VB_LCD_1024x768, 1024,  768, LCD_1024x768 },  /* c */
+	{ VB_LCD_1024x768, 1024,  768, LCD_1024x768 },  /* d */
+	{ VB_LCD_320x480,   320,  480, LCD_320x480  },  /* e */
+	{ VB_LCD_CUSTOM,      0,    0, LCD_CUSTOM   }   /* f */
+d58 1
+a58 1
+static const SiS_LCD_StStruct SiS315_LCD_Type[]=
+d60 16
+a75 16
+        { VB_LCD_1024x768, 1024,  768, LCD_1024x768  },  /* 0 - invalid */
+	{ VB_LCD_800x600,   800,  600, LCD_800x600   },  /* 1 */
+	{ VB_LCD_1024x768, 1024,  768, LCD_1024x768  },  /* 2 */
+	{ VB_LCD_1280x1024,1280, 1024, LCD_1280x1024 },  /* 3 */
+	{ VB_LCD_640x480,   640,  480, LCD_640x480   },  /* 4 */
+	{ VB_LCD_1024x600, 1024,  600, LCD_1024x600  },  /* 5 */
+	{ VB_LCD_1152x864, 1152,  864, LCD_1152x864  },  /* 6 */
+	{ VB_LCD_1280x960, 1280,  960, LCD_1280x960  },  /* 7 */
+	{ VB_LCD_1152x768, 1152,  768, LCD_1152x768  },  /* 8 */
+	{ VB_LCD_1400x1050,1400, 1050, LCD_1400x1050 },  /* 9 */
+	{ VB_LCD_1280x768, 1280,  768, LCD_1280x768  },  /* a */
+	{ VB_LCD_1600x1200,1600, 1200, LCD_1600x1200 },  /* b */
+	{ VB_LCD_640x480_2, 640,  480, LCD_640x480_2 },  /* c DSTN/FSTN */
+	{ VB_LCD_640x480_3, 640,  480, LCD_640x480_3 },  /* d DSTN/FSTN */
+	{ VB_LCD_320x480,   320,  480, LCD_320x480   },  /* e */
+	{ VB_LCD_CUSTOM,      0,    0, LCD_CUSTOM,   }   /* f */
+d78 13
+a90 18
+static const SiS_LCD_StStruct SiS661_LCD_Type[]=
+{
+        { VB_LCD_1024x768, 1024,  768, LCD_1024x768  },  /* 0 - invalid */
+	{ VB_LCD_800x600,   800,  600, LCD_800x600   },  /* 1 */
+	{ VB_LCD_1024x768, 1024,  768, LCD_1024x768  },  /* 2 */
+	{ VB_LCD_1280x1024,1280, 1024, LCD_1280x1024 },  /* 3 */
+	{ VB_LCD_640x480,   640,  480, LCD_640x480   },  /* 4 */
+	{ VB_LCD_1024x600, 1024,  600, LCD_1024x600  },  /* 5 */
+	{ VB_LCD_1152x864, 1152,  864, LCD_1152x864  },  /* 6 */
+	{ VB_LCD_1280x960, 1280,  960, LCD_1280x960  },  /* 7 */
+	{ VB_LCD_1152x768, 1152,  768, LCD_1152x768  },  /* 8 */
+	{ VB_LCD_1400x1050,1400, 1050, LCD_1400x1050 },  /* 9 */
+	{ VB_LCD_1280x768, 1280,  768, LCD_1280x768  },  /* a */
+	{ VB_LCD_1600x1200,1600, 1200, LCD_1600x1200 },  /* b */
+	{ VB_LCD_1280x800, 1280,  800, LCD_1280x800  },  /* c */
+	{ VB_LCD_1680x1050,1680, 1050, LCD_1680x1050 },  /* d */
+	{ VB_LCD_320x480,   320,  480, LCD_320x480   },  /* e */
+	{ VB_LCD_CUSTOM,      0,    0, LCD_CUSTOM,   }   /* f */
+a92 72
+static Bool
+TestDDC1(ScrnInfoPtr pScrn)
+{
+    SISPtr  pSiS = SISPTR(pScrn);
+    unsigned short old;
+    int count = 48;
+
+    old = SiS_ReadDDC1Bit(pSiS->SiS_Pr);
+    do {
+       if(old != SiS_ReadDDC1Bit(pSiS->SiS_Pr)) break;
+    } while(count--);
+    return (count == -1) ? FALSE : TRUE;
+}
+
+static int
+SiS_SISDetectCRT1(ScrnInfoPtr pScrn)
+{
+    SISPtr  pSiS = SISPTR(pScrn);
+    unsigned short temp = 0xffff;
+    unsigned char SR1F, CR63=0, CR17;
+    int i, ret = 0;
+    Bool mustwait = FALSE;
+
+    inSISIDXREG(SISSR,0x1F,SR1F);
+    orSISIDXREG(SISSR,0x1F,0x04);
+    andSISIDXREG(SISSR,0x1F,0x3F);
+    if(SR1F & 0xc0) mustwait = TRUE;
+
+    if(pSiS->VGAEngine == SIS_315_VGA) {
+       inSISIDXREG(SISCR,pSiS->myCR63,CR63);
+       CR63 &= 0x40;
+       andSISIDXREG(SISCR,pSiS->myCR63,0xBF);
+    }
+
+    inSISIDXREG(SISCR,0x17,CR17);
+    CR17 &= 0x80;
+    if(!CR17) {
+       orSISIDXREG(SISCR,0x17,0x80);
+       mustwait = TRUE;
+       outSISIDXREG(SISSR, 0x00, 0x01);
+       outSISIDXREG(SISSR, 0x00, 0x03);
+    }
+
+    if(mustwait) {
+       for(i=0; i < 10; i++) SISWaitRetraceCRT1(pScrn);
+    }
+
+    i = 3;
+    do {
+       temp = SiS_HandleDDC(pSiS->SiS_Pr, pSiS->VBFlags, pSiS->VGAEngine, 0, 0, NULL);
+    } while(((temp == 0) || (temp == 0xffff)) && i--);
+
+    if((temp == 0) || (temp == 0xffff)) {
+       if(TestDDC1(pScrn)) temp = 1;
+    }
+
+    if((temp) && (temp != 0xffff)) {
+       orSISIDXREG(SISCR,0x32,0x20);
+       ret = 1;
+    }
+
+    if(pSiS->VGAEngine == SIS_315_VGA) {
+       setSISIDXREG(SISCR,pSiS->myCR63,0xBF,CR63);
+    }
+
+    setSISIDXREG(SISCR,0x17,0x7F,CR17);
+
+    outSISIDXREG(SISSR,0x1F,SR1F);
+
+    return ret;
+}
+
+d97 1
+a97 1
+    unsigned char CR32;
+d102 2
+a103 2
+       pSiS->CRT1off = 0;
+       return;
+d107 3
+a109 3
+    if(pSiS->DualHeadMode) {
+       pSiS->CRT1off = 0;
+       return;
+d113 9
+a121 6
+#ifdef SISMERGED
+    if((pSiS->MergedFB) && (!(pSiS->MergedFBAuto))) {
+       pSiS->CRT1off = 0;
+       return;
+    }
+#endif
+d123 1
+a123 1
+    inSISIDXREG(SISCR, 0x32, CR32);
+d125 2
+a126 2
+    if(CR32 & 0x20)  CRT1Detected = 1;
+    else CRT1Detected = SiS_SISDetectCRT1(pScrn);
+d128 1
+a128 1
+    if(CR32 & 0x5F)  OtherDevices = 1;
+d131 1
+a131 1
+       if(!CRT1Detected) {
+d133 4
+a136 4
+          /* No CRT1 detected. */
+	  /* If other devices exist, switch it off */
+	  if(OtherDevices) pSiS->CRT1off = 1;
+	  else             pSiS->CRT1off = 0;
+d138 1
+a138 1
+       } else {
+d140 2
+a141 2
+          /* CRT1 detected, leave/switch it on */
+	  pSiS->CRT1off = 0;
+d143 1
+a143 1
+       }
+d147 1
+a147 1
+    		"%sCRT1 (VGA) connection detected\n",
+d155 2
+a156 1
+    unsigned char CR32, CR36, CR37;
+d158 3
+a160 3
+    pSiS->LCDwidth = 0;
+
+    if(!(pSiS->VBFlags & VB_VIDEOBRIDGE)) return;
+d163 1
+a163 54
+   
+    if(CR32 & 0x08) pSiS->VBFlags |= CRT2_LCD;
+    
+    /* If no panel has been detected by the BIOS during booting,
+     * we try to detect it ourselves at this point. We do that
+     * if forcecrt2redetection was given, too.
+     * This is useful on machines with DVI connectors where the
+     * panel was connected after booting. This is only supported
+     * on the 315/330 series and the 301/30xB bridge (because the
+     * 30xLV don't seem to have a DDC port and operate only LVDS
+     * panels which mostly don't support DDC). We only do this if
+     * there was no secondary VGA detected by the BIOS, because LCD
+     * and VGA2 share the same DDC channel and might be misdetected
+     * as the wrong type (especially if the LCD panel only supports
+     * EDID Version 1).
+     *
+     * By default, CRT2 redetection is forced since 12/09/2003, as
+     * I encountered numerous panels which deliver more or less
+     * bogus DDC data confusing the BIOS. Since our DDC detection
+     * is waaaay better, we prefer it instead of the primitive
+     * and buggy BIOS method.
+     */
+#ifdef SISDUALHEAD
+    if((!pSiS->DualHeadMode) || (!pSiS->SecondHead)) {
+#endif
+       if((pSiS->VGAEngine == SIS_315_VGA) &&
+          (pSiS->VBFlags & (VB_301|VB_301B|VB_301C|VB_302B)) &&
+          (!(pSiS->VBFlags & VB_30xBDH))) {
+
+          if(pSiS->forcecrt2redetection) {
+             pSiS->VBFlags &= ~CRT2_LCD;
+          }
+
+          if(!(pSiS->nocrt2ddcdetection)) {
+             if((!(pSiS->VBFlags & CRT2_LCD)) && (!(CR32 & 0x10))) {
+	        xf86DrvMsg(pScrn->scrnIndex, X_INFO,
+	             "%s LCD/Plasma panel, sensing via DDC\n",
+		     pSiS->forcecrt2redetection ?
+		        "Forced re-detection of" : "BIOS detected no");
+                if(SiS_SenseLCDDDC(pSiS->SiS_Pr, pSiS)) {
+    	           xf86DrvMsg(pScrn->scrnIndex, X_INFO,
+	              "DDC error during LCD panel detection\n");
+	        } else {
+	           inSISIDXREG(SISCR, 0x32, CR32);
+	           if(CR32 & 0x08) {
+	              pSiS->VBFlags |= CRT2_LCD;
+		      pSiS->postVBCR32 |= 0x08;
+	           } else {
+	              xf86DrvMsg(pScrn->scrnIndex, X_INFO,
+	        	   "No LCD/Plasma panel detected\n");
+	           }
+	        }
+             }
+          }
+d165 8
+a172 2
+       }
+#ifdef SISDUALHEAD
+a173 1
+#endif
+d176 35
+a210 74
+       inSISIDXREG(SISCR, 0x36, CR36);
+       inSISIDXREG(SISCR, 0x37, CR37);
+       if(pSiS->SiS_Pr->SiS_CustomT == CUT_BARCO1366) {
+          pSiS->VBLCDFlags |= VB_LCD_BARCO1366;
+	  pSiS->LCDwidth = 1360;
+	  pSiS->LCDheight = 1024;
+	  if(CR37 & 0x10) pSiS->VBLCDFlags |= VB_LCD_EXPANDING;
+	  xf86DrvMsg(pScrn->scrnIndex, X_PROBED,
+		"Detected LCD panel (%dx%d, type %d, %sexpanding, RGB%d)\n",
+		pSiS->LCDwidth, pSiS->LCDheight,
+		((CR36 & 0xf0) >> 4),
+		(CR37 & 0x10) ? "" : "non-",
+		(CR37 & 0x01) ? 18 : 24);
+       } else if(pSiS->SiS_Pr->SiS_CustomT == CUT_PANEL848) {
+          pSiS->VBLCDFlags |= VB_LCD_848x480;
+	  pSiS->LCDwidth = pSiS->SiS_Pr->CP_MaxX = 848;
+	  pSiS->LCDheight = pSiS->SiS_Pr->CP_MaxY = 480;
+	  pSiS->VBLCDFlags |= VB_LCD_EXPANDING;
+	  pSiS->sishw_ext.ulCRT2LCDType = LCD_848x480;
+	  xf86DrvMsg(pScrn->scrnIndex, X_CONFIG,
+	  	"Assuming LCD/plasma panel (848x480, expanding, RGB24)\n");
+       } else {
+	  if((pSiS->VGAEngine == SIS_315_VGA) && (!CR36)) {
+	     /* TW: Old 650/301LV BIOS version "forgot" to set CR36, CR37 */
+	     xf86DrvMsg(pScrn->scrnIndex, X_WARNING,
+	        "BIOS-provided LCD information invalid, probing myself...\n");
+	     if(pSiS->VBFlags & VB_LVDS) pSiS->SiS_Pr->SiS_IF_DEF_LVDS = 1;
+	     else pSiS->SiS_Pr->SiS_IF_DEF_LVDS = 0;
+	     SiS_GetPanelID(pSiS->SiS_Pr, &pSiS->sishw_ext);
+	     inSISIDXREG(SISCR, 0x36, CR36);
+	     inSISIDXREG(SISCR, 0x37, CR37);
+	  }
+	  if(((CR36 & 0x0f) == 0x0f) && (pSiS->SiS_Pr->CP_HaveCustomData)) {
+	     pSiS->VBLCDFlags |= VB_LCD_CUSTOM;
+             pSiS->LCDheight = pSiS->SiS_Pr->CP_MaxY;
+	     pSiS->LCDwidth = pSiS->SiS_Pr->CP_MaxX;
+             pSiS->sishw_ext.ulCRT2LCDType = LCD_CUSTOM;
+	     if(CR37 & 0x10) pSiS->VBLCDFlags |= VB_LCD_EXPANDING;
+	     xf86DrvMsg(pScrn->scrnIndex, X_PROBED,
+		"Detected non-standard LCD/Plasma panel (max. X %d Y %d, preferred %dx%d, RGB%d)\n",
+ 		pSiS->SiS_Pr->CP_MaxX, pSiS->SiS_Pr->CP_MaxY,
+		pSiS->SiS_Pr->CP_PreferredX, pSiS->SiS_Pr->CP_PreferredY,
+		(CR37 & 0x01) ? 18 : 24);
+	  } else {
+	     if(pSiS->VGAEngine == SIS_300_VGA) {
+	        pSiS->VBLCDFlags |= SiS300_LCD_Type[(CR36 & 0x0f)].VBLCD_lcdflag;
+                pSiS->LCDheight = SiS300_LCD_Type[(CR36 & 0x0f)].LCDheight;
+	        pSiS->LCDwidth = SiS300_LCD_Type[(CR36 & 0x0f)].LCDwidth;
+                pSiS->sishw_ext.ulCRT2LCDType = SiS300_LCD_Type[(CR36 & 0x0f)].LCDtype;
+	        if(CR37 & 0x10) pSiS->VBLCDFlags |= VB_LCD_EXPANDING;
+	     } else if(pSiS->sishw_ext.jChipType < SIS_661) {
+	        pSiS->VBLCDFlags |= SiS315_LCD_Type[(CR36 & 0x0f)].VBLCD_lcdflag;
+                pSiS->LCDheight = SiS315_LCD_Type[(CR36 & 0x0f)].LCDheight;
+	        pSiS->LCDwidth = SiS315_LCD_Type[(CR36 & 0x0f)].LCDwidth;
+                pSiS->sishw_ext.ulCRT2LCDType = SiS315_LCD_Type[(CR36 & 0x0f)].LCDtype;
+	        if(CR37 & 0x10) pSiS->VBLCDFlags |= VB_LCD_EXPANDING;
+	     } else {
+		pSiS->VBLCDFlags |= SiS661_LCD_Type[(CR36 & 0x0f)].VBLCD_lcdflag;
+                pSiS->LCDheight = SiS661_LCD_Type[(CR36 & 0x0f)].LCDheight;
+	        pSiS->LCDwidth = SiS661_LCD_Type[(CR36 & 0x0f)].LCDwidth;
+                pSiS->sishw_ext.ulCRT2LCDType = SiS661_LCD_Type[(CR36 & 0x0f)].LCDtype;
+	        if(CR37 & 0x10) pSiS->VBLCDFlags |= VB_LCD_EXPANDING;
+	     }
+	     xf86DrvMsg(pScrn->scrnIndex, X_PROBED,
+			"Detected LCD/Plasma panel (%dx%d, %d, %sexp., RGB%d [%02x%02x])\n",
+			pSiS->LCDwidth, pSiS->LCDheight,
+			((pSiS->VGAEngine == SIS_315_VGA) &&
+			 (pSiS->Chipset != PCI_CHIP_SIS660)) ?
+			 	((CR36 & 0x0f) - 1) : ((CR36 & 0xf0) >> 4),
+			(CR37 & 0x10) ? "" : "non-",
+			(CR37 & 0x01) ? 18 : 24,
+			CR36, CR37);
+	  }
+       }
+a211 1
+
+d218 1
+a218 1
+    unsigned char SR16, SR38, CR32, CR35=0, CR38=0, CR79, CR39;
+d221 2
+a222 1
+    if(!(pSiS->VBFlags & VB_VIDEOBRIDGE)) return;
+d225 1
+a225 1
+    inSISIDXREG(SISCR, 0x35, CR35);
+d230 1
+a230 1
+       if(pSiS->Chipset == PCI_CHIP_SIS630) temp = 0x35;
+d241 2
+a242 3
+    xf86DrvMsg(pScrn->scrnIndex, X_PROBED, 
+    	"(vb.c: CR32=%02x SR16=%02x SR38=%02x)\n", 
+	CR32, SR16, SR38);
+d245 18
+a262 1
+    if(CR32 & 0x47) pSiS->VBFlags |= CRT2_TV;
+a263 2
+    if(pSiS->SiS_SD_Flags & SiS_SD_SUPPORTYPBPR) {
+       if(CR32 & 0x80) pSiS->VBFlags |= CRT2_TV;
+a264 2
+       CR32 &= 0x7f;
+    }
+d266 52
+a317 115
+    if(CR32 & 0x01)
+       pSiS->VBFlags |= TV_AVIDEO;
+    else if(CR32 & 0x02)
+       pSiS->VBFlags |= TV_SVIDEO;
+    else if(CR32 & 0x04)
+       pSiS->VBFlags |= TV_SCART;
+    else if((CR32 & 0x40) && (pSiS->SiS_SD_Flags & SiS_SD_SUPPORTHIVISION))
+       pSiS->VBFlags |= (TV_HIVISION | TV_PAL);
+    else if((CR32 & 0x80) && (pSiS->SiS_SD_Flags & SiS_SD_SUPPORTYPBPR)) {
+       pSiS->VBFlags |= TV_YPBPR;
+       if(pSiS->Chipset == PCI_CHIP_SIS660) {
+          if(CR38 & 0x04) {
+             switch((CR35 & 0xE0)) {
+             case 0x20: pSiS->VBFlags |= TV_YPBPR525P; break;
+	     case 0x40: pSiS->VBFlags |= TV_YPBPR750P; break;
+	     case 0x60: pSiS->VBFlags |= TV_YPBPR1080I; break;
+	     default:   pSiS->VBFlags |= TV_YPBPR525I;
+	     }
+          }
+          inSISIDXREG(SISCR,0x39,CR39);
+	  CR39 &= 0x03;
+	  if(CR39 == 0x00)      pSiS->VBFlags |= TV_YPBPR43LB;
+	  else if(CR39 == 0x01) pSiS->VBFlags |= TV_YPBPR43;
+	  else if(CR39 == 0x02) pSiS->VBFlags |= TV_YPBPR169;
+	  else			pSiS->VBFlags |= TV_YPBPR43;
+       } else if(pSiS->SiS_SD_Flags & SiS_SD_SUPPORTYPBPR) {
+          if(CR38 & 0x08) {
+	     switch((CR38 & 0x30)) {
+	     case 0x10: pSiS->VBFlags |= TV_YPBPR525P; break;
+	     case 0x20: pSiS->VBFlags |= TV_YPBPR750P; break;
+	     case 0x30: pSiS->VBFlags |= TV_YPBPR1080I; break;
+	     default:   pSiS->VBFlags |= TV_YPBPR525I;
+	     }
+	  }
+	  if(pSiS->SiS_SD_Flags & SiS_SD_SUPPORTYPBPRAR) {
+             inSISIDXREG(SISCR,0x3B,CR39);
+	     CR39 &= 0x03;
+	     if(CR39 == 0x00)      pSiS->VBFlags |= TV_YPBPR43LB;
+	     else if(CR39 == 0x01) pSiS->VBFlags |= TV_YPBPR169;
+	     else if(CR39 == 0x03) pSiS->VBFlags |= TV_YPBPR43;
+	  }
+       }
+    } else if((CR38 & 0x04) && (pSiS->VBFlags & VB_CHRONTEL))
+       pSiS->VBFlags |= (TV_CHSCART | TV_PAL);
+    else if((CR38 & 0x08) && (pSiS->VBFlags & VB_CHRONTEL))
+       pSiS->VBFlags |= (TV_CHYPBPR525I | TV_NTSC);
+
+    if(pSiS->VBFlags & (TV_SCART | TV_SVIDEO | TV_AVIDEO)) {
+       if(pSiS->VGAEngine == SIS_300_VGA) {
+	  /* Should be SR38, but this does not work. */
+	  if(SR16 & 0x20)
+	     pSiS->VBFlags |= TV_PAL;
+          else
+	     pSiS->VBFlags |= TV_NTSC;
+       } else if(pSiS->Chipset == PCI_CHIP_SIS550) {
+          inSISIDXREG(SISCR, 0x7a, CR79);
+	  if(CR79 & 0x08) {
+             inSISIDXREG(SISCR, 0x79, CR79);
+	     CR79 >>= 5;
+	  }
+	  if(CR79 & 0x01) {
+             pSiS->VBFlags |= TV_PAL;
+	     if(CR38 & 0x40)      pSiS->VBFlags |= TV_PALM;
+	     else if(CR38 & 0x80) pSiS->VBFlags |= TV_PALN;
+ 	  } else
+	     pSiS->VBFlags |= TV_NTSC;
+       } else if(pSiS->Chipset == PCI_CHIP_SIS650) {
+	  inSISIDXREG(SISCR, 0x79, CR79);
+	  if(CR79 & 0x20) {
+             pSiS->VBFlags |= TV_PAL;
+	     if(CR38 & 0x40)      pSiS->VBFlags |= TV_PALM;
+	     else if(CR38 & 0x80) pSiS->VBFlags |= TV_PALN;
+ 	  } else
+	     pSiS->VBFlags |= TV_NTSC;
+       } else if(pSiS->Chipset == PCI_CHIP_SIS660) {
+          if(SR38 & 0x01) {
+	     pSiS->VBFlags |= TV_PAL;
+	     if(CR35 & 0x04)      pSiS->VBFlags |= TV_PALM;
+	     else if(CR35 & 0x08) pSiS->VBFlags |= TV_PALN;
+	  } else {
+	     pSiS->VBFlags |= TV_NTSC;
+	     if(CR35 & 0x02)      pSiS->VBFlags |= TV_NTSCJ;
+	  }
+       } else {	/* 315, 330 */
+	  if(SR38 & 0x01) {
+             pSiS->VBFlags |= TV_PAL;
+	     if(CR38 & 0x40)      pSiS->VBFlags |= TV_PALM;
+	     else if(CR38 & 0x80) pSiS->VBFlags |= TV_PALN;
+ 	  } else
+	     pSiS->VBFlags |= TV_NTSC;
+       }
+    }
+
+    if(pSiS->VBFlags & (TV_SCART|TV_SVIDEO|TV_AVIDEO)) {
+       xf86DrvMsg(pScrn->scrnIndex, X_PROBED, "Detected default TV standard %s\n",
+          (pSiS->VBFlags & TV_NTSC) ?
+	     ((pSiS->VBFlags & TV_NTSCJ) ? "NTSCJ" : "NTSC") :
+	         ((pSiS->VBFlags & TV_PALM) ? "PALM" :
+		     ((pSiS->VBFlags & TV_PALN) ? "PALN" : "PAL")));
+    }
+
+    if(pSiS->VBFlags & TV_HIVISION) {
+       xf86DrvMsg(pScrn->scrnIndex, X_PROBED, "BIOS reports HiVision TV\n");
+    }
+
+    if((pSiS->VBFlags & VB_CHRONTEL) && (pSiS->VBFlags & (TV_CHSCART|TV_CHYPBPR525I))) {
+       xf86DrvMsg(pScrn->scrnIndex, X_PROBED, "Chrontel: %s forced\n",
+       	(pSiS->VBFlags & TV_CHSCART) ? "SCART (PAL)" : "YPbPr (480i)");
+    }
+
+    if(pSiS->VBFlags & TV_YPBPR) {
+       xf86DrvMsg(pScrn->scrnIndex, X_PROBED, "Detected YPbPr TV (%s)\n",
+         (pSiS->VBFlags & TV_YPBPR525I) ? "480i" :
+	     ((pSiS->VBFlags & TV_YPBPR525P) ? "480p" :
+	        ((pSiS->VBFlags & TV_YPBPR750P) ? "720p" : "1080i")));
+d325 1
+a325 1
+    unsigned char CR32; 
+d327 2
+a328 1
+    if(!(pSiS->VBFlags & VB_VIDEOBRIDGE))  return;
+d330 3
+a332 3
+    /* CRT2-VGA not supported on LVDS and 30xLV */
+    if(pSiS->VBFlags & (VB_LVDS|VB_301LV|VB_302LV|VB_302ELV))
+       return;
+d335 1
+a335 2
+    
+    if(CR32 & 0x10)  pSiS->VBFlags |= CRT2_VGA;
+d337 8
+a344 3
+#ifdef SISDUALHEAD
+    if((!pSiS->DualHeadMode) || (!pSiS->SecondHead)) {
+#endif
+d346 3
+a348 37
+       if(pSiS->forcecrt2redetection) {
+          pSiS->VBFlags &= ~CRT2_VGA;
+       }
+
+       /* We don't trust the normal sensing method for VGA2 since
+        * it is performed by the BIOS during POST, and it is
+        * impossible to sense VGA2 if the bridge is disabled.
+        * Therefore, we try sensing VGA2 by DDC as well (if not
+        * detected otherwise and only if there is no LCD panel
+        * which is prone to be misdetected as a secondary VGA)
+        */
+       if(!(pSiS->nocrt2ddcdetection)) {
+          if(pSiS->VBFlags & (VB_301|VB_301B|VB_301C|VB_302B)) {
+             if(!(pSiS->VBFlags & (CRT2_VGA | CRT2_LCD))) {
+	        xf86DrvMsg(pScrn->scrnIndex, X_INFO,
+	           "%s secondary VGA, sensing via DDC\n",
+	           pSiS->forcecrt2redetection ?
+		      "Forced re-detection of" : "BIOS detected no");
+                if(SiS_SenseVGA2DDC(pSiS->SiS_Pr, pSiS)) {
+    	           xf86DrvMsg(pScrn->scrnIndex, X_ERROR,
+	              "DDC error during secondary VGA detection\n");
+	        } else {
+	           inSISIDXREG(SISCR, 0x32, CR32);
+	           if(CR32 & 0x10) {
+	              pSiS->VBFlags |= CRT2_VGA;
+	              pSiS->postVBCR32 |= 0x10;
+		      xf86DrvMsg(pScrn->scrnIndex, X_PROBED,
+		         "Detected secondary VGA connection\n");
+	           } else {
+	              xf86DrvMsg(pScrn->scrnIndex, X_PROBED,
+		         "No secondary VGA connection detected\n");
+	           }
+	        }
+             }
+          }
+       }
+#ifdef SISDUALHEAD
+a349 1
+#endif    
+@
+
+
+1.1.1.4
+log
+@Import OpenBSD X-Window subsystem (based upon XFree86 4.4RC2)
+into vendor branch
+@
+text
+@d1 1
+a1 1
+/* $XFree86: xc/programs/Xserver/hw/xfree86/drivers/sis/sis_vb.c,v 1.45 2004/02/25 23:22:20 twini Exp $ */
+d15 4
+a18 1
+ * 3) The name of the author may not be used to endorse or promote products
+d105 1
+a105 1
+	{ VB_LCD_1280x720, 1280,  720, LCD_1280x720  },  /* e */
+d240 1
+a240 1
+    unsigned char CR32, CR36, CR37, CR7D=0, tmp;
+d255 1
+a255 1
+     * on the 315/330 series and the 301/30xB/C bridge (because the
+d283 1
+a283 1
+	             "%s LCD/plasma panel, sensing via DDC\n",
+d296 1
+a296 1
+	        	   "No LCD/plasma panel detected\n");
+a309 1
+       inSISIDXREG(SISCR, 0x7D, CR7D);
+d326 1
+d331 1
+a331 1
+	     /* Old 650/301LV BIOS version "forgot" to set CR36, CR37 */
+d344 1
+d356 1
+d358 1
+a358 13
+	     } else if((pSiS->sishw_ext.jChipType >= SIS_661) || (pSiS->ROM661New)) {
+	        pSiS->VBLCDFlags |= SiS661_LCD_Type[(CR36 & 0x0f)].VBLCD_lcdflag;
+                pSiS->LCDheight = SiS661_LCD_Type[(CR36 & 0x0f)].LCDheight;
+	        pSiS->LCDwidth = SiS661_LCD_Type[(CR36 & 0x0f)].LCDwidth;
+	        if(CR37 & 0x10) pSiS->VBLCDFlags |= VB_LCD_EXPANDING;
+		if(pSiS->sishw_ext.jChipType < SIS_661) {
+		   if(!(pSiS->SiS_Pr->PanelSelfDetected)) {
+		      inSISIDXREG(SISCR,0x35,tmp);
+		      CR37 &= 0xfc;
+		      CR37 |= (tmp & 0x01);
+		   }
+		}
+ 	     } else {
+d362 7
+d372 1
+a372 1
+			"Detected LCD/plasma panel (%dx%d, %d, %sexp., RGB%d [%02x%02x%02x])\n",
+d379 1
+a379 1
+			CR36, CR37, CR7D);
+d437 1
+a437 1
+             switch(CR35 & 0xE0) {
+d443 1
+a443 1
+          } else        pSiS->VBFlags |= TV_YPBPR525I;
+d452 1
+a452 1
+	     switch(CR38 & 0x30) {
+d458 1
+a458 1
+	  } else        pSiS->VBFlags |= TV_YPBPR525I;
+d536 1
+a536 1
+       xf86DrvMsg(pScrn->scrnIndex, X_PROBED, "Detected YPbPr TV (by default %s)\n",
+@
+
+

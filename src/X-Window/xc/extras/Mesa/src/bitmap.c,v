@@ -1,0 +1,294 @@
+head	1.2;
+access;
+symbols
+	tg-mergetmp-2:1.2
+	MIRBSD_7quater:1.2
+	MIRBSD_7_ALPHA:1.2.0.4
+	MIRBSD_7:1.2.0.2
+	MIRBSD_7ter:1.2
+	ctm-0349:1.1.1.1
+	openbsd-xf4:1.1.1;
+locks; strict;
+comment	@ * @;
+
+
+1.2
+date	2003.04.08.19.32.10;	author tg;	state dead;
+branches;
+next	1.1;
+
+1.1
+date	2003.03.22.20.00.55;	author tg;	state Exp;
+branches
+	1.1.1.1;
+next	;
+
+1.1.1.1
+date	2003.03.22.20.00.55;	author tg;	state Exp;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.2
+log
+@merge conflicts
+@
+text
+@
+/*
+ * Mesa 3-D graphics library
+ * Version:  3.4
+ * 
+ * Copyright (C) 1999-2000  Brian Paul   All Rights Reserved.
+ * 
+ * Permission is hereby granted, free of charge, to any person obtaining a
+ * copy of this software and associated documentation files (the "Software"),
+ * to deal in the Software without restriction, including without limitation
+ * the rights to use, copy, modify, merge, publish, distribute, sublicense,
+ * and/or sell copies of the Software, and to permit persons to whom the
+ * Software is furnished to do so, subject to the following conditions:
+ * 
+ * The above copyright notice and this permission notice shall be included
+ * in all copies or substantial portions of the Software.
+ * 
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
+ * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL
+ * BRIAN PAUL BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN
+ * AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
+ * CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+ */
+
+
+#ifdef PC_HEADER
+#include "all.h"
+#else
+#include "glheader.h"
+#include "bitmap.h"
+#include "context.h"
+#include "feedback.h"
+#include "image.h"
+#include "macros.h"
+#include "pb.h"
+#include "pixel.h"
+#include "state.h"
+#include "types.h"
+#include "vbrender.h"
+#endif
+
+
+
+/*
+ * Render a bitmap.
+ */
+static void 
+render_bitmap( GLcontext *ctx, GLint px, GLint py,
+               GLsizei width, GLsizei height,
+               const struct gl_pixelstore_attrib *unpack,
+               const GLubyte *bitmap )
+{
+   struct pixel_buffer *PB = ctx->PB;
+   GLint row, col;
+   GLdepth fragZ;
+
+   ASSERT(ctx->RenderMode == GL_RENDER);
+
+   if (!bitmap) {
+      return;  /* NULL bitmap is legal, a no-op */
+   }
+
+   RENDER_START(ctx);
+
+   /* Set bitmap drawing color */
+   if (ctx->Visual->RGBAflag) {
+      GLint r, g, b, a;
+      r = (GLint) (ctx->Current.RasterColor[0] * 255.0F);
+      g = (GLint) (ctx->Current.RasterColor[1] * 255.0F);
+      b = (GLint) (ctx->Current.RasterColor[2] * 255.0F);
+      a = (GLint) (ctx->Current.RasterColor[3] * 255.0F);
+      PB_SET_COLOR( PB, r, g, b, a );
+   }
+   else {
+      PB_SET_INDEX( PB, ctx->Current.RasterIndex );
+   }
+
+   fragZ = (GLdepth) ( ctx->Current.RasterPos[2] * ctx->Visual->DepthMaxF);
+
+   for (row=0; row<height; row++) {
+      const GLubyte *src = (const GLubyte *) _mesa_image_address( unpack,
+                 bitmap, width, height, GL_COLOR_INDEX, GL_BITMAP, 0, row, 0 );
+
+      if (unpack->LsbFirst) {
+         /* Lsb first */
+         GLubyte mask = 1U << (unpack->SkipPixels & 0x7);
+         for (col=0; col<width; col++) {
+            if (*src & mask) {
+               PB_WRITE_PIXEL( PB, px+col, py+row, fragZ );
+            }
+            if (mask == 128U) {
+               src++;
+               mask = 1U;
+            }
+            else {
+               mask = mask << 1;
+            }
+         }
+
+         PB_CHECK_FLUSH( ctx, PB );
+
+         /* get ready for next row */
+         if (mask != 1)
+            src++;
+      }
+      else {
+         /* Msb first */
+         GLubyte mask = 128U >> (unpack->SkipPixels & 0x7);
+         for (col=0; col<width; col++) {
+            if (*src & mask) {
+               PB_WRITE_PIXEL( PB, px+col, py+row, fragZ );
+            }
+            if (mask == 1U) {
+               src++;
+               mask = 128U;
+            }
+            else {
+               mask = mask >> 1;
+            }
+         }
+
+         PB_CHECK_FLUSH( ctx, PB );
+
+         /* get ready for next row */
+         if (mask != 128)
+            src++;
+      }
+   }
+
+   gl_flush_pb(ctx);
+
+   RENDER_FINISH(ctx);
+}
+
+
+
+/*
+ * Execute a glBitmap command.
+ */
+void
+_mesa_Bitmap( GLsizei width, GLsizei height,
+              GLfloat xorig, GLfloat yorig, GLfloat xmove, GLfloat ymove,
+              const GLubyte *bitmap )
+{
+   GET_CURRENT_CONTEXT(ctx);
+   ASSERT_OUTSIDE_BEGIN_END_AND_FLUSH(ctx, "glBitmap");
+
+   /* Error checking */
+   if (width < 0 || height < 0) {
+      gl_error( ctx, GL_INVALID_VALUE, "glBitmap" );
+      return;
+   }
+
+   if (ctx->Current.RasterPosValid == GL_FALSE) {
+      return;    /* do nothing */
+   }
+
+   if (ctx->RenderMode==GL_RENDER) {
+      if (bitmap) {
+         GLint x = (GLint) ( (ctx->Current.RasterPos[0] - xorig) + 0.0F );
+         GLint y = (GLint) ( (ctx->Current.RasterPos[1] - yorig) + 0.0F );
+         GLboolean completed = GL_FALSE;
+
+         if (ctx->NewState) {
+            gl_update_state(ctx);
+            gl_reduced_prim_change( ctx, GL_BITMAP );
+         }
+
+         if (ctx->PB->primitive!=GL_BITMAP) {   /* A.W. 1.1.2000 */
+            gl_reduced_prim_change( ctx, GL_BITMAP );
+         }
+
+         ctx->OcclusionResult = GL_TRUE;
+
+         if (ctx->Driver.Bitmap) {
+            /* let device driver try to render the bitmap */
+            completed = (*ctx->Driver.Bitmap)( ctx, x, y, width, height,
+                                               &ctx->Unpack, bitmap );
+         }
+         if (!completed) {
+            /* use generic function */
+            render_bitmap( ctx, x, y, width, height, &ctx->Unpack, bitmap );
+         }
+      }
+   }
+   else if (ctx->RenderMode==GL_FEEDBACK) {
+      GLfloat color[4], texcoord[4], invq;
+      color[0] = ctx->Current.RasterColor[0];
+      color[1] = ctx->Current.RasterColor[1];
+      color[2] = ctx->Current.RasterColor[2];
+      color[3] = ctx->Current.RasterColor[3];
+      if (ctx->Current.Texcoord[0][3] == 0.0)
+         invq = 1.0F;
+      else
+         invq = 1.0F / ctx->Current.RasterTexCoord[3];
+      texcoord[0] = ctx->Current.RasterTexCoord[0] * invq;
+      texcoord[1] = ctx->Current.RasterTexCoord[1] * invq;
+      texcoord[2] = ctx->Current.RasterTexCoord[2] * invq;
+      texcoord[3] = ctx->Current.RasterTexCoord[3];
+      FEEDBACK_TOKEN( ctx, (GLfloat) (GLint) GL_BITMAP_TOKEN );
+      gl_feedback_vertex( ctx,
+                          ctx->Current.RasterPos,
+			  color, ctx->Current.RasterIndex, texcoord );
+   }
+   else if (ctx->RenderMode==GL_SELECT) {
+      /* Bitmaps don't generate selection hits.  See appendix B of 1.1 spec. */
+   }
+
+   /* update raster position */
+   ctx->Current.RasterPos[0] += xmove;
+   ctx->Current.RasterPos[1] += ymove;
+}
+@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@@
+
+
+1.1.1.1
+log
+@Import OpenBSD 3.3 XF4 repository from CTM 3132 the first time
+This finalizes starting an OpenBSD-mirabile (aka MirBSD) repository.
+
+### MirBSD is:
+# Copyright (c) 1982-2003 by Thorsten "mirabile" Glaser <x86@@ePost.de>
+# Copyright © 1968-2003  The authors of And contributors to UNIX®, the
+#       C Language, BSD/Berkeley Unix; 386BSD, NetBSD 1.1 and OpenBSD.
+#
+# Anyone who obtained a copy of this work is hereby permitted to freely use,
+# distribute, modify, merge, sublicence, give away or sell it as long as the
+# authors are given due credit and the following notice is retained:
+#
+# This work is provided "as is", with no explicit or implicit warranty what-
+# soever. Use it only at your own risk. In no event may an author or contri-
+# butor be held liable for any damage, directly or indirectly, that origina-
+# ted through or is caused by creation or modification of this work.
+
+MirBSD is my private tree. MirBSD does not differ very much from OpenBSD
+and intentionally tracks OpenBSD. That's why it _is_ OpenBSD, just not the
+official one. It's like with DarrenBSD.
+
+At time of this writing, no advertising for MirBSD must be done,
+because the advertising clause has not yet been sorted out.
+
+http://templeofhate.com/tglaser/MirBSD/index.php
+@
+text
+@@

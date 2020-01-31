@@ -1,0 +1,704 @@
+head	1.1;
+branch	1.1.1;
+access;
+symbols
+	tg-mergetmp-2:1.1.1.1
+	cvs-200410241530:1.1.1.1
+	cvs-200410012000:1.1.1.1
+	cvs-200407141120:1.1.1.1
+	cvs-200406231010:1.1.1.1
+	MIRBSD_7quater:1.1.1.1
+	cvs-200405271510:1.1.1.1
+	XFree86_4_4_0:1.1.9.1
+	cvs-200403021700:1.1.1.1
+	XFREE86_20040213:1.1.9.1
+	xc:1.1.9
+	cvs-200401291925:1.1.1.1
+	MIRBSD_7_ALPHA:1.1.1.1.0.4
+	MIRBSD_7:1.1.1.1.0.2
+	MIRBSD_7ter:1.1.1.1
+	cvs-20011091815:1.1.1.1
+	cvs-200309162130:1.1.1.1
+	cvs-200308302005:1.1.1.1
+	ctmx-0387:1.1.1.1
+	ctmx-0384:1.1.1.1
+	MIRBSD_5:1.1.1.1
+	ctmx-0375:1.1.1.1
+	ctmx-0373:1.1.1.1
+	ctm-0371:1.1.1.1
+	ctm-0370:1.1.1.1
+	MIRBSD_4:1.1.1.1
+	ctm-0363:1.1.1.1
+	ctm-0359:1.1.1.1
+	ctm-0349:1.1.1.1
+	openbsd:1.1.1;
+locks; strict;
+comment	@ * @;
+
+
+1.1
+date	2003.03.22.20.06.17;	author tg;	state Exp;
+branches
+	1.1.1.1
+	1.1.9.1;
+next	;
+
+1.1.1.1
+date	2003.03.22.20.06.17;	author tg;	state Stab;
+branches;
+next	;
+
+1.1.9.1
+date	2004.02.14.19.21.44;	author tg;	state Exp;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@/*
+ * Fill 32 bit stippled rectangles for 8 bit frame buffers
+ */
+/* $XFree86: xc/programs/Xserver/cfb/cfbrctstp8.c,v 3.6 2001/12/14 19:59:24 dawes Exp $ */
+/*
+
+Copyright 1989, 1998  The Open Group
+
+Permission to use, copy, modify, distribute, and sell this software and its
+documentation for any purpose is hereby granted without fee, provided that
+the above copyright notice appear in all copies and that both that
+copyright notice and this permission notice appear in supporting
+documentation.
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
+OPEN GROUP BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN
+AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
+CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+Except as contained in this notice, the name of The Open Group shall not be
+used in advertising or otherwise to promote the sale, use or other dealings
+in this Software without prior written authorization from The Open Group.
+
+Author: Keith Packard, MIT X Consortium
+
+*/
+
+/* $Xorg: cfbrctstp8.c,v 1.4 2001/02/09 02:04:38 xorgcvs Exp $ */
+
+#if PSZ == 8
+
+#include "X.h"
+#include "Xmd.h"
+#include "servermd.h"
+#include "gcstruct.h"
+#include "window.h"
+#include "pixmapstr.h"
+#include "scrnintstr.h"
+#include "windowstr.h"
+
+#include "cfb.h"
+#include "cfbmskbits.h"
+#include "cfb8bit.h"
+
+#define MFB_CONSTS_ONLY
+#include "maskbits.h"
+
+void
+cfb8FillRectOpaqueStippled32 (pDrawable, pGC, nBox, pBox)
+    DrawablePtr	    pDrawable;
+    GCPtr	    pGC;
+    int		    nBox;	/* number of boxes to fill */
+    register BoxPtr pBox;	/* pointer to list of boxes to fill */
+{
+    CfbBits   *src;
+    int stippleHeight;
+
+    int nlwDst;		/* width in longwords of the dest pixmap */
+    int w;		/* width of current box */
+    register int h;	/* height of current box */
+    CfbBits startmask;
+    CfbBits endmask;	/* masks for reggedy bits at either end of line */
+    int nlwMiddle;	/* number of longwords between sides of boxes */
+    register int nlw;			/* loop version of nlwMiddle */
+    CfbBits *dstLine;
+    register CfbBits *dst;	/* pointer to bits we're writing */
+    CfbBits *dstTmp;
+    int y;				/* current scan line */
+
+    CfbBits *pbits;/* pointer to start of pixmap */
+    register CfbBits bits;	/* bits from stipple */
+    int	rot;
+    register CfbBits xor;
+    PixmapPtr		    stipple;
+    int	    wEnd;
+
+    stipple = pGC->pRotatedPixmap;
+
+    cfb8CheckOpaqueStipple(pGC->alu, pGC->fgPixel, pGC->bgPixel, pGC->planemask);
+
+    stippleHeight = stipple->drawable.height;
+    src = (CfbBits *)stipple->devPrivate.ptr;
+
+    cfbGetLongWidthAndPointer (pDrawable, nlwDst, pbits)
+
+    while (nBox--)
+    {
+	w = pBox->x2 - pBox->x1;
+	h = pBox->y2 - pBox->y1;
+	y = pBox->y1;
+	dstLine = pbits + (pBox->y1 * nlwDst) + ((pBox->x1 & ~PIM) >> PWSH);
+	if (((pBox->x1 & PIM) + w) <= PPW)
+	{
+	    maskpartialbits(pBox->x1, w, startmask);
+	    nlwMiddle = 0;
+	    endmask = 0;
+	}
+	else
+	{
+	    maskbits (pBox->x1, w, startmask, endmask, nlwMiddle);
+	}
+	rot = (pBox->x1 & ((PGSZ-1) & ~PIM));
+	pBox++;
+	y = y % stippleHeight;
+#if PPW == 4
+	if (cfb8StippleRRop == GXcopy)
+	{
+	    if (w < PGSZ*2)
+	    {
+	    	while (h--)
+	    	{
+	    	    bits = src[y];
+	    	    y++;
+	    	    if (y == stippleHeight)
+		    	y = 0;
+	    	    if (rot)
+		    	RotBitsLeft(bits,rot);
+		    dst = dstLine;
+	    	    dstLine += nlwDst;
+	    	    if (startmask)
+	    	    {
+		    	*dst = (*dst & ~startmask) |
+			       (GetPixelGroup (bits) & startmask);
+		    	dst++;
+		    	RotBitsLeft (bits, PGSZB);
+	    	    }
+		    nlw = nlwMiddle;
+	    	    while (nlw--)
+	    	    {
+			*dst++ = GetPixelGroup(bits);
+		    	RotBitsLeft (bits, PGSZB);
+	    	    }
+	    	    if (endmask)
+	    	    {
+			*dst = (*dst & ~endmask) |
+			       (GetPixelGroup (bits) & endmask);
+	    	    }
+	    	}
+	    }
+	    else
+	    {
+		wEnd = 7 - (nlwMiddle & 7);
+		nlwMiddle = (nlwMiddle >> 3) + 1;
+	    	while (h--)
+	    	{
+		    bits = src[y];
+		    y++;
+		    if (y == stippleHeight)
+			y = 0;
+	    	    if (rot != 0)
+			RotBitsLeft (bits, rot);
+	    	    dstTmp = dstLine;
+	    	    dstLine += nlwDst;
+		    if (startmask)
+		    {
+			*dstTmp = (*dstTmp & ~startmask) |
+				  (GetPixelGroup (bits) & startmask);
+			dstTmp++;
+			RotBitsLeft (bits, PGSZB);
+		    }
+		    w = 7 - wEnd;
+		    while (w--)
+		    {
+			nlw = nlwMiddle;
+			dst = dstTmp;
+			dstTmp++;
+			xor = GetPixelGroup (bits);
+			while (nlw--)
+			{
+			    *dst = xor;
+			    dst += 8;
+			}
+			NextBitGroup (bits);
+		    }
+		    nlwMiddle--;
+		    w = wEnd + 1;
+		    if (endmask)
+		    {
+			dst = dstTmp + (nlwMiddle << 3);
+			*dst = (*dst & ~endmask) |
+			       (GetPixelGroup(bits) & endmask);
+		    }
+		    while (w--)
+		    {
+			nlw = nlwMiddle;
+			dst = dstTmp;
+			dstTmp++;
+			xor = GetPixelGroup (bits);
+			while (nlw--)
+			{
+			    *dst = xor;
+			    dst += 8;
+			}
+			NextBitGroup (bits);
+		    }
+		    nlwMiddle++;
+		}
+	    }
+	}
+	else
+#endif /* PPW == 4 */
+	{
+	    while (h--)
+	    {
+	    	bits = src[y];
+	    	y++;
+	    	if (y == stippleHeight)
+		    y = 0;
+	    	if (rot)
+		    RotBitsLeft(bits,rot);
+		dst = dstLine;
+	    	dstLine += nlwDst;
+	    	if (startmask)
+	    	{
+		    xor = GetBitGroup(bits);
+		    *dst = MaskRRopPixels(*dst, xor, startmask);
+		    dst++;
+		    RotBitsLeft (bits, PGSZB);
+	    	}
+		nlw = nlwMiddle;
+	    	while (nlw--)
+	    	{
+		    RRopBitGroup(dst, GetBitGroup(bits));
+		    dst++;
+		    RotBitsLeft (bits, PGSZB);
+	    	}
+	    	if (endmask)
+	    	{
+		    xor = GetBitGroup(bits);
+		    *dst = MaskRRopPixels(*dst, xor, endmask);
+	    	}
+	    }
+	}
+    }
+}
+
+void
+cfb8FillRectTransparentStippled32 (pDrawable, pGC, nBox, pBox)
+    DrawablePtr	    pDrawable;
+    GCPtr	    pGC;
+    int		    nBox;	/* number of boxes to fill */
+    BoxPtr 	    pBox;	/* pointer to list of boxes to fill */
+{
+    int		    x, y, w, h;
+    int		    nlwMiddle, nlwDst;
+    CfbBits   startmask, endmask;
+    register CfbBits   *dst;
+    CfbBits   *dstLine, *pbits, *dstTmp;
+    CfbBits   *src;
+    register CfbBits   xor;
+    register CfbBits   bits, mask;
+    int		    rot;
+    int		    wEnd;
+    cfbPrivGCPtr    devPriv;
+    PixmapPtr	    stipple;
+    int		    stippleHeight;
+    register int    nlw;
+    
+    devPriv = cfbGetGCPrivate(pGC);
+    stipple = pGC->pRotatedPixmap;
+    src = (CfbBits *)stipple->devPrivate.ptr;
+    stippleHeight = stipple->drawable.height;
+
+    cfb8CheckStipple (pGC->alu, pGC->fgPixel, pGC->planemask);
+
+    cfbGetLongWidthAndPointer (pDrawable, nlwDst, pbits)
+
+    while (nBox--)
+    {
+	x = pBox->x1;
+    	w = pBox->x2 - x;
+	if (((x & PIM) + w) <= PPW)
+	{
+	    maskpartialbits(x, w, startmask);
+	    endmask = 0;
+	    nlwMiddle = 0;
+	}
+	else
+	{
+	    maskbits (x, w, startmask, endmask, nlwMiddle);
+	}
+	rot = (x & ((PGSZ-1) & ~PIM));
+    	y = pBox->y1;
+    	dstLine = pbits + (y * nlwDst) + (x >> PWSH);
+    	h = pBox->y2 - y;
+	pBox++;
+	y %= stippleHeight;
+#if PPW == 4
+	if (cfb8StippleRRop == GXcopy)
+	{
+	    xor = devPriv->xor;
+	    if (w < PGSZ*2)
+	    {
+	    	while (h--)
+	    	{
+		    bits = src[y];
+		    y++;
+		    if (y == stippleHeight)
+			y = 0;
+	    	    if (rot != 0)
+			RotBitsLeft (bits, rot);
+	    	    dst = dstLine;
+	    	    dstLine += nlwDst;
+	    	    if (startmask)
+	    	    {
+		    	mask = cfb8PixelMasks[GetBitGroup(bits)];
+		    	*dst = (*dst & ~(mask & startmask)) |
+		       	       (xor & (mask & startmask));
+		    	dst++;
+		    	RotBitsLeft (bits, PGSZB);
+	    	    }
+		    nlw = nlwMiddle;
+	    	    while (nlw--)
+	    	    {
+		    	WriteBitGroup (dst,xor,GetBitGroup(bits))
+		    	dst++;
+		    	RotBitsLeft (bits, PGSZB);
+	    	    }
+	    	    if (endmask)
+	    	    {
+		    	mask = cfb8PixelMasks[GetBitGroup(bits)];
+		    	*dst = (*dst & ~(mask & endmask)) |
+		       	       (xor & (mask & endmask));
+	    	    }
+	    	}
+	    }
+	    else
+	    {
+		wEnd = 7 - (nlwMiddle & 7);
+		nlwMiddle = (nlwMiddle >> 3) + 1;
+	    	while (h--)
+	    	{
+		    bits = src[y];
+		    y++;
+		    if (y == stippleHeight)
+			y = 0;
+	    	    if (rot != 0)
+			RotBitsLeft (bits, rot);
+	    	    dstTmp = dstLine;
+	    	    dstLine += nlwDst;
+		    if (startmask)
+		    {
+		    	mask = cfb8PixelMasks[GetBitGroup(bits)];
+		    	*dstTmp = (*dstTmp & ~(mask & startmask)) |
+		       	       (xor & (mask & startmask));
+		    	dstTmp++;
+		    	RotBitsLeft (bits, PGSZB);
+		    }
+		    w = 7 - wEnd;
+		    while (w--)
+		    {
+			nlw = nlwMiddle;
+			dst = dstTmp;
+			dstTmp++;
+#if defined(__GNUC__) && defined(mc68020)
+			mask = cfb8PixelMasks[GetBitGroup(bits)];
+			xor = xor & mask;
+			mask = ~mask;
+			while (nlw--)
+			{
+			    *dst = (*dst & mask) | xor;
+			    dst += 8;
+			}
+			xor = devPriv->xor;
+#else
+#define SwitchBitsLoop(body) \
+	while (nlw--)	\
+	{		\
+	    body	\
+	    dst += 8;	\
+	}
+			SwitchBitGroup(dst, xor, GetBitGroup(bits));
+#undef SwitchBitsLoop
+#endif
+			NextBitGroup (bits);
+		    }
+		    nlwMiddle--;
+		    w = wEnd + 1;
+		    if (endmask)
+		    {
+			mask = cfb8PixelMasks[GetBitGroup(bits)];
+			dst = dstTmp + (nlwMiddle << 3);
+			*dst = (*dst & ~(mask & endmask)) |
+			       (xor &  (mask & endmask));
+		    }
+		    while (w--)
+		    {
+			nlw = nlwMiddle;
+			dst = dstTmp;
+			dstTmp++;
+#if defined(__GNUC__) && defined(mc68020)
+			mask = cfb8PixelMasks[GetBitGroup(bits)];
+			xor = xor & mask;
+			mask = ~mask;
+			while (nlw--)
+			{
+			    *dst = (*dst & mask) | xor;
+			    dst += 8;
+			}
+			xor = devPriv->xor;
+#else
+#define SwitchBitsLoop(body) \
+	while (nlw--)	\
+	{		\
+	    body	\
+	    dst += 8;	\
+	}
+			SwitchBitGroup(dst, xor, GetBitGroup(bits));
+#undef SwitchBitsLoop
+#endif
+			NextBitGroup (bits);
+		    }
+		    nlwMiddle++;
+		}
+	    }
+	}
+	else
+#endif /* PPW == 4 */
+	{
+	    while (h--)
+	    {
+		bits = src[y];
+		y++;
+		if (y == stippleHeight)
+		    y = 0;
+	    	if (rot != 0)
+		    RotBitsLeft (bits, rot);
+	    	dst = dstLine;
+	    	dstLine += nlwDst;
+	    	if (startmask)
+	    	{
+		    xor = GetBitGroup(bits);
+		    *dst = MaskRRopPixels(*dst, xor, startmask);
+		    dst++;
+		    RotBitsLeft (bits, PGSZB);
+	    	}
+		nlw = nlwMiddle;
+	    	while (nlw--)
+	    	{
+		    RRopBitGroup(dst, GetBitGroup(bits));
+		    dst++;
+		    RotBitsLeft (bits, PGSZB);
+	    	}
+	    	if (endmask)
+	    	{
+		    xor = GetBitGroup(bits);
+		    *dst = MaskRRopPixels(*dst, xor, endmask);
+	    	}
+	    }
+	}
+    }
+}
+
+
+void
+cfb8FillRectStippledUnnatural (pDrawable, pGC, nBox, pBox)
+    DrawablePtr	    pDrawable;
+    GCPtr	    pGC;
+    int		    nBox;
+    register BoxPtr pBox;
+{
+    CfbBits   *pdstBase;	/* pointer to start of bitmap */
+    CfbBits   *pdstLine;	/* current destination line */
+    int		    nlwDst;	/* width in longwords of bitmap */
+    PixmapPtr	    pStipple;	/* pointer to stipple we want to fill with */
+    int		    nlwMiddle;
+    register int    nlw;
+    int		    x, y, w, h, xrem, xSrc, ySrc;
+    int		    stwidth, stippleWidth;
+    int		    stippleHeight;
+    register CfbBits  bits, inputBits;
+    register int    partBitsLeft;
+    int		    nextPartBits;
+    int		    bitsLeft, bitsWhole;
+    register CfbBits    *pdst;	/* pointer to current word in bitmap */
+    CfbBits   *srcTemp, *srcStart;
+    CfbBits   *psrcBase;
+    CfbBits   startmask, endmask;
+
+    if (pGC->fillStyle == FillStippled)
+	cfb8CheckStipple (pGC->alu, pGC->fgPixel, pGC->planemask);
+    else
+	cfb8CheckOpaqueStipple (pGC->alu, pGC->fgPixel, pGC->bgPixel, pGC->planemask);
+
+    if (cfb8StippleRRop == GXnoop)
+	return;
+
+    /*
+     *  OK,  so what's going on here?  We have two Drawables:
+     *
+     *  The Stipple:
+     *		Depth = 1
+     *		Width = stippleWidth
+     *		Words per scanline = stwidth
+     *		Pointer to pixels = pStipple->devPrivate.ptr
+     */
+
+    pStipple = pGC->stipple;
+
+    stwidth = pStipple->devKind >> PWSH;
+    stippleWidth = pStipple->drawable.width;
+    stippleHeight = pStipple->drawable.height;
+    psrcBase = (CfbBits *) pStipple->devPrivate.ptr;
+
+    /*
+     *	The Target:
+     *		Depth = PSZ
+     *		Width = determined from *pwidth
+     *		Words per scanline = nlwDst
+     *		Pointer to pixels = addrlBase
+     */
+
+    xSrc = pDrawable->x;
+    ySrc = pDrawable->y;
+
+    cfbGetLongWidthAndPointer (pDrawable, nlwDst, pdstBase)
+
+    /* this replaces rotating the stipple. Instead we just adjust the offset
+     * at which we start grabbing bits from the stipple.
+     * Ensure that ppt->x - xSrc >= 0 and ppt->y - ySrc >= 0,
+     * so that iline and xrem always stay within the stipple bounds.
+     */
+
+    xSrc += (pGC->patOrg.x % stippleWidth) - stippleWidth;
+    ySrc += (pGC->patOrg.y % stippleHeight) - stippleHeight;
+
+    bitsWhole = stippleWidth;
+
+    while (nBox--)
+    {
+	x = pBox->x1;
+	y = pBox->y1;
+	w = pBox->x2 - x;
+	h = pBox->y2 - y;
+	pBox++;
+	pdstLine = pdstBase + y * nlwDst + (x >> PWSH);
+	y = (y - ySrc) % stippleHeight;
+	srcStart = psrcBase + y * stwidth;
+	xrem = ((x & ~PIM) - xSrc) % stippleWidth;
+	if (((x & PIM) + w) < PPW)
+	{
+	    maskpartialbits (x, w, startmask);
+	    nlwMiddle = 0;
+	    endmask = 0;
+	}
+	else
+	{
+	    maskbits (x, w, startmask, endmask, nlwMiddle);
+	}
+	while (h--)
+	{
+    	    srcTemp = srcStart + (xrem >> MFB_PWSH);
+    	    bitsLeft = stippleWidth - (xrem & ~MFB_PIM);
+	    NextUnnaturalStippleWord
+	    NextSomeBits (inputBits, (xrem & MFB_PIM));
+	    partBitsLeft -= (xrem & MFB_PIM);
+	    NextUnnaturalStippleBits
+	    nlw = nlwMiddle;
+	    pdst = pdstLine;
+	    if (startmask)
+	    {
+		*pdst = MaskRRopPixels(*pdst,bits,startmask);
+		pdst++;
+		NextUnnaturalStippleBits
+	    }
+	    while (nlw--)
+	    {
+		*pdst = RRopPixels(*pdst,bits);
+		pdst++;
+		NextUnnaturalStippleBits
+	    }
+	    if (endmask)
+		*pdst = MaskRRopPixels(*pdst,bits,endmask);
+	    pdstLine += nlwDst;
+	    y++;
+	    srcStart += stwidth;
+	    if (y == stippleHeight)
+	    {
+		y = 0;
+		srcStart = psrcBase;
+	    }
+	}
+    }
+}
+
+#endif /* PSZ == 8 */
+@
+
+
+1.1.9.1
+log
+@OpenBSD just has imported exactly this tree into their vendor branch,
+called the same tag, in XF4/xc
+This is, apparently, the last XFree86 snapshot before the licence change
+(ie, addition of the advertising clause)
+
+Since the developers don't see any problems with that, and we would like
+to integrate improvements done by the remaining one or two (or so) XFree86
+developers (j/k), this prepares enabling us to update X-Window in the future.
+@
+text
+@@
+
+
+1.1.1.1
+log
+@Import OpenBSD 3.3 XF4 repository from CTM 3132 the first time
+This finalizes starting an OpenBSD-mirabile (aka MirBSD) repository.
+
+### MirBSD is:
+# Copyright (c) 1982-2003 by Thorsten "mirabile" Glaser <x86@@ePost.de>
+# Copyright © 1968-2003  The authors of And contributors to UNIX®, the
+#       C Language, BSD/Berkeley Unix; 386BSD, NetBSD 1.1 and OpenBSD.
+#
+# Anyone who obtained a copy of this work is hereby permitted to freely use,
+# distribute, modify, merge, sublicence, give away or sell it as long as the
+# authors are given due credit and the following notice is retained:
+#
+# This work is provided "as is", with no explicit or implicit warranty what-
+# soever. Use it only at your own risk. In no event may an author or contri-
+# butor be held liable for any damage, directly or indirectly, that origina-
+# ted through or is caused by creation or modification of this work.
+
+MirBSD is my private tree. MirBSD does not differ very much from OpenBSD
+and intentionally tracks OpenBSD. That's why it _is_ OpenBSD, just not the
+official one. It's like with DarrenBSD.
+
+At time of this writing, no advertising for MirBSD must be done,
+because the advertising clause has not yet been sorted out.
+
+http://templeofhate.com/tglaser/MirBSD/index.php
+@
+text
+@@

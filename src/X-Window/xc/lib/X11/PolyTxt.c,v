@@ -1,0 +1,345 @@
+head	1.1;
+branch	1.1.1;
+access;
+symbols
+	tg-mergetmp-2:1.1.1.1
+	cvs-200410241530:1.1.1.1
+	cvs-200410012000:1.1.1.1
+	cvs-200407141120:1.1.1.1
+	cvs-200406231010:1.1.1.1
+	MIRBSD_7quater:1.1.1.1
+	cvs-200405271510:1.1.1.1
+	XFree86_4_4_0:1.1.9.1
+	cvs-200403021700:1.1.1.1
+	XFREE86_20040213:1.1.9.1
+	xc:1.1.9
+	cvs-200401291925:1.1.1.1
+	MIRBSD_7_ALPHA:1.1.1.1.0.4
+	MIRBSD_7:1.1.1.1.0.2
+	MIRBSD_7ter:1.1.1.1
+	cvs-20011091815:1.1.1.1
+	cvs-200309162130:1.1.1.1
+	cvs-200308302005:1.1.1.1
+	ctmx-0387:1.1.1.1
+	ctmx-0384:1.1.1.1
+	MIRBSD_5:1.1.1.1
+	ctmx-0375:1.1.1.1
+	ctmx-0373:1.1.1.1
+	ctm-0371:1.1.1.1
+	ctm-0370:1.1.1.1
+	MIRBSD_4:1.1.1.1
+	ctm-0363:1.1.1.1
+	ctm-0359:1.1.1.1
+	ctm-0349:1.1.1.1
+	openbsd:1.1.1;
+locks; strict;
+comment	@ * @;
+
+
+1.1
+date	2003.03.22.20.04.31;	author tg;	state Exp;
+branches
+	1.1.1.1
+	1.1.9.1;
+next	;
+
+1.1.1.1
+date	2003.03.22.20.04.31;	author tg;	state Stab;
+branches;
+next	;
+
+1.1.9.1
+date	2004.02.14.19.18.34;	author tg;	state Exp;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@/* $Xorg: PolyTxt.c,v 1.4 2001/02/09 02:03:35 xorgcvs Exp $ */
+/*
+
+Copyright 1986, 1998  The Open Group
+
+Permission to use, copy, modify, distribute, and sell this software and its
+documentation for any purpose is hereby granted without fee, provided that
+the above copyright notice appear in all copies and that both that
+copyright notice and this permission notice appear in supporting
+documentation.
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
+OPEN GROUP BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN
+AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
+CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+Except as contained in this notice, the name of The Open Group shall not be
+used in advertising or otherwise to promote the sale, use or other dealings
+in this Software without prior written authorization from The Open Group.
+
+*/
+/* $XFree86: xc/lib/X11/PolyTxt.c,v 3.6 2001/12/14 19:54:03 dawes Exp $ */
+
+#include "Xlibint.h"
+
+int
+XDrawText(dpy, d, gc, x, y, items, nitems)
+    register Display *dpy;
+    Drawable d;
+    GC gc;
+    int x, y;
+    XTextItem *items;
+    int nitems;
+{   
+    register int i;
+    register XTextItem *item;
+    int length = 0;
+    register xPolyText8Req *req;
+
+    LockDisplay(dpy);
+    FlushGC(dpy, gc);
+    GetReq (PolyText8, req);
+    req->drawable = d;
+    req->gc = gc->gid;
+    req->x = x;
+    req->y = y;
+
+    item = items;
+    for (i=0; i < nitems; i++) {
+	if (item->font)
+	    length += 5;  /* a 255 byte, plus size of Font id */
+        if (item->delta)
+        {
+	    if (item->delta > 0)
+	    {
+	      length += SIZEOF(xTextElt) * ((item->delta + 126) / 127);
+	    }
+            else
+            {
+   	      length += SIZEOF(xTextElt) * ((-item->delta + 127) / 128);
+ 	    }
+        }
+	if (item->nchars > 0)
+	{
+	    length += SIZEOF(xTextElt) * ((item->nchars + 253) / 254 - 1);
+	    if (!item->delta) length += SIZEOF(xTextElt);
+	    length += item->nchars;
+     	}
+	item++;
+    }
+
+    req->length += (length + 3)>>2;  /* convert to number of 32-bit words */
+
+
+    /* 
+     * If the entire request does not fit into the remaining space in the
+     * buffer, flush the buffer first.   If the request does fit into the
+     * empty buffer, then we won't have to flush it at the end to keep
+     * the buffer 32-bit aligned. 
+     */
+
+    if (dpy->bufptr + length > dpy->bufmax)
+    	_XFlush (dpy);
+
+    item = items;
+    for (i=0; i< nitems; i++) {
+
+	if (item->font) {
+            /* to mark a font shift, write a 255 byte followed by
+	       the 4 bytes of font ID, big-end first */
+	    register unsigned char *f;
+	    BufAlloc (unsigned char *, f, 5);
+
+	    f[0] = 255;
+	    f[1] = (item->font & 0xff000000) >> 24;
+	    f[2] = (item->font & 0x00ff0000) >> 16;
+	    f[3] = (item->font & 0x0000ff00) >> 8;
+	    f[4] =  item->font & 0x000000ff;
+
+            /* update GC shadow */
+	    gc->values.font = item->font;
+	    }
+
+	{
+	    int nbytes = SIZEOF(xTextElt);
+	    int PartialNChars = item->nchars;
+	    int PartialDelta = item->delta;
+            /* register xTextElt *elt; */
+	    int FirstTimeThrough = True;
+ 	    char *CharacterOffset = item->chars;
+            char *tbuf = NULL;
+
+	    while((PartialDelta < -128) || (PartialDelta > 127))
+            {
+	    	int nb = SIZEOF(xTextElt);
+
+	    	BufAlloc (char *, tbuf, nb); 
+	    	*tbuf = 0;    /*   elt->len  */
+	    	if (PartialDelta > 0 ) 
+		{
+		    *(tbuf+1) = 127;  /* elt->delta  */
+		    PartialDelta = PartialDelta - 127;
+		}
+		else
+		{
+		    /* -128 = 0x8, need to be careful of signed chars... */
+		    *((unsigned char *)(tbuf+1)) = 0x80;  /* elt->delta */
+		    PartialDelta = PartialDelta + 128;
+		}
+	    }
+	    if (PartialDelta)
+            {
+                BufAlloc (char *, tbuf , nbytes); 
+	        *tbuf = 0;      /* elt->len */
+		*(tbuf+1) = PartialDelta;    /* elt->delta  */
+	    }
+	    while(PartialNChars > 254)
+            {
+		nbytes = 254;
+	    	if (FirstTimeThrough)
+		{
+		    FirstTimeThrough = False;
+		    if (!item->delta)
+ 		    { 
+			nbytes += SIZEOF(xTextElt);
+	   		BufAlloc (char *, tbuf, nbytes); 
+		        *(tbuf+1) = 0;     /* elt->delta */
+		    }
+		    else
+		    {
+			char *DummyChar;
+		        BufAlloc(char *, DummyChar, nbytes);
+		    }
+		}
+		else
+		{
+ 		    nbytes += SIZEOF(xTextElt);
+	   	    BufAlloc (char *, tbuf, nbytes);
+		    *(tbuf+1) = 0;   /* elt->delta */
+		}
+		/* watch out for signs on chars */
+		*(unsigned char *)tbuf = 254;  /* elt->len */
+                memcpy (tbuf+2 , CharacterOffset, 254);
+		PartialNChars = PartialNChars - 254;
+		CharacterOffset += 254;
+
+	    }
+	    if (PartialNChars)
+            {
+		nbytes = PartialNChars;
+	    	if (FirstTimeThrough)
+		{
+		    FirstTimeThrough = False;
+		    if (!item->delta)
+ 		    { 
+			nbytes += SIZEOF(xTextElt);
+	   		BufAlloc (char *, tbuf, nbytes); 
+			*(tbuf+1) = 0;   /*  elt->delta  */
+		    }
+		    else
+		    {
+			char *DummyChar;
+		        BufAlloc(char *, DummyChar, nbytes);
+		    }
+		}
+		else
+		{
+ 		    nbytes += SIZEOF(xTextElt);
+	   	    BufAlloc (char *, tbuf, nbytes); 
+		    *(tbuf+1) = 0;   /* elt->delta  */
+		}
+	    	*tbuf = PartialNChars;   /*  elt->len  */
+                memcpy (tbuf+2 , CharacterOffset, PartialNChars);
+	    }
+	}
+    item++;
+    }
+
+    /* Pad request out to a 32-bit boundary */
+
+    if (length &= 3) {
+	char *pad;
+	/* 
+	 * BufAlloc is a macro that uses its last argument more than
+	 * once, otherwise I'd write "BufAlloc (char *, pad, 4-length)" 
+	 */
+	length = 4 - length;
+	BufAlloc (char *, pad, length);
+	/* 
+	 * if there are 3 bytes of padding, the first byte MUST be 0
+	 * so the pad bytes aren't mistaken for a final xTextElt 
+	 */
+	*pad = 0;
+        }
+
+    /* 
+     * If the buffer pointer is not now pointing to a 32-bit boundary,
+     * we must flush the buffer so that it does point to a 32-bit boundary
+     * at the end of this routine. 
+     */
+
+    if ((dpy->bufptr - dpy->buffer) & 3)
+       _XFlush (dpy);
+    UnlockDisplay(dpy);
+    SyncHandle();
+    return 0;
+    }
+@
+
+
+1.1.9.1
+log
+@OpenBSD just has imported exactly this tree into their vendor branch,
+called the same tag, in XF4/xc
+This is, apparently, the last XFree86 snapshot before the licence change
+(ie, addition of the advertising clause)
+
+Since the developers don't see any problems with that, and we would like
+to integrate improvements done by the remaining one or two (or so) XFree86
+developers (j/k), this prepares enabling us to update X-Window in the future.
+@
+text
+@@
+
+
+1.1.1.1
+log
+@Import OpenBSD 3.3 XF4 repository from CTM 3132 the first time
+This finalizes starting an OpenBSD-mirabile (aka MirBSD) repository.
+
+### MirBSD is:
+# Copyright (c) 1982-2003 by Thorsten "mirabile" Glaser <x86@@ePost.de>
+# Copyright © 1968-2003  The authors of And contributors to UNIX®, the
+#       C Language, BSD/Berkeley Unix; 386BSD, NetBSD 1.1 and OpenBSD.
+#
+# Anyone who obtained a copy of this work is hereby permitted to freely use,
+# distribute, modify, merge, sublicence, give away or sell it as long as the
+# authors are given due credit and the following notice is retained:
+#
+# This work is provided "as is", with no explicit or implicit warranty what-
+# soever. Use it only at your own risk. In no event may an author or contri-
+# butor be held liable for any damage, directly or indirectly, that origina-
+# ted through or is caused by creation or modification of this work.
+
+MirBSD is my private tree. MirBSD does not differ very much from OpenBSD
+and intentionally tracks OpenBSD. That's why it _is_ OpenBSD, just not the
+official one. It's like with DarrenBSD.
+
+At time of this writing, no advertising for MirBSD must be done,
+because the advertising clause has not yet been sorted out.
+
+http://templeofhate.com/tglaser/MirBSD/index.php
+@
+text
+@@

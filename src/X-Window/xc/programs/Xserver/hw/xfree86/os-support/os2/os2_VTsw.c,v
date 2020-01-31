@@ -1,0 +1,697 @@
+head	1.2;
+access;
+symbols
+	tg-mergetmp-2:1.2
+	cvs-200410241530:1.1.1.3
+	cvs-200410012000:1.1.1.3
+	cvs-200407221130:1.1.1.3
+	cvs-200407141120:1.1.1.3
+	cvs-200406231010:1.1.1.3
+	MIRBSD_7quater:1.1.1.2
+	cvs-200405271510:1.1.1.3
+	XFree86_4_4_0:1.1.9.2
+	cvs-200403021700:1.1.1.3
+	XFREE86_20040213:1.1.9.1
+	xc:1.1.9
+	cvs-200401291925:1.1.1.2
+	MIRBSD_7_ALPHA:1.1.1.2.0.4
+	MIRBSD_7:1.1.1.2.0.2
+	MIRBSD_7ter:1.1.1.2
+	cvs-20011091815:1.1.1.2
+	cvs-200309162130:1.1.1.2
+	cvs-200308302005:1.1.1.2
+	ctmx-0387:1.1.1.2
+	ctmx-0384:1.1.1.2
+	MIRBSD_5:1.1.1.2
+	ctmx-0375:1.1.1.2
+	ctmx-0373:1.1.1.2
+	ctm-0371:1.1.1.2
+	ctm-0370:1.1.1.2
+	MIRBSD_4:1.1.1.2
+	ctm-0363:1.1.1.2
+	ctm-0359:1.1.1.2
+	ctm-0349:1.1.1.1
+	openbsd:1.1.1;
+locks; strict;
+comment	@ * @;
+
+
+1.2
+date	2004.03.07.18.38.34;	author tg;	state Stab;
+branches;
+next	1.1;
+
+1.1
+date	2003.03.22.20.08.53;	author tg;	state Exp;
+branches
+	1.1.1.1
+	1.1.9.1;
+next	;
+
+1.1.1.1
+date	2003.03.22.20.08.53;	author tg;	state Exp;
+branches;
+next	1.1.1.2;
+
+1.1.1.2
+date	2003.04.08.18.37.37;	author tg;	state Exp;
+branches;
+next	1.1.1.3;
+
+1.1.1.3
+date	2004.03.02.18.25.39;	author tg;	state Exp;
+branches;
+next	;
+
+1.1.9.1
+date	2004.02.14.19.25.19;	author tg;	state Exp;
+branches;
+next	1.1.9.2;
+
+1.1.9.2
+date	2004.03.05.22.34.21;	author tg;	state Exp;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.2
+log
+@semi-automagic merge of these files (ie, I've skipped through the diffs,
+and most of that was done by cvs or that weird script of some minutes ago)
+@
+text
+@/* $XFree86: xc/programs/Xserver/hw/xfree86/os-support/os2/os2_VTsw.c,v 3.14 2004/02/14 00:10:17 dawes Exp $ */
+/*
+ * Copyright 1993 by David Wexelblat <dwex@@goblin.org>
+ * Modified 1996 by Sebastien Marineau <marineau@@genie.uottawa.ca>
+ *
+ * Permission to use, copy, modify, distribute, and sell this software and its
+ * documentation for any purpose is hereby granted without fee, provided that
+ * the above copyright notice appear in all copies and that both that
+ * copyright notice and this permission notice appear in supporting
+ * documentation, and that the name of David Wexelblat not be used in
+ * advertising or publicity pertaining to distribution of the software without
+ * specific, written prior permission.  David Wexelblat makes no representations
+ * about the suitability of this software for any purpose.  It is provided
+ * "as is" without express or implied warranty.
+ *
+ * DAVID WEXELBLAT DISCLAIMS ALL WARRANTIES WITH REGARD TO THIS SOFTWARE,
+ * INCLUDING ALL IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS, IN NO
+ * EVENT SHALL DAVID WEXELBLAT BE LIABLE FOR ANY SPECIAL, INDIRECT OR
+ * CONSEQUENTIAL DAMAGES OR ANY DAMAGES WHATSOEVER RESULTING FROM LOSS OF USE,
+ * DATA OR PROFITS, WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER
+ * TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR
+ * PERFORMANCE OF THIS SOFTWARE.
+ *
+ */
+/* $XConsortium: os2_VTsw.c /main/7 1996/05/13 16:37:55 kaleb $ */
+
+#define I_NEED_OS2_H
+#define NEED_EVENTS
+#include "X.h"
+#include "input.h"
+#include "scrnintstr.h"
+
+#define INCL_WINSWITCHLIST
+#define INCL_VIO
+#define INCL_KBD
+#define INCL_DOSPROCESS
+#define INCL_DOSSEMAPHORES
+#define INCL_DOSERRORS
+#undef RT_FONT
+#include "xf86.h"
+#include "xf86Priv.h"
+#include "xf86_OSlib.h"
+#include "atKeynames.h"
+
+BOOL SwitchedToWPS=FALSE;
+BOOL WaitingForAccess=FALSE;
+void os2PostKbdEvent();
+HEV hevServerHasFocus;
+HEV hevSwitchRequested;
+HEV hevErrorPopupDetected;
+extern HEV hevPopupPending;
+extern HEV hSwitchToSem;
+BOOL os2PopupErrorPending=FALSE;
+
+/*
+ * Added OS/2 code to handle switching back to WPS
+ */
+
+
+Bool xf86VTSwitchPending()
+{
+	return(xf86Info.vtRequestsPending ? TRUE : FALSE);
+}
+
+Bool xf86VTSwitchAway()
+{
+        APIRET rc;
+	ULONG  drive;
+
+        xf86Info.vtRequestsPending=FALSE;
+        SwitchedToWPS=TRUE;
+
+	rc = DosQuerySysInfo(5,5,&drive,sizeof(drive));
+	rc = DosSuppressPopUps(0x0000L,drive+96);	/* Disable popups */
+	DosPostEventSem(hevSwitchRequested);
+	usleep(30000);
+	return(TRUE);
+}
+
+Bool xf86VTSwitchTo()
+{
+	APIRET rc;
+	ULONG drive,postCount;
+
+	xf86Info.vtRequestsPending=FALSE;
+	SwitchedToWPS=FALSE;
+	rc = DosResetEventSem(hSwitchToSem,&postCount);
+	DosPostEventSem(hevSwitchRequested);
+	rc = DosQuerySysInfo(5,5,&drive,sizeof(drive));
+	rc = DosSuppressPopUps(0x0001L,drive+96);     /* Disable popups */
+
+	/* We reset the state of the control key */
+	os2PostKbdEvent(KEY_LCtrl,1);
+	os2PostKbdEvent(KEY_LCtrl,0);
+	os2PostKbdEvent(KEY_RCtrl,1);
+	os2PostKbdEvent(KEY_RCtrl,0);
+	os2PostKbdEvent(KEY_Alt,1);
+	os2PostKbdEvent(KEY_Alt,0);
+	return(TRUE);
+}
+
+
+/* This function is run as a thread and will notify of switch-to/switch-away events */
+void os2VideoNotify(arg)
+void * arg;
+{
+   USHORT Indic;
+   USHORT NotifyType;
+   APIRET rc;
+   ULONG postCount;
+   Bool FirstTime=TRUE;
+   int timeout_count;
+
+	rc=DosCreateEventSem(NULL,&hevServerHasFocus,0L,FALSE);
+	rc=DosPostEventSem(hevServerHasFocus);
+	rc=DosCreateEventSem(NULL,&hevSwitchRequested,0L,FALSE);
+	rc=DosPostEventSem(hevSwitchRequested);
+
+
+	while(1) {
+	  Indic=0;
+	  rc=VioSavRedrawWait(Indic,&NotifyType,(HVIO)0);
+
+/* Here we handle the semaphore used to indicate wether we have screen access */
+	  if(NotifyType==0) rc=DosResetEventSem(hevServerHasFocus,&postCount);
+          if(FirstTime){
+                   FirstTime=FALSE;
+                   if(NotifyType==1) NotifyType=65535; /* In case a redraw is requested on first call */
+                }
+
+	  if(NotifyType==1){
+/* Notify os2PseudoSelect() that we are back */
+			rc=DosPostEventSem(hSwitchToSem);
+			if (rc) xf86Msg(X_ERROR,"Post SwitchToSem returned %d\n");
+/* Sanity check */
+		if (!SwitchedToWPS) {
+			xf86Msg(X_ERROR,
+				"Abnormal switching back to server detected\n");
+		}
+	  }
+
+/* Here we set the semaphore used to indicate switching request */
+
+        if((NotifyType!=65535)&&(!WaitingForAccess)) {
+                rc=DosResetEventSem(hevSwitchRequested,&postCount);
+                xf86Info.vtRequestsPending=TRUE;
+/* Then wait for semaphore to be posted once switch is complete. Wait 20 secs, then kill server */
+               timeout_count=0;
+               rc=DosSetPriority(2,3,0,1);
+                     do {
+                            rc=DosWaitEventSem(hevSwitchRequested,1000L);
+                            if(rc==ERROR_TIMEOUT){
+                               timeout_count++;
+                               if(timeout_count>25){
+                                  xf86Msg(X_ERROR,
+					  "Server timeout on VT switch request. Server was killed\n");
+                                  DosExit(1L,0);
+                                  }
+                               if(WaitingForAccess) {  /* The server is resetting */
+                                  DosPostEventSem(hevSwitchRequested);
+                                  xf86Info.vtRequestsPending=FALSE;
+                                  }
+                               }
+                          } while (rc==ERROR_TIMEOUT);
+          rc=DosSetPriority(2,2,0,1);
+          }
+         if(NotifyType==1) rc=DosPostEventSem(hevServerHasFocus);
+         if((NotifyType==0)&&(!SwitchedToWPS))
+		xf86Msg(X_ERROR,
+			"Abnormal switching away from server!\n");
+	} /* endwhile */
+
+/* End of thread */
+}
+
+/* This function is run as a thread and will notify of hard-error events */
+void os2HardErrorNotify(arg)
+void * arg;
+{
+   USHORT Indic;
+   USHORT NotifyType;
+   APIRET rc;
+   ULONG postCount;
+
+	rc=DosCreateEventSem(NULL,&hevErrorPopupDetected,0L,FALSE);
+	rc=DosPostEventSem(hevErrorPopupDetected);
+        os2PopupErrorPending=FALSE;
+
+	while(1) {
+	   Indic=0;
+	   rc=VioModeWait(Indic,&NotifyType,(HVIO)0);
+	   if(NotifyType==0){
+                os2PopupErrorPending=TRUE;
+                rc=DosPostEventSem(hSwitchToSem);
+                rc=DosResetEventSem(hevErrorPopupDetected,&postCount);
+                rc=DosWaitEventSem(hevErrorPopupDetected,20000L);
+                if(rc==ERROR_TIMEOUT) GiveUp(0);  /* Shutdown on timeout of semaphore */
+	   }
+	} /* endwhile */
+
+/* End of thread */
+}
+
+static BOOL is_redirected = FALSE;
+
+static void
+redirect_output(void)
+{
+	/* hv300996 create redirect file on boot drive, instead
+	 * anywhere you are just standing
+	 */
+	char buf[20],dr[3];
+	ULONG drive;
+	APIRET rc;
+
+	if (is_redirected) return;
+
+	if ((rc = DosQuerySysInfo(5,5,&drive,sizeof(drive))) != 0)
+		dr[0] = 0;
+	else {	
+		dr[0] = drive+96;
+		dr[1] = ':';
+		dr[2] = 0;
+	}
+	sprintf(buf,"%s\\xf86log.os2",dr);
+
+	ErrorF("\nThis is the XFree86/OS2-4.0 server\n");
+	ErrorF("\nAll output from now on will be redirected to %s\n",buf);
+	freopen(buf,"w",stderr);
+
+	is_redirected = TRUE;
+}
+
+void
+os2ServerVideoAccess()
+{
+   APIRET rc;
+   ULONG fgSession;
+   ULONG length=4;
+   CHAR Status;
+
+   /* Redirect output as early as possible */
+   /* redirect_output(); */
+   /* too many logfiles, server will log to /usr/adm */
+
+/* Wait for screen access. This is called at server reset or at server startup */
+/* Here we do some waiting until this session comes in the foreground before *
+ * going any further. This is because we may have been started in the bg      */
+
+        if(serverGeneration==1){
+                rc=VioScrLock(0, &Status, (HVIO)0);
+                while(Status != 0){
+                        rc=VioScrLock(0, &Status, (HVIO)0);
+                        DosSleep(1000);
+                        }
+                VioScrUnLock((HVIO)0);
+                return;
+                }
+        WaitingForAccess=TRUE;
+        rc=DosWaitEventSem(hevServerHasFocus,SEM_INDEFINITE_WAIT);
+        WaitingForAccess=FALSE;
+        SwitchedToWPS=FALSE;  /* In case server has reset while we were switched to WPS */
+}
+
+/* This next function will attempt to recover from a hard error popup
+ * with an EnterLeave call
+ */
+
+void os2RecoverFromPopup()
+{
+	int j;
+	ULONG postCount;
+
+	if (os2PopupErrorPending) {
+#if 0
+		for (j = 0; j < screenInfo.numScreens; j++)
+			(XF86SCRNINFO(screenInfo.screens[j])->EnterLeaveVT)(LEAVE, j);
+		for (j = 0; j < screenInfo.numScreens; j++)
+			(XF86SCRNINFO(screenInfo.screens[j])->EnterLeaveVT)(ENTER, j);
+#endif
+		DosResetEventSem(hSwitchToSem,&postCount);
+
+		for (j = 0; j < xf86NumScreens; j++) {
+			if (xf86Screens[j]->EnableDisableFBAccess)
+				(*xf86Screens[j]->EnableDisableFBAccess)(j, FALSE);
+		}
+		xf86EnterServerState(SETUP);
+		for (j = 0; j < xf86NumScreens; j++)
+			xf86Screens[j]->LeaveVT(j, 0);
+		for (j = 0; j < xf86NumScreens; j++) {
+			xf86Screens[j]->EnterVT(j, 0);
+		}
+		xf86EnterServerState(OPERATING);
+		for (j = 0; j < xf86NumScreens; j++) {
+			if (xf86Screens[j]->EnableDisableFBAccess)
+				(*xf86Screens[j]->EnableDisableFBAccess)(j, TRUE);
+		}
+
+		/* We reset the state of the control key */
+		os2PostKbdEvent(KEY_LCtrl,1);
+		os2PostKbdEvent(KEY_LCtrl,0);
+		os2PostKbdEvent(KEY_RCtrl,1);
+		os2PostKbdEvent(KEY_RCtrl,0);
+		os2PostKbdEvent(KEY_Alt,1);
+		os2PostKbdEvent(KEY_Alt,0);
+
+		/* Turn screen saver off when switching back */
+		SaveScreens(SCREEN_SAVER_FORCER,ScreenSaverReset);
+		os2PopupErrorPending=FALSE;
+		DosPostEventSem(hevErrorPopupDetected);
+	}
+}
+
+/* This checks wether a popup event is waiting. The semaphore would be reset
+ * by the XF86VIO.DLL function
+ */
+
+void os2CheckPopupPending()
+{
+	int j;
+	ULONG postCount;
+
+	return;  /* For now this is a no-op */
+
+#if 0
+	DosQueryEventSem(hevPopupPending,&postCount);
+	if (postCount==0) {               /* We have a popup pending */
+#if 0
+		for (j = 0; j < screenInfo.numScreens; j++)
+			(XF86SCRNINFO(screenInfo.screens[j])->EnterLeaveVT)(LEAVE, j);
+#endif
+		DosPostEventSem(hevPopupPending);
+	}
+#endif
+}
+
+@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@d1 1
+a1 1
+/* $XFree86: xc/programs/Xserver/hw/xfree86/os-support/os2/os2_VTsw.c,v 3.10 2000/04/05 18:13:51 dawes Exp $ */
+d27 1
+a32 1
+#define I_NEED_OS2_H
+d52 1
+d83 1
+a83 1
+	ULONG drive;
+d85 3
+a87 2
+        xf86Info.vtRequestsPending=FALSE;
+        SwitchedToWPS=FALSE;
+d91 1
+d95 4
+d130 5
+a134 1
+  
+a135 1
+	  if(NotifyType==1){
+d194 1
+d206 2
+a207 2
+static void 
+redirect_output(void) 
+d209 1
+a209 1
+	/* hv300996 create redirect file on boot drive, instead 
+d229 1
+a229 1
+	freopen(buf,"w",stderr); 
+d234 1
+a234 1
+void 
+d243 3
+a245 2
+   redirect_output();
+  
+d272 2
+d281 26
+@
+
+
+1.1.9.1
+log
+@OpenBSD just has imported exactly this tree into their vendor branch,
+called the same tag, in XF4/xc
+This is, apparently, the last XFree86 snapshot before the licence change
+(ie, addition of the advertising clause)
+
+Since the developers don't see any problems with that, and we would like
+to integrate improvements done by the remaining one or two (or so) XFree86
+developers (j/k), this prepares enabling us to update X-Window in the future.
+@
+text
+@d1 1
+a1 1
+/* $XFree86: xc/programs/Xserver/hw/xfree86/os-support/os2/os2_VTsw.c,v 3.13 2003/06/10 17:03:54 dawes Exp $ */
+a26 1
+#define I_NEED_OS2_H
+d32 1
+a91 4
+	os2PostKbdEvent(KEY_RCtrl,1);
+	os2PostKbdEvent(KEY_RCtrl,0);
+	os2PostKbdEvent(KEY_Alt,1);
+	os2PostKbdEvent(KEY_Alt,0);
+d232 1
+a232 2
+   /* redirect_output(); */
+   /* too many logfiles, server will log to /usr/adm */
+a266 24
+		for (j = 0; j < xf86NumScreens; j++) {
+			if (xf86Screens[j]->EnableDisableFBAccess)
+			  (*xf86Screens[j]->EnableDisableFBAccess)(j, FALSE);
+		}
+		xf86EnterServerState(SETUP);
+		for (j = 0; j < xf86NumScreens; j++)
+			xf86Screens[j]->LeaveVT(j, 0);
+		for (j = 0; j < xf86NumScreens; j++) {
+			xf86Screens[j]->EnterVT(j, 0);
+		}
+		xf86EnterServerState(OPERATING);
+		for (j = 0; j < xf86NumScreens; j++) {
+			if (xf86Screens[j]->EnableDisableFBAccess)
+			  (*xf86Screens[j]->EnableDisableFBAccess)(j, TRUE);
+		}
+
+                /* We reset the state of the control key */
+                os2PostKbdEvent(KEY_LCtrl,1);
+                os2PostKbdEvent(KEY_LCtrl,0);
+                os2PostKbdEvent(KEY_RCtrl,1);
+                os2PostKbdEvent(KEY_RCtrl,0);
+                os2PostKbdEvent(KEY_Alt,1);
+                os2PostKbdEvent(KEY_Alt,0);
+
+@
+
+
+1.1.9.2
+log
+@Import XFree86 4.4 from The XFree86(TM) Project, Inc.
+(integrity cannot be checked)
+
+got via cvs -qd anoncvs@@anoncvs.xfree86.org:/cvs co -Prxf-4_4_0 xc
+@
+text
+@d1 1
+a1 1
+/* $XFree86: xc/programs/Xserver/hw/xfree86/os-support/os2/os2_VTsw.c,v 3.14 2004/02/14 00:10:17 dawes Exp $ */
+a51 1
+extern HEV hSwitchToSem;
+d82 1
+a82 1
+	ULONG drive,postCount;
+d84 2
+a85 3
+	xf86Info.vtRequestsPending=FALSE;
+	SwitchedToWPS=FALSE;
+	rc = DosResetEventSem(hSwitchToSem,&postCount);
+a88 1
+
+d127 2
+a128 1
+
+a129 4
+/* Notify os2PseudoSelect() that we are back */
+			rc=DosPostEventSem(hSwitchToSem);
+			if (rc) xf86Msg(X_ERROR,"Post SwitchToSem returned %d\n");
+/* Sanity check */
+a187 1
+                rc=DosPostEventSem(hSwitchToSem);
+d199 2
+a200 2
+static void
+redirect_output(void)
+d202 1
+a202 1
+	/* hv300996 create redirect file on boot drive, instead
+d222 1
+a222 1
+	freopen(buf,"w",stderr);
+d227 1
+a227 1
+void
+d238 1
+a238 1
+
+a264 2
+	ULONG postCount;
+
+a271 2
+		DosResetEventSem(hSwitchToSem,&postCount);
+
+d274 1
+a274 1
+				(*xf86Screens[j]->EnableDisableFBAccess)(j, FALSE);
+d285 1
+a285 1
+				(*xf86Screens[j]->EnableDisableFBAccess)(j, TRUE);
+d288 7
+a294 7
+		/* We reset the state of the control key */
+		os2PostKbdEvent(KEY_LCtrl,1);
+		os2PostKbdEvent(KEY_LCtrl,0);
+		os2PostKbdEvent(KEY_RCtrl,1);
+		os2PostKbdEvent(KEY_RCtrl,0);
+		os2PostKbdEvent(KEY_Alt,1);
+		os2PostKbdEvent(KEY_Alt,0);
+@
+
+
+1.1.1.1
+log
+@Import OpenBSD 3.3 XF4 repository from CTM 3132 the first time
+This finalizes starting an OpenBSD-mirabile (aka MirBSD) repository.
+
+### MirBSD is:
+# Copyright (c) 1982-2003 by Thorsten "mirabile" Glaser <x86@@ePost.de>
+# Copyright © 1968-2003  The authors of And contributors to UNIX®, the
+#       C Language, BSD/Berkeley Unix; 386BSD, NetBSD 1.1 and OpenBSD.
+#
+# Anyone who obtained a copy of this work is hereby permitted to freely use,
+# distribute, modify, merge, sublicence, give away or sell it as long as the
+# authors are given due credit and the following notice is retained:
+#
+# This work is provided "as is", with no explicit or implicit warranty what-
+# soever. Use it only at your own risk. In no event may an author or contri-
+# butor be held liable for any damage, directly or indirectly, that origina-
+# ted through or is caused by creation or modification of this work.
+
+MirBSD is my private tree. MirBSD does not differ very much from OpenBSD
+and intentionally tracks OpenBSD. That's why it _is_ OpenBSD, just not the
+official one. It's like with DarrenBSD.
+
+At time of this writing, no advertising for MirBSD must be done,
+because the advertising clause has not yet been sorted out.
+
+http://templeofhate.com/tglaser/MirBSD/index.php
+@
+text
+@@
+
+
+1.1.1.2
+log
+@The X-Windowing System
+
+Import XFree86 4.3 from OpenBSD by CTM, in the hope it's stable
+@
+text
+@d1 1
+a1 1
+/* $XFree86: xc/programs/Xserver/hw/xfree86/os-support/os2/os2_VTsw.c,v 3.11 2002/05/31 18:46:01 dawes Exp $ */
+a26 1
+#define I_NEED_OS2_H
+d32 1
+@
+
+
+1.1.1.3
+log
+@That's what OpenBSD will, probably, ship as XF4 in 3.5
+their last sync against XFree86 4.3-current has been
+imported into our vendor branch, too
+@
+text
+@d1 1
+a1 1
+/* $XFree86: xc/programs/Xserver/hw/xfree86/os-support/os2/os2_VTsw.c,v 3.13 2003/06/10 17:03:54 dawes Exp $ */
+a91 4
+	os2PostKbdEvent(KEY_RCtrl,1);
+	os2PostKbdEvent(KEY_RCtrl,0);
+	os2PostKbdEvent(KEY_Alt,1);
+	os2PostKbdEvent(KEY_Alt,0);
+d232 1
+a232 2
+   /* redirect_output(); */
+   /* too many logfiles, server will log to /usr/adm */
+a266 24
+		for (j = 0; j < xf86NumScreens; j++) {
+			if (xf86Screens[j]->EnableDisableFBAccess)
+			  (*xf86Screens[j]->EnableDisableFBAccess)(j, FALSE);
+		}
+		xf86EnterServerState(SETUP);
+		for (j = 0; j < xf86NumScreens; j++)
+			xf86Screens[j]->LeaveVT(j, 0);
+		for (j = 0; j < xf86NumScreens; j++) {
+			xf86Screens[j]->EnterVT(j, 0);
+		}
+		xf86EnterServerState(OPERATING);
+		for (j = 0; j < xf86NumScreens; j++) {
+			if (xf86Screens[j]->EnableDisableFBAccess)
+			  (*xf86Screens[j]->EnableDisableFBAccess)(j, TRUE);
+		}
+
+                /* We reset the state of the control key */
+                os2PostKbdEvent(KEY_LCtrl,1);
+                os2PostKbdEvent(KEY_LCtrl,0);
+                os2PostKbdEvent(KEY_RCtrl,1);
+                os2PostKbdEvent(KEY_RCtrl,0);
+                os2PostKbdEvent(KEY_Alt,1);
+                os2PostKbdEvent(KEY_Alt,0);
+
+@
+
+

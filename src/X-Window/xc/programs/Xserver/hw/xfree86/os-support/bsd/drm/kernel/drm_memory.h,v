@@ -1,0 +1,1087 @@
+head	1.1;
+branch	1.1.1;
+access;
+symbols
+	tg-mergetmp-2:1.1.1.3
+	cvs-200410241530:1.1.1.3
+	cvs-200410012000:1.1.1.3
+	cvs-200407221130:1.1.1.3
+	cvs-200407141120:1.1.1.3
+	cvs-200406231010:1.1.1.3
+	cvs-200406052200:1.1.1.3
+	MIRBSD_7quater:1.1.1.2
+	cvs-200405271510:1.1.1.3
+	XFree86_4_4_0:1.1.9.1
+	cvs-200403021700:1.1.1.3
+	XFREE86_20040213:1.1.9.1
+	xc:1.1.9
+	cvs-200401291925:1.1.1.2
+	MIRBSD_7_ALPHA:1.1.1.2.0.4
+	MIRBSD_7:1.1.1.2.0.2
+	MIRBSD_7ter:1.1.1.2
+	cvs-20011091815:1.1.1.2
+	cvs-200309162130:1.1.1.2
+	cvs-200308302005:1.1.1.2
+	ctmx-0387:1.1.1.2
+	ctmx-0384:1.1.1.2
+	MIRBSD_5:1.1.1.2
+	ctmx-0375:1.1.1.2
+	ctmx-0373:1.1.1.2
+	ctm-0371:1.1.1.2
+	ctm-0370:1.1.1.2
+	MIRBSD_4:1.1.1.2
+	ctm-0363:1.1.1.2
+	ctm-0359:1.1.1.2
+	ctm-0349:1.1.1.1
+	openbsd:1.1.1;
+locks; strict;
+comment	@ * @;
+
+
+1.1
+date	2003.03.22.20.08.33;	author tg;	state Exp;
+branches
+	1.1.1.1
+	1.1.9.1;
+next	;
+
+1.1.1.1
+date	2003.03.22.20.08.33;	author tg;	state Exp;
+branches;
+next	1.1.1.2;
+
+1.1.1.2
+date	2003.04.08.18.37.30;	author tg;	state Exp;
+branches;
+next	1.1.1.3;
+
+1.1.1.3
+date	2004.03.02.18.24.39;	author tg;	state Stab;
+branches;
+next	;
+
+1.1.9.1
+date	2004.02.14.19.25.05;	author tg;	state Exp;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@/* drm_memory.h -- Memory management wrappers for DRM -*- linux-c -*-
+ * Created: Thu Feb  4 14:00:34 1999 by faith@@valinux.com
+ *
+ * Copyright 1999 Precision Insight, Inc., Cedar Park, Texas.
+ * Copyright 2000 VA Linux Systems, Inc., Sunnyvale, California.
+ * All Rights Reserved.
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a
+ * copy of this software and associated documentation files (the "Software"),
+ * to deal in the Software without restriction, including without limitation
+ * the rights to use, copy, modify, merge, publish, distribute, sublicense,
+ * and/or sell copies of the Software, and to permit persons to whom the
+ * Software is furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice (including the next
+ * paragraph) shall be included in all copies or substantial portions of the
+ * Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL
+ * VA LINUX SYSTEMS AND/OR ITS SUPPLIERS BE LIABLE FOR ANY CLAIM, DAMAGES OR
+ * OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE,
+ * ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR
+ * OTHER DEALINGS IN THE SOFTWARE.
+ *
+ * Authors:
+ *    Rickard E. (Rik) Faith <faith@@valinux.com>
+ *    Gareth Hughes <gareth@@valinux.com>
+ */
+
+#define __NO_VERSION__
+#include "drmP.h"
+#include <vm/vm.h>
+#include <vm/pmap.h>
+#if __REALLY_HAVE_AGP
+#include <sys/agpio.h>
+#endif
+
+#define malloctype DRM(M_DRM)
+/* The macros confliced in the MALLOC_DEFINE */
+
+MALLOC_DEFINE(malloctype, "drm", "DRM Data Structures");
+
+#undef malloctype
+
+typedef struct drm_mem_stats {
+	const char	  *name;
+	int		  succeed_count;
+	int		  free_count;
+	int		  fail_count;
+	unsigned long	  bytes_allocated;
+	unsigned long	  bytes_freed;
+} drm_mem_stats_t;
+
+static DRM_OS_SPINTYPE	  DRM(mem_lock);
+static unsigned long	  DRM(ram_available) = 0; /* In pages */
+static unsigned long	  DRM(ram_used)      = 0;
+static drm_mem_stats_t	  DRM(mem_stats)[]   = {
+	[DRM_MEM_DMA]	    = { "dmabufs"  },
+	[DRM_MEM_SAREA]	    = { "sareas"   },
+	[DRM_MEM_DRIVER]    = { "driver"   },
+	[DRM_MEM_MAGIC]	    = { "magic"	   },
+	[DRM_MEM_IOCTLS]    = { "ioctltab" },
+	[DRM_MEM_MAPS]	    = { "maplist"  },
+	[DRM_MEM_VMAS]	    = { "vmalist"  },
+	[DRM_MEM_BUFS]	    = { "buflist"  },
+	[DRM_MEM_SEGS]	    = { "seglist"  },
+	[DRM_MEM_PAGES]	    = { "pagelist" },
+	[DRM_MEM_FILES]	    = { "files"	   },
+	[DRM_MEM_QUEUES]    = { "queues"   },
+	[DRM_MEM_CMDS]	    = { "commands" },
+	[DRM_MEM_MAPPINGS]  = { "mappings" },
+	[DRM_MEM_BUFLISTS]  = { "buflists" },
+	[DRM_MEM_AGPLISTS]  = { "agplist"  },
+	[DRM_MEM_SGLISTS]   = { "sglist"   },
+	[DRM_MEM_TOTALAGP]  = { "totalagp" },
+	[DRM_MEM_BOUNDAGP]  = { "boundagp" },
+	[DRM_MEM_CTXBITMAP] = { "ctxbitmap"},
+	[DRM_MEM_STUB]      = { "stub"     },
+	{ NULL, 0, }		/* Last entry must be null */
+};
+
+void DRM(mem_init)(void)
+{
+	drm_mem_stats_t *mem;
+
+	DRM_OS_SPININIT(DRM(mem_lock), "drm memory");
+
+	for (mem = DRM(mem_stats); mem->name; ++mem) {
+		mem->succeed_count   = 0;
+		mem->free_count	     = 0;
+		mem->fail_count	     = 0;
+		mem->bytes_allocated = 0;
+		mem->bytes_freed     = 0;
+	}
+
+	DRM(ram_available) = 0; /* si.totalram */
+	DRM(ram_used)	   = 0;
+}
+
+/* drm_mem_info is called whenever a process reads /dev/drm/mem. */
+
+static int DRM(_mem_info) DRM_SYSCTL_HANDLER_ARGS
+{
+	drm_mem_stats_t *pt;
+	char buf[128];
+	int error;
+
+	DRM_SYSCTL_PRINT("		  total counts			"
+		       " |    outstanding  \n");
+	DRM_SYSCTL_PRINT("type	   alloc freed fail	bytes	   freed"
+		       " | allocs      bytes\n\n");
+	DRM_SYSCTL_PRINT("%-9.9s %5d %5d %4d %10lu	    |\n",
+		       "system", 0, 0, 0, DRM(ram_available));
+	DRM_SYSCTL_PRINT("%-9.9s %5d %5d %4d %10lu	    |\n",
+		       "locked", 0, 0, 0, DRM(ram_used));
+	DRM_SYSCTL_PRINT("\n");
+	for (pt = DRM(mem_stats); pt->name; pt++) {
+		DRM_SYSCTL_PRINT("%-9.9s %5d %5d %4d %10lu %10lu | %6d %10ld\n",
+			       pt->name,
+			       pt->succeed_count,
+			       pt->free_count,
+			       pt->fail_count,
+			       pt->bytes_allocated,
+			       pt->bytes_freed,
+			       pt->succeed_count - pt->free_count,
+			       (long)pt->bytes_allocated
+			       - (long)pt->bytes_freed);
+	}
+	SYSCTL_OUT(req, "", 1);
+	
+	return 0;
+}
+
+int DRM(mem_info) DRM_SYSCTL_HANDLER_ARGS
+{
+	int ret;
+
+	DRM_OS_SPINLOCK(&DRM(mem_lock));
+	ret = DRM(_mem_info)(oidp, arg1, arg2, req);
+	DRM_OS_SPINUNLOCK(&DRM(mem_lock));
+	return ret;
+}
+
+void *DRM(alloc)(size_t size, int area)
+{
+	void *pt;
+
+	if (!size) {
+		DRM_MEM_ERROR(area, "Allocating 0 bytes\n");
+		return NULL;
+	}
+
+	if (!(pt = malloc(size, DRM(M_DRM), M_NOWAIT))) {
+		DRM_OS_SPINLOCK(&DRM(mem_lock));
+		++DRM(mem_stats)[area].fail_count;
+		DRM_OS_SPINUNLOCK(&DRM(mem_lock));
+		return NULL;
+	}
+	DRM_OS_SPINLOCK(&DRM(mem_lock));
+	++DRM(mem_stats)[area].succeed_count;
+	DRM(mem_stats)[area].bytes_allocated += size;
+	DRM_OS_SPINUNLOCK(&DRM(mem_lock));
+	return pt;
+}
+
+void *DRM(realloc)(void *oldpt, size_t oldsize, size_t size, int area)
+{
+	void *pt;
+
+	if (!(pt = DRM(alloc)(size, area))) return NULL;
+	if (oldpt && oldsize) {
+		memcpy(pt, oldpt, oldsize);
+		DRM(free)(oldpt, oldsize, area);
+	}
+	return pt;
+}
+
+char *DRM(strdup)(const char *s, int area)
+{
+	char *pt;
+	int	 length = s ? strlen(s) : 0;
+
+	if (!(pt = DRM(alloc)(length+1, area))) return NULL;
+	strcpy(pt, s);
+	return pt;
+}
+
+void DRM(strfree)(char *s, int area)
+{
+	unsigned int size;
+
+	if (!s) return;
+
+	size = 1 + strlen(s);
+	DRM(free)((void *)s, size, area);
+}
+
+void DRM(free)(void *pt, size_t size, int area)
+{
+	int alloc_count;
+	int free_count;
+
+	if (!pt) DRM_MEM_ERROR(area, "Attempt to free NULL pointer\n");
+	else     free(pt, DRM(M_DRM));
+	DRM_OS_SPINLOCK(&DRM(mem_lock));
+	DRM(mem_stats)[area].bytes_freed += size;
+	free_count  = ++DRM(mem_stats)[area].free_count;
+	alloc_count =	DRM(mem_stats)[area].succeed_count;
+	DRM_OS_SPINUNLOCK(&DRM(mem_lock));
+	if (free_count > alloc_count) {
+		DRM_MEM_ERROR(area, "Excess frees: %d frees, %d allocs\n",
+			      free_count, alloc_count);
+	}
+}
+
+unsigned long DRM(alloc_pages)(int order, int area)
+{
+	vm_offset_t address;
+	unsigned long bytes	  = PAGE_SIZE << order;
+
+
+	address = (vm_offset_t) contigmalloc(bytes, DRM(M_DRM), M_WAITOK, 0, ~0, 1, 0);
+	if (!address) {
+		DRM_OS_SPINLOCK(&DRM(mem_lock));
+		++DRM(mem_stats)[area].fail_count;
+		DRM_OS_SPINUNLOCK(&DRM(mem_lock));
+		return 0;
+	}
+	DRM_OS_SPINLOCK(&DRM(mem_lock));
+	++DRM(mem_stats)[area].succeed_count;
+	DRM(mem_stats)[area].bytes_allocated += bytes;
+	DRM(ram_used)		             += bytes;
+	DRM_OS_SPINUNLOCK(&DRM(mem_lock));
+
+
+				/* Zero outside the lock */
+	memset((void *)address, 0, bytes);
+
+
+	return address;
+}
+
+void DRM(free_pages)(unsigned long address, int order, int area)
+{
+	unsigned long bytes = PAGE_SIZE << order;
+	int		  alloc_count;
+	int		  free_count;
+
+	if (!address) {
+		DRM_MEM_ERROR(area, "Attempt to free address 0\n");
+	} else {
+		contigfree((void *) address, bytes, DRM(M_DRM));
+	}
+
+	DRM_OS_SPINLOCK(&DRM(mem_lock));
+	free_count  = ++DRM(mem_stats)[area].free_count;
+	alloc_count =	DRM(mem_stats)[area].succeed_count;
+	DRM(mem_stats)[area].bytes_freed += bytes;
+	DRM(ram_used)			 -= bytes;
+	DRM_OS_SPINUNLOCK(&DRM(mem_lock));
+	if (free_count > alloc_count) {
+		DRM_MEM_ERROR(area,
+			      "Excess frees: %d frees, %d allocs\n",
+			      free_count, alloc_count);
+	}
+}
+
+void *DRM(ioremap)(unsigned long offset, unsigned long size)
+{
+	void *pt;
+
+	if (!size) {
+		DRM_MEM_ERROR(DRM_MEM_MAPPINGS,
+			      "Mapping 0 bytes at 0x%08lx\n", offset);
+		return NULL;
+	}
+
+	if (!(pt = pmap_mapdev(offset, size))) {
+		DRM_OS_SPINLOCK(&DRM(mem_lock));
+		++DRM(mem_stats)[DRM_MEM_MAPPINGS].fail_count;
+		DRM_OS_SPINUNLOCK(&DRM(mem_lock));
+		return NULL;
+	}
+	DRM_OS_SPINLOCK(&DRM(mem_lock));
+	++DRM(mem_stats)[DRM_MEM_MAPPINGS].succeed_count;
+	DRM(mem_stats)[DRM_MEM_MAPPINGS].bytes_allocated += size;
+	DRM_OS_SPINUNLOCK(&DRM(mem_lock));
+	return pt;
+}
+
+void DRM(ioremapfree)(void *pt, unsigned long size)
+{
+	int alloc_count;
+	int free_count;
+
+	if (!pt)
+		DRM_MEM_ERROR(DRM_MEM_MAPPINGS,
+			      "Attempt to free NULL pointer\n");
+	else
+		pmap_unmapdev((vm_offset_t) pt, size);
+
+	DRM_OS_SPINLOCK(&DRM(mem_lock));
+	DRM(mem_stats)[DRM_MEM_MAPPINGS].bytes_freed += size;
+	free_count  = ++DRM(mem_stats)[DRM_MEM_MAPPINGS].free_count;
+	alloc_count =	DRM(mem_stats)[DRM_MEM_MAPPINGS].succeed_count;
+	DRM_OS_SPINUNLOCK(&DRM(mem_lock));
+	if (free_count > alloc_count) {
+		DRM_MEM_ERROR(DRM_MEM_MAPPINGS,
+			      "Excess frees: %d frees, %d allocs\n",
+			      free_count, alloc_count);
+	}
+}
+
+#if __REALLY_HAVE_AGP
+agp_memory *DRM(alloc_agp)(int pages, u32 type)
+{
+	agp_memory *handle;
+
+	if (!pages) {
+		DRM_MEM_ERROR(DRM_MEM_TOTALAGP, "Allocating 0 pages\n");
+		return NULL;
+	}
+
+	if ((handle = DRM(agp_allocate_memory)(pages, type))) {
+		DRM_OS_SPINLOCK(&DRM(mem_lock));
+		++DRM(mem_stats)[DRM_MEM_TOTALAGP].succeed_count;
+		DRM(mem_stats)[DRM_MEM_TOTALAGP].bytes_allocated
+			+= pages << PAGE_SHIFT;
+		DRM_OS_SPINUNLOCK(&DRM(mem_lock));
+		return handle;
+	}
+	DRM_OS_SPINLOCK(&DRM(mem_lock));
+	++DRM(mem_stats)[DRM_MEM_TOTALAGP].fail_count;
+	DRM_OS_SPINUNLOCK(&DRM(mem_lock));
+	return NULL;
+}
+
+int DRM(free_agp)(agp_memory *handle, int pages)
+{
+	int           alloc_count;
+	int           free_count;
+
+	if (!handle) {
+		DRM_MEM_ERROR(DRM_MEM_TOTALAGP,
+			      "Attempt to free NULL AGP handle\n");
+		DRM_OS_RETURN(EINVAL);
+	}
+
+	if (DRM(agp_free_memory)(handle)) {
+		DRM_OS_SPINLOCK(&DRM(mem_lock));
+		free_count  = ++DRM(mem_stats)[DRM_MEM_TOTALAGP].free_count;
+		alloc_count =   DRM(mem_stats)[DRM_MEM_TOTALAGP].succeed_count;
+		DRM(mem_stats)[DRM_MEM_TOTALAGP].bytes_freed
+			+= pages << PAGE_SHIFT;
+		DRM_OS_SPINUNLOCK(&DRM(mem_lock));
+		if (free_count > alloc_count) {
+			DRM_MEM_ERROR(DRM_MEM_TOTALAGP,
+				      "Excess frees: %d frees, %d allocs\n",
+				      free_count, alloc_count);
+		}
+		return 0;
+	}
+	DRM_OS_RETURN(EINVAL);
+}
+
+int DRM(bind_agp)(agp_memory *handle, unsigned int start)
+{
+	int retcode;
+	device_t dev = agp_find_device();
+	struct agp_memory_info info;
+
+	if (!dev)
+		return EINVAL;
+
+	if (!handle) {
+		DRM_MEM_ERROR(DRM_MEM_BOUNDAGP,
+			      "Attempt to bind NULL AGP handle\n");
+		DRM_OS_RETURN(EINVAL);
+	}
+
+	if (!(retcode = DRM(agp_bind_memory)(handle, start))) {
+		DRM_OS_SPINLOCK(&DRM(mem_lock));
+		++DRM(mem_stats)[DRM_MEM_BOUNDAGP].succeed_count;
+		agp_memory_info(dev, handle, &info);
+		DRM(mem_stats)[DRM_MEM_BOUNDAGP].bytes_allocated
+			+= info.ami_size;
+		DRM_OS_SPINUNLOCK(&DRM(mem_lock));
+		DRM_OS_RETURN(0);
+	}
+	DRM_OS_SPINLOCK(&DRM(mem_lock));
+	++DRM(mem_stats)[DRM_MEM_BOUNDAGP].fail_count;
+	DRM_OS_SPINUNLOCK(&DRM(mem_lock));
+	DRM_OS_RETURN(retcode);
+}
+
+int DRM(unbind_agp)(agp_memory *handle)
+{
+	int alloc_count;
+	int free_count;
+	int retcode = EINVAL;
+	device_t dev = agp_find_device();
+	struct agp_memory_info info;
+
+	if (!dev)
+		return EINVAL;
+
+	if (!handle) {
+		DRM_MEM_ERROR(DRM_MEM_BOUNDAGP,
+			      "Attempt to unbind NULL AGP handle\n");
+		DRM_OS_RETURN(retcode);
+	}
+
+	agp_memory_info(dev, handle, &info);
+
+	if ((retcode = DRM(agp_unbind_memory)(handle))) 
+		DRM_OS_RETURN(retcode);
+
+	DRM_OS_SPINLOCK(&DRM(mem_lock));
+	free_count  = ++DRM(mem_stats)[DRM_MEM_BOUNDAGP].free_count;
+	alloc_count = DRM(mem_stats)[DRM_MEM_BOUNDAGP].succeed_count;
+	DRM(mem_stats)[DRM_MEM_BOUNDAGP].bytes_freed
+		+= info.ami_size;
+	DRM_OS_SPINUNLOCK(&DRM(mem_lock));
+	if (free_count > alloc_count) {
+		DRM_MEM_ERROR(DRM_MEM_BOUNDAGP,
+			      "Excess frees: %d frees, %d allocs\n",
+			      free_count, alloc_count);
+	}
+	DRM_OS_RETURN(retcode);
+}
+#endif
+@
+
+
+1.1.9.1
+log
+@OpenBSD just has imported exactly this tree into their vendor branch,
+called the same tag, in XF4/xc
+This is, apparently, the last XFree86 snapshot before the licence change
+(ie, addition of the advertising clause)
+
+Since the developers don't see any problems with that, and we would like
+to integrate improvements done by the remaining one or two (or so) XFree86
+developers (j/k), this prepares enabling us to update X-Window in the future.
+@
+text
+@a29 1
+ *
+d32 1
+d34 5
+a39 1
+#if defined(__FreeBSD__) || defined(__NetBSD__)
+d41 2
+a42 1
+/* The macros conflicted in the MALLOC_DEFINE */
+d44 1
+a45 1
+#endif
+d47 37
+a83 3
+#ifdef DEBUG_MEMORY
+#include "drm_memory_debug.h"
+#else
+d86 14
+a99 3
+#ifdef __NetBSD__
+	malloc_type_attach(DRM(M_DRM));
+#endif
+d102 3
+a104 1
+void DRM(mem_uninit)(void)
+d106 28
+d136 1
+a136 1
+void *DRM(alloc)(size_t size, int area)
+d138 6
+a143 1
+	return malloc(size, DRM(M_DRM), M_NOWAIT);
+d146 1
+a146 1
+void *DRM(calloc)(size_t nmemb, size_t size, int area)
+d148 18
+a165 1
+	return malloc(size * nmemb, DRM(M_DRM), M_NOWAIT | M_ZERO);
+d172 1
+a172 3
+	pt = malloc(size, DRM(M_DRM), M_NOWAIT);
+	if (pt == NULL)
+		return NULL;
+d175 1
+a175 1
+		free(oldpt, DRM(M_DRM));
+d180 1
+a180 1
+void DRM(free)(void *pt, size_t size, int area)
+d182 6
+a187 1
+	free(pt, DRM(M_DRM));
+d190 1
+a190 1
+void *DRM(ioremap)( drm_device_t *dev, drm_local_map_t *map )
+d192 6
+a197 9
+#ifdef __FreeBSD__
+	return pmap_mapdev(map->offset, map->size);
+#elif defined(__NetBSD__)
+	map->iot = dev->pa.pa_memt;
+	if (bus_space_map(map->iot, map->offset, map->size, 
+	    BUS_SPACE_MAP_LINEAR, &map->ioh))
+		return NULL;
+	return bus_space_vaddr(map->iot, map->ioh);
+#endif
+d200 1
+a200 1
+void DRM(ioremapfree)(drm_local_map_t *map)
+d202 14
+a215 5
+#ifdef __FreeBSD__
+	pmap_unmapdev((vm_offset_t) map->handle, map->size);
+#elif defined(__NetBSD__)
+	bus_space_unmap(map->iot, map->ioh, map->size);
+#endif
+d218 1
+a218 2
+#if __REALLY_HAVE_AGP
+agp_memory *DRM(alloc_agp)(int pages, u32 type)
+d220 23
+a242 1
+	return DRM(agp_allocate_memory)(pages, type);
+d245 1
+a245 1
+int DRM(free_agp)(agp_memory *handle, int pages)
+d247 21
+a267 1
+	return DRM(agp_free_memory)(handle);
+d270 1
+a270 1
+int DRM(bind_agp)(agp_memory *handle, unsigned int start)
+d272 19
+a290 1
+	return DRM(agp_bind_memory)(handle, start);
+d293 1
+a293 1
+int DRM(unbind_agp)(agp_memory *handle)
+d295 19
+a313 1
+	return DRM(agp_unbind_memory)(handle);
+a314 1
+#endif /* __REALLY_HAVE_AGP */
+d316 2
+a317 3
+#ifdef __FreeBSD__
+int
+DRM(mtrr_add)(unsigned long offset, size_t size, int flags)
+d319 6
+a324 2
+	int act;
+	struct mem_range_desc mrdesc;
+d326 12
+a337 6
+	mrdesc.mr_base = offset;
+	mrdesc.mr_len = size;
+	mrdesc.mr_flags = flags;
+	act = MEMRANGE_SET_UPDATE;
+	bcopy(DRIVER_NAME, &mrdesc.mr_owner, strlen(DRIVER_NAME));
+	return mem_range_attr_set(&mrdesc, &act);
+d340 1
+a340 2
+int
+DRM(mtrr_del)(unsigned long offset, size_t size, int flags)
+d342 2
+a343 2
+	int act;
+	struct mem_range_desc mrdesc;
+d345 21
+a365 6
+	mrdesc.mr_base = offset;
+	mrdesc.mr_len = size;
+	mrdesc.mr_flags = flags;
+	act = MEMRANGE_SET_REMOVE;
+	bcopy(DRIVER_NAME, &mrdesc.mr_owner, strlen(DRIVER_NAME));
+	return mem_range_attr_set(&mrdesc, &act);
+d367 2
+a368 3
+#elif defined(__NetBSD__)
+int
+DRM(mtrr_add)(unsigned long offset, size_t size, int flags)
+d370 12
+a381 2
+	struct mtrr mtrrmap;
+	int one = 1;
+d383 13
+a395 5
+	mtrrmap.base = offset;
+	mtrrmap.len = size;
+	mtrrmap.type = flags;
+	mtrrmap.flags = MTRR_VALID;
+	return mtrr_set(&mtrrmap, &one, NULL, MTRR_GETSET_KERNEL);
+d398 1
+a398 2
+int
+DRM(mtrr_del)(unsigned long offset, size_t size, int flags)
+d400 19
+a418 2
+	struct mtrr mtrrmap;
+	int one = 1;
+d420 12
+a431 5
+	mtrrmap.base = offset;
+	mtrrmap.len = size;
+	mtrrmap.type = flags;
+	mtrrmap.flags = 0;
+	return mtrr_set(&mtrrmap, &one, NULL, MTRR_GETSET_KERNEL);
+a433 2
+
+#endif /* DEBUG_MEMORY */
+@
+
+
+1.1.1.1
+log
+@Import OpenBSD 3.3 XF4 repository from CTM 3132 the first time
+This finalizes starting an OpenBSD-mirabile (aka MirBSD) repository.
+
+### MirBSD is:
+# Copyright (c) 1982-2003 by Thorsten "mirabile" Glaser <x86@@ePost.de>
+# Copyright © 1968-2003  The authors of And contributors to UNIX®, the
+#       C Language, BSD/Berkeley Unix; 386BSD, NetBSD 1.1 and OpenBSD.
+#
+# Anyone who obtained a copy of this work is hereby permitted to freely use,
+# distribute, modify, merge, sublicence, give away or sell it as long as the
+# authors are given due credit and the following notice is retained:
+#
+# This work is provided "as is", with no explicit or implicit warranty what-
+# soever. Use it only at your own risk. In no event may an author or contri-
+# butor be held liable for any damage, directly or indirectly, that origina-
+# ted through or is caused by creation or modification of this work.
+
+MirBSD is my private tree. MirBSD does not differ very much from OpenBSD
+and intentionally tracks OpenBSD. That's why it _is_ OpenBSD, just not the
+official one. It's like with DarrenBSD.
+
+At time of this writing, no advertising for MirBSD must be done,
+because the advertising clause has not yet been sorted out.
+
+http://templeofhate.com/tglaser/MirBSD/index.php
+@
+text
+@@
+
+
+1.1.1.2
+log
+@The X-Windowing System
+
+Import XFree86 4.3 from OpenBSD by CTM, in the hope it's stable
+@
+text
+@d32 1
+d34 5
+a39 1
+#ifdef __FreeBSD__
+a45 1
+#endif
+d56 1
+a56 1
+static DRM_SPINTYPE	  DRM(mem_lock);
+d88 1
+a88 1
+	DRM_SPININIT(DRM(mem_lock), "drm memory");
+d102 1
+a102 4
+void DRM(mem_uninit)(void)
+{
+	DRM_SPINUNINIT(DRM(mem_lock));
+}
+a103 2
+#ifdef __FreeBSD__
+/* drm_mem_info is called whenever a process reads /dev/drm/mem. */
+d140 1
+a140 1
+	DRM_SPINLOCK(&DRM(mem_lock));
+d142 1
+a142 1
+	DRM_SPINUNLOCK(&DRM(mem_lock));
+a144 1
+#endif
+a154 1
+#ifdef __FreeBSD__
+d156 1
+a156 4
+#elif defined(__NetBSD__)
+	if (!(pt = malloc(size, M_DEVBUF, M_NOWAIT))) {
+#endif
+		DRM_SPINLOCK(&DRM(mem_lock));
+d158 1
+a158 1
+		DRM_SPINUNLOCK(&DRM(mem_lock));
+d161 1
+a161 1
+	DRM_SPINLOCK(&DRM(mem_lock));
+d164 1
+a164 1
+	DRM_SPINUNLOCK(&DRM(mem_lock));
+d206 2
+a207 7
+	else
+#ifdef __FreeBSD__
+	free(pt, DRM(M_DRM));
+#elif defined(__NetBSD__)
+	free(pt, M_DEVBUF);
+#endif
+	DRM_SPINLOCK(&DRM(mem_lock));
+d211 1
+a211 1
+	DRM_SPINUNLOCK(&DRM(mem_lock));
+d218 28
+a245 1
+void *DRM(ioremap)(unsigned long offset, unsigned long size)
+d247 3
+a249 1
+	void *pt;
+d251 4
+a254 4
+	if (!size) {
+		DRM_MEM_ERROR(DRM_MEM_MAPPINGS,
+			      "Mapping 0 bytes at 0x%08lx\n", offset);
+		return NULL;
+d257 10
+a266 5
+	if (!(pt = pmap_mapdev(offset, size))) {
+		DRM_SPINLOCK(&DRM(mem_lock));
+		++DRM(mem_stats)[DRM_MEM_MAPPINGS].fail_count;
+		DRM_SPINUNLOCK(&DRM(mem_lock));
+		return NULL;
+a267 5
+	DRM_SPINLOCK(&DRM(mem_lock));
+	++DRM(mem_stats)[DRM_MEM_MAPPINGS].succeed_count;
+	DRM(mem_stats)[DRM_MEM_MAPPINGS].bytes_allocated += size;
+	DRM_SPINUNLOCK(&DRM(mem_lock));
+	return pt;
+d270 1
+a270 3
+/* unused so far */
+#if 0
+void *DRM(ioremap_nocache)(unsigned long offset, unsigned long size)
+d280 2
+a281 3
+	/* FIXME FOR BSD */
+	if (!(pt = ioremap_nocache(offset, size))) {
+		DRM_SPINLOCK(&DRM(mem_lock));
+d283 1
+a283 1
+		DRM_SPINUNLOCK(&DRM(mem_lock));
+d286 1
+a286 1
+	DRM_SPINLOCK(&DRM(mem_lock));
+d289 1
+a289 1
+	DRM_SPINUNLOCK(&DRM(mem_lock));
+a291 1
+#endif
+d304 1
+a304 1
+	DRM_SPINLOCK(&DRM(mem_lock));
+d308 1
+a308 1
+	DRM_SPINUNLOCK(&DRM(mem_lock));
+d327 1
+a327 1
+		DRM_SPINLOCK(&DRM(mem_lock));
+d331 1
+a331 1
+		DRM_SPINUNLOCK(&DRM(mem_lock));
+d334 1
+a334 1
+	DRM_SPINLOCK(&DRM(mem_lock));
+d336 1
+a336 1
+	DRM_SPINUNLOCK(&DRM(mem_lock));
+d348 1
+a348 1
+		return DRM_ERR(EINVAL);
+d352 1
+a352 1
+		DRM_SPINLOCK(&DRM(mem_lock));
+d357 1
+a357 1
+		DRM_SPINUNLOCK(&DRM(mem_lock));
+d365 1
+a365 1
+	return DRM_ERR(EINVAL);
+d371 1
+a371 1
+	device_t dev = DRM_AGP_FIND_DEVICE();
+d380 1
+a380 1
+		return DRM_ERR(EINVAL);
+d384 1
+a384 1
+		DRM_SPINLOCK(&DRM(mem_lock));
+d389 2
+a390 2
+		DRM_SPINUNLOCK(&DRM(mem_lock));
+		return DRM_ERR(0);
+d392 1
+a392 1
+	DRM_SPINLOCK(&DRM(mem_lock));
+d394 2
+a395 2
+	DRM_SPINUNLOCK(&DRM(mem_lock));
+	return DRM_ERR(retcode);
+d403 1
+a403 1
+	device_t dev = DRM_AGP_FIND_DEVICE();
+d412 1
+a412 1
+		return DRM_ERR(retcode);
+d418 1
+a418 1
+		return DRM_ERR(retcode);
+d420 1
+a420 1
+	DRM_SPINLOCK(&DRM(mem_lock));
+d425 1
+a425 1
+	DRM_SPINUNLOCK(&DRM(mem_lock));
+d431 1
+a431 1
+	return DRM_ERR(retcode);
+@
+
+
+1.1.1.3
+log
+@That's what OpenBSD will, probably, ship as XF4 in 3.5
+their last sync against XFree86 4.3-current has been
+imported into our vendor branch, too
+@
+text
+@a29 1
+ *
+d34 1
+a34 1
+#if defined(__FreeBSD__) || defined(__NetBSD__)
+d36 2
+a37 1
+/* The macros conflicted in the MALLOC_DEFINE */
+d39 1
+d43 37
+a79 3
+#ifdef DEBUG_MEMORY
+#include "drm_memory_debug.h"
+#else
+d82 14
+a95 3
+#ifdef __NetBSD__
+	malloc_type_attach(DRM(M_DRM));
+#endif
+d100 1
+d103 35
+a137 1
+void *DRM(alloc)(size_t size, int area)
+d139 6
+a144 1
+	return malloc(size, DRM(M_DRM), M_NOWAIT);
+d146 1
+d148 1
+a148 1
+void *DRM(calloc)(size_t nmemb, size_t size, int area)
+d150 22
+a171 1
+	return malloc(size * nmemb, DRM(M_DRM), M_NOWAIT | M_ZERO);
+d178 1
+a178 3
+	pt = malloc(size, DRM(M_DRM), M_NOWAIT);
+	if (pt == NULL)
+		return NULL;
+d181 1
+a181 1
+		free(oldpt, DRM(M_DRM));
+d186 1
+a186 1
+void DRM(free)(void *pt, size_t size, int area)
+d188 6
+a193 1
+	free(pt, DRM(M_DRM));
+d196 1
+a196 1
+void *DRM(ioremap)( drm_device_t *dev, drm_local_map_t *map )
+d198 6
+a203 9
+#ifdef __FreeBSD__
+	return pmap_mapdev(map->offset, map->size);
+#elif defined(__NetBSD__)
+	map->iot = dev->pa.pa_memt;
+	if (bus_space_map(map->iot, map->offset, map->size, 
+	    BUS_SPACE_MAP_LINEAR, &map->ioh))
+		return NULL;
+	return bus_space_vaddr(map->iot, map->ioh);
+#endif
+d206 1
+a206 1
+void DRM(ioremapfree)(drm_local_map_t *map)
+d208 5
+d214 1
+a214 1
+	pmap_unmapdev((vm_offset_t) map->handle, map->size);
+d216 1
+a216 1
+	bus_space_unmap(map->iot, map->ioh, map->size);
+d218 9
+d229 1
+a229 2
+#if __REALLY_HAVE_AGP
+agp_memory *DRM(alloc_agp)(int pages, u32 type)
+d231 19
+a249 1
+	return DRM(agp_allocate_memory)(pages, type);
+d252 3
+a254 1
+int DRM(free_agp)(agp_memory *handle, int pages)
+d256 20
+a275 1
+	return DRM(agp_free_memory)(handle);
+d277 1
+d279 1
+a279 1
+int DRM(bind_agp)(agp_memory *handle, unsigned int start)
+d281 19
+a299 1
+	return DRM(agp_bind_memory)(handle, start);
+d302 2
+a303 1
+int DRM(unbind_agp)(agp_memory *handle)
+d305 19
+a323 1
+	return DRM(agp_unbind_memory)(handle);
+a324 1
+#endif /* __REALLY_HAVE_AGP */
+d326 1
+a326 3
+#ifdef __FreeBSD__
+int
+DRM(mtrr_add)(unsigned long offset, size_t size, int flags)
+d328 2
+a329 2
+	int act;
+	struct mem_range_desc mrdesc;
+d331 21
+a351 20
+	mrdesc.mr_base = offset;
+	mrdesc.mr_len = size;
+	mrdesc.mr_flags = flags;
+	act = MEMRANGE_SET_UPDATE;
+	bcopy(DRIVER_NAME, &mrdesc.mr_owner, strlen(DRIVER_NAME));
+	return mem_range_attr_set(&mrdesc, &act);
+}
+
+int
+DRM(mtrr_del)(unsigned long offset, size_t size, int flags)
+{
+	int act;
+	struct mem_range_desc mrdesc;
+
+	mrdesc.mr_base = offset;
+	mrdesc.mr_len = size;
+	mrdesc.mr_flags = flags;
+	act = MEMRANGE_SET_REMOVE;
+	bcopy(DRIVER_NAME, &mrdesc.mr_owner, strlen(DRIVER_NAME));
+	return mem_range_attr_set(&mrdesc, &act);
+d353 2
+a354 3
+#elif defined(__NetBSD__)
+int
+DRM(mtrr_add)(unsigned long offset, size_t size, int flags)
+d356 12
+a367 2
+	struct mtrr mtrrmap;
+	int one = 1;
+d369 13
+a381 5
+	mtrrmap.base = offset;
+	mtrrmap.len = size;
+	mtrrmap.type = flags;
+	mtrrmap.flags = MTRR_VALID;
+	return mtrr_set(&mtrrmap, &one, NULL, MTRR_GETSET_KERNEL);
+d384 1
+a384 2
+int
+DRM(mtrr_del)(unsigned long offset, size_t size, int flags)
+d386 19
+a404 2
+	struct mtrr mtrrmap;
+	int one = 1;
+d406 12
+a417 5
+	mtrrmap.base = offset;
+	mtrrmap.len = size;
+	mtrrmap.type = flags;
+	mtrrmap.flags = 0;
+	return mtrr_set(&mtrrmap, &one, NULL, MTRR_GETSET_KERNEL);
+a419 2
+
+#endif /* DEBUG_MEMORY */
+@
+
+

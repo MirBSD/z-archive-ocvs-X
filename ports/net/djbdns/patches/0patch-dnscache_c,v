@@ -1,0 +1,69 @@
+head	1.1;
+access;
+symbols;
+locks; strict;
+comment	@# @;
+
+
+1.1
+date	2003.09.23.16.57.01;	author tg;	state Stab;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.1
+log
+@o Incorporate Russel Nelson's "ignoreip v2" patch which can have
+  djbdns return NXDOMAIN instead of A for specific IPv4 addresses
+o Enable the "ignoreip-update" script (public domain code)
+o Install the SECURITY file, if it exists
+o bump pkglevel
+(untested)
+@
+text
+@$MirBSD$
+--- dnscache.c.orig	2001-02-11 21:11:23.000000000 +0000
++++ dnscache.c	2003-09-23 16:03:47.000000000 +0000
+@@@@ -23,6 +23,8 @@@@
+ #include "okclient.h"
+ #include "droproot.h"
+ 
++stralloc ignoreip = {0};
++
+ static int packetquery(char *buf,unsigned int len,char **q,char qtype[2],char qclass[2],char id[2])
+ {
+   unsigned int pos;
+@@@@ -389,6 +391,7 @@@@ char seed[128];
+ int main()
+ {
+   char *x;
++  unsigned int i, j, k;
+   unsigned long cachesize;
+ 
+   x = env_get("IP");
+@@@@ -431,6 +434,20 @@@@ int main()
+   if (!cache_init(cachesize))
+     strerr_die3x(111,FATAL,"not enough memory for cache of size ",x);
+ 
++  if (openreadclose("ignoreip", &ignoreip, 64) < 0)
++    strerr_die2x(111, FATAL, "trouble reading ignoreip");
++  for (j = k = i = 0; i < ignoreip.len; i++)
++    if (ignoreip.s[i] == '\n') {
++      ignoreip.s[i] = '\0';
++      if (j + 4 > i)
++        strerr_die3x(111, FATAL, "badly malformed ip4 address ", ignoreip.s+k);
++      if (!ip4_scan(ignoreip.s + k, ignoreip.s + j))
++        strerr_die3x(111, FATAL, "unable to parse address in ignoreip ", ignoreip.s + k);
++      j += 4;
++      k = i + 1;
++    }
++  ignoreip.len = j;
++
+   if (env_get("HIDETTL"))
+     response_hidettl();
+   if (env_get("FORWARDONLY"))
+@

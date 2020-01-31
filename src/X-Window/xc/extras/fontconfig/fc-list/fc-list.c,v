@@ -1,0 +1,305 @@
+head	1.2;
+access;
+symbols
+	tg-mergetmp-2:1.2
+	cvs-200410241530:1.1.1.2
+	cvs-200410012000:1.1.1.2
+	cvs-200407141120:1.1.1.2
+	cvs-200406231010:1.1.1.2
+	cvs-200405271510:1.1.1.1
+	XFree86_4_4_0:1.1.9.1
+	cvs-200403021700:1.1.1.1
+	openbsd:1.1.1
+	XFREE86_20040213:1.1.9.1
+	xc:1.1.9;
+locks; strict;
+comment	@ * @;
+
+
+1.2
+date	2004.06.23.12.36.20;	author tg;	state Stab;
+branches;
+next	1.1;
+
+1.1
+date	2004.02.14.19.05.58;	author tg;	state Exp;
+branches
+	1.1.1.1
+	1.1.9.1;
+next	;
+
+1.1.1.1
+date	2004.03.02.17.43.05;	author tg;	state Exp;
+branches;
+next	1.1.1.2;
+
+1.1.1.2
+date	2004.06.23.11.15.12;	author tg;	state Exp;
+branches;
+next	;
+
+1.1.9.1
+date	2004.02.14.19.05.58;	author tg;	state Exp;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.2
+log
+@merge
+@
+text
+@/*
+ * $RCSId: xc/lib/fontconfig/fc-list/fc-list.c,v 1.5 2002/06/30 23:45:40 keithp Exp $
+ *
+ * Copyright © 2002 Keith Packard
+ *
+ * Permission to use, copy, modify, distribute, and sell this software and its
+ * documentation for any purpose is hereby granted without fee, provided that
+ * the above copyright notice appear in all copies and that both that
+ * copyright notice and this permission notice appear in supporting
+ * documentation, and that the name of Keith Packard not be used in
+ * advertising or publicity pertaining to distribution of the software without
+ * specific, written prior permission.  Keith Packard makes no
+ * representations about the suitability of this software for any purpose.  It
+ * is provided "as is" without express or implied warranty.
+ *
+ * KEITH PACKARD DISCLAIMS ALL WARRANTIES WITH REGARD TO THIS SOFTWARE,
+ * INCLUDING ALL IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS, IN NO
+ * EVENT SHALL KEITH PACKARD BE LIABLE FOR ANY SPECIAL, INDIRECT OR
+ * CONSEQUENTIAL DAMAGES OR ANY DAMAGES WHATSOEVER RESULTING FROM LOSS OF USE,
+ * DATA OR PROFITS, WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER
+ * TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR
+ * PERFORMANCE OF THIS SOFTWARE.
+ */
+
+#include <fontconfig/fontconfig.h>
+#include <stdio.h>
+#include <unistd.h>
+#include <stdlib.h>
+#ifdef HAVE_CONFIG_H
+#include <config.h>
+#else
+#ifdef linux
+#define HAVE_GETOPT_LONG 1
+#endif
+#define HAVE_GETOPT 1
+#endif
+
+#ifndef HAVE_GETOPT
+#define HAVE_GETOPT 0
+#endif
+#ifndef HAVE_GETOPT_LONG
+#define HAVE_GETOPT_LONG 0
+#endif
+
+#if HAVE_GETOPT_LONG
+#undef  _GNU_SOURCE
+#define _GNU_SOURCE
+#include <getopt.h>
+const struct option longopts[] = {
+    {"version", 0, 0, 'V'},
+    {"verbose", 0, 0, 'v'},
+    {"help", 0, 0, '?'},
+    {NULL,0,0,0},
+};
+#else
+#if HAVE_GETOPT
+extern char *optarg;
+extern int optind, opterr, optopt;
+#endif
+#endif
+
+static void usage (char *program)
+{
+    fprintf (stderr, "usage: %s [-vV?] [--verbose] [--version] [--help] [pattern] {element ...} \n",
+	     program);
+    fprintf (stderr, "List fonts matching [pattern]\n");
+    fprintf (stderr, "\n");
+    fprintf (stderr, "  -v, --verbose        display status information while busy\n");
+    fprintf (stderr, "  -V, --version        display font config version and exit\n");
+    fprintf (stderr, "  -?, --help           display this help and exit\n");
+    exit (1);
+}
+
+int
+main (int argc, char **argv)
+{
+    int		verbose = 0;
+    int		i;
+    FcObjectSet *os = 0;
+    FcFontSet	*fs;
+    FcPattern   *pat;
+#if HAVE_GETOPT_LONG || HAVE_GETOPT
+    int		c;
+
+#if HAVE_GETOPT_LONG
+    while ((c = getopt_long (argc, argv, "Vv?", longopts, NULL)) != -1)
+#else
+    while ((c = getopt (argc, argv, "Vv?")) != -1)
+#endif
+    {
+	switch (c) {
+	case 'V':
+	    fprintf (stderr, "fontconfig version %d.%d.%d\n", 
+		     FC_MAJOR, FC_MINOR, FC_REVISION);
+	    exit (0);
+	case 'v':
+	    verbose = 1;
+	    break;
+	default:
+	    usage (argv[0]);
+	}
+    }
+    i = optind;
+#else
+    i = 1;
+#endif
+
+    if (!FcInit ())
+    {
+	fprintf (stderr, "Can't init font config library\n");
+	return 1;
+    }
+    if (argv[i])
+    {
+	pat = FcNameParse ((FcChar8 *) argv[i]);
+	while (argv[++i])
+	{
+	    if (!os)
+		os = FcObjectSetCreate ();
+	    FcObjectSetAdd (os, argv[i]);
+	}
+    }
+    else
+	pat = FcPatternCreate ();
+    
+    if (!os)
+	os = FcObjectSetBuild (FC_FAMILY, FC_STYLE, 0);
+    fs = FcFontList (0, pat, os);
+    if (pat)
+	FcPatternDestroy (pat);
+
+    if (fs)
+    {
+	int	j;
+
+	for (j = 0; j < fs->nfont; j++)
+	{
+	    FcChar8 *font;
+	    FcChar8 *file;
+
+	    font = FcNameUnparse (fs->fonts[j]);
+	    if (FcPatternGetString (fs->fonts[j], FC_FILE, 0, &file) == FcResultMatch)
+		printf ("%s: ", file);
+	    printf ("%s\n", font);
+	    free (font);
+	}
+	FcFontSetDestroy (fs);
+    }
+    return 0;
+}
+@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@d2 3
+a4 1
+ * Copyright © 2002 Keith Packard, member of The XFree86 Project, Inc.
+a23 1
+/* $XFree86: xc/extras/fontconfig/fc-list/fc-list.c,v 1.3 2003/09/13 21:33:00 dawes Exp $ */
+a35 3
+#if defined(ISC) || defined(Lynx)
+#define HAVE_OPTARG_IN_UNISTD 0
+#endif
+a43 3
+#ifndef HAVE_OPTARG_IN_UNISTD
+#define HAVE_OPTARG_IN_UNISTD HAVE_GETOPT
+#endif
+d56 1
+a56 1
+#if HAVE_GETOPT && !HAVE_OPTARG_IN_UNISTD
+d64 1
+a64 3
+#if HAVE_GETOPT_LONG || HAVE_GETOPT
+    fprintf (stderr,
+	     "usage: %s [-V?] [--version] [--help] [pattern] {element ...} \n",
+d68 2
+a69 2
+    fprintf (stderr,
+	     "  -V, --version        display font config version and exit\n");
+a70 4
+#else
+    fprintf (stderr, "usage: %s [pattern] {element ...} \n", program);
+    fprintf (stderr, "List fonts matching [pattern]\n");
+#endif
+d77 1
+d97 1
+a97 1
+	    /* Ignore */
+@
+
+
+1.1.1.1
+log
+@That's what OpenBSD will, probably, ship as XF4 in 3.5
+their last sync against XFree86 4.3-current has been
+imported into our vendor branch, too
+@
+text
+@@
+
+
+1.1.1.2
+log
+@OpenBSD updated X-Window plus fontconfig 2.2.2.
+@
+text
+@d2 1
+a2 3
+ * $RCSId: xc/lib/fontconfig/fc-list/fc-list.c,v 1.5 2002/06/30 23:45:40 keithp Exp $
+ *
+ * Copyright © 2002 Keith Packard
+d22 1
+d35 3
+d46 3
+d61 1
+a61 1
+#if HAVE_GETOPT
+d69 3
+a71 1
+    fprintf (stderr, "usage: %s [-vV?] [--verbose] [--version] [--help] [pattern] {element ...} \n",
+d75 2
+a76 2
+    fprintf (stderr, "  -v, --verbose        display status information while busy\n");
+    fprintf (stderr, "  -V, --version        display font config version and exit\n");
+d78 4
+a87 1
+    int		verbose = 0;
+d107 1
+a107 1
+	    verbose = 1;
+@
+
+
+1.1.9.1
+log
+@OpenBSD just has imported exactly this tree into their vendor branch,
+called the same tag, in XF4/xc
+This is, apparently, the last XFree86 snapshot before the licence change
+(ie, addition of the advertising clause)
+
+Since the developers don't see any problems with that, and we would like
+to integrate improvements done by the remaining one or two (or so) XFree86
+developers (j/k), this prepares enabling us to update X-Window in the future.
+@
+text
+@@

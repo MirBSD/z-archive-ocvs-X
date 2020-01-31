@@ -1,0 +1,2392 @@
+head	1.1;
+branch	1.1.1;
+access;
+symbols
+	tg-mergetmp-2:1.1.1.3
+	cvs-200410241530:1.1.1.3
+	cvs-200410012000:1.1.1.3
+	cvs-200407221130:1.1.1.3
+	cvs-200407141120:1.1.1.3
+	cvs-200406231010:1.1.1.3
+	MIRBSD_7quater:1.1.1.2
+	cvs-200405271510:1.1.1.3
+	XFree86_4_4_0:1.1.9.1
+	cvs-200403021700:1.1.1.3
+	XFREE86_20040213:1.1.9.1
+	xc:1.1.9
+	cvs-200401291925:1.1.1.2
+	MIRBSD_7_ALPHA:1.1.1.2.0.4
+	MIRBSD_7:1.1.1.2.0.2
+	MIRBSD_7ter:1.1.1.2
+	cvs-20011091815:1.1.1.2
+	cvs-200309162130:1.1.1.2
+	cvs-200308302005:1.1.1.2
+	ctmx-0387:1.1.1.2
+	ctmx-0384:1.1.1.2
+	MIRBSD_5:1.1.1.2
+	ctmx-0375:1.1.1.2
+	ctmx-0373:1.1.1.2
+	ctm-0371:1.1.1.2
+	ctm-0370:1.1.1.2
+	MIRBSD_4:1.1.1.2
+	ctm-0363:1.1.1.2
+	ctm-0359:1.1.1.2
+	ctm-0349:1.1.1.1
+	openbsd:1.1.1;
+locks; strict;
+comment	@ * @;
+
+
+1.1
+date	2003.03.22.20.08.43;	author tg;	state Exp;
+branches
+	1.1.1.1
+	1.1.9.1;
+next	;
+
+1.1.1.1
+date	2003.03.22.20.08.43;	author tg;	state Exp;
+branches;
+next	1.1.1.2;
+
+1.1.1.2
+date	2003.04.08.18.37.31;	author tg;	state Exp;
+branches;
+next	1.1.1.3;
+
+1.1.1.3
+date	2004.03.02.18.25.11;	author tg;	state Stab;
+branches;
+next	;
+
+1.1.9.1
+date	2004.02.14.19.25.12;	author tg;	state Exp;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@/* drmP.h -- Private header for Direct Rendering Manager -*- linux-c -*-
+ * Created: Mon Jan  4 10:05:05 1999 by faith@@precisioninsight.com
+ *
+ * Copyright 1999 Precision Insight, Inc., Cedar Park, Texas.
+ * Copyright 2000 VA Linux Systems, Inc., Sunnyvale, California.
+ * All rights reserved.
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a
+ * copy of this software and associated documentation files (the "Software"),
+ * to deal in the Software without restriction, including without limitation
+ * the rights to use, copy, modify, merge, publish, distribute, sublicense,
+ * and/or sell copies of the Software, and to permit persons to whom the
+ * Software is furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice (including the next
+ * paragraph) shall be included in all copies or substantial portions of the
+ * Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL
+ * VA LINUX SYSTEMS AND/OR ITS SUPPLIERS BE LIABLE FOR ANY CLAIM, DAMAGES OR
+ * OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE,
+ * ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR
+ * OTHER DEALINGS IN THE SOFTWARE.
+ *
+ * Authors:
+ *    Rickard E. (Rik) Faith <faith@@valinux.com>
+ *    Gareth Hughes <gareth@@valinux.com>
+ */
+
+#ifndef _DRM_P_H_
+#define _DRM_P_H_
+
+#ifdef __KERNEL__
+#ifdef __alpha__
+/* add include of current.h so that "current" is defined
+ * before static inline funcs in wait.h. Doing this so we
+ * can build the DRM (part of PI DRI). 4/21/2000 S + B */
+#include <asm/current.h>
+#endif /* __alpha__ */
+#include <linux/config.h>
+#include <linux/module.h>
+#include <linux/kernel.h>
+#include <linux/miscdevice.h>
+#include <linux/fs.h>
+#include <linux/proc_fs.h>
+#include <linux/init.h>
+#include <linux/file.h>
+#include <linux/pci.h>
+#include <linux/wrapper.h>
+#include <linux/version.h>
+#include <linux/sched.h>
+#include <linux/smp_lock.h>	/* For (un)lock_kernel */
+#include <linux/mm.h>
+#if defined(__alpha__) || defined(__powerpc__)
+#include <asm/pgtable.h> /* For pte_wrprotect */
+#endif
+#include <asm/io.h>
+#include <asm/mman.h>
+#include <asm/uaccess.h>
+#ifdef CONFIG_MTRR
+#include <asm/mtrr.h>
+#endif
+#if defined(CONFIG_AGP) || defined(CONFIG_AGP_MODULE)
+#include <linux/types.h>
+#include <linux/agp_backend.h>
+#endif
+#include <linux/tqueue.h>
+#include <linux/poll.h>
+#include <asm/pgalloc.h>
+#include "drm.h"
+
+/* page_to_bus for earlier kernels, not optimal in all cases */
+#ifndef page_to_bus
+#define page_to_bus(page)	((unsigned int)(virt_to_bus(page_address(page))))
+#endif
+
+/* DRM template customization defaults
+ */
+#ifndef __HAVE_AGP
+#define __HAVE_AGP		0
+#endif
+#ifndef __HAVE_MTRR
+#define __HAVE_MTRR		0
+#endif
+#ifndef __HAVE_CTX_BITMAP
+#define __HAVE_CTX_BITMAP	0
+#endif
+#ifndef __HAVE_DMA
+#define __HAVE_DMA		0
+#endif
+#ifndef __HAVE_DMA_IRQ
+#define __HAVE_DMA_IRQ		0
+#endif
+#ifndef __HAVE_DMA_WAITLIST
+#define __HAVE_DMA_WAITLIST	0
+#endif
+#ifndef __HAVE_DMA_FREELIST
+#define __HAVE_DMA_FREELIST	0
+#endif
+#ifndef __HAVE_DMA_HISTOGRAM
+#define __HAVE_DMA_HISTOGRAM	0
+#endif
+
+#define __REALLY_HAVE_AGP	(__HAVE_AGP && (defined(CONFIG_AGP) || \
+						defined(CONFIG_AGP_MODULE)))
+#define __REALLY_HAVE_MTRR	(__HAVE_MTRR && defined(CONFIG_MTRR))
+
+
+/* Begin the DRM...
+ */
+
+#define DRM_DEBUG_CODE 2	  /* Include debugging code (if > 1, then
+				     also include looping detection. */
+
+#define DRM_HASH_SIZE	      16 /* Size of key hash table		  */
+#define DRM_KERNEL_CONTEXT    0	 /* Change drm_resctx if changed	  */
+#define DRM_RESERVED_CONTEXTS 1	 /* Change drm_resctx if changed	  */
+#define DRM_LOOPING_LIMIT     5000000
+#define DRM_BSZ		      1024 /* Buffer size for /dev/drm? output	  */
+#define DRM_TIME_SLICE	      (HZ/20)  /* Time slice for GLXContexts	  */
+#define DRM_LOCK_SLICE	      1	/* Time slice for lock, in jiffies	  */
+
+#define DRM_FLAG_DEBUG	  0x01
+#define DRM_FLAG_NOCTX	  0x02
+
+#define DRM_MEM_DMA	   0
+#define DRM_MEM_SAREA	   1
+#define DRM_MEM_DRIVER	   2
+#define DRM_MEM_MAGIC	   3
+#define DRM_MEM_IOCTLS	   4
+#define DRM_MEM_MAPS	   5
+#define DRM_MEM_VMAS	   6
+#define DRM_MEM_BUFS	   7
+#define DRM_MEM_SEGS	   8
+#define DRM_MEM_PAGES	   9
+#define DRM_MEM_FILES	  10
+#define DRM_MEM_QUEUES	  11
+#define DRM_MEM_CMDS	  12
+#define DRM_MEM_MAPPINGS  13
+#define DRM_MEM_BUFLISTS  14
+#define DRM_MEM_AGPLISTS  15
+#define DRM_MEM_TOTALAGP  16
+#define DRM_MEM_BOUNDAGP  17
+#define DRM_MEM_CTXBITMAP 18
+#define DRM_MEM_STUB      19
+#define DRM_MEM_SGLISTS   20
+
+#define DRM_MAX_CTXBITMAP (PAGE_SIZE * 8)
+
+#define VM_OFFSET(vma) ((vma)->vm_pgoff << PAGE_SHIFT)
+
+				/* Macros to make printk easier */
+#define DRM_ERROR(fmt, arg...) \
+	printk(KERN_ERR "[" DRM_NAME ":" __FUNCTION__ "] *ERROR* " fmt , ##arg)
+#define DRM_MEM_ERROR(area, fmt, arg...) \
+	printk(KERN_ERR "[" DRM_NAME ":" __FUNCTION__ ":%s] *ERROR* " fmt , \
+	       DRM(mem_stats)[area].name , ##arg)
+#define DRM_INFO(fmt, arg...)  printk(KERN_INFO "[" DRM_NAME "] " fmt , ##arg)
+
+#if DRM_DEBUG_CODE
+#define DRM_DEBUG(fmt, arg...)						\
+	do {								\
+		if ( DRM(flags) & DRM_FLAG_DEBUG )			\
+			printk(KERN_DEBUG				\
+			       "[" DRM_NAME ":" __FUNCTION__ "] " fmt ,	\
+			       ##arg);					\
+	} while (0)
+#else
+#define DRM_DEBUG(fmt, arg...)		 do { } while (0)
+#endif
+
+#define DRM_PROC_LIMIT (PAGE_SIZE-80)
+
+#define DRM_PROC_PRINT(fmt, arg...)					\
+   len += sprintf(&buf[len], fmt , ##arg);				\
+   if (len > DRM_PROC_LIMIT) { *eof = 1; return len - offset; }
+
+#define DRM_PROC_PRINT_RET(ret, fmt, arg...)				\
+   len += sprintf(&buf[len], fmt , ##arg);				\
+   if (len > DRM_PROC_LIMIT) { ret; *eof = 1; return len - offset; }
+
+				/* Mapping helper macros */
+#define DRM_IOREMAP(map)						\
+	(map)->handle = DRM(ioremap)( (map)->offset, (map)->size )
+
+#define DRM_IOREMAPFREE(map)						\
+	do {								\
+		if ( (map)->handle && (map)->size )			\
+			DRM(ioremapfree)( (map)->handle, (map)->size );	\
+	} while (0)
+
+#define DRM_FIND_MAP(_map, _o)						\
+do {									\
+	struct list_head *_list;					\
+	list_for_each( _list, &dev->maplist->head ) {			\
+		drm_map_list_t *_entry = (drm_map_list_t *)_list;	\
+		if ( _entry->map &&					\
+		     _entry->map->offset == (_o) ) {			\
+			(_map) = _entry->map;				\
+			break;						\
+ 		}							\
+	}								\
+} while(0)
+
+				/* Internal types and structures */
+#define DRM_ARRAY_SIZE(x) (sizeof(x)/sizeof(x[0]))
+#define DRM_MIN(a,b) ((a)<(b)?(a):(b))
+#define DRM_MAX(a,b) ((a)>(b)?(a):(b))
+
+#define DRM_LEFTCOUNT(x) (((x)->rp + (x)->count - (x)->wp) % ((x)->count + 1))
+#define DRM_BUFCOUNT(x) ((x)->count - DRM_LEFTCOUNT(x))
+#define DRM_WAITCOUNT(dev,idx) DRM_BUFCOUNT(&dev->queuelist[idx]->waitlist)
+
+#define DRM_GET_PRIV_SAREA(_dev, _ctx, _map) do {	\
+	(_map) = (_dev)->context_sareas[_ctx];		\
+} while(0)
+
+typedef int drm_ioctl_t( struct inode *inode, struct file *filp,
+			 unsigned int cmd, unsigned long arg );
+
+typedef struct drm_pci_list {
+	u16 vendor;
+	u16 device;
+} drm_pci_list_t;
+
+typedef struct drm_ioctl_desc {
+	drm_ioctl_t	     *func;
+	int		     auth_needed;
+	int		     root_only;
+} drm_ioctl_desc_t;
+
+typedef struct drm_devstate {
+	pid_t		  owner;	/* X server pid holding x_lock */
+
+} drm_devstate_t;
+
+typedef struct drm_magic_entry {
+	drm_magic_t	       magic;
+	struct drm_file	       *priv;
+	struct drm_magic_entry *next;
+} drm_magic_entry_t;
+
+typedef struct drm_magic_head {
+	struct drm_magic_entry *head;
+	struct drm_magic_entry *tail;
+} drm_magic_head_t;
+
+typedef struct drm_vma_entry {
+	struct vm_area_struct *vma;
+	struct drm_vma_entry  *next;
+	pid_t		      pid;
+} drm_vma_entry_t;
+
+typedef struct drm_buf {
+	int		  idx;	       /* Index into master buflist	     */
+	int		  total;       /* Buffer size			     */
+	int		  order;       /* log-base-2(total)		     */
+	int		  used;	       /* Amount of buffer in use (for DMA)  */
+	unsigned long	  offset;      /* Byte offset (used internally)	     */
+	void		  *address;    /* Address of buffer		     */
+	unsigned long	  bus_address; /* Bus address of buffer		     */
+	struct drm_buf	  *next;       /* Kernel-only: used for free list    */
+	__volatile__ int  waiting;     /* On kernel DMA queue		     */
+	__volatile__ int  pending;     /* On hardware DMA queue		     */
+	wait_queue_head_t dma_wait;    /* Processes waiting		     */
+	pid_t		  pid;	       /* PID of holding process	     */
+	int		  context;     /* Kernel queue for this buffer	     */
+	int		  while_locked;/* Dispatch this buffer while locked  */
+	enum {
+		DRM_LIST_NONE	 = 0,
+		DRM_LIST_FREE	 = 1,
+		DRM_LIST_WAIT	 = 2,
+		DRM_LIST_PEND	 = 3,
+		DRM_LIST_PRIO	 = 4,
+		DRM_LIST_RECLAIM = 5
+	}		  list;	       /* Which list we're on		     */
+
+#if DRM_DMA_HISTOGRAM
+	cycles_t	  time_queued;	   /* Queued to kernel DMA queue     */
+	cycles_t	  time_dispatched; /* Dispatched to hardware	     */
+	cycles_t	  time_completed;  /* Completed by hardware	     */
+	cycles_t	  time_freed;	   /* Back on freelist		     */
+#endif
+
+	int		  dev_priv_size; /* Size of buffer private stoarge   */
+	void		  *dev_private;  /* Per-buffer private storage       */
+} drm_buf_t;
+
+#if DRM_DMA_HISTOGRAM
+#define DRM_DMA_HISTOGRAM_SLOTS		  9
+#define DRM_DMA_HISTOGRAM_INITIAL	 10
+#define DRM_DMA_HISTOGRAM_NEXT(current)	 ((current)*10)
+typedef struct drm_histogram {
+	atomic_t	  total;
+
+	atomic_t	  queued_to_dispatched[DRM_DMA_HISTOGRAM_SLOTS];
+	atomic_t	  dispatched_to_completed[DRM_DMA_HISTOGRAM_SLOTS];
+	atomic_t	  completed_to_freed[DRM_DMA_HISTOGRAM_SLOTS];
+
+	atomic_t	  queued_to_completed[DRM_DMA_HISTOGRAM_SLOTS];
+	atomic_t	  queued_to_freed[DRM_DMA_HISTOGRAM_SLOTS];
+
+	atomic_t	  dma[DRM_DMA_HISTOGRAM_SLOTS];
+	atomic_t	  schedule[DRM_DMA_HISTOGRAM_SLOTS];
+	atomic_t	  ctx[DRM_DMA_HISTOGRAM_SLOTS];
+	atomic_t	  lacq[DRM_DMA_HISTOGRAM_SLOTS];
+	atomic_t	  lhld[DRM_DMA_HISTOGRAM_SLOTS];
+} drm_histogram_t;
+#endif
+
+				/* bufs is one longer than it has to be */
+typedef struct drm_waitlist {
+	int		  count;	/* Number of possible buffers	   */
+	drm_buf_t	  **bufs;	/* List of pointers to buffers	   */
+	drm_buf_t	  **rp;		/* Read pointer			   */
+	drm_buf_t	  **wp;		/* Write pointer		   */
+	drm_buf_t	  **end;	/* End pointer			   */
+	spinlock_t	  read_lock;
+	spinlock_t	  write_lock;
+} drm_waitlist_t;
+
+typedef struct drm_freelist {
+	int		  initialized; /* Freelist in use		   */
+	atomic_t	  count;       /* Number of free buffers	   */
+	drm_buf_t	  *next;       /* End pointer			   */
+
+	wait_queue_head_t waiting;     /* Processes waiting on free bufs   */
+	int		  low_mark;    /* Low water mark		   */
+	int		  high_mark;   /* High water mark		   */
+	atomic_t	  wfh;	       /* If waiting for high mark	   */
+	spinlock_t        lock;
+} drm_freelist_t;
+
+typedef struct drm_buf_entry {
+	int		  buf_size;
+	int		  buf_count;
+	drm_buf_t	  *buflist;
+	int		  seg_count;
+	int		  page_order;
+	unsigned long	  *seglist;
+
+	drm_freelist_t	  freelist;
+} drm_buf_entry_t;
+
+typedef struct drm_hw_lock {
+	__volatile__ unsigned int lock;
+	char			  padding[60]; /* Pad to cache line */
+} drm_hw_lock_t;
+
+typedef struct drm_file {
+	int		  authenticated;
+	int		  minor;
+	pid_t		  pid;
+	uid_t		  uid;
+	drm_magic_t	  magic;
+	unsigned long	  ioctl_count;
+	struct drm_file	  *next;
+	struct drm_file	  *prev;
+	struct drm_device *dev;
+	int 		  remove_auth_on_close;
+} drm_file_t;
+
+
+typedef struct drm_queue {
+	atomic_t	  use_count;	/* Outstanding uses (+1)	    */
+	atomic_t	  finalization;	/* Finalization in progress	    */
+	atomic_t	  block_count;	/* Count of processes waiting	    */
+	atomic_t	  block_read;	/* Queue blocked for reads	    */
+	wait_queue_head_t read_queue;	/* Processes waiting on block_read  */
+	atomic_t	  block_write;	/* Queue blocked for writes	    */
+	wait_queue_head_t write_queue;	/* Processes waiting on block_write */
+#if 1
+	atomic_t	  total_queued;	/* Total queued statistic	    */
+	atomic_t	  total_flushed;/* Total flushes statistic	    */
+	atomic_t	  total_locks;	/* Total locks statistics	    */
+#endif
+	drm_ctx_flags_t	  flags;	/* Context preserving and 2D-only   */
+	drm_waitlist_t	  waitlist;	/* Pending buffers		    */
+	wait_queue_head_t flush_queue;	/* Processes waiting until flush    */
+} drm_queue_t;
+
+typedef struct drm_lock_data {
+	drm_hw_lock_t	  *hw_lock;	/* Hardware lock		   */
+	pid_t		  pid;		/* PID of lock holder (0=kernel)   */
+	wait_queue_head_t lock_queue;	/* Queue of blocked processes	   */
+	unsigned long	  lock_time;	/* Time of last lock in jiffies	   */
+} drm_lock_data_t;
+
+typedef struct drm_device_dma {
+#if 0
+				/* Performance Counters */
+	atomic_t	  total_prio;	/* Total DRM_DMA_PRIORITY	   */
+	atomic_t	  total_bytes;	/* Total bytes DMA'd		   */
+	atomic_t	  total_dmas;	/* Total DMA buffers dispatched	   */
+
+	atomic_t	  total_missed_dma;  /* Missed drm_do_dma	    */
+	atomic_t	  total_missed_lock; /* Missed lock in drm_do_dma   */
+	atomic_t	  total_missed_free; /* Missed drm_free_this_buffer */
+	atomic_t	  total_missed_sched;/* Missed drm_dma_schedule	    */
+
+	atomic_t	  total_tried;	/* Tried next_buffer		    */
+	atomic_t	  total_hit;	/* Sent next_buffer		    */
+	atomic_t	  total_lost;	/* Lost interrupt		    */
+#endif
+
+	drm_buf_entry_t	  bufs[DRM_MAX_ORDER+1];
+	int		  buf_count;
+	drm_buf_t	  **buflist;	/* Vector of pointers info bufs	   */
+	int		  seg_count;
+	int		  page_count;
+	unsigned long	  *pagelist;
+	unsigned long	  byte_count;
+	enum {
+		_DRM_DMA_USE_AGP = 0x01,
+		_DRM_DMA_USE_SG  = 0x02
+	} flags;
+
+				/* DMA support */
+	drm_buf_t	  *this_buffer;	/* Buffer being sent		   */
+	drm_buf_t	  *next_buffer; /* Selected buffer to send	   */
+	drm_queue_t	  *next_queue;	/* Queue from which buffer selected*/
+	wait_queue_head_t waiting;	/* Processes waiting on free bufs  */
+} drm_device_dma_t;
+
+#if __REALLY_HAVE_AGP
+typedef struct drm_agp_mem {
+	unsigned long      handle;
+	agp_memory         *memory;
+	unsigned long      bound; /* address */
+	int                pages;
+	struct drm_agp_mem *prev;
+	struct drm_agp_mem *next;
+} drm_agp_mem_t;
+
+typedef struct drm_agp_head {
+	agp_kern_info      agp_info;
+	const char         *chipset;
+	drm_agp_mem_t      *memory;
+	unsigned long      mode;
+	int                enabled;
+	int                acquired;
+	unsigned long      base;
+   	int 		   agp_mtrr;
+	int		   cant_use_aperture;
+	unsigned long	   page_mask;
+} drm_agp_head_t;
+#endif
+
+typedef struct drm_sg_mem {
+	unsigned long   handle;
+	void            *virtual;
+	int             pages;
+	struct page     **pagelist;
+	dma_addr_t	*busaddr;
+} drm_sg_mem_t;
+
+typedef struct drm_sigdata {
+	int           context;
+	drm_hw_lock_t *lock;
+} drm_sigdata_t;
+
+typedef struct drm_map_list {
+	struct list_head	head;
+	drm_map_t		*map;
+} drm_map_list_t;
+
+typedef struct drm_device {
+	const char	  *name;	/* Simple driver name		   */
+	char		  *unique;	/* Unique identifier: e.g., busid  */
+	int		  unique_len;	/* Length of unique field	   */
+	dev_t		  device;	/* Device number for mknod	   */
+	char		  *devname;	/* For /proc/interrupts		   */
+
+	int		  blocked;	/* Blocked due to VC switch?	   */
+	struct proc_dir_entry *root;	/* Root for this device's entries  */
+
+				/* Locks */
+	spinlock_t	  count_lock;	/* For inuse, open_count, buf_use  */
+	struct semaphore  struct_sem;	/* For others			   */
+
+				/* Usage Counters */
+	int		  open_count;	/* Outstanding files open	   */
+	atomic_t	  ioctl_count;	/* Outstanding IOCTLs pending	   */
+	atomic_t	  vma_count;	/* Outstanding vma areas open	   */
+	int		  buf_use;	/* Buffers in use -- cannot alloc  */
+	atomic_t	  buf_alloc;	/* Buffer allocation in progress   */
+
+				/* Performance counters */
+	unsigned long     counters;
+	drm_stat_type_t   types[15];
+	atomic_t          counts[15];
+
+				/* Authentication */
+	drm_file_t	  *file_first;
+	drm_file_t	  *file_last;
+	drm_magic_head_t  magiclist[DRM_HASH_SIZE];
+
+				/* Memory management */
+	drm_map_list_t	  *maplist;	/* Linked list of regions	   */
+	int		  map_count;	/* Number of mappable regions	   */
+
+	drm_map_t	  **context_sareas;
+	int		  max_context;
+
+	drm_vma_entry_t	  *vmalist;	/* List of vmas (for debugging)	   */
+	drm_lock_data_t	  lock;		/* Information on hardware lock	   */
+
+				/* DMA queues (contexts) */
+	int		  queue_count;	/* Number of active DMA queues	   */
+	int		  queue_reserved; /* Number of reserved DMA queues */
+	int		  queue_slots;	/* Actual length of queuelist	   */
+	drm_queue_t	  **queuelist;	/* Vector of pointers to DMA queues */
+	drm_device_dma_t  *dma;		/* Optional pointer for DMA support */
+
+				/* Context support */
+	int		  irq;		/* Interrupt used by board	   */
+	__volatile__ long context_flag;	/* Context swapping flag	   */
+	__volatile__ long interrupt_flag; /* Interruption handler flag	   */
+	__volatile__ long dma_flag;	/* DMA dispatch flag		   */
+	struct timer_list timer;	/* Timer for delaying ctx switch   */
+	wait_queue_head_t context_wait; /* Processes waiting on ctx switch */
+	int		  last_checked;	/* Last context checked for DMA	   */
+	int		  last_context;	/* Last current context		   */
+	unsigned long	  last_switch;	/* jiffies at last context switch  */
+	struct tq_struct  tq;
+	cycles_t	  ctx_start;
+	cycles_t	  lck_start;
+#if __HAVE_DMA_HISTOGRAM
+	drm_histogram_t	  histo;
+#endif
+
+				/* Callback to X server for context switch
+				   and for heavy-handed reset. */
+	char		  buf[DRM_BSZ]; /* Output buffer		   */
+	char		  *buf_rp;	/* Read pointer			   */
+	char		  *buf_wp;	/* Write pointer		   */
+	char		  *buf_end;	/* End pointer			   */
+	struct fasync_struct *buf_async;/* Processes waiting for SIGIO	   */
+	wait_queue_head_t buf_readers;	/* Processes waiting to read	   */
+	wait_queue_head_t buf_writers;	/* Processes waiting to ctx switch */
+
+#if __REALLY_HAVE_AGP
+	drm_agp_head_t    *agp;
+#endif
+	struct pci_dev *pdev;
+#ifdef __alpha__
+#if LINUX_VERSION_CODE < 0x020403
+	struct pci_controler *hose;
+#else
+	struct pci_controller *hose;
+#endif
+#endif
+	drm_sg_mem_t      *sg;  /* Scatter gather memory */
+	unsigned long     *ctx_bitmap;
+	void		  *dev_private;
+	drm_sigdata_t     sigdata; /* For block_all_signals */
+	sigset_t          sigmask;
+} drm_device_t;
+
+
+/* ================================================================
+ * Internal function definitions
+ */
+
+				/* Misc. support (drm_init.h) */
+extern int	     DRM(flags);
+extern void	     DRM(parse_options)( char *s );
+extern int           DRM(cpu_valid)( void );
+
+				/* Driver support (drm_drv.h) */
+extern int           DRM(version)(struct inode *inode, struct file *filp,
+				  unsigned int cmd, unsigned long arg);
+extern int           DRM(open)(struct inode *inode, struct file *filp);
+extern int           DRM(release)(struct inode *inode, struct file *filp);
+extern int           DRM(ioctl)(struct inode *inode, struct file *filp,
+				unsigned int cmd, unsigned long arg);
+extern int           DRM(lock)(struct inode *inode, struct file *filp,
+			       unsigned int cmd, unsigned long arg);
+extern int           DRM(unlock)(struct inode *inode, struct file *filp,
+				 unsigned int cmd, unsigned long arg);
+
+				/* Device support (drm_fops.h) */
+extern int	     DRM(open_helper)(struct inode *inode, struct file *filp,
+				      drm_device_t *dev);
+extern int	     DRM(flush)(struct file *filp);
+extern int	     DRM(release_fuck)(struct inode *inode, struct file *filp);
+extern int	     DRM(fasync)(int fd, struct file *filp, int on);
+extern ssize_t	     DRM(read)(struct file *filp, char *buf, size_t count,
+			       loff_t *off);
+extern int	     DRM(write_string)(drm_device_t *dev, const char *s);
+extern unsigned int  DRM(poll)(struct file *filp,
+			       struct poll_table_struct *wait);
+
+				/* Mapping support (drm_vm.h) */
+extern struct page *DRM(vm_nopage)(struct vm_area_struct *vma,
+				   unsigned long address,
+				   int write_access);
+extern struct page *DRM(vm_shm_nopage)(struct vm_area_struct *vma,
+				       unsigned long address,
+				       int write_access);
+extern struct page *DRM(vm_dma_nopage)(struct vm_area_struct *vma,
+				       unsigned long address,
+				       int write_access);
+extern struct page *DRM(vm_sg_nopage)(struct vm_area_struct *vma,
+				      unsigned long address,
+				      int write_access);
+extern void	     DRM(vm_open)(struct vm_area_struct *vma);
+extern void	     DRM(vm_close)(struct vm_area_struct *vma);
+extern void	     DRM(vm_shm_close)(struct vm_area_struct *vma);
+extern int	     DRM(mmap_dma)(struct file *filp,
+				   struct vm_area_struct *vma);
+extern int	     DRM(mmap)(struct file *filp, struct vm_area_struct *vma);
+
+				/* Memory management support (drm_memory.h) */
+extern void	     DRM(mem_init)(void);
+extern int	     DRM(mem_info)(char *buf, char **start, off_t offset,
+				   int request, int *eof, void *data);
+extern void	     *DRM(alloc)(size_t size, int area);
+extern void	     *DRM(realloc)(void *oldpt, size_t oldsize, size_t size,
+				   int area);
+extern char	     *DRM(strdup)(const char *s, int area);
+extern void	     DRM(strfree)(const char *s, int area);
+extern void	     DRM(free)(void *pt, size_t size, int area);
+extern unsigned long DRM(alloc_pages)(int order, int area);
+extern void	     DRM(free_pages)(unsigned long address, int order,
+				     int area);
+extern void	     *DRM(ioremap)(unsigned long offset, unsigned long size);
+extern void	     DRM(ioremapfree)(void *pt, unsigned long size);
+
+#if __REALLY_HAVE_AGP
+extern agp_memory    *DRM(alloc_agp)(int pages, u32 type);
+extern int           DRM(free_agp)(agp_memory *handle, int pages);
+extern int           DRM(bind_agp)(agp_memory *handle, unsigned int start);
+extern int           DRM(unbind_agp)(agp_memory *handle);
+#endif
+
+				/* Misc. IOCTL support (drm_ioctl.h) */
+extern int	     DRM(irq_busid)(struct inode *inode, struct file *filp,
+				    unsigned int cmd, unsigned long arg);
+extern int	     DRM(getunique)(struct inode *inode, struct file *filp,
+				    unsigned int cmd, unsigned long arg);
+extern int	     DRM(setunique)(struct inode *inode, struct file *filp,
+				    unsigned int cmd, unsigned long arg);
+extern int	     DRM(getmap)(struct inode *inode, struct file *filp,
+				 unsigned int cmd, unsigned long arg);
+extern int	     DRM(getclient)(struct inode *inode, struct file *filp,
+				    unsigned int cmd, unsigned long arg);
+extern int	     DRM(getstats)(struct inode *inode, struct file *filp,
+				   unsigned int cmd, unsigned long arg);
+
+				/* Context IOCTL support (drm_context.h) */
+extern int	     DRM(resctx)( struct inode *inode, struct file *filp,
+				  unsigned int cmd, unsigned long arg );
+extern int	     DRM(addctx)( struct inode *inode, struct file *filp,
+				  unsigned int cmd, unsigned long arg );
+extern int	     DRM(modctx)( struct inode *inode, struct file *filp,
+				  unsigned int cmd, unsigned long arg );
+extern int	     DRM(getctx)( struct inode *inode, struct file *filp,
+				  unsigned int cmd, unsigned long arg );
+extern int	     DRM(switchctx)( struct inode *inode, struct file *filp,
+				     unsigned int cmd, unsigned long arg );
+extern int	     DRM(newctx)( struct inode *inode, struct file *filp,
+				  unsigned int cmd, unsigned long arg );
+extern int	     DRM(rmctx)( struct inode *inode, struct file *filp,
+				 unsigned int cmd, unsigned long arg );
+
+extern int	     DRM(context_switch)(drm_device_t *dev, int old, int new);
+extern int	     DRM(context_switch_complete)(drm_device_t *dev, int new);
+
+#if __HAVE_CTX_BITMAP
+extern int	     DRM(ctxbitmap_init)( drm_device_t *dev );
+extern void	     DRM(ctxbitmap_cleanup)( drm_device_t *dev );
+#endif
+
+extern int	     DRM(setsareactx)( struct inode *inode, struct file *filp,
+				       unsigned int cmd, unsigned long arg );
+extern int	     DRM(getsareactx)( struct inode *inode, struct file *filp,
+				       unsigned int cmd, unsigned long arg );
+
+				/* Drawable IOCTL support (drm_drawable.h) */
+extern int	     DRM(adddraw)(struct inode *inode, struct file *filp,
+				  unsigned int cmd, unsigned long arg);
+extern int	     DRM(rmdraw)(struct inode *inode, struct file *filp,
+				 unsigned int cmd, unsigned long arg);
+
+
+				/* Authentication IOCTL support (drm_auth.h) */
+extern int	     DRM(add_magic)(drm_device_t *dev, drm_file_t *priv,
+				    drm_magic_t magic);
+extern int	     DRM(remove_magic)(drm_device_t *dev, drm_magic_t magic);
+extern int	     DRM(getmagic)(struct inode *inode, struct file *filp,
+				   unsigned int cmd, unsigned long arg);
+extern int	     DRM(authmagic)(struct inode *inode, struct file *filp,
+				    unsigned int cmd, unsigned long arg);
+
+
+				/* Locking IOCTL support (drm_lock.h) */
+extern int	     DRM(block)(struct inode *inode, struct file *filp,
+				unsigned int cmd, unsigned long arg);
+extern int	     DRM(unblock)(struct inode *inode, struct file *filp,
+				  unsigned int cmd, unsigned long arg);
+extern int	     DRM(lock_take)(__volatile__ unsigned int *lock,
+				    unsigned int context);
+extern int	     DRM(lock_transfer)(drm_device_t *dev,
+					__volatile__ unsigned int *lock,
+					unsigned int context);
+extern int	     DRM(lock_free)(drm_device_t *dev,
+				    __volatile__ unsigned int *lock,
+				    unsigned int context);
+extern int	     DRM(finish)(struct inode *inode, struct file *filp,
+				 unsigned int cmd, unsigned long arg);
+extern int	     DRM(flush_unblock)(drm_device_t *dev, int context,
+					drm_lock_flags_t flags);
+extern int	     DRM(flush_block_and_flush)(drm_device_t *dev, int context,
+						drm_lock_flags_t flags);
+extern int           DRM(notifier)(void *priv);
+
+				/* Buffer management support (drm_bufs.h) */
+extern int	     DRM(order)( unsigned long size );
+extern int	     DRM(addmap)( struct inode *inode, struct file *filp,
+				  unsigned int cmd, unsigned long arg );
+extern int	     DRM(rmmap)( struct inode *inode, struct file *filp,
+				 unsigned int cmd, unsigned long arg );
+#if __HAVE_DMA
+extern int	     DRM(addbufs)( struct inode *inode, struct file *filp,
+				   unsigned int cmd, unsigned long arg );
+extern int	     DRM(infobufs)( struct inode *inode, struct file *filp,
+				    unsigned int cmd, unsigned long arg );
+extern int	     DRM(markbufs)( struct inode *inode, struct file *filp,
+				    unsigned int cmd, unsigned long arg );
+extern int	     DRM(freebufs)( struct inode *inode, struct file *filp,
+				    unsigned int cmd, unsigned long arg );
+extern int	     DRM(mapbufs)( struct inode *inode, struct file *filp,
+				   unsigned int cmd, unsigned long arg );
+
+				/* DMA support (drm_dma.h) */
+extern int	     DRM(dma_setup)(drm_device_t *dev);
+extern void	     DRM(dma_takedown)(drm_device_t *dev);
+extern void	     DRM(free_buffer)(drm_device_t *dev, drm_buf_t *buf);
+extern void	     DRM(reclaim_buffers)(drm_device_t *dev, pid_t pid);
+#if __HAVE_OLD_DMA
+/* GH: This is a dirty hack for now...
+ */
+extern void	     DRM(clear_next_buffer)(drm_device_t *dev);
+extern int	     DRM(select_queue)(drm_device_t *dev,
+				       void (*wrapper)(unsigned long));
+extern int	     DRM(dma_enqueue)(drm_device_t *dev, drm_dma_t *dma);
+extern int	     DRM(dma_get_buffers)(drm_device_t *dev, drm_dma_t *dma);
+#endif
+#if __HAVE_DMA_IRQ
+extern int           DRM(control)( struct inode *inode, struct file *filp,
+				   unsigned int cmd, unsigned long arg );
+extern int           DRM(irq_install)( drm_device_t *dev, int irq );
+extern int           DRM(irq_uninstall)( drm_device_t *dev );
+extern void          DRM(dma_service)( int irq, void *device,
+				       struct pt_regs *regs );
+#if __HAVE_DMA_IRQ_BH
+extern void          DRM(dma_immediate_bh)( void *dev );
+#endif
+#endif
+#if DRM_DMA_HISTOGRAM
+extern int	     DRM(histogram_slot)(unsigned long count);
+extern void	     DRM(histogram_compute)(drm_device_t *dev, drm_buf_t *buf);
+#endif
+
+				/* Buffer list support (drm_lists.h) */
+#if __HAVE_DMA_WAITLIST
+extern int	     DRM(waitlist_create)(drm_waitlist_t *bl, int count);
+extern int	     DRM(waitlist_destroy)(drm_waitlist_t *bl);
+extern int	     DRM(waitlist_put)(drm_waitlist_t *bl, drm_buf_t *buf);
+extern drm_buf_t     *DRM(waitlist_get)(drm_waitlist_t *bl);
+#endif
+#if __HAVE_DMA_FREELIST
+extern int	     DRM(freelist_create)(drm_freelist_t *bl, int count);
+extern int	     DRM(freelist_destroy)(drm_freelist_t *bl);
+extern int	     DRM(freelist_put)(drm_device_t *dev, drm_freelist_t *bl,
+				       drm_buf_t *buf);
+extern drm_buf_t     *DRM(freelist_get)(drm_freelist_t *bl, int block);
+#endif
+#endif /* __HAVE_DMA */
+
+#if __REALLY_HAVE_AGP
+				/* AGP/GART support (drm_agpsupport.h) */
+extern drm_agp_head_t *DRM(agp_init)(void);
+extern void           DRM(agp_uninit)(void);
+extern int            DRM(agp_acquire)(struct inode *inode, struct file *filp,
+				       unsigned int cmd, unsigned long arg);
+extern void           DRM(agp_do_release)(void);
+extern int            DRM(agp_release)(struct inode *inode, struct file *filp,
+				       unsigned int cmd, unsigned long arg);
+extern int            DRM(agp_enable)(struct inode *inode, struct file *filp,
+				      unsigned int cmd, unsigned long arg);
+extern int            DRM(agp_info)(struct inode *inode, struct file *filp,
+				    unsigned int cmd, unsigned long arg);
+extern int            DRM(agp_alloc)(struct inode *inode, struct file *filp,
+				     unsigned int cmd, unsigned long arg);
+extern int            DRM(agp_free)(struct inode *inode, struct file *filp,
+				    unsigned int cmd, unsigned long arg);
+extern int            DRM(agp_unbind)(struct inode *inode, struct file *filp,
+				      unsigned int cmd, unsigned long arg);
+extern int            DRM(agp_bind)(struct inode *inode, struct file *filp,
+				    unsigned int cmd, unsigned long arg);
+extern agp_memory     *DRM(agp_allocate_memory)(size_t pages, u32 type);
+extern int            DRM(agp_free_memory)(agp_memory *handle);
+extern int            DRM(agp_bind_memory)(agp_memory *handle, off_t start);
+extern int            DRM(agp_unbind_memory)(agp_memory *handle);
+#endif
+
+				/* Stub support (drm_stub.h) */
+int                   DRM(stub_register)(const char *name,
+					 struct file_operations *fops,
+					 drm_device_t *dev);
+int                   DRM(stub_unregister)(int minor);
+
+				/* Proc support (drm_proc.h) */
+extern struct proc_dir_entry *DRM(proc_init)(drm_device_t *dev,
+					     int minor,
+					     struct proc_dir_entry *root,
+					     struct proc_dir_entry **dev_root);
+extern int            DRM(proc_cleanup)(int minor,
+					struct proc_dir_entry *root,
+					struct proc_dir_entry *dev_root);
+
+#if __HAVE_SG
+				/* Scatter Gather Support (drm_scatter.h) */
+extern void           DRM(sg_cleanup)(drm_sg_mem_t *entry);
+extern int            DRM(sg_alloc)(struct inode *inode, struct file *filp,
+				    unsigned int cmd, unsigned long arg);
+extern int            DRM(sg_free)(struct inode *inode, struct file *filp,
+				   unsigned int cmd, unsigned long arg);
+#endif
+
+                               /* ATI PCIGART support (ati_pcigart.h) */
+extern int            DRM(ati_pcigart_init)(drm_device_t *dev,
+					    unsigned long *addr,
+					    dma_addr_t *bus_addr);
+extern int            DRM(ati_pcigart_cleanup)(drm_device_t *dev,
+					       unsigned long addr,
+					       dma_addr_t bus_addr);
+
+#endif /* __KERNEL__ */
+#endif
+@
+
+
+1.1.9.1
+log
+@OpenBSD just has imported exactly this tree into their vendor branch,
+called the same tag, in XF4/xc
+This is, apparently, the last XFree86 snapshot before the licence change
+(ie, addition of the advertising clause)
+
+Since the developers don't see any problems with that, and we would like
+to integrate improvements done by the remaining one or two (or so) XFree86
+developers (j/k), this prepares enabling us to update X-Window in the future.
+@
+text
+@d1 3
+a3 9
+/**
+ * \file drmP.h 
+ * Private header for Direct Rendering Manager
+ * 
+ * \author Rickard E. (Rik) Faith <faith@@valinux.com>
+ * \author Gareth Hughes <gareth@@valinux.com>
+ */
+
+/*
+d26 4
+a34 1
+
+d51 1
+a55 1
+#include <linux/pagemap.h>
+a68 6
+#if LINUX_VERSION_CODE < KERNEL_VERSION(2,5,41)
+#define HAS_WORKQUEUE 0
+#else
+#define HAS_WORKQUEUE 1
+#endif
+#if !HAS_WORKQUEUE
+a69 3
+#else
+#include <linux/workqueue.h>
+#endif
+d74 4
+a77 6
+#include "drm_os_linux.h"
+
+
+/***********************************************************************/
+/** \name DRM template customization defaults */
+/*@@{*/
+d79 2
+d93 2
+a94 2
+#ifndef __HAVE_IRQ
+#define __HAVE_IRQ		0
+d102 3
+a108 1
+#define __REALLY_HAVE_SG	(__HAVE_SG)
+a109 1
+/*@@}*/
+d111 2
+d114 1
+a114 5
+/***********************************************************************/
+/** \name Begin the DRM... */
+/*@@{*/
+
+#define DRM_DEBUG_CODE 2	  /**< Include debugging code if > 1, then
+d117 3
+a119 3
+#define DRM_HASH_SIZE	      16 /**< Size of key hash table. Must be power of 2. */
+#define DRM_KERNEL_CONTEXT    0	 /**< Change drm_resctx if changed */
+#define DRM_RESERVED_CONTEXTS 1	 /**< Change drm_resctx if changed */
+d121 3
+a123 3
+#define DRM_BSZ		      1024 /**< Buffer size for /dev/drm? output */
+#define DRM_TIME_SLICE	      (HZ/20)  /**< Time slice for GLXContexts */
+#define DRM_LOCK_SLICE	      1	/**< Time slice for lock, in jiffies */
+d126 1
+a150 71
+	
+/*@@}*/
+
+
+/***********************************************************************/
+/** \name Backward compatibility section */
+/*@@{*/
+
+#ifndef minor
+#define minor(x) MINOR((x))
+#endif
+
+#ifndef MODULE_LICENSE
+#define MODULE_LICENSE(x) 
+#endif
+
+#ifndef preempt_disable
+#define preempt_disable()
+#define preempt_enable()
+#endif
+
+#ifndef pte_offset_map 
+#define pte_offset_map pte_offset
+#define pte_unmap(pte)
+#endif
+
+#ifndef list_for_each_safe
+#define list_for_each_safe(pos, n, head)				\
+	for (pos = (head)->next, n = pos->next; pos != (head);		\
+		pos = n, n = pos->next)
+#endif
+
+#ifndef list_for_each_entry
+#define list_for_each_entry(pos, head, member)				\
+       for (pos = list_entry((head)->next, typeof(*pos), member),	\
+                    prefetch(pos->member.next);				\
+            &pos->member != (head);					\
+            pos = list_entry(pos->member.next, typeof(*pos), member),	\
+                    prefetch(pos->member.next))
+#endif
+
+#if LINUX_VERSION_CODE < KERNEL_VERSION(2,4,19)
+static inline struct page * vmalloc_to_page(void * vmalloc_addr)
+{
+	unsigned long addr = (unsigned long) vmalloc_addr;
+	struct page *page = NULL;
+	pgd_t *pgd = pgd_offset_k(addr);
+	pmd_t *pmd;
+	pte_t *ptep, pte;
+  
+	if (!pgd_none(*pgd)) {
+		pmd = pmd_offset(pgd, addr);
+		if (!pmd_none(*pmd)) {
+			preempt_disable();
+			ptep = pte_offset_map(pmd, addr);
+			pte = *ptep;
+			if (pte_present(pte))
+				page = pte_page(pte);
+			pte_unmap(ptep);
+			preempt_enable();
+		}
+	}
+	return page;
+}
+#endif
+
+#ifndef REMAP_PAGE_RANGE_5_ARGS
+#define DRM_RPR_ARG(vma)
+#else
+#define DRM_RPR_ARG(vma) vma,
+#endif
+d154 1
+a154 13
+/*@@}*/
+
+
+/***********************************************************************/
+/** \name Macros to make printk easier */
+/*@@{*/
+
+/**
+ * Error output.
+ *
+ * \param fmt printf() like format string.
+ * \param arg arguments
+ */
+d156 1
+a156 9
+	printk(KERN_ERR "[" DRM_NAME ":%s] *ERROR* " fmt , __FUNCTION__ , ##arg)
+
+/**
+ * Memory error output.
+ *
+ * \param area memory area where the error occurred.
+ * \param fmt printf() like format string.
+ * \param arg arguments
+ */
+d158 1
+a158 1
+	printk(KERN_ERR "[" DRM_NAME ":%s:%s] *ERROR* " fmt , __FUNCTION__, \
+a161 6
+/**
+ * Debug output.
+ * 
+ * \param fmt printf() like format string.
+ * \param arg arguments
+ */
+d167 2
+a168 2
+			       "[" DRM_NAME ":%s] " fmt ,	\
+			       __FUNCTION__ , ##arg);			\
+d184 3
+a186 12
+/*@@}*/
+
+
+/***********************************************************************/
+/** \name Mapping helper macros */
+/*@@{*/
+
+#define DRM_IOREMAP(map, dev)							\
+	(map)->handle = DRM(ioremap)( (map)->offset, (map)->size, (dev) )
+
+#define DRM_IOREMAP_NOCACHE(map, dev)						\
+	(map)->handle = DRM(ioremap_nocache)((map)->offset, (map)->size, (dev))
+d188 1
+a188 12
+#define DRM_IOREMAPFREE(map, dev)						\
+	do {									\
+		if ( (map)->handle && (map)->size )				\
+			DRM(ioremapfree)( (map)->handle, (map)->size, (dev) );	\
+	} while (0)
+
+#ifndef VMAP_4_ARGS
+
+#define DRM_IOREMAPAGP(map, dev)						\
+	(map)->handle = DRM(ioremap_agp)( (map)->offset, (map)->size, (dev) )
+
+#define DRM_IOREMAPAGPFREE(map)						\
+d191 1
+a191 1
+			DRM(ioremap_agp_free)( (map)->handle, (map)->size );	\
+d194 11
+a204 22
+#endif
+
+/**
+ * Find mapping.
+ *
+ * \param _map matching mapping if found, untouched otherwise.
+ * \param _o offset.
+ *
+ * Expects the existence of a local variable named \p dev pointing to the
+ * drm_device structure.
+ */
+#define DRM_FIND_MAP(_map, _o)								\
+do {											\
+	struct list_head *_list;							\
+	list_for_each( _list, &dev->maplist->head ) {					\
+		drm_map_list_t *_entry = list_entry( _list, drm_map_list_t, head );	\
+		if ( _entry->map &&							\
+		     _entry->map->offset == (_o) ) {					\
+			(_map) = _entry->map;						\
+			break;								\
+ 		}									\
+	}										\
+d207 1
+a207 14
+/**
+ * Drop mapping.
+ *
+ * \sa #DRM_FIND_MAP.
+ */
+#define DRM_DROP_MAP(_map)
+
+/*@@}*/
+
+
+/***********************************************************************/
+/** \name Internal types and structures */
+/*@@{*/
+
+a215 8
+#define DRM_IF_VERSION(maj, min) (maj << 16 | min)
+/**
+ * Get the private SAREA mapping.
+ *
+ * \param _dev DRM device.
+ * \param _ctx context number.
+ * \param _map output mapping.
+ */
+a219 24
+/**
+ * Test that the hardware lock is held by the caller, returning otherwise.
+ *
+ * \param dev DRM device.
+ * \param filp file pointer of the caller.
+ */
+#define LOCK_TEST_WITH_RETURN( dev, filp )				\
+do {									\
+	if ( !_DRM_LOCK_IS_HELD( dev->lock.hw_lock->lock ) ||		\
+	     dev->lock.filp != filp ) {				\
+		DRM_ERROR( "%s called without lock held\n",		\
+			   __FUNCTION__ );				\
+		return -EINVAL;						\
+	}								\
+} while (0)
+
+/**
+ * Ioctl function type.
+ *
+ * \param inode device inode.
+ * \param filp file pointer.
+ * \param cmd command.
+ * \param arg argument.
+ */
+d223 4
+a226 7
+typedef struct drm_pci_id_list
+{
+	int vendor;
+	int device;
+	long driver_private;
+	char *name;
+} drm_pci_id_list_t;
+d235 2
+a236 1
+	pid_t		  owner;	/**< X server pid holding x_lock */
+a255 3
+/**
+ * DMA buffer.
+ */
+d257 14
+a270 14
+	int		  idx;	       /**< Index into master buflist */
+	int		  total;       /**< Buffer size */
+	int		  order;       /**< log-base-2(total) */
+	int		  used;	       /**< Amount of buffer in use (for DMA) */
+	unsigned long	  offset;      /**< Byte offset (used internally) */
+	void		  *address;    /**< Address of buffer */
+	unsigned long	  bus_address; /**< Bus address of buffer */
+	struct drm_buf	  *next;       /**< Kernel-only: used for free list */
+	__volatile__ int  waiting;     /**< On kernel DMA queue */
+	__volatile__ int  pending;     /**< On hardware DMA queue */
+	wait_queue_head_t dma_wait;    /**< Processes waiting */
+	struct file       *filp;       /**< Pointer to holding file descr */
+	int		  context;     /**< Kernel queue for this buffer */
+	int		  while_locked;/**< Dispatch this buffer while locked */
+d278 1
+a278 1
+	}		  list;	       /**< Which list we're on */
+d280 9
+a288 2
+	int		  dev_priv_size; /**< Size of buffer private storage */
+	void		  *dev_private;  /**< Per-buffer private storage */
+d291 21
+d313 1
+a313 1
+/** bufs is one longer than it has to be */
+d315 5
+a319 5
+	int		  count;	/**< Number of possible buffers */
+	drm_buf_t	  **bufs;	/**< List of pointers to buffers */
+	drm_buf_t	  **rp;		/**< Read pointer */
+	drm_buf_t	  **wp;		/**< Write pointer */
+	drm_buf_t	  **end;	/**< End pointer */
+d325 8
+a332 8
+	int		  initialized; /**< Freelist in use */
+	atomic_t	  count;       /**< Number of free buffers */
+	drm_buf_t	  *next;       /**< End pointer */
+
+	wait_queue_head_t waiting;     /**< Processes waiting on free bufs */
+	int		  low_mark;    /**< Low water mark */
+	int		  high_mark;   /**< High water mark */
+	atomic_t	  wfh;	       /**< If waiting for high mark */
+a335 3
+/**
+ * Buffer entry.  There is one of this for each buffer size order.
+ */
+d337 3
+a339 3
+	int		  buf_size;	/**< size */
+	int		  buf_count;	/**< number of buffers */
+	drm_buf_t	  *buflist;	/**< buffer list */
+a346 7
+/**
+ * Hardware lock.
+ *
+ * The lock structure is a simple cache-line aligned integer.  To avoid
+ * processor bus contention on a multiprocessor system, there should not be any
+ * other data stored in the same cache line.
+ */
+d348 2
+a349 2
+	__volatile__ unsigned int lock;		/**< lock variable */
+	char			  padding[60];	/**< Pad to cache line */
+a351 1
+/** File private data */
+a362 4
+	unsigned long     lock_count;
+#ifdef DRIVER_FILE_FIELDS
+	DRIVER_FILE_FIELDS;
+#endif
+d365 1
+a365 1
+/** Wait queue */
+d367 7
+a373 7
+	atomic_t	  use_count;	/**< Outstanding uses (+1) */
+	atomic_t	  finalization;	/**< Finalization in progress */
+	atomic_t	  block_count;	/**< Count of processes waiting */
+	atomic_t	  block_read;	/**< Queue blocked for reads */
+	wait_queue_head_t read_queue;	/**< Processes waiting on block_read */
+	atomic_t	  block_write;	/**< Queue blocked for writes */
+	wait_queue_head_t write_queue;	/**< Processes waiting on block_write */
+d375 7
+a381 7
+	atomic_t	  total_queued;	/**< Total queued statistic */
+	atomic_t	  total_flushed;/**< Total flushes statistic */
+	atomic_t	  total_locks;	/**< Total locks statistics */
+#endif
+	drm_ctx_flags_t	  flags;	/**< Context preserving and 2D-only */
+	drm_waitlist_t	  waitlist;	/**< Pending buffers */
+	wait_queue_head_t flush_queue;	/**< Processes waiting until flush */
+a383 3
+/**
+ * Lock data.
+ */
+d385 4
+a388 4
+	drm_hw_lock_t	  *hw_lock;	/**< Hardware lock */
+	struct file       *filp;	/**< File descr of lock holder (0=kernel) */
+	wait_queue_head_t lock_queue;	/**< Queue of blocked processes */
+	unsigned long	  lock_time;	/**< Time of last lock in jiffies */
+a390 3
+/**
+ * DMA data.
+ */
+d392 19
+a410 4
+
+	drm_buf_entry_t	  bufs[DRM_MAX_ORDER+1];	/**< buffers, grouped by their size order */
+	int		  buf_count;	/**< total number of buffers */
+	drm_buf_t	  **buflist;	/**< Vector of pointers into drm_device_dma::bufs */
+d412 2
+a413 2
+	int		  page_count;	/**< number of pages */
+	unsigned long	  *pagelist;	/**< page list */
+d420 5
+a424 7
+	/** \name DMA support */
+	/*@@{*/
+	drm_buf_t	  *this_buffer;	/**< Buffer being sent */
+	drm_buf_t	  *next_buffer; /**< Selected buffer to send */
+	drm_queue_t	  *next_queue;	/**< Queue from which buffer selected*/
+	wait_queue_head_t waiting;	/**< Processes waiting on free bufs */
+	/*@@}*/
+a427 3
+/** 
+ * AGP memory entry.  Stored as a doubly linked list.
+ */
+d429 3
+a431 3
+	unsigned long      handle;	/**< handle */
+	DRM_AGP_MEM        *memory;	
+	unsigned long      bound;	/**< address */
+d433 2
+a434 2
+	struct drm_agp_mem *prev;	/**< previous entry */
+	struct drm_agp_mem *next;	/**< next entry */
+a436 5
+/**
+ * AGP data.
+ *
+ * \sa DRM(agp_init)() and drm_device::agp.
+ */
+d438 6
+a443 5
+	DRM_AGP_KERN       agp_info;	/**< AGP device information */
+	drm_agp_mem_t      *memory;	/**< memory entries */
+	unsigned long      mode;	/**< AGP mode */
+	int                enabled;	/**< whether the AGP bus as been enabled */
+	int                acquired;	/**< whether the AGP device has been acquired */
+a450 3
+/**
+ * Scatter-gather memory.
+ */
+a463 3
+/**
+ * Mappings list
+ */
+d465 2
+a466 2
+	struct list_head	head;	/**< list head */
+	drm_map_t		*map;	/**< mapping */
+a468 16
+typedef drm_map_t drm_local_map_t;
+
+#if __HAVE_VBL_IRQ
+
+typedef struct drm_vbl_sig {
+	struct list_head	head;
+	unsigned int		sequence;
+	struct siginfo		info;
+	struct task_struct	*task;
+} drm_vbl_sig_t;
+
+#endif
+
+/**
+ * DRM device structure.
+ */
+d470 19
+a488 25
+	const char	  *name;	/**< Simple driver name */
+	char		  *unique;	/**< Unique identifier: e.g., busid */
+	int		  unique_len;	/**< Length of unique field */
+	dev_t		  device;	/**< Device number for mknod */
+	char		  *devname;	/**< For /proc/interrupts */
+	int		  minor;        /**< Minor device number */
+	int		  if_version;	/**< Highest interface version set */
+
+	int		  blocked;	/**< Blocked due to VC switch? */
+	struct proc_dir_entry *root;	/**< Root for this device's entries */
+
+	/** \name Locks */
+	/*@@{*/
+	spinlock_t	  count_lock;	/**< For inuse, drm_device::open_count, drm_device::buf_use */
+	struct semaphore  struct_sem;	/**< For others */
+	/*@@}*/
+
+	/** \name Usage Counters */
+	/*@@{*/
+	int		  open_count;	/**< Outstanding files open */
+	atomic_t	  ioctl_count;	/**< Outstanding IOCTLs pending */
+	atomic_t	  vma_count;	/**< Outstanding vma areas open */
+	int		  buf_use;	/**< Buffers in use -- cannot alloc */
+	atomic_t	  buf_alloc;	/**< Buffer allocation in progress */
+	/*@@}*/
+d490 1
+a490 2
+	/** \name Performance counters */
+	/*@@{*/
+a493 1
+	/*@@}*/
+d495 8
+a502 11
+	/** \name Authentication */
+	/*@@{*/
+	drm_file_t	  *file_first;	/**< file list head */
+	drm_file_t	  *file_last;	/**< file list tail */
+	drm_magic_head_t  magiclist[DRM_HASH_SIZE];	/**< magic hash table */
+	/*@@}*/
+
+	/** \name Memory management */
+	/*@@{*/
+	drm_map_list_t	  *maplist;	/**< Linked list of regions */
+	int		  map_count;	/**< Number of mappable regions */
+d504 1
+a504 1
+	drm_map_t	  **context_sareas; /**< per-context SAREA's */
+d507 20
+a526 28
+	drm_vma_entry_t	  *vmalist;	/**< List of vmas (for debugging) */
+	drm_lock_data_t	  lock;		/**< Information on hardware lock */
+	/*@@}*/
+
+	/** \name DMA queues (contexts) */
+	/*@@{*/
+	int		  queue_count;	/**< Number of active DMA queues */
+	int		  queue_reserved; /**< Number of reserved DMA queues */
+	int		  queue_slots;	/**< Actual length of queuelist */
+	drm_queue_t	  **queuelist;	/**< Vector of pointers to DMA queues */
+	drm_device_dma_t  *dma;		/**< Optional pointer for DMA support */
+	/*@@}*/
+
+	/** \name Context support */
+	/*@@{*/
+	int		  irq;		/**< Interrupt used by board */
+	int		  irq_enabled;	/**< True if irq handler is enabled */
+	__volatile__ long context_flag;	/**< Context swapping flag */
+	__volatile__ long interrupt_flag; /**< Interruption handler flag */
+	__volatile__ long dma_flag;	/**< DMA dispatch flag */
+	struct timer_list timer;	/**< Timer for delaying ctx switch */
+	wait_queue_head_t context_wait; /**< Processes waiting on ctx switch */
+	int		  last_checked;	/**< Last context checked for DMA */
+	int		  last_context;	/**< Last current context */
+	unsigned long	  last_switch;	/**< jiffies at last context switch */
+	/*@@}*/
+	
+#if !HAS_WORKQUEUE
+a527 13
+#else
+	struct work_struct	work;
+#endif
+	/** \name VBLANK IRQ support */
+	/*@@{*/
+#if __HAVE_VBL_IRQ
+   	wait_queue_head_t vbl_queue;	/**< VBLANK wait queue */
+   	atomic_t          vbl_received;
+	spinlock_t        vbl_lock;
+	drm_vbl_sig_t     vbl_sigs;	/**< signal list to send on VBLANK */
+	unsigned int      vbl_pending;
+#endif
+	/*@@}*/
+d530 3
+d534 9
+a542 7
+	char		  buf[DRM_BSZ]; /**< Output buffer */
+	char		  *buf_rp;	/**< Read pointer */
+	char		  *buf_wp;	/**< Write pointer */
+	char		  *buf_end;	/**< End pointer */
+	struct fasync_struct *buf_async;/**< Processes waiting for SIGIO */
+	wait_queue_head_t buf_readers;	/**< Processes waiting to read */
+	wait_queue_head_t buf_writers;	/**< Processes waiting to ctx switch */
+d545 1
+a545 1
+	drm_agp_head_t    *agp;	/**< AGP data */
+d547 1
+a547 6
+
+	struct pci_dev    *pdev;	/**< PCI device structure */
+	int               pci_domain;	/**< PCI bus domain number */
+	int               pci_bus;	/**< PCI bus number */
+	int               pci_slot;	/**< PCI slot number */
+	int               pci_func;	/**< PCI function number */
+d549 1
+a549 1
+#if LINUX_VERSION_CODE < KERNEL_VERSION(2,4,3)
+d555 4
+a558 4
+	drm_sg_mem_t      *sg;  /**< Scatter gather memory */
+	unsigned long     *ctx_bitmap;	/**< context bitmap */
+	void		  *dev_private; /**< device private data */
+	drm_sigdata_t     sigdata; /**< For block_all_signals */
+d563 3
+a565 3
+/******************************************************************/
+/** \name Internal function definitions */
+/*@@{*/
+d588 1
+d590 5
+d597 12
+a614 2
+extern unsigned int  DRM(poll)(struct file *filp, struct poll_table_struct *wait);
+extern ssize_t       DRM(read)(struct file *filp, char *buf, size_t count, loff_t *off);
+a620 1
+extern void	     *DRM(calloc)(size_t nmemb, size_t size, int area);
+d623 2
+d629 2
+a630 4
+extern void	     *DRM(ioremap)(unsigned long offset, unsigned long size, drm_device_t *dev);
+extern void	     *DRM(ioremap_nocache)(unsigned long offset, unsigned long size,
+					   drm_device_t *dev);
+extern void	     DRM(ioremapfree)(void *pt, unsigned long size, drm_device_t *dev);
+d633 4
+a636 8
+#ifndef VMAP_4_ARGS
+extern void	     *DRM(ioremap_agp)(unsigned long offset, unsigned long size, drm_device_t *dev);
+extern void	     DRM(ioremap_agp_free)(void *pt, unsigned long size);
+#endif
+extern DRM_AGP_MEM   *DRM(alloc_agp)(int pages, u32 type);
+extern int           DRM(free_agp)(DRM_AGP_MEM *handle, int pages);
+extern int           DRM(bind_agp)(DRM_AGP_MEM *handle, unsigned int start);
+extern int           DRM(unbind_agp)(DRM_AGP_MEM *handle);
+d640 2
+a641 2
+extern int	     DRM(irq_by_busid)(struct inode *inode, struct file *filp,
+				       unsigned int cmd, unsigned long arg);
+a651 2
+extern int	     DRM(setversion)(struct inode *inode, struct file *filp,
+				     unsigned int cmd, unsigned long arg);
+a697 3
+                                /* Placeholder for ioctls past */
+extern int	     DRM(noop)(struct inode *inode, struct file *filp,
+				  unsigned int cmd, unsigned long arg);
+d700 4
+d712 6
+d742 11
+a752 5
+extern void	     DRM(reclaim_buffers)( struct file *filp );
+#endif /* __HAVE_DMA */
+
+				/* IRQ support (drm_irq.h) */
+#if __HAVE_IRQ || __HAVE_DMA
+d755 1
+a755 3
+#endif
+#if __HAVE_IRQ
+extern int           DRM(irq_install)( drm_device_t *dev );
+d757 24
+a780 9
+extern irqreturn_t   DRM(irq_handler)( DRM_IRQ_ARGS );
+extern void          DRM(driver_irq_preinstall)( drm_device_t *dev );
+extern void          DRM(driver_irq_postinstall)( drm_device_t *dev );
+extern void          DRM(driver_irq_uninstall)( drm_device_t *dev );
+#if __HAVE_VBL_IRQ
+extern int           DRM(wait_vblank)(struct inode *inode, struct file *filp,
+				      unsigned int cmd, unsigned long arg);
+extern int           DRM(vblank_wait)(drm_device_t *dev, unsigned int *vbl_seq);
+extern void          DRM(vbl_send_signals)( drm_device_t *dev );
+d782 1
+a782 5
+#if __HAVE_IRQ_BH
+extern void          DRM(irq_immediate_bh)( void *dev );
+#endif
+#endif
+
+d805 4
+a808 4
+extern DRM_AGP_MEM    *DRM(agp_allocate_memory)(size_t pages, u32 type);
+extern int            DRM(agp_free_memory)(DRM_AGP_MEM *handle);
+extern int            DRM(agp_bind_memory)(DRM_AGP_MEM *handle, off_t start);
+extern int            DRM(agp_unbind_memory)(DRM_AGP_MEM *handle);
+a841 2
+
+/*@@}*/
+@
+
+
+1.1.1.1
+log
+@Import OpenBSD 3.3 XF4 repository from CTM 3132 the first time
+This finalizes starting an OpenBSD-mirabile (aka MirBSD) repository.
+
+### MirBSD is:
+# Copyright (c) 1982-2003 by Thorsten "mirabile" Glaser <x86@@ePost.de>
+# Copyright © 1968-2003  The authors of And contributors to UNIX®, the
+#       C Language, BSD/Berkeley Unix; 386BSD, NetBSD 1.1 and OpenBSD.
+#
+# Anyone who obtained a copy of this work is hereby permitted to freely use,
+# distribute, modify, merge, sublicence, give away or sell it as long as the
+# authors are given due credit and the following notice is retained:
+#
+# This work is provided "as is", with no explicit or implicit warranty what-
+# soever. Use it only at your own risk. In no event may an author or contri-
+# butor be held liable for any damage, directly or indirectly, that origina-
+# ted through or is caused by creation or modification of this work.
+
+MirBSD is my private tree. MirBSD does not differ very much from OpenBSD
+and intentionally tracks OpenBSD. That's why it _is_ OpenBSD, just not the
+official one. It's like with DarrenBSD.
+
+At time of this writing, no advertising for MirBSD must be done,
+because the advertising clause has not yet been sorted out.
+
+http://templeofhate.com/tglaser/MirBSD/index.php
+@
+text
+@@
+
+
+1.1.1.2
+log
+@The X-Windowing System
+
+Import XFree86 4.3 from OpenBSD by CTM, in the hope it's stable
+@
+text
+@a55 1
+#include <linux/pagemap.h>
+d74 4
+a77 1
+#include "drm_os_linux.h"
+d109 1
+a109 1
+#define __REALLY_HAVE_SG	(__HAVE_SG)
+a151 57
+				/* Backward compatibility section */
+#ifndef minor
+#define minor(x) MINOR((x))
+#endif
+
+#ifndef MODULE_LICENSE
+#define MODULE_LICENSE(x) 
+#endif
+
+#ifndef preempt_disable
+#define preempt_disable()
+#define preempt_enable()
+#endif
+
+#ifndef pte_offset_map 
+#define pte_offset_map pte_offset
+#define pte_unmap(pte)
+#endif
+
+#ifndef list_for_each_safe
+#define list_for_each_safe(pos, n, head)				\
+	for (pos = (head)->next, n = pos->next; pos != (head);		\
+		pos = n, n = pos->next)
+#endif
+
+#if LINUX_VERSION_CODE < KERNEL_VERSION(2,4,19)
+static inline struct page * vmalloc_to_page(void * vmalloc_addr)
+{
+	unsigned long addr = (unsigned long) vmalloc_addr;
+	struct page *page = NULL;
+	pgd_t *pgd = pgd_offset_k(addr);
+	pmd_t *pmd;
+	pte_t *ptep, pte;
+  
+	if (!pgd_none(*pgd)) {
+		pmd = pmd_offset(pgd, addr);
+		if (!pmd_none(*pmd)) {
+			preempt_disable();
+			ptep = pte_offset_map(pmd, addr);
+			pte = *ptep;
+			if (pte_present(pte))
+				page = pte_page(pte);
+			pte_unmap(ptep);
+			preempt_enable();
+		}
+	}
+	return page;
+}
+#endif
+
+#if LINUX_VERSION_CODE < KERNEL_VERSION(2,5,0)
+#define DRM_RPR_ARG(vma)
+#else
+#define DRM_RPR_ARG(vma) vma,
+#endif
+
+
+d156 1
+a156 1
+	printk(KERN_ERR "[" DRM_NAME ":%s] *ERROR* " fmt , __FUNCTION__ , ##arg)
+d158 1
+a158 1
+	printk(KERN_ERR "[" DRM_NAME ":%s:%s] *ERROR* " fmt , __FUNCTION__, \
+d167 2
+a168 2
+			       "[" DRM_NAME ":%s] " fmt ,	\
+			       __FUNCTION__ , ##arg);			\
+a187 3
+#define DRM_IOREMAP_NOCACHE(map)					\
+	(map)->handle = DRM(ioremap_nocache)((map)->offset, (map)->size)
+
+d439 1
+a468 11
+#if __HAVE_VBL_IRQ
+
+typedef struct drm_vbl_sig {
+	struct list_head	head;
+	unsigned int		sequence;
+	struct siginfo		info;
+	struct task_struct	*task;
+} drm_vbl_sig_t;
+
+#endif
+
+a527 7
+#if __HAVE_VBL_IRQ
+   	wait_queue_head_t vbl_queue;
+   	atomic_t          vbl_received;
+	spinlock_t        vbl_lock;
+	drm_vbl_sig_t     vbl_sigs;
+	unsigned int      vbl_pending;
+#endif
+d549 1
+a549 1
+#if LINUX_VERSION_CODE < KERNEL_VERSION(2,4,3)
+a629 1
+extern void	     *DRM(ioremap_nocache)(unsigned long offset, unsigned long size);
+a758 9
+extern void          DRM(driver_irq_preinstall)( drm_device_t *dev );
+extern void          DRM(driver_irq_postinstall)( drm_device_t *dev );
+extern void          DRM(driver_irq_uninstall)( drm_device_t *dev );
+#if __HAVE_VBL_IRQ
+extern int           DRM(wait_vblank)(struct inode *inode, struct file *filp,
+				      unsigned int cmd, unsigned long arg);
+extern int           DRM(vblank_wait)(drm_device_t *dev, unsigned int *vbl_seq);
+extern void          DRM(vbl_send_signals)( drm_device_t *dev );
+#endif
+@
+
+
+1.1.1.3
+log
+@That's what OpenBSD will, probably, ship as XF4 in 3.5
+their last sync against XFree86 4.3-current has been
+imported into our vendor branch, too
+@
+text
+@d1 3
+a3 9
+/**
+ * \file drmP.h 
+ * Private header for Direct Rendering Manager
+ * 
+ * \author Rickard E. (Rik) Faith <faith@@valinux.com>
+ * \author Gareth Hughes <gareth@@valinux.com>
+ */
+
+/*
+d26 4
+a34 1
+
+d51 1
+a69 6
+#if LINUX_VERSION_CODE < KERNEL_VERSION(2,5,41)
+#define HAS_WORKQUEUE 0
+#else
+#define HAS_WORKQUEUE 1
+#endif
+#if !HAS_WORKQUEUE
+a70 3
+#else
+#include <linux/workqueue.h>
+#endif
+d77 2
+a78 5
+
+/***********************************************************************/
+/** \name DRM template customization defaults */
+/*@@{*/
+
+d91 2
+a92 2
+#ifndef __HAVE_IRQ
+#define __HAVE_IRQ		0
+d100 3
+d109 2
+a110 2
+/*@@}*/
+
+d112 1
+a112 5
+/***********************************************************************/
+/** \name Begin the DRM... */
+/*@@{*/
+
+#define DRM_DEBUG_CODE 2	  /**< Include debugging code if > 1, then
+d115 3
+a117 3
+#define DRM_HASH_SIZE	      16 /**< Size of key hash table. Must be power of 2. */
+#define DRM_KERNEL_CONTEXT    0	 /**< Change drm_resctx if changed */
+#define DRM_RESERVED_CONTEXTS 1	 /**< Change drm_resctx if changed */
+d119 3
+a121 3
+#define DRM_BSZ		      1024 /**< Buffer size for /dev/drm? output */
+#define DRM_TIME_SLICE	      (HZ/20)  /**< Time slice for GLXContexts */
+#define DRM_LOCK_SLICE	      1	/**< Time slice for lock, in jiffies */
+d124 1
+a148 7
+	
+/*@@}*/
+
+
+/***********************************************************************/
+/** \name Backward compatibility section */
+/*@@{*/
+d150 1
+a174 9
+#ifndef list_for_each_entry
+#define list_for_each_entry(pos, head, member)				\
+       for (pos = list_entry((head)->next, typeof(*pos), member),	\
+                    prefetch(pos->member.next);				\
+            &pos->member != (head);					\
+            pos = list_entry(pos->member.next, typeof(*pos), member),	\
+                    prefetch(pos->member.next))
+#endif
+
+d200 1
+a200 1
+#ifndef REMAP_PAGE_RANGE_5_ARGS
+d206 1
+d209 1
+a209 13
+/*@@}*/
+
+
+/***********************************************************************/
+/** \name Macros to make printk easier */
+/*@@{*/
+
+/**
+ * Error output.
+ *
+ * \param fmt printf() like format string.
+ * \param arg arguments
+ */
+a211 8
+
+/**
+ * Memory error output.
+ *
+ * \param area memory area where the error occurred.
+ * \param fmt printf() like format string.
+ * \param arg arguments
+ */
+a216 6
+/**
+ * Debug output.
+ * 
+ * \param fmt printf() like format string.
+ * \param arg arguments
+ */
+d239 3
+a241 9
+/*@@}*/
+
+
+/***********************************************************************/
+/** \name Mapping helper macros */
+/*@@{*/
+
+#define DRM_IOREMAP(map, dev)							\
+	(map)->handle = DRM(ioremap)( (map)->offset, (map)->size, (dev) )
+d243 2
+a244 2
+#define DRM_IOREMAP_NOCACHE(map, dev)						\
+	(map)->handle = DRM(ioremap_nocache)((map)->offset, (map)->size, (dev))
+d246 1
+a246 12
+#define DRM_IOREMAPFREE(map, dev)						\
+	do {									\
+		if ( (map)->handle && (map)->size )				\
+			DRM(ioremapfree)( (map)->handle, (map)->size, (dev) );	\
+	} while (0)
+
+#ifndef VMAP_4_ARGS
+
+#define DRM_IOREMAPAGP(map, dev)						\
+	(map)->handle = DRM(ioremap_agp)( (map)->offset, (map)->size, (dev) )
+
+#define DRM_IOREMAPAGPFREE(map)						\
+d249 1
+a249 1
+			DRM(ioremap_agp_free)( (map)->handle, (map)->size );	\
+d252 11
+a262 22
+#endif
+
+/**
+ * Find mapping.
+ *
+ * \param _map matching mapping if found, untouched otherwise.
+ * \param _o offset.
+ *
+ * Expects the existence of a local variable named \p dev pointing to the
+ * drm_device structure.
+ */
+#define DRM_FIND_MAP(_map, _o)								\
+do {											\
+	struct list_head *_list;							\
+	list_for_each( _list, &dev->maplist->head ) {					\
+		drm_map_list_t *_entry = list_entry( _list, drm_map_list_t, head );	\
+		if ( _entry->map &&							\
+		     _entry->map->offset == (_o) ) {					\
+			(_map) = _entry->map;						\
+			break;								\
+ 		}									\
+	}										\
+d265 1
+a265 14
+/**
+ * Drop mapping.
+ *
+ * \sa #DRM_FIND_MAP.
+ */
+#define DRM_DROP_MAP(_map)
+
+/*@@}*/
+
+
+/***********************************************************************/
+/** \name Internal types and structures */
+/*@@{*/
+
+a273 8
+#define DRM_IF_VERSION(maj, min) (maj << 16 | min)
+/**
+ * Get the private SAREA mapping.
+ *
+ * \param _dev DRM device.
+ * \param _ctx context number.
+ * \param _map output mapping.
+ */
+a277 24
+/**
+ * Test that the hardware lock is held by the caller, returning otherwise.
+ *
+ * \param dev DRM device.
+ * \param filp file pointer of the caller.
+ */
+#define LOCK_TEST_WITH_RETURN( dev, filp )				\
+do {									\
+	if ( !_DRM_LOCK_IS_HELD( dev->lock.hw_lock->lock ) ||		\
+	     dev->lock.filp != filp ) {				\
+		DRM_ERROR( "%s called without lock held\n",		\
+			   __FUNCTION__ );				\
+		return -EINVAL;						\
+	}								\
+} while (0)
+
+/**
+ * Ioctl function type.
+ *
+ * \param inode device inode.
+ * \param filp file pointer.
+ * \param cmd command.
+ * \param arg argument.
+ */
+d281 4
+a284 7
+typedef struct drm_pci_id_list
+{
+	int vendor;
+	int device;
+	long driver_private;
+	char *name;
+} drm_pci_id_list_t;
+d293 2
+a294 1
+	pid_t		  owner;	/**< X server pid holding x_lock */
+a313 3
+/**
+ * DMA buffer.
+ */
+d315 14
+a328 14
+	int		  idx;	       /**< Index into master buflist */
+	int		  total;       /**< Buffer size */
+	int		  order;       /**< log-base-2(total) */
+	int		  used;	       /**< Amount of buffer in use (for DMA) */
+	unsigned long	  offset;      /**< Byte offset (used internally) */
+	void		  *address;    /**< Address of buffer */
+	unsigned long	  bus_address; /**< Bus address of buffer */
+	struct drm_buf	  *next;       /**< Kernel-only: used for free list */
+	__volatile__ int  waiting;     /**< On kernel DMA queue */
+	__volatile__ int  pending;     /**< On hardware DMA queue */
+	wait_queue_head_t dma_wait;    /**< Processes waiting */
+	struct file       *filp;       /**< Pointer to holding file descr */
+	int		  context;     /**< Kernel queue for this buffer */
+	int		  while_locked;/**< Dispatch this buffer while locked */
+d336 8
+a343 1
+	}		  list;	       /**< Which list we're on */
+d345 2
+a346 2
+	int		  dev_priv_size; /**< Size of buffer private storage */
+	void		  *dev_private;  /**< Per-buffer private storage */
+d349 21
+d371 1
+a371 1
+/** bufs is one longer than it has to be */
+d373 5
+a377 5
+	int		  count;	/**< Number of possible buffers */
+	drm_buf_t	  **bufs;	/**< List of pointers to buffers */
+	drm_buf_t	  **rp;		/**< Read pointer */
+	drm_buf_t	  **wp;		/**< Write pointer */
+	drm_buf_t	  **end;	/**< End pointer */
+d383 8
+a390 8
+	int		  initialized; /**< Freelist in use */
+	atomic_t	  count;       /**< Number of free buffers */
+	drm_buf_t	  *next;       /**< End pointer */
+
+	wait_queue_head_t waiting;     /**< Processes waiting on free bufs */
+	int		  low_mark;    /**< Low water mark */
+	int		  high_mark;   /**< High water mark */
+	atomic_t	  wfh;	       /**< If waiting for high mark */
+a393 3
+/**
+ * Buffer entry.  There is one of this for each buffer size order.
+ */
+d395 3
+a397 3
+	int		  buf_size;	/**< size */
+	int		  buf_count;	/**< number of buffers */
+	drm_buf_t	  *buflist;	/**< buffer list */
+a404 7
+/**
+ * Hardware lock.
+ *
+ * The lock structure is a simple cache-line aligned integer.  To avoid
+ * processor bus contention on a multiprocessor system, there should not be any
+ * other data stored in the same cache line.
+ */
+d406 2
+a407 2
+	__volatile__ unsigned int lock;		/**< lock variable */
+	char			  padding[60];	/**< Pad to cache line */
+a409 1
+/** File private data */
+a420 4
+	unsigned long     lock_count;
+#ifdef DRIVER_FILE_FIELDS
+	DRIVER_FILE_FIELDS;
+#endif
+d423 1
+a423 1
+/** Wait queue */
+d425 7
+a431 7
+	atomic_t	  use_count;	/**< Outstanding uses (+1) */
+	atomic_t	  finalization;	/**< Finalization in progress */
+	atomic_t	  block_count;	/**< Count of processes waiting */
+	atomic_t	  block_read;	/**< Queue blocked for reads */
+	wait_queue_head_t read_queue;	/**< Processes waiting on block_read */
+	atomic_t	  block_write;	/**< Queue blocked for writes */
+	wait_queue_head_t write_queue;	/**< Processes waiting on block_write */
+d433 7
+a439 7
+	atomic_t	  total_queued;	/**< Total queued statistic */
+	atomic_t	  total_flushed;/**< Total flushes statistic */
+	atomic_t	  total_locks;	/**< Total locks statistics */
+#endif
+	drm_ctx_flags_t	  flags;	/**< Context preserving and 2D-only */
+	drm_waitlist_t	  waitlist;	/**< Pending buffers */
+	wait_queue_head_t flush_queue;	/**< Processes waiting until flush */
+a441 3
+/**
+ * Lock data.
+ */
+d443 4
+a446 4
+	drm_hw_lock_t	  *hw_lock;	/**< Hardware lock */
+	struct file       *filp;	/**< File descr of lock holder (0=kernel) */
+	wait_queue_head_t lock_queue;	/**< Queue of blocked processes */
+	unsigned long	  lock_time;	/**< Time of last lock in jiffies */
+a448 3
+/**
+ * DMA data.
+ */
+d450 19
+a468 4
+
+	drm_buf_entry_t	  bufs[DRM_MAX_ORDER+1];	/**< buffers, grouped by their size order */
+	int		  buf_count;	/**< total number of buffers */
+	drm_buf_t	  **buflist;	/**< Vector of pointers into drm_device_dma::bufs */
+d470 2
+a471 2
+	int		  page_count;	/**< number of pages */
+	unsigned long	  *pagelist;	/**< page list */
+d478 5
+a482 7
+	/** \name DMA support */
+	/*@@{*/
+	drm_buf_t	  *this_buffer;	/**< Buffer being sent */
+	drm_buf_t	  *next_buffer; /**< Selected buffer to send */
+	drm_queue_t	  *next_queue;	/**< Queue from which buffer selected*/
+	wait_queue_head_t waiting;	/**< Processes waiting on free bufs */
+	/*@@}*/
+a485 3
+/** 
+ * AGP memory entry.  Stored as a doubly linked list.
+ */
+d487 3
+a489 3
+	unsigned long      handle;	/**< handle */
+	DRM_AGP_MEM        *memory;	
+	unsigned long      bound;	/**< address */
+d491 2
+a492 2
+	struct drm_agp_mem *prev;	/**< previous entry */
+	struct drm_agp_mem *next;	/**< next entry */
+a494 5
+/**
+ * AGP data.
+ *
+ * \sa DRM(agp_init)() and drm_device::agp.
+ */
+d496 5
+a500 5
+	DRM_AGP_KERN       agp_info;	/**< AGP device information */
+	drm_agp_mem_t      *memory;	/**< memory entries */
+	unsigned long      mode;	/**< AGP mode */
+	int                enabled;	/**< whether the AGP bus as been enabled */
+	int                acquired;	/**< whether the AGP device has been acquired */
+a507 3
+/**
+ * Scatter-gather memory.
+ */
+a520 3
+/**
+ * Mappings list
+ */
+d522 2
+a523 2
+	struct list_head	head;	/**< list head */
+	drm_map_t		*map;	/**< mapping */
+a525 2
+typedef drm_map_t drm_local_map_t;
+
+a536 3
+/**
+ * DRM device structure.
+ */
+d538 19
+a556 25
+	const char	  *name;	/**< Simple driver name */
+	char		  *unique;	/**< Unique identifier: e.g., busid */
+	int		  unique_len;	/**< Length of unique field */
+	dev_t		  device;	/**< Device number for mknod */
+	char		  *devname;	/**< For /proc/interrupts */
+	int		  minor;        /**< Minor device number */
+	int		  if_version;	/**< Highest interface version set */
+
+	int		  blocked;	/**< Blocked due to VC switch? */
+	struct proc_dir_entry *root;	/**< Root for this device's entries */
+
+	/** \name Locks */
+	/*@@{*/
+	spinlock_t	  count_lock;	/**< For inuse, drm_device::open_count, drm_device::buf_use */
+	struct semaphore  struct_sem;	/**< For others */
+	/*@@}*/
+
+	/** \name Usage Counters */
+	/*@@{*/
+	int		  open_count;	/**< Outstanding files open */
+	atomic_t	  ioctl_count;	/**< Outstanding IOCTLs pending */
+	atomic_t	  vma_count;	/**< Outstanding vma areas open */
+	int		  buf_use;	/**< Buffers in use -- cannot alloc */
+	atomic_t	  buf_alloc;	/**< Buffer allocation in progress */
+	/*@@}*/
+d558 1
+a558 2
+	/** \name Performance counters */
+	/*@@{*/
+a561 1
+	/*@@}*/
+d563 8
+a570 11
+	/** \name Authentication */
+	/*@@{*/
+	drm_file_t	  *file_first;	/**< file list head */
+	drm_file_t	  *file_last;	/**< file list tail */
+	drm_magic_head_t  magiclist[DRM_HASH_SIZE];	/**< magic hash table */
+	/*@@}*/
+
+	/** \name Memory management */
+	/*@@{*/
+	drm_map_list_t	  *maplist;	/**< Linked list of regions */
+	int		  map_count;	/**< Number of mappable regions */
+d572 1
+a572 1
+	drm_map_t	  **context_sareas; /**< per-context SAREA's */
+d575 20
+a594 28
+	drm_vma_entry_t	  *vmalist;	/**< List of vmas (for debugging) */
+	drm_lock_data_t	  lock;		/**< Information on hardware lock */
+	/*@@}*/
+
+	/** \name DMA queues (contexts) */
+	/*@@{*/
+	int		  queue_count;	/**< Number of active DMA queues */
+	int		  queue_reserved; /**< Number of reserved DMA queues */
+	int		  queue_slots;	/**< Actual length of queuelist */
+	drm_queue_t	  **queuelist;	/**< Vector of pointers to DMA queues */
+	drm_device_dma_t  *dma;		/**< Optional pointer for DMA support */
+	/*@@}*/
+
+	/** \name Context support */
+	/*@@{*/
+	int		  irq;		/**< Interrupt used by board */
+	int		  irq_enabled;	/**< True if irq handler is enabled */
+	__volatile__ long context_flag;	/**< Context swapping flag */
+	__volatile__ long interrupt_flag; /**< Interruption handler flag */
+	__volatile__ long dma_flag;	/**< DMA dispatch flag */
+	struct timer_list timer;	/**< Timer for delaying ctx switch */
+	wait_queue_head_t context_wait; /**< Processes waiting on ctx switch */
+	int		  last_checked;	/**< Last context checked for DMA */
+	int		  last_context;	/**< Last current context */
+	unsigned long	  last_switch;	/**< jiffies at last context switch */
+	/*@@}*/
+	
+#if !HAS_WORKQUEUE
+a595 5
+#else
+	struct work_struct	work;
+#endif
+	/** \name VBLANK IRQ support */
+	/*@@{*/
+d597 1
+a597 1
+   	wait_queue_head_t vbl_queue;	/**< VBLANK wait queue */
+d600 1
+a600 1
+	drm_vbl_sig_t     vbl_sigs;	/**< signal list to send on VBLANK */
+a602 1
+	/*@@}*/
+d605 3
+d609 9
+a617 7
+	char		  buf[DRM_BSZ]; /**< Output buffer */
+	char		  *buf_rp;	/**< Read pointer */
+	char		  *buf_wp;	/**< Write pointer */
+	char		  *buf_end;	/**< End pointer */
+	struct fasync_struct *buf_async;/**< Processes waiting for SIGIO */
+	wait_queue_head_t buf_readers;	/**< Processes waiting to read */
+	wait_queue_head_t buf_writers;	/**< Processes waiting to ctx switch */
+d620 1
+a620 1
+	drm_agp_head_t    *agp;	/**< AGP data */
+d622 1
+a622 6
+
+	struct pci_dev    *pdev;	/**< PCI device structure */
+	int               pci_domain;	/**< PCI bus domain number */
+	int               pci_bus;	/**< PCI bus number */
+	int               pci_slot;	/**< PCI slot number */
+	int               pci_func;	/**< PCI function number */
+d630 4
+a633 4
+	drm_sg_mem_t      *sg;  /**< Scatter gather memory */
+	unsigned long     *ctx_bitmap;	/**< context bitmap */
+	void		  *dev_private; /**< device private data */
+	drm_sigdata_t     sigdata; /**< For block_all_signals */
+d638 3
+a640 3
+/******************************************************************/
+/** \name Internal function definitions */
+/*@@{*/
+d663 1
+d665 5
+d672 12
+a689 2
+extern unsigned int  DRM(poll)(struct file *filp, struct poll_table_struct *wait);
+extern ssize_t       DRM(read)(struct file *filp, char *buf, size_t count, loff_t *off);
+a695 1
+extern void	     *DRM(calloc)(size_t nmemb, size_t size, int area);
+d698 2
+d704 3
+a706 4
+extern void	     *DRM(ioremap)(unsigned long offset, unsigned long size, drm_device_t *dev);
+extern void	     *DRM(ioremap_nocache)(unsigned long offset, unsigned long size,
+					   drm_device_t *dev);
+extern void	     DRM(ioremapfree)(void *pt, unsigned long size, drm_device_t *dev);
+d709 4
+a712 8
+#ifndef VMAP_4_ARGS
+extern void	     *DRM(ioremap_agp)(unsigned long offset, unsigned long size, drm_device_t *dev);
+extern void	     DRM(ioremap_agp_free)(void *pt, unsigned long size);
+#endif
+extern DRM_AGP_MEM   *DRM(alloc_agp)(int pages, u32 type);
+extern int           DRM(free_agp)(DRM_AGP_MEM *handle, int pages);
+extern int           DRM(bind_agp)(DRM_AGP_MEM *handle, unsigned int start);
+extern int           DRM(unbind_agp)(DRM_AGP_MEM *handle);
+d716 2
+a717 2
+extern int	     DRM(irq_by_busid)(struct inode *inode, struct file *filp,
+				       unsigned int cmd, unsigned long arg);
+a727 2
+extern int	     DRM(setversion)(struct inode *inode, struct file *filp,
+				     unsigned int cmd, unsigned long arg);
+a773 3
+                                /* Placeholder for ioctls past */
+extern int	     DRM(noop)(struct inode *inode, struct file *filp,
+				  unsigned int cmd, unsigned long arg);
+d776 4
+d788 6
+d818 11
+a828 5
+extern void	     DRM(reclaim_buffers)( struct file *filp );
+#endif /* __HAVE_DMA */
+
+				/* IRQ support (drm_irq.h) */
+#if __HAVE_IRQ || __HAVE_DMA
+d831 1
+a831 3
+#endif
+#if __HAVE_IRQ
+extern int           DRM(irq_install)( drm_device_t *dev );
+d833 2
+a834 1
+extern irqreturn_t   DRM(irq_handler)( DRM_IRQ_ARGS );
+d844 3
+a846 2
+#if __HAVE_IRQ_BH
+extern void          DRM(irq_immediate_bh)( void *dev );
+d848 18
+d867 1
+a867 1
+
+d890 4
+a893 4
+extern DRM_AGP_MEM    *DRM(agp_allocate_memory)(size_t pages, u32 type);
+extern int            DRM(agp_free_memory)(DRM_AGP_MEM *handle);
+extern int            DRM(agp_bind_memory)(DRM_AGP_MEM *handle, off_t start);
+extern int            DRM(agp_unbind_memory)(DRM_AGP_MEM *handle);
+a926 2
+
+/*@@}*/
+@
+
+

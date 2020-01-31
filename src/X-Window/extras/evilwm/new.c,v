@@ -1,0 +1,940 @@
+head	1.5;
+access;
+symbols
+	tg-mergetmp-2:1.5
+	MIRBSD_7quater:1.3
+	evilwm_0_99_17:1.1.3.1
+	MIRBSD_7_ALPHA:1.3.0.4
+	MIRBSD_7:1.3.0.2
+	MIRBSD_7ter:1.3
+	evilwm_0_99_16:1.1.1.2
+	evilwm_0_99_14:1.1.1.1
+	tg:1.1.3
+	MIRBSD_5:1.1
+	MIRBSD_4:1.1;
+locks; strict;
+comment	@ * @;
+
+
+1.5
+date	2004.08.21.16.19.36;	author tg;	state Stab;
+branches;
+next	1.4;
+
+1.4
+date	2004.07.29.11.19.33;	author tg;	state Exp;
+branches;
+next	1.3;
+
+1.3
+date	2003.09.18.19.20.21;	author tg;	state Exp;
+branches;
+next	1.2;
+
+1.2
+date	2003.07.07.22.03.17;	author tg;	state Exp;
+branches;
+next	1.1;
+
+1.1
+date	2003.04.10.14.50.36;	author tg;	state Exp;
+branches
+	1.1.1.1
+	1.1.3.1;
+next	;
+
+1.1.1.1
+date	2003.09.18.18.43.42;	author tg;	state Exp;
+branches;
+next	1.1.1.2;
+
+1.1.1.2
+date	2003.09.18.19.11.34;	author tg;	state Exp;
+branches;
+next	;
+
+1.1.3.1
+date	2004.01.29.19.07.52;	author tg;	state Exp;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.5
+log
+@update to new-style licence template
+@
+text
+@/**	$MirBSD: src/share/misc/licence.template,v 1.14 2004/08/15 15:29:11 tg Rel $ */
+
+/*-
+ * Copyright (c) 2004
+ *	Thorsten "mirabile" Glaser <tg@@66h.42h.de>
+ *
+ * Licensee is hereby permitted to deal in this work without restric-
+ * tion, including unlimited rights to use, publically perform, modi-
+ * fy, merge, distribute, sell, give away or sublicence, provided the
+ * above copyright notices, these terms and the disclaimer are retai-
+ * ned in all redistributions, or reproduced in accompanying documen-
+ * tation or other materials provided with binary redistributions.
+ *
+ * Licensor hereby provides this work "AS IS" and WITHOUT WARRANTY of
+ * any kind, expressed or implied, to the maximum extent permitted by
+ * applicable law, but with the warranty of being written without ma-
+ * licious intent or gross negligence; in no event shall licensor, an
+ * author or contributor be held liable for any damage, direct, indi-
+ * rect or other, however caused, arising in any way out of the usage
+ * of covered work, even if advised of the possibility of such damage.
+ */
+
+/* evilwm - Minimalist Window Manager for X
+ * Copyright (C) 1999-2002 Ciaran Anscomb <evilwm@@6809.org.uk>
+ * see README for license and other details. */
+
+#include "evilwm.h"
+#include <stdlib.h>
+#include <string.h>
+#include <stdio.h>
+#ifdef SHAPE
+#include <X11/extensions/shape.h>
+#endif
+
+#ifdef MWM_HINTS
+static PropMwmHints *get_mwm_hints(Window);
+#endif
+
+void make_new_client(Window w, ScreenInfo *s) {
+	Client *c;
+	XWindowAttributes attr;
+	long dummy;
+	XWMHints *hints;
+	char *name;
+	/*
+	XClassHint *class;
+	*/
+#ifdef MWM_HINTS
+	PropMwmHints *mhints;
+#endif
+
+	XGrabServer(dpy);
+
+	c = (Client *)malloc(sizeof(Client));
+	/* Don't crash the window manager, just fail the operation. */
+	if (!c) {
+#ifdef STDIO
+		fprintf(stderr, "out of memory in new_client; limping onward\n");
+#endif
+		return;
+	}
+	/* We do this first of all as a test to see if the window actually
+	 * still exists by the time we've got to create a client structure
+	 * for it (sometimes they vanish too quickly or something, and lots
+	 * of pain ensues). */
+	initialising = w;
+	XFetchName(dpy, w, &name);
+	/* If 'initialising' is now set to None, that means doing the
+	 * XFetchName raised BadWindow - the window has been removed before
+	 * we got a chance to grab the server. */
+	if (initialising == None) {
+#ifdef DEBUG
+		fprintf(stderr, "make_new_client() : XError occurred for initialising window - aborting...\n");
+#endif
+		free(c);
+		XSync(dpy, False);
+		XUngrabServer(dpy);
+		return;
+	}
+	initialising = None;
+	c->next = head_client;
+	head_client = c;
+
+	/*
+	class = XAllocClassHint();
+	if (class) {
+		XGetClassHint(dpy, w, class);
+		fprintf(stderr, "res_name = %s, res_class = %s\n", class->res_name, class->res_class);
+		XFree(class->res_name);
+		XFree(class->res_class);
+		XFree(class);
+	}
+	*/
+
+	/* initialise(c, w); */
+	c->screen = s;
+	c->window = w;
+	c->ignore_unmap = 0;
+
+	c->size = XAllocSizeHints();
+#ifdef XDEBUG
+	fprintf(stderr, "XGetWMNormalHints(); ");
+#endif
+	XGetWMNormalHints(dpy, c->window, c->size, &dummy);
+
+	XGetWindowAttributes(dpy, c->window, &attr);
+
+	c->x = attr.x;
+	c->y = attr.y;
+	c->width = attr.width;
+	c->height = attr.height;
+	c->border = opt_bw;
+	c->oldw = c->oldh = 0;
+
+#ifdef MWM_HINTS
+	if ((mhints = get_mwm_hints(c->window))) {
+		if (mhints->flags & MWM_HINTS_DECORATIONS
+				&& !(mhints->decorations & MWM_DECOR_ALL)) {
+			if (!(mhints->decorations & MWM_DECOR_BORDER)) {
+				c->border = 0;
+			}
+		}
+		XFree(mhints);
+	}
+#endif
+	/* If we don't have MWM_HINTS (ie, lesstif) for a client to tell us
+	 * it has no border, I include this *really blatant hack* to remove
+	 * the border from XMMS. */
+	if (name) {
+#ifndef MWM_HINTS
+		if (!strncmp("XMMS", name, 4))
+			c->border = 0;
+#endif
+		XFree(name);  /* But we want to free this anyway... */
+	}
+
+#ifdef COLOURMAP
+	c->cmap = attr.colormap;
+#endif
+#ifdef VWM
+	c->vdesk = vdesk;
+#endif
+#ifdef DEBUG
+	{
+		Client *p;
+		int i = 0;
+		for (p = head_client; p; p = p->next)
+			i++;
+		fprintf(stderr, "make_new_client() : new window %dx%d+%d+%d, wincount=%d\n", c->width, c->height, c->x, c->y, i);
+	}
+#endif
+
+	/* c->size = XAllocSizeHints();
+	XGetWMNormalHints(dpy, c->window, c->size, &dummy); */
+
+	if (attr.map_state == IsViewable) {
+		c->ignore_unmap++;
+	} else {
+		init_position(c);
+		if ((hints = XGetWMHints(dpy, w))) {
+			if (hints->flags & StateHint)
+				set_wm_state(c, hints->initial_state);
+			XFree(hints);
+		}
+	}
+
+	/* Jon Perkin reported a crash wish an app called 'sunpci' which we
+	 * traced to getting divide-by-zeros because it sets PResizeInc
+	 * but then has increments as 0.  So we check for 0s here and set them
+	 * to sensible defaults. */
+	/* moved sanity checking to after receiving all hints from the
+	 * server and application, because they override it in some cases */
+	if (c->size->width_inc == 0)
+		c->size->width_inc = 1;
+	if (c->size->height_inc == 0)
+		c->size->height_inc = 1;
+
+	/* client is initialised */
+
+	gravitate(c);
+	reparent(c);
+
+#ifdef DEBUG
+	if (wm_state(c) == IconicState) {
+		fprintf(stderr, "make_new_client() : client thinks it's iconised\n");
+	} else {
+		if (wm_state(c) == NormalState) {
+			fprintf(stderr, "make_new_client() : client is in NormalState - good\n");
+		} else {
+			if (wm_state(c) == WithdrawnState) {
+				fprintf(stderr, "make_new_client() : silly client!  it's in WithdrawnState\n");
+			} else {
+				fprintf(stderr, "make_new_client() : don't know what state client is in\n");
+			}
+		}
+	}
+#endif
+	XMapWindow(dpy, c->window);
+	XMapRaised(dpy, c->parent);
+	set_wm_state(c, NormalState);
+
+	XSync(dpy, False);
+	XUngrabServer(dpy);
+#ifndef MOUSE
+	setmouse(c->window, c->width + c->border - 1,
+			c->height + c->border - 1);
+#endif
+}
+
+void init_position(Client *c) {
+#ifdef MOUSE
+	int x, y;
+#endif
+	int xmax = DisplayWidth(dpy, c->screen->screen);
+	int ymax = DisplayHeight(dpy, c->screen->screen);
+
+	/*
+	if (c->size->flags & (/+PSize | +/USSize)) {
+		c->width = c->size->width;
+		c->height = c->size->height;
+	}
+	*/
+
+	if (c->width < MINSIZE) c->width = MINSIZE;
+	if (c->height < MINSIZE) c->height = MINSIZE;
+	if (c->width > xmax) c->width = xmax;
+	if (c->height > ymax) c->height = ymax;
+
+	if (c->size->flags & (/*PPosition | */USPosition)) {
+		c->x = c->size->x;
+		c->y = c->size->y;
+		if (c->x < 0 || c->y < 0 || c->x > xmax || c->y > ymax)
+			c->x = c->y = c->border;
+	} else {
+#ifdef MOUSE
+		get_mouse_position(&x, &y, c->screen->root);
+		c->x = (x * (xmax - c->border - c->width)) / xmax;
+		c->y = (y * (ymax - c->border - c->height)) / ymax;
+#else
+		c->x = c->y = 0;
+#endif
+	}
+	/* reposition if maximised horizontally or vertically */
+	if (c->x == 0 && c->width == xmax)
+		c->x = -c->border;
+	if (c->y == 0 && c->height == ymax)
+		c->y = -c->border;
+}
+
+void reparent(Client *c) {
+	XSetWindowAttributes p_attr;
+
+#ifdef COLOURMAP
+	XSelectInput(dpy, c->window, ColormapChangeMask | EnterWindowMask | PropertyChangeMask);
+#else
+	XSelectInput(dpy, c->window, EnterWindowMask | PropertyChangeMask);
+#endif
+
+	p_attr.override_redirect = True;
+	p_attr.background_pixel = c->screen->bg.pixel;
+	p_attr.event_mask = ChildMask | ButtonPressMask | ExposureMask | EnterWindowMask;
+	c->parent = XCreateWindow(dpy, c->screen->root, c->x-c->border, c->y-c->border,
+		c->width+(c->border*2), c->height + (c->border*2), 0,
+		DefaultDepth(dpy, c->screen->screen), CopyFromParent,
+		DefaultVisual(dpy, c->screen->screen),
+		CWOverrideRedirect | CWBackPixel | CWEventMask, &p_attr);
+#ifdef SHAPE
+	if (have_shape) {
+	    XShapeSelectInput(dpy, c->window, ShapeNotifyMask);
+	    set_shape(c);
+	}
+#endif
+
+	XAddToSaveSet(dpy, c->window);
+	XSetWindowBorderWidth(dpy, c->window, 0);
+	XReparentWindow(dpy, c->window, c->parent, c->border, c->border);
+
+	send_config(c);
+}
+
+/* Taken from aewm-1.2.0 */
+
+#ifdef MWM_HINTS
+static PropMwmHints *get_mwm_hints(Window w) {
+	Atom real_type; int real_format;
+	unsigned long items_read, bytes_left;
+	unsigned char *data;
+	if (XGetWindowProperty(dpy, w, mwm_hints, 0L, 20L, False,
+		mwm_hints, &real_type, &real_format, &items_read, &bytes_left,
+		&data) == Success
+		&& items_read >= PROP_MOTIF_WM_HINTS_ELEMENTS) {
+		return (PropMwmHints *)data;
+	} else {
+		return NULL;
+	}
+}
+#endif
+@
+
+
+1.4
+log
+@* use window's hints as the account to be resized by by default,
+  not a fixed value of 16 (thanks to ciruz (Jonathan Schleifer) for
+  mentioning this value exists)
+* move check if hints are <1 to after all hints have been received
+  from the X server and application (could have been overridden)
+* don't let the user resize a window by keyboard to less than one
+  (1) pixel width and height
+* update licence template
+* CFLAGS -> CPPFLAGS in Makefile, as usual
+@
+text
+@d1 3
+a3 2
+/* $MirBSD: src/share/misc/licence.template,v 1.11 2004/05/28 15:34:01 tg Rel $
+ *-
+@
+
+
+1.3
+log
+@Upgrade evilwm to 0.99.16-mirbsd.
+
+This work sponsored by: NetzLaden.org
+@
+text
+@d1 21
+a98 4
+	/* Jon Perkin reported a crash wish an app called 'sunpci' which we
+	 * traced to getting divide-by-zeros because it sets PResizeInc
+	 * but then has increments as 0.  So we check for 0s here and set them
+	 * to sensible defaults. */
+a99 4
+	if (c->size->width_inc == 0)
+		c->size->width_inc = 1;
+	if (c->size->height_inc == 0)
+		c->size->height_inc = 1;
+d165 11
+@
+
+
+1.2
+log
+@update to evilwm 0.99.14
+@
+text
+@d23 3
+d33 7
+d62 11
+d192 2
+a193 1
+	if (c->size->flags & (/*PSize | */USSize)) {
+d197 1
+d262 1
+a262 1
+	PropMwmHints *data;
+d265 1
+a265 1
+		(unsigned char **) &data) == Success
+d267 1
+a267 1
+		return data;
+@
+
+
+1.1
+log
+@evilwm is a minimalist window manager for the X Window System.
+
+Features:
+* No window decorations apart from a simple 1 pixel border.
+* No icons.
+* Good keyboard control, including repositioning and maximise toggles.
+* Solid window drags.
+* Virtual desktops.
+* Small binary size.
+
+WWW: http://evilwm.sf.net/
+@
+text
+@d13 5
+a17 1
+void make_new_client(Window w) {
+d23 3
+a27 4
+#ifdef XDEBUG
+	fprintf(stderr, "XGetWMHints(); ");
+#endif
+	hints = XGetWMHints(dpy, w);
+d30 12
+a41 2
+#ifdef SANITY
+	tracked_count++;
+d43 6
+a50 9
+#ifdef DEBUG
+	{
+		Client *p;
+		int i = 0;
+		for (p = head_client; p; p = p->next)
+			i++;
+		fprintf(stderr, "NEW: malloc(), window count now %d\n", i);
+	}
+#endif
+d53 1
+d57 4
+a60 1
+	/* try these here instead */
+d62 4
+a70 2
+	XFetchName(dpy, c->window, &name);
+
+d79 15
+a93 1
+	/* blatant hack alert!  --kja3 */
+d95 1
+d98 2
+a99 1
+		XFree(name);
+d101 1
+d106 10
+a115 1
+	WR_DESK(c, GET_VDESK );
+d118 2
+a119 2
+	// c->size = XAllocSizeHints();
+	// XGetWMNormalHints(dpy, c->window, c->size, &dummy);
+d121 3
+a123 2
+	if (attr.map_state == IsViewable) c->ignore_unmap++;
+	else {
+d125 5
+a129 2
+		if (hints && hints->flags & StateHint)
+			set_wm_state(c, hints->initial_state);
+a131 2
+	if (hints) XFree(hints);
+
+d139 11
+a149 1
+		fprintf(stderr, "NEW: client thinks it's iconised\n");
+d168 2
+a169 2
+	int xmax = DisplayWidth(dpy, screen);
+	int ymax = DisplayHeight(dpy, screen);
+d188 1
+a188 1
+		get_mouse_position(&x, &y);
+d195 5
+d212 1
+a212 1
+	p_attr.background_pixel = bg.pixel;
+d214 1
+a214 1
+	c->parent = XCreateWindow(dpy, root, c->x-c->border, c->y-c->border,
+d216 2
+a217 2
+		DefaultDepth(dpy, screen), CopyFromParent,
+		DefaultVisual(dpy, screen),
+d232 18
+@
+
+
+1.1.3.1
+log
+@evilwm 0.99.17
+@
+text
+@d13 1
+a13 5
+#ifdef MWM_HINTS
+static PropMwmHints *get_mwm_hints(Window);
+#endif
+
+void make_new_client(Window w, ScreenInfo *s) {
+a18 6
+	/*
+	XClassHint *class;
+	*/
+#ifdef MWM_HINTS
+	PropMwmHints *mhints;
+#endif
+d21 4
+d27 2
+a28 4
+	/* Don't crash the window manager, just fail the operation. */
+	if (!c) {
+#ifdef STDIO
+		fprintf(stderr, "out of memory in new_client; limping onward\n");
+a29 21
+		return;
+	}
+	/* We do this first of all as a test to see if the window actually
+	 * still exists by the time we've got to create a client structure
+	 * for it (sometimes they vanish too quickly or something, and lots
+	 * of pain ensues). */
+	initialising = w;
+	XFetchName(dpy, w, &name);
+	/* If 'initialising' is now set to None, that means doing the
+	 * XFetchName raised BadWindow - the window has been removed before
+	 * we got a chance to grab the server. */
+	if (initialising == None) {
+#ifdef DEBUG
+		fprintf(stderr, "make_new_client() : XError occurred for initialising window - aborting...\n");
+#endif
+		free(c);
+		XSync(dpy, False);
+		XUngrabServer(dpy);
+		return;
+	}
+	initialising = None;
+d32 7
+a38 9
+
+	/*
+	class = XAllocClassHint();
+	if (class) {
+		XGetClassHint(dpy, w, class);
+		fprintf(stderr, "res_name = %s, res_class = %s\n", class->res_name, class->res_class);
+		XFree(class->res_name);
+		XFree(class->res_class);
+		XFree(class);
+d40 1
+a40 1
+	*/
+a42 1
+	c->screen = s;
+d46 1
+a46 4
+	/* Jon Perkin reported a crash wish an app called 'sunpci' which we
+	 * traced to getting divide-by-zeros because it sets PResizeInc
+	 * but then has increments as 0.  So we check for 0s here and set them
+	 * to sensible defaults. */
+a47 4
+	if (c->size->width_inc == 0)
+		c->size->width_inc = 1;
+	if (c->size->height_inc == 0)
+		c->size->height_inc = 1;
+d53 2
+d63 1
+a63 15
+
+#ifdef MWM_HINTS
+	if ((mhints = get_mwm_hints(c->window))) {
+		if (mhints->flags & MWM_HINTS_DECORATIONS
+				&& !(mhints->decorations & MWM_DECOR_ALL)) {
+			if (!(mhints->decorations & MWM_DECOR_BORDER)) {
+				c->border = 0;
+			}
+		}
+		XFree(mhints);
+	}
+#endif
+	/* If we don't have MWM_HINTS (ie, lesstif) for a client to tell us
+	 * it has no border, I include this *really blatant hack* to remove
+	 * the border from XMMS. */
+a64 1
+#ifndef MWM_HINTS
+d67 1
+a67 2
+#endif
+		XFree(name);  /* But we want to free this anyway... */
+a68 1
+
+d73 1
+a73 10
+	c->vdesk = vdesk;
+#endif
+#ifdef DEBUG
+	{
+		Client *p;
+		int i = 0;
+		for (p = head_client; p; p = p->next)
+			i++;
+		fprintf(stderr, "make_new_client() : new window %dx%d+%d+%d, wincount=%d\n", c->width, c->height, c->x, c->y, i);
+	}
+d76 2
+a77 2
+	/* c->size = XAllocSizeHints();
+	XGetWMNormalHints(dpy, c->window, c->size, &dummy); */
+d79 2
+a80 3
+	if (attr.map_state == IsViewable) {
+		c->ignore_unmap++;
+	} else {
+d82 2
+a83 5
+		if ((hints = XGetWMHints(dpy, w))) {
+			if (hints->flags & StateHint)
+				set_wm_state(c, hints->initial_state);
+			XFree(hints);
+		}
+d86 2
+d95 1
+a95 11
+		fprintf(stderr, "make_new_client() : client thinks it's iconised\n");
+	} else {
+		if (wm_state(c) == NormalState) {
+			fprintf(stderr, "make_new_client() : client is in NormalState - good\n");
+		} else {
+			if (wm_state(c) == WithdrawnState) {
+				fprintf(stderr, "make_new_client() : silly client!  it's in WithdrawnState\n");
+			} else {
+				fprintf(stderr, "make_new_client() : don't know what state client is in\n");
+			}
+		}
+d114 2
+a115 2
+	int xmax = DisplayWidth(dpy, c->screen->screen);
+	int ymax = DisplayHeight(dpy, c->screen->screen);
+d117 1
+a117 2
+	/*
+	if (c->size->flags & (/+PSize | +/USSize)) {
+a120 1
+	*/
+d134 1
+a134 1
+		get_mouse_position(&x, &y, c->screen->root);
+a140 5
+	/* reposition if maximised horizontally or vertically */
+	if (c->x == 0 && c->width == xmax)
+		c->x = -c->border;
+	if (c->y == 0 && c->height == ymax)
+		c->y = -c->border;
+d153 1
+a153 1
+	p_attr.background_pixel = c->screen->bg.pixel;
+d155 1
+a155 1
+	c->parent = XCreateWindow(dpy, c->screen->root, c->x-c->border, c->y-c->border,
+d157 2
+a158 2
+		DefaultDepth(dpy, c->screen->screen), CopyFromParent,
+		DefaultVisual(dpy, c->screen->screen),
+a172 18
+
+/* Taken from aewm-1.2.0 */
+
+#ifdef MWM_HINTS
+static PropMwmHints *get_mwm_hints(Window w) {
+	Atom real_type; int real_format;
+	unsigned long items_read, bytes_left;
+	unsigned char *data;
+	if (XGetWindowProperty(dpy, w, mwm_hints, 0L, 20L, False,
+		mwm_hints, &real_type, &real_format, &items_read, &bytes_left,
+		&data) == Success
+		&& items_read >= PROP_MOTIF_WM_HINTS_ELEMENTS) {
+		return (PropMwmHints *)data;
+	} else {
+		return NULL;
+	}
+}
+#endif
+@
+
+
+1.1.1.1
+log
+@Move evilwm 0.99.14 to a vendor branch, too. Facilitates easier updating.
+@
+text
+@d13 1
+a13 5
+#ifdef MWM_HINTS
+static PropMwmHints *get_mwm_hints(Window);
+#endif
+
+void make_new_client(Window w, ScreenInfo *s) {
+a18 3
+#ifdef MWM_HINTS
+	PropMwmHints *mhints;
+#endif
+d21 4
+d27 2
+a28 12
+	/* We do this first of all as a test to see if the window actually
+	 * still exists by the time we've got to create a client structure
+	 * for it (sometimes they vanish too quickly or something, and lots
+	 * of pain ensues). */
+	initialising = w;
+	XFetchName(dpy, w, &name);
+	/* If 'initialising' is now set to None, that means doing the
+	 * XFetchName raised BadWindow - the window has been removed before
+	 * we got a chance to grab the server. */
+	if (initialising == None) {
+#ifdef DEBUG
+		fprintf(stderr, "make_new_client() : XError occurred for initialising window - aborting...\n");
+a29 6
+		free(c);
+		XSync(dpy, False);
+		XUngrabServer(dpy);
+		return;
+	}
+	initialising = None;
+d32 9
+a42 1
+	c->screen = s;
+d46 1
+a46 4
+	/* Jon Perkin reported a crash wish an app called 'sunpci' which we
+	 * traced to getting divide-by-zeros because it sets PResizeInc
+	 * but then has increments as 0.  So we check for 0s here and set them
+	 * to sensible defaults. */
+a47 4
+	if (c->size->width_inc == 0)
+		c->size->width_inc = 1;
+	if (c->size->height_inc == 0)
+		c->size->height_inc = 1;
+d53 2
+d63 1
+a63 15
+
+#ifdef MWM_HINTS
+	if ((mhints = get_mwm_hints(c->window))) {
+		if (mhints->flags & MWM_HINTS_DECORATIONS
+				&& !(mhints->decorations & MWM_DECOR_ALL)) {
+			if (!(mhints->decorations & MWM_DECOR_BORDER)) {
+				c->border = 0;
+			}
+		}
+		XFree(mhints);
+	}
+#endif
+	/* If we don't have MWM_HINTS (ie, lesstif) for a client to tell us
+	 * it has no border, I include this *really blatant hack* to remove
+	 * the border from XMMS. */
+a64 1
+#ifndef MWM_HINTS
+d67 1
+a67 2
+#endif
+		XFree(name);  /* But we want to free this anyway... */
+a68 1
+
+d73 1
+a73 10
+	c->vdesk = vdesk;
+#endif
+#ifdef DEBUG
+	{
+		Client *p;
+		int i = 0;
+		for (p = head_client; p; p = p->next)
+			i++;
+		fprintf(stderr, "make_new_client() : new window %dx%d+%d+%d, wincount=%d\n", c->width, c->height, c->x, c->y, i);
+	}
+d76 2
+a77 2
+	/* c->size = XAllocSizeHints();
+	XGetWMNormalHints(dpy, c->window, c->size, &dummy); */
+d79 2
+a80 3
+	if (attr.map_state == IsViewable) {
+		c->ignore_unmap++;
+	} else {
+d82 2
+a83 5
+		if ((hints = XGetWMHints(dpy, w))) {
+			if (hints->flags & StateHint)
+				set_wm_state(c, hints->initial_state);
+			XFree(hints);
+		}
+d86 2
+d95 1
+a95 11
+		fprintf(stderr, "make_new_client() : client thinks it's iconised\n");
+	} else {
+		if (wm_state(c) == NormalState) {
+			fprintf(stderr, "make_new_client() : client is in NormalState - good\n");
+		} else {
+			if (wm_state(c) == WithdrawnState) {
+				fprintf(stderr, "make_new_client() : silly client!  it's in WithdrawnState\n");
+			} else {
+				fprintf(stderr, "make_new_client() : don't know what state client is in\n");
+			}
+		}
+d114 2
+a115 2
+	int xmax = DisplayWidth(dpy, c->screen->screen);
+	int ymax = DisplayHeight(dpy, c->screen->screen);
+d134 1
+a134 1
+		get_mouse_position(&x, &y, c->screen->root);
+a140 5
+	/* reposition if maximised horizontally or vertically */
+	if (c->x == 0 && c->width == xmax)
+		c->x = -c->border;
+	if (c->y == 0 && c->height == ymax)
+		c->y = -c->border;
+d153 1
+a153 1
+	p_attr.background_pixel = c->screen->bg.pixel;
+d155 1
+a155 1
+	c->parent = XCreateWindow(dpy, c->screen->root, c->x-c->border, c->y-c->border,
+d157 2
+a158 2
+		DefaultDepth(dpy, c->screen->screen), CopyFromParent,
+		DefaultVisual(dpy, c->screen->screen),
+a172 18
+
+/* Taken from aewm-1.2.0 */
+
+#ifdef MWM_HINTS
+static PropMwmHints *get_mwm_hints(Window w) {
+	Atom real_type; int real_format;
+	unsigned long items_read, bytes_left;
+	PropMwmHints *data;
+	if (XGetWindowProperty(dpy, w, mwm_hints, 0L, 20L, False,
+		mwm_hints, &real_type, &real_format, &items_read, &bytes_left,
+		(unsigned char **) &data) == Success
+		&& items_read >= PROP_MOTIF_WM_HINTS_ELEMENTS) {
+		return data;
+	} else {
+		return NULL;
+	}
+}
+#endif
+@
+
+
+1.1.1.2
+log
+@Update evilwm to release 0.99.16
+@
+text
+@a22 3
+	/*
+	XClassHint *class;
+	*/
+a29 7
+	/* Don't crash the window manager, just fail the operation. */
+	if (!c) {
+#ifdef STDIO
+		fprintf(stderr, "out of memory in new_client; limping onward\n");
+#endif
+		return;
+	}
+a51 11
+	/*
+	class = XAllocClassHint();
+	if (class) {
+		XGetClassHint(dpy, w, class);
+		fprintf(stderr, "res_name = %s, res_class = %s\n", class->res_name, class->res_class);
+		XFree(class->res_name);
+		XFree(class->res_class);
+		XFree(class);
+	}
+	*/
+
+d171 1
+a171 2
+	/*
+	if (c->size->flags & (/+PSize | +/USSize)) {
+a174 1
+	*/
+d239 1
+a239 1
+	unsigned char *data;
+d242 1
+a242 1
+		&data) == Success
+d244 1
+a244 1
+		return (PropMwmHints *)data;
+@
+
+

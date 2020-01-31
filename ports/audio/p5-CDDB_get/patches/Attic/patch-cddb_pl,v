@@ -1,0 +1,305 @@
+head	1.2;
+access;
+symbols
+	cvs-200405281530:1.1.1.2
+	cvs-200401261625:1.1.1.2
+	cvs-200401162142:1.1.1.2
+	cvs-200301141450:1.1.1.2
+	cvs-200312021610:1.1.1.2
+	cvs-200311151930:1.1.1.2
+	cvs-200310311830:1.1.1.2
+	cvs-200310021000:1.1.1.2
+	cvs-200309281111:1.1.1.2
+	cvs-200309171515:1.1.1.1
+	cvs-200308302005:1.1.1.1
+	cvs-200308171200:1.1.1.1
+	ctm-3449:1.1.1.1
+	cvs-200307191610:1.1.1.1
+	ctm-3416:1.1.1.1
+	cvs-200307091500:1.1.1.1
+	ctm-3389:1.1.1.1
+	cvs-200306291800:1.1.1.1
+	ctm-3369:1.1.1.1
+	ctm-3341:1.1.1.1
+	MIRBSD_5:1.1.1.1
+	cvs-200306082100:1.1.1.1
+	ctm-3316:1.1.1.1
+	ctm-3272:1.1.1.1
+	ctm-3264:1.1.1.1
+	ctm-3258:1.1.1.1
+	MIRBSD_4:1.1.1.1
+	ctm-3200:1.1.1.1
+	ctm-3188:1.1.1.1
+	ctm-3155:1.1.1.1
+	ctm-3132:1.1.1.1
+	openbsd:1.1.1;
+locks; strict;
+comment	@# @;
+
+
+1.2
+date	2004.02.21.22.07.18;	author tg;	state dead;
+branches;
+next	1.1;
+
+1.1
+date	2003.03.22.19.49.11;	author tg;	state Exp;
+branches
+	1.1.1.1;
+next	;
+
+1.1.1.1
+date	2003.03.22.19.49.11;	author tg;	state Exp;
+branches;
+next	1.1.1.2;
+
+1.1.1.2
+date	2003.09.28.11.56.36;	author tg;	state Exp;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.2
+log
+@merge
+@
+text
+@$OpenBSD: patch-cddb_pl,v 1.2 2002/11/10 12:14:44 wilfried Exp $
+
+--- cddb.pl.orig	Thu Oct 10 02:55:24 2002
++++ cddb.pl	Sat Nov  9 09:37:21 2002
+@@@@ -26,7 +26,7 @@@@ use strict;
+ 
+ use Getopt::Std;
+ my %option = ();
+-getopts("oghdtsiSfDlO", \%option);
++getopts("oghdtsSfDlO", \%option);
+ 
+ if($option{h}) {
+   print "$0: gets CDDB info of a CD\n";
+@@@@ -34,8 +34,7 @@@@ if($option{h}) {
+   print "  -o  offline mode - just stores CD info\n";
+   print "  -d  output in xmcd format\n";
+   print "  -s  save in xmcd format\n";
+-  print "  -i  write to mysql db\n";
+-  print "  -O  overwrite file or db\n";
++  print "  -O  overwrite file\n";
+   print "  -t  output toc\n";
+   print "  -l  output lame command\n";
+   print "  -f  http mode (e.g. through firewalls)\n";
+@@@@ -58,7 +57,7 @@@@ my $xmcddir="/tmp/xmcd";
+ # $config{CDDB_HOST}="freedb.freedb.org";	# set cddb host
+ # $config{CDDB_PORT}=888; 			# set cddb port
+ # $config{CDDB_MODE}="cddb";			# set cddb mode: cddb or http, this is switched with -f
+-# $config{CD_DEVICE}="/dev/cdrom";		# set cd device
++# $config{CD_DEVICE}="/dev/cd0c";		# set cd device
+ 
+ # $config{HELLO_ID} ="root nowhere.com fastrip 0.77"; # hello string: username hostname clientname version
+ 
+@@@@ -77,19 +76,6 @@@@ $config{input}=1;   # 1: ask user if mor
+ $config{multi}=0;   # 1: do not ask user and get all of them
+                     # 0: just the first one
+ 
+-my %db;
+-
+-if($option{i}) {
+-  require DBI;
+-
+-  $db{host} = "localhost:3306";
+-  $db{name} = "mp3-test";
+-  $db{table_cds} = "cds";
+-  $db{table_tracks} = "tracks";
+-  $db{user} = "root";
+-  $db{passwd} = "xxx";
+-}
+-  
+ if($option{o}) {
+   my $ids=get_discids($config{CD_DEVICE});
+ 
+@@@@ -150,8 +136,6 @@@@ if($option{g}) {
+ 
+     if($option{d} || $option{s}) {
+       print_xmcd(\%cd,$option{s});
+-    } elsif($option{i}) {
+-      insert_db(\%cd,\%db);
+     } elsif($option{l}) {
+       print_lame(\%cd);
+     } else {
+@@@@ -186,8 +170,6 @@@@ unless($config{multi}) {
+ 
+   if($option{d} || $option{s}) {
+     print_xmcd(\%cd,$option{s});
+-  } elsif($option{i}) {
+-    insert_db(\%cd,\%db);
+   } elsif($option{l}) {
+     print_lame(\%cd);
+   } else {
+@@@@ -216,8 +198,6 @@@@ unless($config{multi}) {
+ 
+     if($option{d} || $option{s}) {
+       print_xmcd($c,$option{s});
+-    } elsif($option{i}) {
+-      insert_db($c,\%db);
+     } elsif($option{l}) {
+       print_lame($c);
+       print "\n";
+@@@@ -291,67 +271,6 @@@@ sub print_xmcd {
+     close OUT;
+   }
+ }  
+-
+-sub insert_db {
+-  my $cd=shift;
+-  my $db=shift;
+-
+-  my ($artist, $title, $category, $cddbid, $trackno) =
+-    ($cd->{artist}, $cd->{title}, $cd->{cat}, $cd->{id}, $cd->{tno});
+-
+-  my $sql = "SELECT cddbid FROM $db->{table_cds} WHERE CDDBID = \'$cddbid\'";
+-  my $dbh = DBI->connect("dbi:mysql:$db->{name}:$db->{host}",
+-    $db->{user},$db->{passwd}) or die "cannot connect to db: $DBI::errstr";
+-  my $sth = $dbh->prepare($sql);
+-  my $r = $sth->execute or die "cannot check for cd: $DBI::errstr";
+-  if ($r == 1) {
+-    print "cd already in db\n";
+-    if($option{O}) {
+-      my $sql = "DELETE FROM $db->{table_cds} WHERE CDDBID = \'$cddbid\'";
+-      my $sth = $dbh->prepare($sql);
+-      my $r = $sth->execute or die "cannot delete from $db->{table_cds}: $DBI::errstr";
+-      $sql = "DELETE FROM $db->{table_tracks} WHERE CDDBID = \'$cddbid\'";
+-      $sth = $dbh->prepare($sql);
+-      $r = $sth->execute or die "cannot delete from $db->{table_tracks}: $DBI::errstr";
+-    } else {
+-      exit;
+-    }
+-  }
+-
+-  $title =~ s/'/\\'/g;
+-  $artist =~ s/'/\\'/g;
+-  $category =~ s/'/\\'/g;
+-
+-  $sql = "INSERT INTO $db->{table_cds} (cddbid, artist, title, category, tracks) VALUES (\'$cddbid\', \'$artist\', \'$title\', \'$category\' , \'$trackno\')";
+-  $sth = $dbh->prepare($sql);
+-  $r = $sth->execute or die "failed to insert cd: $DBI::errstr";
+-
+-  my $n=1;
+-
+-  print "titel: $title\n";
+-  print "artist: $artist\n";
+-  print "category: $category\n\n";
+-
+-  for my $t ( @@{$cd->{track}} ) {
+-    $t =~ s/'/\\'/g;
+-    my $dur=($cd->{frames}[$n]-1-$cd->{frames}[$n-1])/75;
+-    my $hour=int($dur/3600);
+-    my $min=int($dur/60-$hour*60);
+-    my $sec=$dur-$hour*3600-$min*60;
+-    my $fr=substr(sprintf("%5.2f",$sec-int($sec)),2,3);
+-    my $time=sprintf "%.2d:%.2d:%.2d%s",$hour,$min,int($sec),$fr;
+-
+-    print "track $n: $t  [$time]\n";
+-    
+-    my $sql = "INSERT INTO $db->{table_tracks} (cddbid, title, trackno, time) 
+-               VALUES (\'$cddbid\',\'$t\', \'$n\', \'$time\')";
+-    my $sth = $dbh->prepare($sql);
+-    my $r = $sth->execute or die "failed to insert track $n: $DBI::errstr";
+-    $n++;
+-  }
+-
+-  $dbh->disconnect();
+-} 
+ 
+ sub print_lame {
+   my $cd=shift;
+@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@@
+
+
+1.1.1.1
+log
+@Import OpenBSD 3.3 ports repository from CTM 3132 the first time
+This continues opening an OpenBSD-mirabile (aka MirBSD) repository.
+
+### MirBSD is:
+# Copyright (c) 1982-2003 by Thorsten "mirabile" Glaser <x86@@ePost.de>
+# Copyright © 1968-2003  The authors of And contributors to UNIX®, the
+#       C Language, BSD/Berkeley Unix; 386BSD, NetBSD 1.1 and OpenBSD.
+#
+# Anyone who obtained a copy of this work is hereby permitted to freely use,
+# distribute, modify, merge, sublicence, give away or sell it as long as the
+# authors are given due credit and the following notice is retained:
+#
+# This work is provided "as is", with no explicit or implicit warranty what-
+# soever. Use it only at your own risk. In no event may an author or contri-
+# butor be held liable for any damage, directly or indirectly, that origina-
+# ted through or is caused by creation or modification of this work.
+
+MirBSD is my private tree. MirBSD does not differ very much from OpenBSD
+and intentionally tracks OpenBSD. That's why it _is_ OpenBSD, just not the
+official one. It's like with DarrenBSD.
+
+At time of this writing, no advertising for MirBSD must be done,
+because the advertising clause has not yet been sorted out.
+
+http://templeofhate.com/tglaser/MirBSD/index.php
+@
+text
+@@
+
+
+1.1.1.2
+log
+@Merge OpenBSD ports tree from comstyle into MirPorts
+@
+text
+@d1 5
+a5 5
+$OpenBSD: patch-cddb_pl,v 1.3 2003/09/23 05:09:06 jolan Exp $
+--- cddb.pl.orig	2003-08-23 12:00:32.000000000 -0700
++++ cddb.pl	2003-08-23 12:02:49.000000000 -0700
+@@@@ -27,7 +27,7 @@@@ use Getopt::Std;
+ use strict;
+d7 1
+d9 2
+a10 2
+-getopts("oghdtsiSfDlOFc:", \%option); 
++getopts("oghdtsSfDlOFc:", \%option); 
+d14 1
+a14 1
+@@@@ -36,8 +36,7 @@@@ if($option{h}) {
+d24 10
+a33 1
+@@@@ -87,19 +86,6 @@@@ $config{input}=1;   # 1: ask user if mor
+d53 1
+a53 1
+@@@@ -160,8 +146,6 @@@@ if($option{g}) {
+d62 1
+a62 1
+@@@@ -196,8 +180,6 @@@@ unless($config{multi}) {
+d71 1
+a71 1
+@@@@ -226,8 +208,6 @@@@ unless($config{multi}) {
+d80 2
+a81 1
+@@@@ -304,67 +284,6 @@@@ sub print_xmcd {
+d84 1
+a84 1
+ 
+d145 1
+a145 1
+-
+a147 1
+ 
+@
+

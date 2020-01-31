@@ -1,0 +1,513 @@
+head	1.2;
+branch	1.1.1;
+access;
+symbols
+	tg-mergetmp-2:1.1.1.2
+	cvs-200410241530:1.1.1.2
+	cvs-200410012000:1.1.1.2
+	cvs-200407141120:1.1.1.2
+	cvs-200406231010:1.1.1.2
+	MIRBSD_7quater:1.1.1.1
+	cvs-200405271510:1.1.1.2
+	XFree86_4_4_0:1.1.9.1
+	cvs-200403021700:1.1.1.2
+	XFREE86_20040213:1.1.9.1
+	xc:1.1.9
+	cvs-200401291925:1.1.1.1
+	MIRBSD_7_ALPHA:1.1.1.1.0.4
+	MIRBSD_7:1.1.1.1.0.2
+	MIRBSD_7ter:1.1.1.1
+	cvs-20011091815:1.1.1.1
+	cvs-200309162130:1.1.1.1
+	cvs-200308302005:1.1.1.1
+	ctmx-0387:1.1.1.1
+	ctmx-0384:1.1.1.1
+	MIRBSD_5:1.1.1.1
+	ctmx-0375:1.1.1.1
+	ctmx-0373:1.1.1.1
+	ctm-0371:1.1.1.1
+	ctm-0370:1.1.1.1
+	MIRBSD_4:1.1.1.1
+	ctm-0363:1.1.1.1
+	ctm-0359:1.1.1.1
+	openbsd:1.1.1;
+locks; strict;
+comment	@ * @;
+
+
+1.2
+date	2003.05.16.16.28.11;	author tg;	state dead;
+branches;
+next	1.1;
+
+1.1
+date	2003.04.08.18.19.55;	author tg;	state Exp;
+branches
+	1.1.1.1
+	1.1.9.1;
+next	;
+
+1.1.1.1
+date	2003.04.08.18.19.55;	author tg;	state Exp;
+branches;
+next	1.1.1.2;
+
+1.1.1.2
+date	2004.03.02.17.28.17;	author tg;	state Stab;
+branches;
+next	;
+
+1.1.9.1
+date	2004.02.14.19.04.32;	author tg;	state Exp;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.2
+log
+@remove a bunch of files not used in MirBSD - clean tree. People who want them got cvs.
+@
+text
+@
+/*
+ * Mesa 3-D graphics library
+ * Version:  4.0.3
+ *
+ * Copyright (C) 1999-2002  Brian Paul   All Rights Reserved.
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a
+ * copy of this software and associated documentation files (the "Software"),
+ * to deal in the Software without restriction, including without limitation
+ * the rights to use, copy, modify, merge, publish, distribute, sublicense,
+ * and/or sell copies of the Software, and to permit persons to whom the
+ * Software is furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included
+ * in all copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
+ * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL
+ * BRIAN PAUL BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN
+ * AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
+ * CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+ */
+
+/* Author:
+ *    Keith Whitwell <keith_whitwell@@yahoo.com>
+ */
+
+#include "glheader.h"
+#include "api_arrayelt.h"
+#include "context.h"
+#include "glapi.h"
+#include "mem.h"
+#include "macros.h"
+#include "mtypes.h"
+
+
+typedef void (*texarray_func)( GLenum, const void * );
+
+typedef struct {
+   GLint unit;
+   struct gl_client_array *array;
+   texarray_func func;
+} AEtexarray;
+
+typedef void (*array_func)( const void * );
+
+typedef struct {
+   struct gl_client_array *array;
+   array_func func;
+} AEarray;
+
+typedef struct {
+   AEtexarray texarrays[MAX_TEXTURE_UNITS+1];
+   AEarray arrays[32];
+   GLuint NewState;
+} AEcontext;
+
+#define AE_CONTEXT(ctx) ((AEcontext *)(ctx)->aelt_context)
+#define TYPE_IDX(t) ((t) & 0xf)
+
+static void (*colorfuncs[2][8])( const void * ) = {
+   { (array_func)glColor3bv,
+     (array_func)glColor3ubv,
+     (array_func)glColor3sv,
+     (array_func)glColor3usv,
+     (array_func)glColor3iv,
+     (array_func)glColor3uiv,
+     (array_func)glColor3fv,
+     (array_func)glColor3dv },
+
+   { (array_func)glColor4bv,
+     (array_func)glColor4ubv,
+     (array_func)glColor4sv,
+     (array_func)glColor4usv,
+     (array_func)glColor4iv,
+     (array_func)glColor4uiv,
+     (array_func)glColor4fv,
+     (array_func)glColor4dv }
+};
+
+static void (*vertexfuncs[3][8])( const void * ) = {
+   { 0,
+     0,
+     (array_func)glVertex2sv,
+     0,
+     (array_func)glVertex2iv,
+     0,
+     (array_func)glVertex2fv,
+     (array_func)glVertex2dv },
+
+   { 0,
+     0,
+     (array_func)glVertex3sv,
+     0,
+     (array_func)glVertex3iv,
+     0,
+     (array_func)glVertex3fv,
+     (array_func)glVertex3dv },
+
+   { 0,
+     0,
+     (array_func)glVertex4sv,
+     0,
+     (array_func)glVertex4iv,
+     0,
+     (array_func)glVertex4fv,
+     (array_func)glVertex4dv }
+};
+
+
+static void (*multitexfuncs[4][8])( GLenum, const void * ) = {
+   { 0,
+     0,
+     (texarray_func)glMultiTexCoord1svARB,
+     0,
+     (texarray_func)glMultiTexCoord1ivARB,
+     0,
+     (texarray_func)glMultiTexCoord1fvARB,
+     (texarray_func)glMultiTexCoord1dvARB },
+
+   { 0,
+     0,
+     (texarray_func)glMultiTexCoord2svARB,
+     0,
+     (texarray_func)glMultiTexCoord2ivARB,
+     0,
+     (texarray_func)glMultiTexCoord2fvARB,
+     (texarray_func)glMultiTexCoord2dvARB },
+
+   { 0,
+     0,
+     (texarray_func)glMultiTexCoord3svARB,
+     0,
+     (texarray_func)glMultiTexCoord3ivARB,
+     0,
+     (texarray_func)glMultiTexCoord3fvARB,
+     (texarray_func)glMultiTexCoord3dvARB },
+
+   { 0,
+     0,
+     (texarray_func)glMultiTexCoord4svARB,
+     0,
+     (texarray_func)glMultiTexCoord4ivARB,
+     0,
+     (texarray_func)glMultiTexCoord4fvARB,
+     (texarray_func)glMultiTexCoord4dvARB }
+};
+
+static void (*indexfuncs[8])( const void * ) = {
+   0,
+   (array_func)glIndexubv,
+   (array_func)glIndexsv,
+   0,
+   (array_func)glIndexiv,
+   0,
+   (array_func)glIndexfv,
+   (array_func)glIndexdv
+};
+
+
+static void (*normalfuncs[8])( const void * ) = {
+   (array_func)glNormal3bv,
+   0,
+   (array_func)glNormal3sv,
+   0,
+   (array_func)glNormal3iv,
+   0,
+   (array_func)glNormal3fv,
+   (array_func)glNormal3dv,
+};
+
+
+/* Wrapper functions in case glSecondaryColor*EXT doesn't exist */
+static void SecondaryColor3bvEXT(const GLbyte *c)
+{
+   _glapi_Dispatch->SecondaryColor3bvEXT(c);
+}
+
+static void SecondaryColor3ubvEXT(const GLubyte *c)
+{
+   _glapi_Dispatch->SecondaryColor3ubvEXT(c);
+}
+
+static void SecondaryColor3svEXT(const GLshort *c)
+{
+   _glapi_Dispatch->SecondaryColor3svEXT(c);
+}
+
+static void SecondaryColor3usvEXT(const GLushort *c)
+{
+   _glapi_Dispatch->SecondaryColor3usvEXT(c);
+}
+
+static void SecondaryColor3ivEXT(const GLint *c)
+{
+   _glapi_Dispatch->SecondaryColor3ivEXT(c);
+}
+
+static void SecondaryColor3uivEXT(const GLuint *c)
+{
+   _glapi_Dispatch->SecondaryColor3uivEXT(c);
+}
+
+static void SecondaryColor3fvEXT(const GLfloat *c)
+{
+   _glapi_Dispatch->SecondaryColor3fvEXT(c);
+}
+
+static void SecondaryColor3dvEXT(const GLdouble *c)
+{
+   _glapi_Dispatch->SecondaryColor3dvEXT(c);
+}
+
+static void (*secondarycolorfuncs[8])( const void * ) = {
+   (array_func) SecondaryColor3bvEXT,
+   (array_func) SecondaryColor3ubvEXT,
+   (array_func) SecondaryColor3svEXT,
+   (array_func) SecondaryColor3usvEXT,
+   (array_func) SecondaryColor3ivEXT,
+   (array_func) SecondaryColor3uivEXT,
+   (array_func) SecondaryColor3fvEXT,
+   (array_func) SecondaryColor3dvEXT,
+};
+
+
+/* Again, wrapper functions in case glSecondaryColor*EXT doesn't exist */
+static void FogCoordfvEXT(const GLfloat *f)
+{
+   _glapi_Dispatch->FogCoordfvEXT(f);
+}
+
+static void FogCoorddvEXT(const GLdouble *f)
+{
+   _glapi_Dispatch->FogCoorddvEXT(f);
+}
+
+static void (*fogcoordfuncs[8])( const void * ) = {
+   0,
+   0,
+   0,
+   0,
+   0,
+   0,
+   (array_func) FogCoordfvEXT,
+   (array_func) FogCoorddvEXT
+};
+
+
+
+GLboolean _ae_create_context( GLcontext *ctx )
+{
+   ctx->aelt_context = MALLOC( sizeof(AEcontext) );
+   if (!ctx->aelt_context) 
+      return GL_FALSE;
+
+   AE_CONTEXT(ctx)->NewState = ~0;
+   return GL_TRUE;
+}
+
+
+void _ae_destroy_context( GLcontext *ctx )
+{
+   if ( AE_CONTEXT( ctx ) ) {
+      FREE( ctx->aelt_context );
+      ctx->aelt_context = 0;
+   }
+}
+
+
+static void _ae_update_state( GLcontext *ctx )
+{
+   AEcontext *actx = AE_CONTEXT(ctx);
+   AEtexarray *ta = actx->texarrays;
+   AEarray *aa = actx->arrays;
+   GLuint i;
+
+   for (i = 0 ; i < ctx->Const.MaxTextureUnits ; i++)
+      if (ctx->Array.TexCoord[i].Enabled) {
+	 ta->unit = i;
+	 ta->array = &ctx->Array.TexCoord[i];
+	 ta->func = multitexfuncs[ta->array->Size-1][TYPE_IDX(ta->array->Type)];
+	 ta++;
+      }
+
+   ta->func = 0;
+
+   if (ctx->Array.Color.Enabled) {
+      aa->array = &ctx->Array.Color;
+      aa->func = colorfuncs[aa->array->Size-3][TYPE_IDX(aa->array->Type)];
+      aa++;
+   }
+
+   if (ctx->Array.Normal.Enabled) {
+      aa->array = &ctx->Array.Normal;
+      aa->func = normalfuncs[TYPE_IDX(aa->array->Type)];
+      aa++;
+   }
+
+   if (ctx->Array.Index.Enabled) {
+      aa->array = &ctx->Array.Index;
+      aa->func = indexfuncs[TYPE_IDX(aa->array->Type)];
+      aa++;
+   }
+
+   if (ctx->Array.EdgeFlag.Enabled) {
+      aa->array = &ctx->Array.EdgeFlag;
+      aa->func = (array_func) glEdgeFlagv;
+      aa++;
+   }
+
+   if (ctx->Array.FogCoord.Enabled) {
+      aa->array = &ctx->Array.FogCoord;
+      aa->func = fogcoordfuncs[TYPE_IDX(aa->array->Type)];
+      aa++;
+   }
+
+   if (ctx->Array.SecondaryColor.Enabled) {
+      aa->array = &ctx->Array.SecondaryColor;
+      aa->func = secondarycolorfuncs[TYPE_IDX(aa->array->Type)];
+      aa++;
+   }
+
+   /* Must be last
+    */
+   if (ctx->Array.Vertex.Enabled) {
+      aa->array = &ctx->Array.Vertex;
+      aa->func = vertexfuncs[aa->array->Size-2][TYPE_IDX(aa->array->Type)];
+      aa++;
+   }
+
+   aa->func = 0;
+   actx->NewState = 0;
+}
+
+
+void _ae_loopback_array_elt( GLint elt )
+{
+   GET_CURRENT_CONTEXT(ctx);
+   AEcontext *actx = AE_CONTEXT(ctx);
+   AEtexarray *ta;
+   AEarray *aa;
+
+   if (actx->NewState)
+      _ae_update_state( ctx );
+
+   for (ta = actx->texarrays ; ta->func ; ta++) {
+      ta->func( ta->unit + GL_TEXTURE0_ARB, (char *)ta->array->Ptr + elt * ta->array->StrideB );
+   }
+
+   /* Must be last
+    */
+   for (aa = actx->arrays ; aa->func ; aa++) {
+      aa->func( (char *)aa->array->Ptr + elt * aa->array->StrideB );
+   }
+}
+
+
+
+void _ae_invalidate_state( GLcontext *ctx, GLuint new_state )
+{
+   AE_CONTEXT(ctx)->NewState |= new_state;
+}
+@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@@
+
+
+1.1.9.1
+log
+@OpenBSD just has imported exactly this tree into their vendor branch,
+called the same tag, in XF4/xc
+This is, apparently, the last XFree86 snapshot before the licence change
+(ie, addition of the advertising clause)
+
+Since the developers don't see any problems with that, and we would like
+to integrate improvements done by the remaining one or two (or so) XFree86
+developers (j/k), this prepares enabling us to update X-Window in the future.
+@
+text
+@d4 1
+a4 1
+ * Version:  4.1
+d27 1
+a27 1
+ *    Keith Whitwell <keith@@tungstengraphics.com>
+d34 1
+a34 1
+#include "imports.h"
+d255 1
+a255 1
+   if (!ctx->aelt_context)
+d309 1
+a309 1
+      aa->func = (array_func)glEdgeFlagv;
+@
+
+
+1.1.1.1
+log
+@The X-Windowing System
+
+Import XFree86 4.3 from OpenBSD by CTM, in the hope it's stable
+@
+text
+@@
+
+
+1.1.1.2
+log
+@That's what OpenBSD will, probably, ship as XF4 in 3.5
+their last sync against XFree86 4.3-current has been
+imported into our vendor branch, too
+@
+text
+@d4 1
+a4 1
+ * Version:  4.1
+d27 1
+a27 1
+ *    Keith Whitwell <keith@@tungstengraphics.com>
+d34 1
+a34 1
+#include "imports.h"
+d255 1
+a255 1
+   if (!ctx->aelt_context)
+d309 1
+a309 1
+      aa->func = (array_func)glEdgeFlagv;
+@
+

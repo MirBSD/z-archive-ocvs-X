@@ -1,0 +1,409 @@
+head	1.2;
+access;
+symbols
+	cvs-200405281530:1.1.1.4
+	cvs-200402211630:1.1.1.3
+	cvs-200401261625:1.1.1.3
+	cvs-200401162142:1.1.1.3
+	cvs-200301141450:1.1.1.3
+	cvs-200312021610:1.1.1.2
+	cvs-200311151930:1.1.1.2
+	cvs-200310311830:1.1.1.2
+	cvs-200310021000:1.1.1.2
+	cvs-200309281111:1.1.1.2
+	cvs-200309171515:1.1.1.2
+	cvs-200308302005:1.1.1.2
+	cvs-200308221505:1.1.1.1
+	cvs-200308171200:1.1.1.1
+	ctm-3449:1.1.1.1
+	cvs-200307191610:1.1.1.1
+	ctm-3416:1.1.1.1
+	cvs-200307091500:1.1.1.1
+	ctm-3389:1.1.1.1
+	cvs-200306291800:1.1.1.1
+	ctm-3369:1.1.1.1
+	ctm-3341:1.1.1.1
+	MIRBSD_5:1.1.1.1
+	cvs-200306082100:1.1.1.1
+	ctm-3316:1.1.1.1
+	ctm-3272:1.1.1.1
+	ctm-3264:1.1.1.1
+	ctm-3258:1.1.1.1
+	MIRBSD_4:1.1.1.1
+	ctm-3200:1.1.1.1
+	ctm-3188:1.1.1.1
+	ctm-3155:1.1.1.1
+	ctm-3132:1.1.1.1
+	openbsd:1.1.1;
+locks; strict;
+comment	@# @;
+
+
+1.2
+date	2004.02.19.21.58.17;	author tg;	state dead;
+branches;
+next	1.1;
+
+1.1
+date	2003.03.22.19.49.33;	author tg;	state Exp;
+branches
+	1.1.1.1;
+next	;
+
+1.1.1.1
+date	2003.03.22.19.49.33;	author tg;	state Exp;
+branches;
+next	1.1.1.2;
+
+1.1.1.2
+date	2003.08.30.21.09.01;	author tg;	state Exp;
+branches;
+next	1.1.1.3;
+
+1.1.1.3
+date	2004.01.14.15.30.22;	author tg;	state Exp;
+branches;
+next	1.1.1.4;
+
+1.1.1.4
+date	2004.05.28.16.21.57;	author bsiegert;	state Exp;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.2
+log
+@update to 4.0.18, asked for by "ciruZ" in irc
+regen diffs; mirlibtoolify, etc.
+@
+text
+@$OpenBSD: patch-scripts_mysql_install_db.sh,v 1.9 2002/12/14 23:56:43 brad Exp $
+--- scripts/mysql_install_db.sh.orig	Thu Oct 10 06:17:34 2002
++++ scripts/mysql_install_db.sh	Tue Nov 26 21:07:21 2002
+@@@@ -7,12 +7,9 @@@@
+ #
+ # All unrecognized arguments to this script are passed to mysqld.
+ 
+-IN_RPM=0
+-case "$1" in
+-    -IN-RPM)
+-      IN_RPM="1"; shift
+-      ;;
+-esac
++user=mysql
++group=mysql
++
+ defaults=
+ case "$1" in
+     --no-defaults|--defaults-file=*|--defaults-extra-file=*)
+@@@@ -33,10 +30,10 @@@@ parse_arguments() {
+ 
+   for arg do
+     case "$arg" in
+-      --force) force=1 ;;
+       --basedir=*) basedir=`echo "$arg" | sed -e 's/^[^=]*=//'` ;;
+       --ldata=*|--datadir=*) ldata=`echo "$arg" | sed -e 's/^[^=]*=//'` ;;
+       --user=*) user=`echo "$arg" | sed -e 's/^[^=]*=//'` ;;
++      --group=*) group=`echo "$arg" | sed -e 's/^[^=]*=//'` ;;
+       *)
+         if test -n "$pick_args"
+         then
+@@@@ -69,7 +66,6 @@@@ ldata=
+ execdir=
+ bindir=
+ basedir=
+-force=0
+ parse_arguments `$print_defaults $defaults mysqld mysql_install_db`
+ parse_arguments PICK-ARGS-FROM-ARGV "$@@"
+ 
+@@@@ -96,53 +92,37 @@@@ mdata=$ldata/mysql
+ 
+ if test ! -x $execdir/mysqld
+ then
+-  if test "$IN_RPM" -eq 1
+-  then
+-    echo "FATAL ERROR $execdir/mysqld not found!"
+-    exit 1
+-  else
+     echo "Didn't find $execdir/mysqld"
+     echo "You should do a 'make install' before executing this script"
+     exit 1
+-  fi
+ fi
+ 
+-hostname=`@@HOSTNAME@@`		# Install this too in the user table
++hostname=`hostname -s`		# Install this too in the user table
+ 
+ # Check if hostname is valid
+-if test "$IN_RPM" -eq 0 -a $force -eq 0
++resolved=`$bindir/resolveip $hostname 2>&1`
++if [ $? -ne 0 ]
+ then
+-  resolved=`$bindir/resolveip $hostname 2>&1`
+-  if [ $? -ne 0 ]
++  resolved=`$bindir/resolveip localhost 2>&1`
++  if [ $? -eq 0 ]
+   then
+-    resolved=`$bindir/resolveip localhost 2>&1`
+-    if [ $? -eq 0 ]
+-    then
+-      echo "Sorry, the host '$hostname' could not be looked up."
+-      echo "Please configure the 'hostname' command to return a correct hostname."
+-      echo "If you want to solve this at a later stage, restart this script with"
+-      echo "the --force option"
+-      exit 1
+-    fi
+-    echo "WARNING: The host '$hostname' could not be looked up with resolveip."
+-    echo "This probably means that your libc libraries are not 100 % compatible"
+-    echo "with this binary MySQL version. The MySQL deamon, mysqld, should work"
+-    echo "normally with the exception that host name resolving will not work."
+-    echo "This means that you should use IP addresses instead of hostnames"
+-    echo "when specifying MySQL privileges !"
++    echo "Sorry, the host '$hostname' could not be looked up."
++    echo "Please configure the 'hostname' command to return a correct hostname."
++    exit 1
+   fi
++  echo "WARNING: The host '$hostname' could not be looked up with resolveip."
++  echo "This probably means that your libc libraries are not 100 % compatible"
++  echo "with this binary MySQL version. The MySQL deamon, mysqld, should work"
++  echo "normally with the exception that host name resolving will not work."
++  echo "This means that you should use IP addresses instead of hostnames"
++  echo "when specifying MySQL privileges !"
+ fi
+ 
+ # Create database directories mysql & test
+-if test "$IN_RPM" -eq 0
+-then
+-  if test ! -d $ldata; then mkdir $ldata; chmod 700 $ldata ; fi
+-  if test ! -d $ldata/mysql; then mkdir $ldata/mysql;  chmod 700 $ldata/mysql ; fi
+-  if test ! -d $ldata/test; then mkdir $ldata/test;  chmod 700 $ldata/test ; fi
+-  if test -w / -a ! -z "$user"; then
+-    chown $user $ldata $ldata/mysql $ldata/test;
+-  fi
+-fi
++if test ! -d $ldata; then mkdir -p $ldata; chmod 700 $ldata ; fi
++if test ! -d $ldata/mysql; then mkdir -p $ldata/mysql;  chmod 700 $ldata/mysql ; fi
++if test ! -d $ldata/test; then mkdir -p $ldata/test;  chmod 700 $ldata/test ; fi
++chown $user:$group $ldata $ldata/mysql $ldata/test;
+ 
+ # Initialize variables
+ c_d="" i_d=""
+@@@@ -309,12 +289,6 @@@@ $c_c
+ END_OF_DATA
+ then
+   echo ""
+-  if test "$IN_RPM" -eq 0
+-  then
+-    echo "To start mysqld at boot time you have to copy support-files/mysql.server"
+-    echo "to the right place for your system"
+-    echo
+-  fi
+   echo "PLEASE REMEMBER TO SET A PASSWORD FOR THE MySQL root USER !"
+   echo "This is done with:"
+   echo "$bindir/mysqladmin -u root  password 'new-password'"
+@@@@ -330,15 +304,6 @@@@ then
+     echo "able to use the new GRANT command!"
+   fi
+   echo
+-  if test "$IN_RPM" -eq 0
+-  then
+-    echo "You can start the MySQL daemon with:"
+-    echo "cd @@prefix@@ ; $bindir/safe_mysqld &"
+-    echo
+-    echo "You can test the MySQL daemon with the benchmarks in the 'sql-bench' directory:"
+-    echo "cd sql-bench ; run-all-tests"
+-    echo
+-  fi
+   echo "Please report any problems with the @@scriptdir@@/mysqlbug script!"
+   echo
+   echo "The latest information about MySQL is available on the web at"
+@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@@
+
+
+1.1.1.1
+log
+@Import OpenBSD 3.3 ports repository from CTM 3132 the first time
+This continues opening an OpenBSD-mirabile (aka MirBSD) repository.
+
+### MirBSD is:
+# Copyright (c) 1982-2003 by Thorsten "mirabile" Glaser <x86@@ePost.de>
+# Copyright © 1968-2003  The authors of And contributors to UNIX®, the
+#       C Language, BSD/Berkeley Unix; 386BSD, NetBSD 1.1 and OpenBSD.
+#
+# Anyone who obtained a copy of this work is hereby permitted to freely use,
+# distribute, modify, merge, sublicence, give away or sell it as long as the
+# authors are given due credit and the following notice is retained:
+#
+# This work is provided "as is", with no explicit or implicit warranty what-
+# soever. Use it only at your own risk. In no event may an author or contri-
+# butor be held liable for any damage, directly or indirectly, that origina-
+# ted through or is caused by creation or modification of this work.
+
+MirBSD is my private tree. MirBSD does not differ very much from OpenBSD
+and intentionally tracks OpenBSD. That's why it _is_ OpenBSD, just not the
+official one. It's like with DarrenBSD.
+
+At time of this writing, no advertising for MirBSD must be done,
+because the advertising clause has not yet been sorted out.
+
+http://templeofhate.com/tglaser/MirBSD/index.php
+@
+text
+@@
+
+
+1.1.1.2
+log
+@Synchronize with OpenBSD 3.4-beta
+@
+text
+@d1 3
+a3 3
+$OpenBSD: patch-scripts_mysql_install_db.sh,v 1.10 2003/08/27 00:14:49 brad Exp $
+--- scripts/mysql_install_db.sh.orig	2003-06-06 10:39:19.000000000 -0400
++++ scripts/mysql_install_db.sh	2003-08-26 19:17:20.000000000 -0400
+d14 2
+a15 2
++user=_mysql
++group=_mysql
+@
+
+
+1.1.1.3
+log
+@Now we can update MirPorts from OpenBSD ports tree again,
+that we have fixed pkg_install tools accordingly in both
+stable and current, and that these tools are compatible.
+
+Consider MirPorts locked until next commit of ports/INDEX,v
+@
+text
+@d1 3
+a3 3
+$OpenBSD: patch-scripts_mysql_install_db.sh,v 1.12 2003/12/30 08:47:02 brad Exp $
+--- scripts/mysql_install_db.sh.orig	2003-12-14 16:23:48.000000000 -0500
++++ scripts/mysql_install_db.sh	2003-12-30 03:41:32.000000000 -0500
+a28 1
+       --skip-name-resolve) ip_only=1 ;;
+d31 2
+a32 1
+@@@@ -70,7 +67,6 @@@@ ldata=
+d40 1
+a40 1
+@@@@ -97,43 +93,33 @@@@ mdata=$ldata/mysql
+d44 1
+a44 1
+-  if test "$IN_RPM" = "1"
+d49 3
+a51 3
+-    echo "Didn't find $execdir/mysqld"
+-    echo "You should do a 'make install' before executing this script"
+-    exit 1
+a52 2
++  echo "FATAL ERROR $execdir/mysqld not found!"
++  exit 1
+d55 2
+a56 2
+ # Try to determine the hostname
+ hostname=`@@HOSTNAME@@`
+d59 1
+a59 1
+-if test "$IN_RPM" = "0" -a $force = "0"
+d71 1
+a71 2
+-      echo "Neither host '$hostname' and 'localhost' could not be looked up with"
+-      echo "$bindir/resolveip"
+d79 1
+a79 1
+-    echo "with this binary MySQL version. The MySQL daemon, mysqld, should work"
+d83 1
+a83 2
++    echo "Neither host '$hostname' and 'localhost' could not be looked up with"
++    echo "$bindir/resolveip"
+a84 2
++    echo "If you want to solve this at a later stage, restart this script with"
++    echo "the --force option"
+d89 1
+a89 1
++  echo "with this binary MySQL version. The MySQL daemon, mysqld, should work"
+a94 4
+ if test "$ip_only" = "1"
+@@@@ -143,12 +129,10 @@@@ then
+ fi
+ 
+d96 2
+d104 5
+a108 4
++  if test ! -d $ldata; then mkdir -p $ldata; chmod 700 $ldata ; fi
++  if test ! -d $ldata/mysql; then mkdir -p $ldata/mysql;  chmod 700 $ldata/mysql ; fi
++  if test ! -d $ldata/test; then mkdir -p $ldata/test;  chmod 700 $ldata/test ; fi
++  chown -f $user:$group $ldata $ldata/mysql $ldata/test
+d112 1
+a112 1
+@@@@ -333,12 +317,6 @@@@ $c_c
+d116 1
+a116 1
+-  if test "$IN_RPM" = "0"
+d124 2
+a125 2
+   echo "$bindir/mysqladmin -u root password 'new-password'"
+@@@@ -354,15 +332,6 @@@@ then
+d129 1
+a129 1
+-  if test "$IN_RPM" = "0"
+d132 1
+a132 1
+-    echo "cd @@prefix@@ ; $bindir/mysqld_safe &"
+d135 1
+a135 1
+-    echo "cd sql-bench ; perl run-all-tests"
+@
+
+
+1.1.1.4
+log
+@Import OpenBSD ports tree checked out from anoncvs.ca.openbsd.org at
+2004-05-28 15:30 UTC.
+
+Lots of SECURITY fixes, at least:
+
+ * databases/mysql: tmpfile issue
+ * www/squid: acl bypass
+ * games/xonix: privilege escalation
+ * archivers/lha: buffer overflow
+ * mail/exim: buffer overflows
+ * net/rsync: path checking issue
+ * net/icecast: buffer overflow
+ * www/opera
+@
+text
+@d1 3
+a3 3
+$OpenBSD: patch-scripts_mysql_install_db.sh,v 1.16 2004/05/21 12:16:21 brad Exp $
+--- scripts/mysql_install_db.sh.orig	2004-05-13 20:53:23.000000000 -0400
++++ scripts/mysql_install_db.sh	2004-05-19 11:14:59.000000000 -0400
+d66 1
+d68 1
+a68 1
+   if [ $? -ne 0 ]
+d71 1
+a71 1
+-    if [ $? -ne 0 ]
+d130 1
+a130 1
+   echo "To do so, start the server, then issue the following commands:"
+@
+
+

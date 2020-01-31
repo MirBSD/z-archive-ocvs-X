@@ -1,0 +1,475 @@
+head	1.1;
+branch	1.1.1;
+access;
+symbols
+	tg-mergetmp-2:1.1.1.2
+	cvs-200410241530:1.1.1.2
+	cvs-200410012000:1.1.1.2
+	cvs-200407141120:1.1.1.2
+	cvs-200406231010:1.1.1.2
+	MIRBSD_7quater:1.1.1.1
+	cvs-200405271510:1.1.1.2
+	XFree86_4_4_0:1.1.9.1
+	cvs-200403021700:1.1.1.2
+	XFREE86_20040213:1.1.9.1
+	xc:1.1.9
+	cvs-200401291925:1.1.1.1
+	MIRBSD_7_ALPHA:1.1.1.1.0.4
+	MIRBSD_7:1.1.1.1.0.2
+	MIRBSD_7ter:1.1.1.1
+	cvs-20011091815:1.1.1.1
+	cvs-200309162130:1.1.1.1
+	cvs-200308302005:1.1.1.1
+	ctmx-0387:1.1.1.1
+	ctmx-0384:1.1.1.1
+	MIRBSD_5:1.1.1.1
+	ctmx-0375:1.1.1.1
+	ctmx-0373:1.1.1.1
+	ctm-0371:1.1.1.1
+	ctm-0370:1.1.1.1
+	MIRBSD_4:1.1.1.1
+	ctm-0363:1.1.1.1
+	ctm-0359:1.1.1.1
+	ctm-0349:1.1.1.1
+	openbsd:1.1.1;
+locks; strict;
+comment	@ * @;
+
+
+1.1
+date	2003.03.22.20.06.17;	author tg;	state Exp;
+branches
+	1.1.1.1
+	1.1.9.1;
+next	;
+
+1.1.1.1
+date	2003.03.22.20.06.17;	author tg;	state Exp;
+branches;
+next	1.1.1.2;
+
+1.1.1.2
+date	2004.03.02.18.12.04;	author tg;	state Stab;
+branches;
+next	;
+
+1.1.9.1
+date	2004.02.14.19.21.44;	author tg;	state Exp;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@/* $Xorg: cfbsetsp.c,v 1.4 2001/02/09 02:04:38 xorgcvs Exp $ */
+/***********************************************************
+
+Copyright 1987, 1998  The Open Group
+
+Permission to use, copy, modify, distribute, and sell this software and its
+documentation for any purpose is hereby granted without fee, provided that
+the above copyright notice appear in all copies and that both that
+copyright notice and this permission notice appear in supporting
+documentation.
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
+OPEN GROUP BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN
+AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
+CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+Except as contained in this notice, the name of The Open Group shall not be
+used in advertising or otherwise to promote the sale, use or other dealings
+in this Software without prior written authorization from The Open Group.
+
+
+Copyright 1987 by Digital Equipment Corporation, Maynard, Massachusetts.
+
+                        All Rights Reserved
+
+Permission to use, copy, modify, and distribute this software and its 
+documentation for any purpose and without fee is hereby granted, 
+provided that the above copyright notice appear in all copies and that
+both that copyright notice and this permission notice appear in 
+supporting documentation, and that the name of Digital not be
+used in advertising or publicity pertaining to distribution of the
+software without specific, written prior permission.  
+
+DIGITAL DISCLAIMS ALL WARRANTIES WITH REGARD TO THIS SOFTWARE, INCLUDING
+ALL IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS, IN NO EVENT SHALL
+DIGITAL BE LIABLE FOR ANY SPECIAL, INDIRECT OR CONSEQUENTIAL DAMAGES OR
+ANY DAMAGES WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS,
+WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION,
+ARISING OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS
+SOFTWARE.
+
+******************************************************************/
+/* $XFree86: xc/programs/Xserver/cfb/cfbsetsp.c,v 3.5 2001/12/14 19:59:24 dawes Exp $ */
+
+#include "X.h"
+#include "Xmd.h"
+#include "servermd.h"
+
+#include "misc.h"
+#include "regionstr.h"
+#include "gcstruct.h"
+#include "windowstr.h"
+#include "pixmapstr.h"
+#include "scrnintstr.h"
+
+#include "cfb.h"
+#include "cfbmskbits.h"
+#include <mergerop.h>
+
+/* cfbSetScanline -- copies the bits from psrc to the drawable starting at
+ * (xStart, y) and continuing to (xEnd, y).  xOrigin tells us where psrc 
+ * starts on the scanline. (I.e., if this scanline passes through multiple
+ * boxes, we may not want to start grabbing bits at psrc but at some offset
+ * further on.) 
+ */
+void
+cfbSetScanline(y, xOrigin, xStart, xEnd, psrc, alu, pdstBase, widthDst, planemask)
+    int			y;
+    int			xOrigin;	/* where this scanline starts */
+    int			xStart;		/* first bit to use from scanline */
+    int			xEnd;		/* last bit to use from scanline + 1 */
+    register unsigned int *psrc;
+    register int	alu;		/* raster op */
+    int			*pdstBase;	/* start of the drawable */
+    int			widthDst;	/* width of drawable in words */
+    unsigned long	planemask;
+{
+    int			w;		/* width of scanline in bits */
+    register int	*pdst;		/* where to put the bits */
+    register int	tmpSrc;		/* scratch buffer to collect bits in */
+    int			dstBit;		/* offset in bits from beginning of 
+					 * word */
+    int			offSrc;
+    int			nl;
+#if PSZ == 24
+    register char *psrcb, *pdstb;
+    register int	xIndex;
+#else
+    register int	nstart; 	/* number of bits from first partial */
+    register int	nend; 		/* " " last partial word */
+    int			startmask, endmask, nlMiddle;
+#endif
+    DeclareMergeRop()
+
+    InitializeMergeRop(alu,planemask);
+#if PSZ == 24
+    pdst = pdstBase + (y * widthDst);
+    xIndex = xStart;
+    pdstb = (char *)pdst + (xStart * 3);
+    offSrc = xStart - xOrigin;
+    psrcb = (char *)psrc + (offSrc * 3);
+#else
+    pdst = pdstBase + (y * widthDst) + (xStart >> PWSH); 
+    psrc += (xStart - xOrigin) >> PWSH;
+    offSrc = (xStart - xOrigin) & PIM;
+#endif
+    w = xEnd - xStart;
+    dstBit = xStart & PIM;
+
+#if PSZ == 24
+    nl = w;
+    while (nl--){
+      psrc = (unsigned int *)((unsigned long)psrcb & ~0x03);
+      getbits24(psrc, tmpSrc, offSrc);
+      pdst = (int *)((unsigned long)pdstb & ~0x03);
+      DoMergeRop24(tmpSrc, pdst, xIndex);
+      offSrc++;
+      psrcb += 3;
+      xIndex++;
+      pdstb += 3;
+    } 
+#else /* PSZ == 24 */
+    if (dstBit + w <= PPW) 
+    { 
+	maskpartialbits(dstBit, w, startmask);
+	endmask = 0;
+	nlMiddle = 0;
+    } 
+    else 
+    { 
+	maskbits(xStart, w, startmask, endmask, nlMiddle);
+    }
+    if (startmask) 
+	nstart = PPW - dstBit; 
+    else 
+	nstart = 0; 
+    if (endmask) 
+	nend = xEnd & PIM; 
+    else 
+	nend = 0; 
+    if (startmask) 
+    { 
+	getbits(psrc, offSrc, nstart, tmpSrc);
+	putbitsmropshort(tmpSrc, dstBit, nstart, pdst);
+	pdst++; 
+	offSrc += nstart;
+	if (offSrc > PLST)
+	{
+	    psrc++;
+	    offSrc -= PPW;
+	}
+    } 
+    nl = nlMiddle; 
+    while (nl--) 
+    { 
+	getbits(psrc, offSrc, PPW, tmpSrc);
+	*pdst = DoMergeRop(tmpSrc, *pdst);
+	pdst++; 
+	psrc++; 
+    } 
+    if (endmask) 
+    { 
+	getbits(psrc, offSrc, nend, tmpSrc);
+	putbitsmropshort(tmpSrc, 0, nend, pdst);
+    } 
+#endif /* PSZ == 24 */
+}
+
+
+
+/* SetSpans -- for each span copy pwidth[i] bits from psrc to pDrawable at
+ * ppt[i] using the raster op from the GC.  If fSorted is TRUE, the scanlines
+ * are in increasing Y order.
+ * Source bit lines are server scanline padded so that they always begin
+ * on a word boundary.
+ */ 
+void
+cfbSetSpans(pDrawable, pGC, pcharsrc, ppt, pwidth, nspans, fSorted)
+    DrawablePtr		pDrawable;
+    GCPtr		pGC;
+    char		*pcharsrc;
+    register DDXPointPtr ppt;
+    int			*pwidth;
+    int			nspans;
+    int			fSorted;
+{
+    unsigned int	*psrc = (unsigned int *)pcharsrc;
+    CfbBits	*pdstBase;	/* start of dst bitmap */
+    int 		widthDst;	/* width of bitmap in words */
+    register BoxPtr 	pbox, pboxLast, pboxTest;
+    register DDXPointPtr pptLast;
+    int 		alu;
+    RegionPtr 		prgnDst;
+    int			xStart, xEnd;
+    int			yMax;
+
+    alu = pGC->alu;
+    prgnDst = cfbGetCompositeClip(pGC);
+    pptLast = ppt + nspans;
+
+    cfbGetLongWidthAndPointer (pDrawable, widthDst, pdstBase)
+
+    yMax = (int) pDrawable->y + (int) pDrawable->height;
+
+    pbox = REGION_RECTS(prgnDst);
+    pboxLast = pbox + REGION_NUM_RECTS(prgnDst);
+
+    if(fSorted)
+    {
+    /* scan lines sorted in ascending order. Because they are sorted, we
+     * don't have to check each scanline against each clip box.  We can be
+     * sure that this scanline only has to be clipped to boxes at or after the
+     * beginning of this y-band 
+     */
+	pboxTest = pbox;
+	while(ppt < pptLast)
+	{
+	    pbox = pboxTest;
+	    if(ppt->y >= yMax)
+		break;
+	    while(pbox < pboxLast)
+	    {
+		if(pbox->y1 > ppt->y)
+		{
+		    /* scanline is before clip box */
+		    break;
+		}
+		else if(pbox->y2 <= ppt->y)
+		{
+		    /* clip box is before scanline */
+		    pboxTest = ++pbox;
+		    continue;
+		}
+		else if(pbox->x1 > ppt->x + *pwidth) 
+		{
+		    /* clip box is to right of scanline */
+		    break;
+		}
+		else if(pbox->x2 <= ppt->x)
+		{
+		    /* scanline is to right of clip box */
+		    pbox++;
+		    continue;
+		}
+
+		/* at least some of the scanline is in the current clip box */
+		xStart = max(pbox->x1, ppt->x);
+		xEnd = min(ppt->x + *pwidth, pbox->x2);
+		cfbSetScanline(ppt->y, ppt->x, xStart, xEnd, psrc, alu,
+		    (int *)pdstBase, widthDst, pGC->planemask);
+		if(ppt->x + *pwidth <= pbox->x2)
+		{
+		    /* End of the line, as it were */
+		    break;
+		}
+		else
+		    pbox++;
+	    }
+	    /* We've tried this line against every box; it must be outside them
+	     * all.  move on to the next point */
+	    ppt++;
+	    psrc += PixmapWidthInPadUnits(*pwidth, pDrawable->depth);
+	    pwidth++;
+	}
+    }
+    else
+    {
+    /* scan lines not sorted. We must clip each line against all the boxes */
+	while(ppt < pptLast)
+	{
+	    if(ppt->y >= 0 && ppt->y < yMax)
+	    {
+		
+		for(pbox = REGION_RECTS(prgnDst); pbox< pboxLast; pbox++)
+		{
+		    if(pbox->y1 > ppt->y)
+		    {
+			/* rest of clip region is above this scanline,
+			 * skip it */
+			break;
+		    }
+		    if(pbox->y2 <= ppt->y)
+		    {
+			/* clip box is below scanline */
+			pbox++;
+			break;
+		    }
+		    if(pbox->x1 <= ppt->x + *pwidth &&
+		       pbox->x2 > ppt->x)
+		    {
+			xStart = max(pbox->x1, ppt->x);
+			xEnd = min(pbox->x2, ppt->x + *pwidth);
+			cfbSetScanline(ppt->y, ppt->x, xStart, xEnd, psrc, alu,
+			    (int *)pdstBase, widthDst, pGC->planemask);
+		    }
+
+		}
+	    }
+	psrc += PixmapWidthInPadUnits(*pwidth, pDrawable->depth);
+	ppt++;
+	pwidth++;
+	}
+    }
+}
+
+@
+
+
+1.1.9.1
+log
+@OpenBSD just has imported exactly this tree into their vendor branch,
+called the same tag, in XF4/xc
+This is, apparently, the last XFree86 snapshot before the licence change
+(ie, addition of the advertising clause)
+
+Since the developers don't see any problems with that, and we would like
+to integrate improvements done by the remaining one or two (or so) XFree86
+developers (j/k), this prepares enabling us to update X-Window in the future.
+@
+text
+@d48 1
+a48 1
+/* $XFree86: xc/programs/Xserver/cfb/cfbsetsp.c,v 3.6 2003/10/29 22:44:53 tsi Exp $ */
+d86 2
+a93 2
+    int			dstBit;		/* offset in bits from beginning of
+					 * word */
+a94 1
+#if PSZ != 32 || PPW != 1
+a95 1
+#endif
+d113 1
+a127 1
+    dstBit = xStart & PIM;
+a141 1
+#if PSZ != 32 || PPW != 1
+a145 1
+#endif
+@
+
+
+1.1.1.1
+log
+@Import OpenBSD 3.3 XF4 repository from CTM 3132 the first time
+This finalizes starting an OpenBSD-mirabile (aka MirBSD) repository.
+
+### MirBSD is:
+# Copyright (c) 1982-2003 by Thorsten "mirabile" Glaser <x86@@ePost.de>
+# Copyright © 1968-2003  The authors of And contributors to UNIX®, the
+#       C Language, BSD/Berkeley Unix; 386BSD, NetBSD 1.1 and OpenBSD.
+#
+# Anyone who obtained a copy of this work is hereby permitted to freely use,
+# distribute, modify, merge, sublicence, give away or sell it as long as the
+# authors are given due credit and the following notice is retained:
+#
+# This work is provided "as is", with no explicit or implicit warranty what-
+# soever. Use it only at your own risk. In no event may an author or contri-
+# butor be held liable for any damage, directly or indirectly, that origina-
+# ted through or is caused by creation or modification of this work.
+
+MirBSD is my private tree. MirBSD does not differ very much from OpenBSD
+and intentionally tracks OpenBSD. That's why it _is_ OpenBSD, just not the
+official one. It's like with DarrenBSD.
+
+At time of this writing, no advertising for MirBSD must be done,
+because the advertising clause has not yet been sorted out.
+
+http://templeofhate.com/tglaser/MirBSD/index.php
+@
+text
+@@
+
+
+1.1.1.2
+log
+@That's what OpenBSD will, probably, ship as XF4 in 3.5
+their last sync against XFree86 4.3-current has been
+imported into our vendor branch, too
+@
+text
+@d48 1
+a48 1
+/* $XFree86: xc/programs/Xserver/cfb/cfbsetsp.c,v 3.6 2003/10/29 22:44:53 tsi Exp $ */
+d86 2
+a93 2
+    int			dstBit;		/* offset in bits from beginning of
+					 * word */
+a94 1
+#if PSZ != 32 || PPW != 1
+a95 1
+#endif
+d113 1
+a127 1
+    dstBit = xStart & PIM;
+a141 1
+#if PSZ != 32 || PPW != 1
+a145 1
+#endif
+@
+

@@ -1,0 +1,246 @@
+head	1.1;
+branch	1.1.1;
+access;
+symbols
+	tg-mergetmp-2:1.1.1.1
+	cvs-200410241530:1.1.1.1
+	cvs-200410012000:1.1.1.1
+	cvs-200407221130:1.1.1.1
+	cvs-200407141120:1.1.1.1
+	cvs-200406231010:1.1.1.1
+	MIRBSD_7quater:1.1.1.1
+	cvs-200405271510:1.1.1.1
+	XFree86_4_4_0:1.1.9.1
+	cvs-200403021700:1.1.1.1
+	XFREE86_20040213:1.1.9.1
+	xc:1.1.9
+	cvs-200401291925:1.1.1.1
+	MIRBSD_7_ALPHA:1.1.1.1.0.4
+	MIRBSD_7:1.1.1.1.0.2
+	MIRBSD_7ter:1.1.1.1
+	cvs-20011091815:1.1.1.1
+	cvs-200309162130:1.1.1.1
+	cvs-200308302005:1.1.1.1
+	ctmx-0387:1.1.1.1
+	ctmx-0384:1.1.1.1
+	MIRBSD_5:1.1.1.1
+	ctmx-0375:1.1.1.1
+	ctmx-0373:1.1.1.1
+	ctm-0371:1.1.1.1
+	ctm-0370:1.1.1.1
+	MIRBSD_4:1.1.1.1
+	ctm-0363:1.1.1.1
+	ctm-0359:1.1.1.1
+	openbsd:1.1.1;
+locks; strict;
+comment	@ * @;
+
+
+1.1
+date	2003.04.08.18.36.10;	author tg;	state Exp;
+branches
+	1.1.1.1
+	1.1.9.1;
+next	;
+
+1.1.1.1
+date	2003.04.08.18.36.10;	author tg;	state Stab;
+branches;
+next	;
+
+1.1.9.1
+date	2004.02.14.19.23.05;	author tg;	state Exp;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@/* $XFree86: xc/programs/Xserver/hw/xfree86/drivers/cyrix/cyrix_shadow.c,v 1.1 2002/11/06 11:38:59 alanh Exp $ */
+
+/*
+   Copyright (c) 1999,  The XFree86 Project Inc. 
+   Written by Mark Vojkovich <markv@@valinux.com>
+*/
+
+#include "xf86.h"
+#include "xf86_OSproc.h"
+#include "xf86Resources.h"
+#include "xf86_ansic.h"
+#include "xf86PciInfo.h"
+#include "xf86Pci.h"
+#include "cyrix.h"
+#include "shadowfb.h"
+#include "servermd.h"
+
+
+
+void
+CYRIXRefreshArea(ScrnInfoPtr pScrn, int num, BoxPtr pbox)
+{
+    CYRIXPrvPtr pCyrix = CYRIXPTR(pScrn);
+    int width, height, Bpp, FBPitch;
+    unsigned char *src, *dst;
+   
+    Bpp = pScrn->bitsPerPixel >> 3;
+    FBPitch = BitmapBytePad(pScrn->displayWidth * pScrn->bitsPerPixel);
+
+    while(num--) {
+	width = (pbox->x2 - pbox->x1) * Bpp;
+	height = pbox->y2 - pbox->y1;
+	src = pCyrix->ShadowPtr + (pbox->y1 * pCyrix->ShadowPitch) + 
+						(pbox->x1 * Bpp);
+	dst = pCyrix->FbBase + (pbox->y1 * FBPitch) + (pbox->x1 * Bpp);
+
+	while(height--) {
+	    memcpy(dst, src, width);
+	    dst += FBPitch;
+	    src += pCyrix->ShadowPitch;
+	}
+	
+	pbox++;
+    }
+} 
+
+void
+CYRIXPointerMoved(int index, int x, int y)
+{
+    ScrnInfoPtr pScrn = xf86Screens[index];
+    CYRIXPrvPtr pCyrix = CYRIXPTR(pScrn);
+    int newX, newY;
+
+    if(pCyrix->Rotate == 1) {
+	newX = pScrn->pScreen->height - y - 1;
+	newY = x;
+    } else {
+	newX = y;
+	newY = pScrn->pScreen->width - x - 1;
+    }
+
+    (*pCyrix->PointerMoved)(index, newX, newY);
+}
+
+void
+CYRIXRefreshArea8(ScrnInfoPtr pScrn, int num, BoxPtr pbox)
+{
+    CYRIXPrvPtr pCyrix = CYRIXPTR(pScrn);
+    int count, width, height, y1, y2, dstPitch, srcPitch;
+    CARD8 *dstPtr, *srcPtr, *src;
+    CARD32 *dst;
+
+    dstPitch = pScrn->displayWidth;
+    srcPitch = -pCyrix->Rotate * pCyrix->ShadowPitch;
+
+    while(num--) {
+	width = pbox->x2 - pbox->x1;
+	y1 = pbox->y1 & ~3;
+	y2 = (pbox->y2 + 3) & ~3;
+	height = (y2 - y1) >> 2;  /* in dwords */
+
+	if(pCyrix->Rotate == 1) {
+	    dstPtr = pCyrix->FbBase + 
+			(pbox->x1 * dstPitch) + pScrn->virtualX - y2;
+	    srcPtr = pCyrix->ShadowPtr + ((1 - y2) * srcPitch) + pbox->x1;
+	} else {
+	    dstPtr = pCyrix->FbBase + 
+			((pScrn->virtualY - pbox->x2) * dstPitch) + y1;
+	    srcPtr = pCyrix->ShadowPtr + (y1 * srcPitch) + pbox->x2 - 1;
+	}
+
+	while(width--) {
+	    src = srcPtr;
+	    dst = (CARD32*)dstPtr;
+	    count = height;
+	    while(count--) {
+		*(dst++) = src[0] | (src[srcPitch] << 8) | 
+					(src[srcPitch * 2] << 16) | 
+					(src[srcPitch * 3] << 24);
+		src += srcPitch * 4;
+	    }
+	    srcPtr += pCyrix->Rotate;
+	    dstPtr += dstPitch;
+	}
+
+	pbox++;
+    }
+} 
+
+
+void
+CYRIXRefreshArea16(ScrnInfoPtr pScrn, int num, BoxPtr pbox)
+{
+    CYRIXPrvPtr pCyrix = CYRIXPTR(pScrn);
+    int count, width, height, y1, y2, dstPitch, srcPitch;
+    CARD16 *dstPtr, *srcPtr, *src;
+    CARD32 *dst;
+
+    dstPitch = pScrn->displayWidth;
+    srcPitch = -pCyrix->Rotate * pCyrix->ShadowPitch >> 1;
+
+    while(num--) {
+	width = pbox->x2 - pbox->x1;
+	y1 = pbox->y1 & ~1;
+	y2 = (pbox->y2 + 1) & ~1;
+	height = (y2 - y1) >> 1;  /* in dwords */
+
+	if(pCyrix->Rotate == 1) {
+	    dstPtr = (CARD16*)pCyrix->FbBase + 
+			(pbox->x1 * dstPitch) + pScrn->virtualX - y2;
+	    srcPtr = (CARD16*)pCyrix->ShadowPtr + 
+			((1 - y2) * srcPitch) + pbox->x1;
+	} else {
+	    dstPtr = (CARD16*)pCyrix->FbBase + 
+			((pScrn->virtualY - pbox->x2) * dstPitch) + y1;
+	    srcPtr = (CARD16*)pCyrix->ShadowPtr + 
+			(y1 * srcPitch) + pbox->x2 - 1;
+	}
+
+	while(width--) {
+	    src = srcPtr;
+	    dst = (CARD32*)dstPtr;
+	    count = height;
+	    while(count--) {
+		*(dst++) = src[0] | (src[srcPitch] << 16);
+		src += srcPitch * 2;
+	    }
+	    srcPtr += pCyrix->Rotate;
+	    dstPtr += dstPitch;
+	}
+
+	pbox++;
+    }
+}
+
+@
+
+
+1.1.9.1
+log
+@OpenBSD just has imported exactly this tree into their vendor branch,
+called the same tag, in XF4/xc
+This is, apparently, the last XFree86 snapshot before the licence change
+(ie, addition of the advertising clause)
+
+Since the developers don't see any problems with that, and we would like
+to integrate improvements done by the remaining one or two (or so) XFree86
+developers (j/k), this prepares enabling us to update X-Window in the future.
+@
+text
+@@
+
+
+1.1.1.1
+log
+@The X-Windowing System
+
+Import XFree86 4.3 from OpenBSD by CTM, in the hope it's stable
+@
+text
+@@

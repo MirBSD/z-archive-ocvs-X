@@ -1,0 +1,774 @@
+head	1.1;
+branch	1.1.1;
+access;
+symbols
+	tg-mergetmp-2:1.1.1.3
+	cvs-200410241530:1.1.1.3
+	cvs-200410012000:1.1.1.3
+	cvs-200407190955:1.1.1.3
+	cvs-200407141120:1.1.1.3
+	cvs-200406231010:1.1.1.3
+	MIRBSD_7quater:1.1.1.2
+	cvs-200405271510:1.1.1.3
+	XFree86_4_4_0:1.1.9.1
+	cvs-200403021700:1.1.1.3
+	XFREE86_20040213:1.1.9.1
+	xc:1.1.9
+	cvs-200401291925:1.1.1.2
+	MIRBSD_7_ALPHA:1.1.1.2.0.4
+	MIRBSD_7:1.1.1.2.0.2
+	MIRBSD_7ter:1.1.1.2
+	cvs-20011091815:1.1.1.2
+	cvs-200309162130:1.1.1.2
+	cvs-200308302005:1.1.1.2
+	ctmx-0387:1.1.1.2
+	ctmx-0384:1.1.1.2
+	MIRBSD_5:1.1.1.2
+	ctmx-0375:1.1.1.2
+	ctmx-0373:1.1.1.2
+	ctm-0371:1.1.1.2
+	ctm-0370:1.1.1.2
+	MIRBSD_4:1.1.1.2
+	ctm-0363:1.1.1.2
+	ctm-0359:1.1.1.2
+	ctm-0349:1.1.1.1
+	openbsd:1.1.1;
+locks; strict;
+comment	@ * @;
+
+
+1.1
+date	2003.03.22.20.11.10;	author tg;	state Exp;
+branches
+	1.1.1.1
+	1.1.9.1;
+next	;
+
+1.1.1.1
+date	2003.03.22.20.11.10;	author tg;	state Exp;
+branches;
+next	1.1.1.2;
+
+1.1.1.2
+date	2003.04.08.18.41.12;	author tg;	state Exp;
+branches;
+next	1.1.1.3;
+
+1.1.1.3
+date	2004.03.02.18.46.14;	author tg;	state Stab;
+branches;
+next	;
+
+1.1.9.1
+date	2004.02.14.19.29.42;	author tg;	state Exp;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@/*
+ * $XFree86: xc/programs/xterm/doublechr.c,v 3.10 2000/06/13 02:28:39 dawes Exp $
+ */
+
+/************************************************************
+
+Copyright 1997-2000 by Thomas E. Dickey
+
+                        All Rights Reserved
+
+Permission is hereby granted, free of charge, to any person obtaining a
+copy of this software and associated documentation files (the
+"Software"), to deal in the Software without restriction, including
+without limitation the rights to use, copy, modify, merge, publish,
+distribute, sublicense, and/or sell copies of the Software, and to
+permit persons to whom the Software is furnished to do so, subject to
+the following conditions:
+
+The above copyright notice and this permission notice shall be included
+in all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
+OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. 
+IN NO EVENT SHALL THE ABOVE LISTED COPYRIGHT HOLDER(S) BE LIABLE FOR ANY
+CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,
+TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
+SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+Except as contained in this notice, the name(s) of the above copyright
+holders shall not be used in advertising or otherwise to promote the
+sale, use or other dealings in this Software without prior written
+authorization.
+
+********************************************************/
+
+#include <xterm.h>
+#include <data.h>
+#include <fontutils.h>
+
+/*
+ * The first column is all that matters for double-size characters (since the
+ * controls apply to a whole line).  However, it's easier to maintain the
+ * information for special fonts by writing to all cells.
+ */
+#define curChrSet SCRN_BUF_CSETS(screen, screen->cur_row)[0]
+
+#if OPT_DEC_CHRSET
+static void
+repaint_line(unsigned newChrSet)
+{
+	register TScreen *screen = &term->screen;
+	int curcol = screen->cur_col;
+	int currow = screen->cur_row;
+	int len = screen->max_col + 1;
+	int width = len;
+	unsigned oldChrSet = SCRN_BUF_CSETS(screen, currow)[0];
+
+	/*
+	 * Ignore repetition.
+	 */
+	if (oldChrSet == newChrSet)
+		return;
+
+	TRACE(("repaint_line(%2d,%2d) (%d)\n", currow, screen->cur_col, newChrSet));
+	HideCursor();
+
+	/* If switching from single-width, keep the cursor in the visible part
+	 * of the line.
+	 */
+	if (CSET_DOUBLE(newChrSet)) {
+		width /= 2;
+		if (curcol > width)
+			curcol = width;
+	}
+
+	/*
+	 * ScrnRefresh won't paint blanks for us if we're switching between a
+	 * single-size and double-size font.
+	 */
+	if (CSET_DOUBLE(oldChrSet) != CSET_DOUBLE(newChrSet)) {
+		ClearCurBackground(
+			screen,
+			CursorY (screen, currow),
+			CurCursorX (screen, currow, 0),
+			FontHeight(screen),
+			len * CurFontWidth(screen,currow));
+	}
+
+	/* FIXME: do VT220 softchars allow double-sizes? */
+	memset(SCRN_BUF_CSETS(screen, currow), newChrSet, len);
+
+	screen->cur_col = 0;
+	ScrnRefresh (screen, currow, 0, 1, len, True);
+	screen->cur_col = curcol;
+}
+#endif
+
+/*
+ * Set the line to double-height characters.  The 'top' flag denotes whether
+ * we'll be using it for the top (true) or bottom (false) of the line.
+ */
+void
+xterm_DECDHL(Bool top)
+{
+#if OPT_DEC_CHRSET
+	repaint_line(top ? CSET_DHL_TOP : CSET_DHL_BOT);
+#endif
+}
+
+/*
+ * Set the line to single-width characters (the normal state).
+ */
+void
+xterm_DECSWL(void)
+{
+#if OPT_DEC_CHRSET
+	repaint_line(CSET_SWL);
+#endif
+}
+
+/*
+ * Set the line to double-width characters
+ */
+void
+xterm_DECDWL(void)
+{
+#if OPT_DEC_CHRSET
+	repaint_line(CSET_DWL);
+#endif
+}
+
+
+#if OPT_DEC_CHRSET
+static void
+discard_font(TScreen *screen, XTermFonts *data)
+{
+	TRACE(("discard_font chrset=%d %s\n", data->chrset,
+		(data->fn != 0) ? data->fn : "<no-name>"));
+
+	data->chrset = 0;
+	data->flags = 0;
+	if (data->gc != 0) {
+		XFreeGC(screen->display, data->gc);
+		data->gc = 0;
+	}
+	if (data->fn != 0) {
+		free(data->fn);
+		data->fn = 0;
+	}
+	if (data->fs != 0) {
+		XFreeFont(screen->display, data->fs);
+		data->fs = 0;
+	}
+}
+
+int
+xterm_Double_index(unsigned chrset, unsigned flags)
+{
+	int n;
+	TScreen *screen = &term->screen;
+	XTermFonts *data = screen->double_fonts;
+
+	flags &= BOLD;
+	TRACE(("xterm_Double_index chrset=%#x, flags=%#x\n", chrset, flags));
+
+	for (n = 0; n < screen->fonts_used; n++) {
+		if (data[n].chrset == chrset
+		 && data[n].flags == flags) {
+			if (n != 0) {
+				XTermFonts save;
+				TRACE(("...xterm_Double_index -> %d (OLD:%d)\n", n, screen->fonts_used));
+				save = data[n];
+				while (n > 0) {
+					data[n] = data[n-1];
+					n--;
+				}
+				data[n] = save;
+			}
+			return n;
+		}
+	}
+
+	/* Not, found, push back existing fonts and create a new entry */
+	if (screen->fonts_used >= screen->cache_doublesize) {
+		TRACE(("...xterm_Double_index: discard oldest\n"));
+		discard_font(screen, &(data[screen->fonts_used - 1]));
+	} else {
+		screen->fonts_used += 1;
+	}
+	for (n = screen->fonts_used; n > 0; n--)
+		data[n] = data[n-1];
+
+	TRACE(("...xterm_Double_index -> (NEW:%d)\n", screen->fonts_used));
+
+	data[0].chrset = chrset;
+	data[0].flags = flags;
+	data[0].fn = 0;
+	data[0].fs = 0;
+	data[0].gc = 0;
+	return 0;
+}
+
+/*
+ * Lookup/cache a GC for the double-size character display.  We save up to
+ * NUM_CHRSET values.
+ */
+GC
+xterm_DoubleGC(unsigned chrset, unsigned flags, GC old_gc)
+{
+	XGCValues gcv;
+	register TScreen *screen = &term->screen;
+	unsigned long mask = (GCForeground | GCBackground | GCFont);
+	int n;
+	char *name;
+	XTermFonts *data;
+
+	if ((name = xtermSpecialFont(flags, chrset)) == 0)
+		return 0;
+
+	n = xterm_Double_index(chrset, flags);
+	data = &(screen->double_fonts[n]);
+	if (data->fn != 0) {
+		if (!strcmp(data->fn, name)) {
+			if (data->fs != 0) {
+				XCopyGC(screen->display, old_gc, ~GCFont, data->gc);
+				return data->gc;
+			}
+		}
+		discard_font(screen, data);
+		data->chrset = chrset;
+		data->flags  = flags & BOLD;
+	}
+	data->fn = name;
+
+	TRACE(("xterm_DoubleGC %s %d: %s\n", flags&BOLD ? "BOLD" : "NORM", n, name));
+
+	if ((data->fs = XLoadQueryFont (screen->display, name)) == 0)
+		return 0;
+	TRACE(("-> OK\n"));
+
+	gcv.graphics_exposures = TRUE;	/* default */
+	gcv.font       = data->fs->fid;
+	gcv.foreground = screen->foreground;
+	gcv.background = term->core.background_pixel;
+
+	data->gc = XCreateGC (screen->display, VWindow(screen), mask, &gcv);
+	XCopyGC(screen->display, old_gc, ~GCFont, data->gc);
+	return data->gc;
+}
+#endif
+@
+
+
+1.1.9.1
+log
+@OpenBSD just has imported exactly this tree into their vendor branch,
+called the same tag, in XF4/xc
+This is, apparently, the last XFree86 snapshot before the licence change
+(ie, addition of the advertising clause)
+
+Since the developers don't see any problems with that, and we would like
+to integrate improvements done by the remaining one or two (or so) XFree86
+developers (j/k), this prepares enabling us to update X-Window in the future.
+@
+text
+@d2 1
+a2 1
+ * $XFree86: xc/programs/xterm/doublechr.c,v 3.12 2003/10/13 00:58:22 dickey Exp $
+d7 1
+a7 1
+Copyright 1997-2002,2003 by Thomas E. Dickey
+d52 44
+a95 44
+    register TScreen *screen = &term->screen;
+    int curcol = screen->cur_col;
+    int currow = screen->cur_row;
+    int len = screen->max_col + 1;
+    int width = len;
+    unsigned oldChrSet = SCRN_BUF_CSETS(screen, currow)[0];
+
+    /*
+     * Ignore repetition.
+     */
+    if (oldChrSet == newChrSet)
+	return;
+
+    TRACE(("repaint_line(%2d,%2d) (%d)\n", currow, screen->cur_col, newChrSet));
+    HideCursor();
+
+    /* If switching from single-width, keep the cursor in the visible part
+     * of the line.
+     */
+    if (CSET_DOUBLE(newChrSet)) {
+	width /= 2;
+	if (curcol > width)
+	    curcol = width;
+    }
+
+    /*
+     * ScrnRefresh won't paint blanks for us if we're switching between a
+     * single-size and double-size font.
+     */
+    if (CSET_DOUBLE(oldChrSet) != CSET_DOUBLE(newChrSet)) {
+	ClearCurBackground(
+			      screen,
+			      CursorY(screen, currow),
+			      CurCursorX(screen, currow, 0),
+			      FontHeight(screen),
+			      len * CurFontWidth(screen, currow));
+    }
+
+    /* FIXME: do VT220 softchars allow double-sizes? */
+    memset(SCRN_BUF_CSETS(screen, currow), newChrSet, len);
+
+    screen->cur_col = 0;
+    ScrnRefresh(screen, currow, 0, 1, len, True);
+    screen->cur_col = curcol;
+d107 1
+a107 1
+    repaint_line(top ? CSET_DHL_TOP : CSET_DHL_BOT);
+d118 1
+a118 1
+    repaint_line(CSET_SWL);
+d129 1
+a129 1
+    repaint_line(CSET_DWL);
+d133 1
+d136 1
+a136 1
+discard_font(TScreen * screen, XTermFonts * data)
+d138 2
+a139 2
+    TRACE(("discard_font chrset=%d %s\n", data->chrset,
+	   (data->fn != 0) ? data->fn : "<no-name>"));
+d141 14
+a154 14
+    data->chrset = 0;
+    data->flags = 0;
+    if (data->gc != 0) {
+	XFreeGC(screen->display, data->gc);
+	data->gc = 0;
+    }
+    if (data->fn != 0) {
+	free(data->fn);
+	data->fn = 0;
+    }
+    if (data->fs != 0) {
+	XFreeFont(screen->display, data->fs);
+	data->fs = 0;
+    }
+d160 21
+a180 17
+    int n;
+    TScreen *screen = &term->screen;
+    XTermFonts *data = screen->double_fonts;
+
+    flags &= BOLD;
+    TRACE(("xterm_Double_index chrset=%#x, flags=%#x\n", chrset, flags));
+
+    for (n = 0; n < screen->fonts_used; n++) {
+	if (data[n].chrset == chrset
+	    && data[n].flags == flags) {
+	    if (n != 0) {
+		XTermFonts save;
+		TRACE(("...xterm_Double_index -> %d (OLD:%d)\n", n, screen->fonts_used));
+		save = data[n];
+		while (n > 0) {
+		    data[n] = data[n - 1];
+		    n--;
+a181 3
+		data[n] = save;
+	    }
+	    return n;
+a182 1
+    }
+d184 18
+a201 18
+    /* Not, found, push back existing fonts and create a new entry */
+    if (screen->fonts_used >= screen->cache_doublesize) {
+	TRACE(("...xterm_Double_index: discard oldest\n"));
+	discard_font(screen, &(data[screen->fonts_used - 1]));
+    } else {
+	screen->fonts_used += 1;
+    }
+    for (n = screen->fonts_used; n > 0; n--)
+	data[n] = data[n - 1];
+
+    TRACE(("...xterm_Double_index -> (NEW:%d)\n", screen->fonts_used));
+
+    data[0].chrset = chrset;
+    data[0].flags = flags;
+    data[0].fn = 0;
+    data[0].fs = 0;
+    data[0].gc = 0;
+    return 0;
+d211 24
+a234 6
+    XGCValues gcv;
+    register TScreen *screen = &term->screen;
+    unsigned long mask = (GCForeground | GCBackground | GCFont);
+    int n;
+    char *name;
+    XTermFonts *data;
+d236 1
+a236 2
+    if ((name = xtermSpecialFont(flags, chrset)) == 0)
+	return 0;
+d238 12
+a249 41
+    n = xterm_Double_index(chrset, flags);
+    data = &(screen->double_fonts[n]);
+    if (data->fn != 0) {
+	if (!strcmp(data->fn, name)) {
+	    if (data->fs != 0) {
+		XCopyGC(screen->display, old_gc, ~GCFont, data->gc);
+		return data->gc;
+	    }
+	}
+	discard_font(screen, data);
+	data->chrset = chrset;
+	data->flags = flags & BOLD;
+    }
+    data->fn = name;
+
+    TRACE(("xterm_DoubleGC %s %d: %s\n", flags & BOLD ? "BOLD" : "NORM", n, name));
+
+    if ((data->fs = XLoadQueryFont(screen->display, name)) == 0) {
+	/* Retry with * in resolutions */
+	char *nname = xtermSpecialFont(flags | NORESOLUTION, chrset);
+
+	if (!nname)
+	    return 0;
+	if ((data->fs = XLoadQueryFont(screen->display, nname)) == 0) {
+	    XtFree(nname);
+	    return 0;
+	}
+	XtFree(name);
+	data->fn = nname;
+    }
+
+    TRACE(("-> OK\n"));
+
+    gcv.graphics_exposures = TRUE;	/* default */
+    gcv.font = data->fs->fid;
+    gcv.foreground = screen->foreground;
+    gcv.background = term->core.background_pixel;
+
+    data->gc = XCreateGC(screen->display, VWindow(screen), mask, &gcv);
+    XCopyGC(screen->display, old_gc, ~GCFont, data->gc);
+    return data->gc;
+@
+
+
+1.1.1.1
+log
+@Import OpenBSD 3.3 XF4 repository from CTM 3132 the first time
+This finalizes starting an OpenBSD-mirabile (aka MirBSD) repository.
+
+### MirBSD is:
+# Copyright (c) 1982-2003 by Thorsten "mirabile" Glaser <x86@@ePost.de>
+# Copyright © 1968-2003  The authors of And contributors to UNIX®, the
+#       C Language, BSD/Berkeley Unix; 386BSD, NetBSD 1.1 and OpenBSD.
+#
+# Anyone who obtained a copy of this work is hereby permitted to freely use,
+# distribute, modify, merge, sublicence, give away or sell it as long as the
+# authors are given due credit and the following notice is retained:
+#
+# This work is provided "as is", with no explicit or implicit warranty what-
+# soever. Use it only at your own risk. In no event may an author or contri-
+# butor be held liable for any damage, directly or indirectly, that origina-
+# ted through or is caused by creation or modification of this work.
+
+MirBSD is my private tree. MirBSD does not differ very much from OpenBSD
+and intentionally tracks OpenBSD. That's why it _is_ OpenBSD, just not the
+official one. It's like with DarrenBSD.
+
+At time of this writing, no advertising for MirBSD must be done,
+because the advertising clause has not yet been sorted out.
+
+http://templeofhate.com/tglaser/MirBSD/index.php
+@
+text
+@@
+
+
+1.1.1.2
+log
+@The X-Windowing System
+
+Import XFree86 4.3 from OpenBSD by CTM, in the hope it's stable
+@
+text
+@d2 1
+a2 1
+ * $XFree86: xc/programs/xterm/doublechr.c,v 3.11 2002/04/28 19:04:20 dickey Exp $
+d52 44
+a95 44
+    register TScreen *screen = &term->screen;
+    int curcol = screen->cur_col;
+    int currow = screen->cur_row;
+    int len = screen->max_col + 1;
+    int width = len;
+    unsigned oldChrSet = SCRN_BUF_CSETS(screen, currow)[0];
+
+    /*
+     * Ignore repetition.
+     */
+    if (oldChrSet == newChrSet)
+	return;
+
+    TRACE(("repaint_line(%2d,%2d) (%d)\n", currow, screen->cur_col, newChrSet));
+    HideCursor();
+
+    /* If switching from single-width, keep the cursor in the visible part
+     * of the line.
+     */
+    if (CSET_DOUBLE(newChrSet)) {
+	width /= 2;
+	if (curcol > width)
+	    curcol = width;
+    }
+
+    /*
+     * ScrnRefresh won't paint blanks for us if we're switching between a
+     * single-size and double-size font.
+     */
+    if (CSET_DOUBLE(oldChrSet) != CSET_DOUBLE(newChrSet)) {
+	ClearCurBackground(
+			      screen,
+			      CursorY(screen, currow),
+			      CurCursorX(screen, currow, 0),
+			      FontHeight(screen),
+			      len * CurFontWidth(screen, currow));
+    }
+
+    /* FIXME: do VT220 softchars allow double-sizes? */
+    memset(SCRN_BUF_CSETS(screen, currow), newChrSet, len);
+
+    screen->cur_col = 0;
+    ScrnRefresh(screen, currow, 0, 1, len, True);
+    screen->cur_col = curcol;
+d107 1
+a107 1
+    repaint_line(top ? CSET_DHL_TOP : CSET_DHL_BOT);
+d118 1
+a118 1
+    repaint_line(CSET_SWL);
+d129 1
+a129 1
+    repaint_line(CSET_DWL);
+d133 1
+d136 1
+a136 1
+discard_font(TScreen * screen, XTermFonts * data)
+d138 2
+a139 2
+    TRACE(("discard_font chrset=%d %s\n", data->chrset,
+	   (data->fn != 0) ? data->fn : "<no-name>"));
+d141 14
+a154 14
+    data->chrset = 0;
+    data->flags = 0;
+    if (data->gc != 0) {
+	XFreeGC(screen->display, data->gc);
+	data->gc = 0;
+    }
+    if (data->fn != 0) {
+	free(data->fn);
+	data->fn = 0;
+    }
+    if (data->fs != 0) {
+	XFreeFont(screen->display, data->fs);
+	data->fs = 0;
+    }
+d160 21
+a180 17
+    int n;
+    TScreen *screen = &term->screen;
+    XTermFonts *data = screen->double_fonts;
+
+    flags &= BOLD;
+    TRACE(("xterm_Double_index chrset=%#x, flags=%#x\n", chrset, flags));
+
+    for (n = 0; n < screen->fonts_used; n++) {
+	if (data[n].chrset == chrset
+	    && data[n].flags == flags) {
+	    if (n != 0) {
+		XTermFonts save;
+		TRACE(("...xterm_Double_index -> %d (OLD:%d)\n", n, screen->fonts_used));
+		save = data[n];
+		while (n > 0) {
+		    data[n] = data[n - 1];
+		    n--;
+d182 20
+a201 24
+		data[n] = save;
+	    }
+	    return n;
+	}
+    }
+
+    /* Not, found, push back existing fonts and create a new entry */
+    if (screen->fonts_used >= screen->cache_doublesize) {
+	TRACE(("...xterm_Double_index: discard oldest\n"));
+	discard_font(screen, &(data[screen->fonts_used - 1]));
+    } else {
+	screen->fonts_used += 1;
+    }
+    for (n = screen->fonts_used; n > 0; n--)
+	data[n] = data[n - 1];
+
+    TRACE(("...xterm_Double_index -> (NEW:%d)\n", screen->fonts_used));
+
+    data[0].chrset = chrset;
+    data[0].flags = flags;
+    data[0].fn = 0;
+    data[0].fs = 0;
+    data[0].gc = 0;
+    return 0;
+d211 24
+a234 6
+    XGCValues gcv;
+    register TScreen *screen = &term->screen;
+    unsigned long mask = (GCForeground | GCBackground | GCFont);
+    int n;
+    char *name;
+    XTermFonts *data;
+d236 1
+a236 23
+    if ((name = xtermSpecialFont(flags, chrset)) == 0)
+	return 0;
+
+    n = xterm_Double_index(chrset, flags);
+    data = &(screen->double_fonts[n]);
+    if (data->fn != 0) {
+	if (!strcmp(data->fn, name)) {
+	    if (data->fs != 0) {
+		XCopyGC(screen->display, old_gc, ~GCFont, data->gc);
+		return data->gc;
+	    }
+	}
+	discard_font(screen, data);
+	data->chrset = chrset;
+	data->flags = flags & BOLD;
+    }
+    data->fn = name;
+
+    TRACE(("xterm_DoubleGC %s %d: %s\n", flags & BOLD ? "BOLD" : "NORM", n, name));
+
+    if ((data->fs = XLoadQueryFont(screen->display, name)) == 0)
+	return 0;
+    TRACE(("-> OK\n"));
+d238 12
+a249 8
+    gcv.graphics_exposures = TRUE;	/* default */
+    gcv.font = data->fs->fid;
+    gcv.foreground = screen->foreground;
+    gcv.background = term->core.background_pixel;
+
+    data->gc = XCreateGC(screen->display, VWindow(screen), mask, &gcv);
+    XCopyGC(screen->display, old_gc, ~GCFont, data->gc);
+    return data->gc;
+@
+
+
+1.1.1.3
+log
+@That's what OpenBSD will, probably, ship as XF4 in 3.5
+their last sync against XFree86 4.3-current has been
+imported into our vendor branch, too
+@
+text
+@d2 1
+a2 1
+ * $XFree86: xc/programs/xterm/doublechr.c,v 3.12 2003/10/13 00:58:22 dickey Exp $
+d7 1
+a7 1
+Copyright 1997-2002,2003 by Thomas E. Dickey
+d237 2
+a238 14
+    if ((data->fs = XLoadQueryFont(screen->display, name)) == 0) {
+	/* Retry with * in resolutions */
+	char *nname = xtermSpecialFont(flags | NORESOLUTION, chrset);
+
+	if (!nname)
+	    return 0;
+	if ((data->fs = XLoadQueryFont(screen->display, nname)) == 0) {
+	    XtFree(nname);
+	    return 0;
+	}
+	XtFree(name);
+	data->fn = nname;
+    }
+
+@
+
+

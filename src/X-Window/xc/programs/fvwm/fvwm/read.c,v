@@ -1,0 +1,371 @@
+head	1.1;
+branch	1.1.1;
+access;
+symbols
+	tg-mergetmp-2:1.1.1.2
+	cvs-200410241530:1.1.1.2
+	cvs-200410012000:1.1.1.2
+	cvs-200407141120:1.1.1.2
+	cvs-200406231010:1.1.1.2
+	MIRBSD_7quater:1.1.1.1
+	cvs-200405271510:1.1.1.2
+	cvs-200403021700:1.1.1.2
+	cvs-200401291925:1.1.1.1
+	MIRBSD_7_ALPHA:1.1.1.1.0.4
+	MIRBSD_7:1.1.1.1.0.2
+	MIRBSD_7ter:1.1.1.1
+	cvs-20011091815:1.1.1.1
+	cvs-200309162130:1.1.1.1
+	cvs-200308302005:1.1.1.1
+	ctmx-0387:1.1.1.1
+	ctmx-0384:1.1.1.1
+	MIRBSD_5:1.1.1.1
+	ctmx-0375:1.1.1.1
+	ctmx-0373:1.1.1.1
+	ctm-0371:1.1.1.1
+	ctm-0370:1.1.1.1
+	MIRBSD_4:1.1.1.1
+	ctm-0363:1.1.1.1
+	ctm-0359:1.1.1.1
+	ctm-0349:1.1.1.1
+	openbsd:1.1.1;
+locks; strict;
+comment	@ * @;
+
+
+1.1
+date	2003.03.22.20.09.50;	author tg;	state Exp;
+branches
+	1.1.1.1;
+next	;
+
+1.1.1.1
+date	2003.03.22.20.09.50;	author tg;	state Exp;
+branches;
+next	1.1.1.2;
+
+1.1.1.2
+date	2004.03.02.18.32.24;	author tg;	state Stab;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@/*
+ * *************************************************************************
+ * This module is all original code
+ * by Rob Nation
+ * Copyright 1993, Robert Nation
+ *     You may use this code for any purpose, as long as the original
+ *     copyright remains in the source code and all documentation
+ *
+ * Changed 09/24/98 by Dan Espen:
+ * - remove logic that processed and saved module configuration commands.
+ * Its now in "modconf.c".
+ * *************************************************************************
+ */
+#include "config.h"
+
+#include <stdio.h>
+#include <signal.h>
+#include <string.h>
+#include <ctype.h>
+#include <unistd.h>
+#include <fcntl.h>
+
+#include "fvwm.h"
+#include "menus.h"
+#include "misc.h"
+#include "parse.h"
+#include "screen.h"
+#include "module.h"
+
+extern Boolean debugging;
+
+char *fvwm_file = NULL;
+
+int numfilesread = 0;
+
+static int last_read_failed=0;
+
+static const char *read_system_rc_cmd="Read system"FVWMRC;
+
+
+extern void StartupStuff(void);
+
+/*
+ * func to do actual read/piperead work
+ * Arg 1 is file name to read.
+ * Arg 2 (optional) "Quiet" to suppress message on missing file.
+ */
+static void ReadSubFunc(XEvent *eventp,Window junk,FvwmWindow *tmp_win,
+                        unsigned long context, char *action,int* Module,
+                        int piperead)
+{
+  char *filename= NULL,*Home, *home_file, *ofilename = NULL;
+  char *option;                         /* optional arg to read */
+  char *rest,*tline,line[1024];
+  FILE *fd;
+  int thisfileno;
+  char missing_quiet;                   /* missing file msg control */
+  char *cmdname;
+
+  /* domivogt (30-Dec-1998: I tried using conditional evaluation instead
+   * of the cmdname variable ( piperead?"PipeRead":"Read" ), but gcc seems
+   * to treat this expression as a pointer to a character pointer, not just
+   * as a character pointer, but it doesn't complain either. Or perhaps
+   * insure++ gets this wrong? */
+  if (piperead)
+    cmdname = "PipeRead";
+  else
+    cmdname = "Read";
+
+  thisfileno = numfilesread;
+  numfilesread++;
+
+/*  fvwm_msg(INFO,cmdname,"action == '%s'",action); */
+
+  rest = GetNextToken(action,&ofilename); /* read file name arg */
+  if(ofilename == NULL)
+  {
+    fvwm_msg(ERR, cmdname,"missing parameter");
+    last_read_failed = 1;
+    return;
+  }
+  missing_quiet='n';                    /* init */
+  rest = GetNextToken(rest,&option);    /* read optional arg */
+  if (option != NULL) {                 /* if there is a second arg */
+    if (strncasecmp(option,"Quiet",5)==0) { /* is the arg "quiet"? */
+      missing_quiet='y';                /* no missing file message wanted */
+    } /* end quiet arg */
+    free(option);                       /* arg not needed after this */
+  } /* end there is a second arg */
+
+  filename = ofilename;
+/*  fvwm_msg(INFO, cmdname,"trying '%s'",filename); */
+
+  if (piperead)
+    fd = popen(filename,"r");
+  else if (ofilename[0] != '/')
+  {
+    /* find the home directory to look in */
+    Home = getenv("HOME");
+    if (Home != NULL)
+    {
+      home_file = safemalloc(strlen(Home) + strlen(ofilename)+3);
+      strcpy(home_file,Home);
+      strcat(home_file,"/");
+      strcat(home_file,ofilename);
+      filename = home_file;
+      fd = fopen(filename,"r");
+    }
+    else
+    {
+      fd = 0;
+    }
+    if (fd == 0)
+    {
+      if((filename != NULL)&&(filename!= ofilename))
+	free(filename);
+      /* find the home directory to look in */
+      Home = FVWM_CONFIGDIR;
+      home_file = safemalloc(strlen(Home) + strlen(ofilename)+3);
+      strcpy(home_file,Home);
+      strcat(home_file,"/");
+      strcat(home_file,ofilename);
+      filename = home_file;
+      fd = fopen(filename,"r");
+    }
+  }
+  else
+  {
+    /* open file with absolute path */
+    fd = fopen(filename,"r");
+  }
+
+  if(fd == NULL)
+  {
+    if (missing_quiet == 'n') {         /* if quiet option not on */
+      if (piperead)
+	fvwm_msg(ERR, cmdname, "command '%s' not run", ofilename);
+      else
+	fvwm_msg(ERR, cmdname,
+		 "file '%s' not found in $HOME or "FVWM_CONFIGDIR, ofilename);
+    } /* end quiet option not on */
+    if((ofilename != filename)&&(filename != NULL))
+    {
+      free(filename);
+    }
+    if(ofilename != NULL)
+    {
+      free(ofilename);
+    }
+    last_read_failed = 1;
+    return;
+  }
+  if((ofilename != NULL)&&(filename!= ofilename))
+    free(ofilename);
+  fcntl(fileno(fd), F_SETFD, 1);
+  if (!piperead)
+  {
+    if(fvwm_file != NULL)
+      free(fvwm_file);
+    fvwm_file = filename;
+  }
+  else
+  {
+    if (filename)
+      free(filename);
+  }
+
+  tline = fgets(line,(sizeof line)-1,fd);
+  while(tline)
+  {
+    int l;
+    while(tline && (l = strlen(line)) < sizeof(line) && l >= 2 &&
+          line[l-2]=='\\' && line[l-1]=='\n')
+    {
+      tline = fgets(line+l-2,sizeof(line)-l+1,fd);
+    }
+    tline=line;
+    while(isspace(*tline))
+      tline++;
+    if (debugging)
+    {
+      fvwm_msg(DBG,"ReadSubFunc","about to exec: '%s'",tline);
+    }
+    ExecuteFunction(tline,tmp_win,eventp,context,*Module);
+    tline = fgets(line,(sizeof line)-1,fd);
+  }
+
+  if (piperead)
+    pclose(fd);
+  else
+    fclose(fd);
+  last_read_failed = 0;
+}
+
+void ReadFile(XEvent *eventp,Window junk,FvwmWindow *tmp_win,
+              unsigned long context, char *action,int* Module)
+{
+  int this_read = numfilesread;
+
+  if (debugging)
+  {
+    fvwm_msg(DBG,"ReadFile","about to attempt '%s'",action);
+  }
+
+  ReadSubFunc(eventp,junk,tmp_win,context,action,Module,0);
+
+  if (last_read_failed && this_read == 0)
+  {
+    fvwm_msg(INFO,"Read","trying to read system rc file");
+    ExecuteFunction((char *)read_system_rc_cmd,NULL,&Event,C_ROOT,-1);
+  }
+
+  if (this_read == 0)
+  {
+    if (debugging)
+    {
+      fvwm_msg(DBG,"ReadFile","about to call startup functions");
+    }
+    StartupStuff();
+  }
+}
+
+void PipeRead(XEvent *eventp,Window junk,FvwmWindow *tmp_win,
+              unsigned long context, char *action,int* Module)
+{
+  int this_read = numfilesread;
+
+  if (debugging)
+  {
+    fvwm_msg(DBG,"PipeRead","about to attempt '%s'",action);
+  }
+
+  ReadSubFunc(eventp,junk,tmp_win,context,action,Module,1);
+
+  if (last_read_failed && this_read == 0)
+  {
+    fvwm_msg(INFO,"PipeRead","trying to read system rc file");
+    ExecuteFunction((char *)read_system_rc_cmd,NULL,&Event,C_ROOT,-1);
+  }
+
+  if (this_read == 0)
+  {
+    if (debugging)
+    {
+      fvwm_msg(DBG,"PipeRead","about to call startup functions");
+    }
+    StartupStuff();
+  }
+}
+
+@
+
+
+1.1.1.1
+log
+@Import OpenBSD 3.3 XF4 repository from CTM 3132 the first time
+This finalizes starting an OpenBSD-mirabile (aka MirBSD) repository.
+
+### MirBSD is:
+# Copyright (c) 1982-2003 by Thorsten "mirabile" Glaser <x86@@ePost.de>
+# Copyright © 1968-2003  The authors of And contributors to UNIX®, the
+#       C Language, BSD/Berkeley Unix; 386BSD, NetBSD 1.1 and OpenBSD.
+#
+# Anyone who obtained a copy of this work is hereby permitted to freely use,
+# distribute, modify, merge, sublicence, give away or sell it as long as the
+# authors are given due credit and the following notice is retained:
+#
+# This work is provided "as is", with no explicit or implicit warranty what-
+# soever. Use it only at your own risk. In no event may an author or contri-
+# butor be held liable for any damage, directly or indirectly, that origina-
+# ted through or is caused by creation or modification of this work.
+
+MirBSD is my private tree. MirBSD does not differ very much from OpenBSD
+and intentionally tracks OpenBSD. That's why it _is_ OpenBSD, just not the
+official one. It's like with DarrenBSD.
+
+At time of this writing, no advertising for MirBSD must be done,
+because the advertising clause has not yet been sorted out.
+
+http://templeofhate.com/tglaser/MirBSD/index.php
+@
+text
+@@
+
+
+1.1.1.2
+log
+@That's what OpenBSD will, probably, ship as XF4 in 3.5
+their last sync against XFree86 4.3-current has been
+imported into our vendor branch, too
+@
+text
+@a58 1
+  size_t len;
+d102 4
+a105 5
+      len = strlen(Home) + strlen(ofilename) + 3;
+      home_file = safemalloc(len);
+      strlcpy(home_file,Home,len);
+      strlcat(home_file,"/",len);
+      strlcat(home_file,ofilename,len);
+d119 4
+a122 5
+      len = strlen(Home) + strlen(ofilename) + 3;
+      home_file = safemalloc(len);
+      strlcpy(home_file,Home,len);
+      strlcat(home_file,"/",len);
+      strlcat(home_file,ofilename,len);
+@
+

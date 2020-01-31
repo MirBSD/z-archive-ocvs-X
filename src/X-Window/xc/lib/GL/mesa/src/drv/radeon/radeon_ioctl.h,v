@@ -1,0 +1,663 @@
+head	1.1;
+branch	1.1.1;
+access;
+symbols
+	tg-mergetmp-2:1.1.1.3
+	cvs-200410241530:1.1.1.3
+	cvs-200410012000:1.1.1.3
+	cvs-200407141120:1.1.1.3
+	cvs-200406231010:1.1.1.3
+	MIRBSD_7quater:1.1.1.2
+	cvs-200405271510:1.1.1.3
+	XFree86_4_4_0:1.1.9.1
+	cvs-200403021700:1.1.1.3
+	XFREE86_20040213:1.1.9.1
+	xc:1.1.9
+	cvs-200401291925:1.1.1.2
+	MIRBSD_7_ALPHA:1.1.1.2.0.4
+	MIRBSD_7:1.1.1.2.0.2
+	MIRBSD_7ter:1.1.1.2
+	cvs-20011091815:1.1.1.2
+	cvs-200309162130:1.1.1.2
+	cvs-200308302005:1.1.1.2
+	ctmx-0387:1.1.1.2
+	ctmx-0384:1.1.1.2
+	MIRBSD_5:1.1.1.2
+	ctmx-0375:1.1.1.2
+	ctmx-0373:1.1.1.2
+	ctm-0371:1.1.1.2
+	ctm-0370:1.1.1.2
+	MIRBSD_4:1.1.1.2
+	ctm-0363:1.1.1.2
+	ctm-0359:1.1.1.2
+	ctm-0349:1.1.1.1
+	openbsd:1.1.1;
+locks; strict;
+comment	@ * @;
+
+
+1.1
+date	2003.03.22.20.04.19;	author tg;	state Exp;
+branches
+	1.1.1.1
+	1.1.9.1;
+next	;
+
+1.1.1.1
+date	2003.03.22.20.04.19;	author tg;	state Exp;
+branches;
+next	1.1.1.2;
+
+1.1.1.2
+date	2003.04.08.18.31.33;	author tg;	state Exp;
+branches;
+next	1.1.1.3;
+
+1.1.1.3
+date	2004.03.02.17.59.13;	author tg;	state Stab;
+branches;
+next	;
+
+1.1.9.1
+date	2004.02.14.19.18.07;	author tg;	state Exp;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@/* $XFree86: xc/lib/GL/mesa/src/drv/radeon/radeon_ioctl.h,v 1.2 2001/04/01 14:00:00 tsi Exp $ */
+/**************************************************************************
+
+Copyright 2000, 2001 ATI Technologies Inc., Ontario, Canada, and
+                     VA Linux Systems Inc., Fremont, California.
+
+All Rights Reserved.
+
+Permission is hereby granted, free of charge, to any person obtaining a
+copy of this software and associated documentation files (the "Software"),
+to deal in the Software without restriction, including without limitation
+on the rights to use, copy, modify, merge, publish, distribute, sub
+license, and/or sell copies of the Software, and to permit persons to whom
+the Software is furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice (including the next
+paragraph) shall be included in all copies or substantial portions of the
+Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NON-INFRINGEMENT. IN NO EVENT SHALL
+ATI, VA LINUX SYSTEMS AND/OR THEIR SUPPLIERS BE LIABLE FOR ANY CLAIM,
+DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR
+OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE
+USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+**************************************************************************/
+
+/*
+ * Authors:
+ *   Kevin E. Martin <martin@@valinux.com>
+ *   Gareth Hughes <gareth@@valinux.com>
+ *
+ */
+
+#ifndef __RADEON_IOCTL_H__
+#define __RADEON_IOCTL_H__
+
+#ifdef GLX_DIRECT_RENDERING
+
+#include "radeon_dri.h"
+#include "radeon_lock.h"
+
+#include "xf86drm.h"
+#include "xf86drmRadeon.h"
+
+#define RADEON_BUFFER_MAX_DWORDS	(RADEON_BUFFER_SIZE / sizeof(CARD32))
+
+
+extern drmBufPtr radeonGetBufferLocked( radeonContextPtr rmesa );
+extern void radeonFlushVerticesLocked( radeonContextPtr rmesa );
+
+extern void radeonGetEltBufLocked( radeonContextPtr rmesa );
+extern void radeonFlushEltsLocked( radeonContextPtr rmesa );
+extern void radeonFireEltsLocked( radeonContextPtr rmesa,
+				  GLuint start, GLuint end,
+				  GLuint discard );
+extern void radeonReleaseBufLocked( radeonContextPtr rmesa, drmBufPtr buffer );
+
+/* Make this available as both a regular and an inline function.
+ */
+extern CARD32 *radeonAllocVertices( radeonContextPtr rmesa, GLuint count );
+
+static __inline CARD32 *radeonAllocVerticesInline( radeonContextPtr rmesa,
+						   GLuint count )
+{
+   int bytes = count * rmesa->vertsize * 4;
+   CARD32 *head;
+
+   if ( !rmesa->vert_buf ) {
+      LOCK_HARDWARE( rmesa );
+
+      if ( rmesa->first_elt != rmesa->next_elt ) {
+	 radeonFlushEltsLocked( rmesa );
+      }
+
+      rmesa->vert_buf = radeonGetBufferLocked( rmesa );
+
+      UNLOCK_HARDWARE( rmesa );
+   } else if ( rmesa->vert_buf->used + bytes > rmesa->vert_buf->total ) {
+      LOCK_HARDWARE( rmesa );
+
+      radeonFlushVerticesLocked( rmesa );
+      rmesa->vert_buf = radeonGetBufferLocked( rmesa );
+
+      UNLOCK_HARDWARE( rmesa );
+   }
+
+   head = (CARD32 *)((char *)rmesa->vert_buf->address +
+		     rmesa->vert_buf->used);
+
+   rmesa->vert_buf->used += bytes;
+   rmesa->num_verts += count;
+   return head;
+}
+
+extern void radeonFireBlitLocked( radeonContextPtr rmesa,
+				  drmBufPtr buffer,
+				  GLint offset, GLint pitch, GLint format,
+				  GLint x, GLint y,
+				  GLint width, GLint height );
+
+extern void radeonSwapBuffers( radeonContextPtr rmesa );
+extern void radeonPageFlip( radeonContextPtr rmesa );
+
+extern void radeonWaitForIdleLocked( radeonContextPtr rmesa );
+
+
+extern void radeonDDInitIoctlFuncs( GLcontext *ctx );
+
+
+/* ================================================================
+ * Helper macros:
+ */
+
+#define FLUSH_BATCH( rmesa )						\
+do {									\
+   if ( RADEON_DEBUG & DEBUG_VERBOSE_IOCTL )				\
+      fprintf( stderr, "FLUSH_BATCH in %s\n", __FUNCTION__ );		\
+   if ( rmesa->vert_buf ) {						\
+      radeonFlushVertices( rmesa );					\
+   } else if ( rmesa->next_elt != rmesa->first_elt ) {			\
+      radeonFlushElts( rmesa );						\
+   }									\
+} while (0)
+
+/* 64-bit align the next element address, and then make room for the
+ * next indexed prim packet header.
+ */
+#define ALIGN_NEXT_ELT( rmesa )						\
+do {									\
+   rmesa->next_elt = (GLushort *)					\
+      (((unsigned long)rmesa->next_elt + 7) & ~0x7);			\
+   rmesa->next_elt = (GLushort *)					\
+      ((GLubyte *)rmesa->next_elt + RADEON_INDEX_PRIM_OFFSET);		\
+} while (0)
+
+#define radeonFlushVertices( rmesa )					\
+do {									\
+   LOCK_HARDWARE( rmesa );						\
+   radeonFlushVerticesLocked( rmesa );					\
+   UNLOCK_HARDWARE( rmesa );						\
+} while (0)
+
+#define radeonFlushElts( rmesa )					\
+do {									\
+   LOCK_HARDWARE( rmesa );						\
+   radeonFlushEltsLocked( rmesa );					\
+   UNLOCK_HARDWARE( rmesa );						\
+} while (0)
+
+#define radeonWaitForIdle( rmesa )					\
+do {									\
+   LOCK_HARDWARE( rmesa );						\
+   radeonWaitForIdleLocked( rmesa );					\
+   UNLOCK_HARDWARE( rmesa );						\
+} while (0)
+
+#endif
+#endif /* __RADEON_IOCTL_H__ */
+@
+
+
+1.1.9.1
+log
+@OpenBSD just has imported exactly this tree into their vendor branch,
+called the same tag, in XF4/xc
+This is, apparently, the last XFree86 snapshot before the licence change
+(ie, addition of the advertising clause)
+
+Since the developers don't see any problems with that, and we would like
+to integrate improvements done by the remaining one or two (or so) XFree86
+developers (j/k), this prepares enabling us to update X-Window in the future.
+@
+text
+@d1 1
+a1 1
+/* $XFree86: xc/lib/GL/mesa/src/drv/radeon/radeon_ioctl.h,v 1.8 2003/10/24 15:25:07 tsi Exp $ */
+d9 18
+a26 19
+Permission is hereby granted, free of charge, to any person obtaining
+a copy of this software and associated documentation files (the
+"Software"), to deal in the Software without restriction, including
+without limitation the rights to use, copy, modify, merge, publish,
+distribute, sublicense, and/or sell copies of the Software, and to
+permit persons to whom the Software is furnished to do so, subject to
+the following conditions:
+
+The above copyright notice and this permission notice (including the
+next paragraph) shall be included in all copies or substantial
+portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
+IN NO EVENT SHALL THE COPYRIGHT OWNER(S) AND/OR ITS SUPPLIERS BE
+LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
+OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
+WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+d34 1
+d42 1
+a42 1
+#include "simple_list.h"
+d45 4
+a49 60
+extern void radeonEmitState( radeonContextPtr rmesa );
+extern void radeonEmitVertexAOS( radeonContextPtr rmesa,
+				 GLuint vertex_size,
+				 GLuint offset );
+
+extern void radeonEmitVbufPrim( radeonContextPtr rmesa,
+				GLuint vertex_format,
+				GLuint primitive,
+				GLuint vertex_nr );
+
+extern void radeonFlushElts( radeonContextPtr rmesa );
+
+extern GLushort *radeonAllocEltsOpenEnded( radeonContextPtr rmesa,
+					   GLuint vertex_format,
+					   GLuint primitive,
+					   GLuint min_nr );
+
+extern void radeonEmitAOS( radeonContextPtr rmesa,
+			   struct radeon_dma_region **regions,
+			   GLuint n,
+			   GLuint offset );
+
+extern void radeonEmitBlit( radeonContextPtr rmesa,
+			    GLuint color_fmt,
+			    GLuint src_pitch,
+			    GLuint src_offset,
+			    GLuint dst_pitch,
+			    GLuint dst_offset,
+			    GLint srcx, GLint srcy,
+			    GLint dstx, GLint dsty,
+			    GLuint w, GLuint h );
+
+extern void radeonEmitWait( radeonContextPtr rmesa, GLuint flags );
+
+extern void radeonFlushCmdBuf( radeonContextPtr rmesa, const char * );
+extern void radeonRefillCurrentDmaRegion( radeonContextPtr rmesa );
+
+extern void radeonAllocDmaRegion( radeonContextPtr rmesa,
+				  struct radeon_dma_region *region,
+				  int bytes, 
+				  int alignment );
+
+extern void radeonAllocDmaRegionVerts( radeonContextPtr rmesa,
+				       struct radeon_dma_region *region,
+				       int numverts,
+				       int vertsize, 
+				       int alignment );
+
+extern void radeonReleaseDmaRegion( radeonContextPtr rmesa,
+				    struct radeon_dma_region *region,
+				    const char *caller );
+
+extern void radeonCopyBuffer( const __DRIdrawablePrivate *drawable );
+extern void radeonPageFlip( const __DRIdrawablePrivate *drawable );
+extern void radeonFlush( GLcontext *ctx );
+extern void radeonFinish( GLcontext *ctx );
+extern void radeonWaitForIdleLocked( radeonContextPtr rmesa );
+extern void radeonWaitForVBlank( radeonContextPtr rmesa );
+extern void radeonInitIoctlFuncs( GLcontext *ctx );
+extern void radeonGetAllParams( radeonContextPtr rmesa );
+d51 2
+a52 3
+/* ================================================================
+ * Helper macros:
+ */
+d54 6
+a59 7
+/* Close off the last primitive, if it exists.
+ */
+#define RADEON_NEWPRIM( rmesa )			\
+do {						\
+   if ( rmesa->dma.flush )			\
+      rmesa->dma.flush( rmesa );	\
+} while (0)
+d61 1
+a61 2
+/* Can accomodate several state changes and primitive changes without
+ * actually firing the buffer.
+d63 1
+a63 5
+#define RADEON_STATECHANGE( rmesa, ATOM )			\
+do {								\
+   RADEON_NEWPRIM( rmesa );					\
+   move_to_head( &(rmesa->hw.dirty), &(rmesa->hw.ATOM));	\
+} while (0)
+d65 2
+a66 7
+#define RADEON_DB_STATE( ATOM )			        \
+   memcpy( rmesa->hw.ATOM.lastcmd, rmesa->hw.ATOM.cmd,	\
+	   rmesa->hw.ATOM.cmd_size * 4)
+
+static __inline int RADEON_DB_STATECHANGE( 
+   radeonContextPtr rmesa,
+   struct radeon_state_atom *atom )
+d68 20
+a87 8
+   if (memcmp(atom->cmd, atom->lastcmd, atom->cmd_size*4)) {
+      int *tmp;
+      RADEON_NEWPRIM( rmesa );
+      move_to_head( &(rmesa->hw.dirty), atom );
+      tmp = atom->cmd; 
+      atom->cmd = atom->lastcmd;
+      atom->lastcmd = tmp;
+      return 1;
+d89 7
+a95 2
+   else
+      return 0;
+d98 5
+d104 11
+a114 1
+/* Fire the buffered vertices no matter what.
+d116 10
+a125 5
+#define RADEON_FIREVERTICES( rmesa )			\
+do {							\
+   if ( rmesa->store.cmd_used || rmesa->dma.flush ) {	\
+      radeonFlush( rmesa->glCtx );			\
+   }							\
+d128 2
+a129 1
+/* Alloc space in the command buffer
+d131 7
+a137 14
+static __inline char *radeonAllocCmdBuf( radeonContextPtr rmesa,
+					 int bytes, const char *where )
+{
+   if (rmesa->store.cmd_used + bytes > RADEON_CMD_BUF_SZ)
+      radeonFlushCmdBuf( rmesa, __FUNCTION__ );
+   
+   assert(rmesa->dri.drmMinor >= 3);
+
+   {
+      char *head = rmesa->store.cmd_buf + rmesa->store.cmd_used;
+      rmesa->store.cmd_used += bytes;
+      return head;
+   }
+}
+d139 6
+d146 6
+d153 6
+@
+
+
+1.1.1.1
+log
+@Import OpenBSD 3.3 XF4 repository from CTM 3132 the first time
+This finalizes starting an OpenBSD-mirabile (aka MirBSD) repository.
+
+### MirBSD is:
+# Copyright (c) 1982-2003 by Thorsten "mirabile" Glaser <x86@@ePost.de>
+# Copyright © 1968-2003  The authors of And contributors to UNIX®, the
+#       C Language, BSD/Berkeley Unix; 386BSD, NetBSD 1.1 and OpenBSD.
+#
+# Anyone who obtained a copy of this work is hereby permitted to freely use,
+# distribute, modify, merge, sublicence, give away or sell it as long as the
+# authors are given due credit and the following notice is retained:
+#
+# This work is provided "as is", with no explicit or implicit warranty what-
+# soever. Use it only at your own risk. In no event may an author or contri-
+# butor be held liable for any damage, directly or indirectly, that origina-
+# ted through or is caused by creation or modification of this work.
+
+MirBSD is my private tree. MirBSD does not differ very much from OpenBSD
+and intentionally tracks OpenBSD. That's why it _is_ OpenBSD, just not the
+official one. It's like with DarrenBSD.
+
+At time of this writing, no advertising for MirBSD must be done,
+because the advertising clause has not yet been sorted out.
+
+http://templeofhate.com/tglaser/MirBSD/index.php
+@
+text
+@@
+
+
+1.1.1.2
+log
+@The X-Windowing System
+
+Import XFree86 4.3 from OpenBSD by CTM, in the hope it's stable
+@
+text
+@d1 1
+a1 1
+/* $XFree86: xc/lib/GL/mesa/src/drv/radeon/radeon_ioctl.h,v 1.6 2002/12/16 16:18:58 dawes Exp $ */
+d42 1
+a42 1
+#include "simple_list.h"
+d45 2
+d48 1
+a48 21
+extern void radeonEmitState( radeonContextPtr rmesa );
+extern void radeonEmitVertexAOS( radeonContextPtr rmesa,
+				 GLuint vertex_size,
+				 GLuint offset );
+
+extern void radeonEmitVbufPrim( radeonContextPtr rmesa,
+				GLuint vertex_format,
+				GLuint primitive,
+				GLuint vertex_nr );
+
+extern void radeonFlushElts( radeonContextPtr rmesa );
+
+extern GLushort *radeonAllocEltsOpenEnded( radeonContextPtr rmesa,
+					   GLuint vertex_format,
+					   GLuint primitive,
+					   GLuint min_nr );
+
+extern void radeonEmitAOS( radeonContextPtr rmesa,
+			   struct radeon_dma_region **regions,
+			   GLuint n,
+			   GLuint offset );
+d51 2
+d54 6
+a59 26
+extern void radeonFlushCmdBuf( radeonContextPtr rmesa, const char * );
+extern void radeonRefillCurrentDmaRegion( radeonContextPtr rmesa );
+
+extern void radeonAllocDmaRegion( radeonContextPtr rmesa,
+				  struct radeon_dma_region *region,
+				  int bytes, 
+				  int alignment );
+
+extern void radeonAllocDmaRegionVerts( radeonContextPtr rmesa,
+				       struct radeon_dma_region *region,
+				       int numverts,
+				       int vertsize, 
+				       int alignment );
+
+extern void radeonReleaseDmaRegion( radeonContextPtr rmesa,
+				    struct radeon_dma_region *region,
+				    const char *caller );
+
+extern void radeonCopyBuffer( const __DRIdrawablePrivate *drawable );
+extern void radeonPageFlip( const __DRIdrawablePrivate *drawable );
+extern void radeonFlush( GLcontext *ctx );
+extern void radeonFinish( GLcontext *ctx );
+extern void radeonWaitForIdleLocked( radeonContextPtr rmesa );
+extern void radeonWaitForVBlank( radeonContextPtr rmesa );
+extern void radeonInitIoctlFuncs( GLcontext *ctx );
+extern void radeonGetAllParams( radeonContextPtr rmesa );
+d61 1
+a61 1
+/* radeon_compat.c:
+d63 10
+a72 4
+extern void radeonCompatEmitPrimitive( radeonContextPtr rmesa,
+				       GLuint vertex_format,
+				       GLuint hw_primitive,
+				       GLuint nrverts );
+d74 3
+d78 1
+a78 3
+/* ================================================================
+ * Helper macros:
+ */
+d80 3
+a82 7
+/* Close off the last primitive, if it exists.
+ */
+#define RADEON_NEWPRIM( rmesa )			\
+do {						\
+   if ( rmesa->dma.flush )			\
+      rmesa->dma.flush( rmesa );	\
+} while (0)
+d84 2
+a85 8
+/* Can accomodate several state changes and primitive changes without
+ * actually firing the buffer.
+ */
+#define RADEON_STATECHANGE( rmesa, ATOM )			\
+do {								\
+   RADEON_NEWPRIM( rmesa );					\
+   move_to_head( &(rmesa->hw.dirty), &(rmesa->hw.ATOM));	\
+} while (0)
+d87 1
+a87 16
+#define RADEON_DB_STATE( ATOM )			        \
+   memcpy( rmesa->hw.ATOM.lastcmd, rmesa->hw.ATOM.cmd,	\
+	   rmesa->hw.ATOM.cmd_size * 4)
+
+static __inline int RADEON_DB_STATECHANGE( 
+   radeonContextPtr rmesa,
+   struct radeon_state_atom *atom )
+{
+   if (memcmp(atom->cmd, atom->lastcmd, atom->cmd_size*4)) {
+      int *tmp;
+      RADEON_NEWPRIM( rmesa );
+      move_to_head( &(rmesa->hw.dirty), atom );
+      tmp = atom->cmd; 
+      atom->cmd = atom->lastcmd;
+      atom->lastcmd = tmp;
+      return 1;
+d89 7
+a95 2
+   else
+      return 0;
+d98 8
+d107 8
+a114 1
+/* Fire the buffered vertices no matter what.
+d116 10
+a125 5
+#define RADEON_FIREVERTICES( rmesa )			\
+do {							\
+   if ( rmesa->store.cmd_used || rmesa->dma.flush ) {	\
+      radeonFlush( rmesa->glCtx );			\
+   }							\
+d128 2
+a129 1
+/* Alloc space in the command buffer
+d131 7
+a137 14
+static __inline char *radeonAllocCmdBuf( radeonContextPtr rmesa,
+					 int bytes, const char *where )
+{
+   if (rmesa->store.cmd_used + bytes > RADEON_CMD_BUF_SZ)
+      radeonFlushCmdBuf( rmesa, __FUNCTION__ );
+   
+   assert(rmesa->dri.drmMinor >= 3);
+
+   {
+      char *head = rmesa->store.cmd_buf + rmesa->store.cmd_used;
+      rmesa->store.cmd_used += bytes;
+      return head;
+   }
+}
+d139 6
+d146 6
+d153 6
+@
+
+
+1.1.1.3
+log
+@That's what OpenBSD will, probably, ship as XF4 in 3.5
+their last sync against XFree86 4.3-current has been
+imported into our vendor branch, too
+@
+text
+@d1 1
+a1 1
+/* $XFree86: xc/lib/GL/mesa/src/drv/radeon/radeon_ioctl.h,v 1.8 2003/10/24 15:25:07 tsi Exp $ */
+d9 18
+a26 19
+Permission is hereby granted, free of charge, to any person obtaining
+a copy of this software and associated documentation files (the
+"Software"), to deal in the Software without restriction, including
+without limitation the rights to use, copy, modify, merge, publish,
+distribute, sublicense, and/or sell copies of the Software, and to
+permit persons to whom the Software is furnished to do so, subject to
+the following conditions:
+
+The above copyright notice and this permission notice (including the
+next paragraph) shall be included in all copies or substantial
+portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
+IN NO EVENT SHALL THE COPYRIGHT OWNER(S) AND/OR ITS SUPPLIERS BE
+LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
+OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
+WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+d34 1
+a67 9
+extern void radeonEmitBlit( radeonContextPtr rmesa,
+			    GLuint color_fmt,
+			    GLuint src_pitch,
+			    GLuint src_offset,
+			    GLuint dst_pitch,
+			    GLuint dst_offset,
+			    GLint srcx, GLint srcy,
+			    GLint dstx, GLint dsty,
+			    GLuint w, GLuint h );
+a68 1
+extern void radeonEmitWait( radeonContextPtr rmesa, GLuint flags );
+d96 8
+@
+
+

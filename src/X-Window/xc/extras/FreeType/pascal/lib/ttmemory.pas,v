@@ -1,0 +1,408 @@
+head	1.2;
+branch	1.1.1;
+access;
+symbols
+	tg-mergetmp-2:1.1.1.1
+	cvs-200410241530:1.1.1.1
+	cvs-200410012000:1.1.1.1
+	cvs-200407141120:1.1.1.1
+	cvs-200406231010:1.1.1.1
+	MIRBSD_7quater:1.1.1.1
+	cvs-200405271510:1.1.1.1
+	XFree86_4_4_0:1.1.9.1
+	cvs-200403021700:1.1.1.1
+	XFREE86_20040213:1.1.9.1
+	xc:1.1.9
+	cvs-200401291925:1.1.1.1
+	MIRBSD_7_ALPHA:1.1.1.1.0.4
+	MIRBSD_7:1.1.1.1.0.2
+	MIRBSD_7ter:1.1.1.1
+	cvs-20011091815:1.1.1.1
+	cvs-200309162130:1.1.1.1
+	cvs-200308302005:1.1.1.1
+	ctmx-0387:1.1.1.1
+	ctmx-0384:1.1.1.1
+	MIRBSD_5:1.1.1.1
+	ctmx-0375:1.1.1.1
+	ctmx-0373:1.1.1.1
+	ctm-0371:1.1.1.1
+	ctm-0370:1.1.1.1
+	MIRBSD_4:1.1.1.1
+	ctm-0363:1.1.1.1
+	ctm-0359:1.1.1.1
+	ctm-0349:1.1.1.1
+	openbsd:1.1.1;
+locks; strict;
+comment	@ * @;
+
+
+1.2
+date	2003.05.16.16.28.01;	author tg;	state dead;
+branches;
+next	1.1;
+
+1.1
+date	2003.03.22.20.00.51;	author tg;	state Exp;
+branches
+	1.1.1.1
+	1.1.9.1;
+next	;
+
+1.1.1.1
+date	2003.03.22.20.00.51;	author tg;	state Stab;
+branches;
+next	;
+
+1.1.9.1
+date	2004.02.14.19.04.21;	author tg;	state Exp;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.2
+log
+@remove a bunch of files not used in MirBSD - clean tree. People who want them got cvs.
+@
+text
+@(*******************************************************************
+ *
+ *  TTMemory.Pas                                             2.1
+ *
+ *    Memory management component (specification)
+ *
+ *  Copyright 1996 David Turner, Robert Wilhelm and Werner Lemberg
+ *
+ *  This file is part of the FreeType project, and may only be used
+ *  modified and distributed under the terms of the FreeType project
+ *  license, LICENSE.TXT. By continuing to use, modify or distribute
+ *  this file you indicate that you have read the license and
+ *  understand and accept it fully.
+ *
+ *  Differences between 2.1 and 2.0 :
+ *
+ *  - Added a memory mutex to make the component thread-safe
+ *
+ *  Differences between 2.0 and 1.1 :
+ *
+ *  - The growing heap was completely removed in version 2.0
+ *
+ *  - The support for small mini-heaps may be re-introduced later
+ *    to allow the storage of several consecutive arrays in one
+ *    single block.
+ *
+ *  IMPORTANT NOTICE :
+ *
+ *  The Alloc and Free functions mimic their C equivalent,
+ *  however, some points must be noticed :
+ *
+ *  - both functions return a boolean. As usual, True indicates
+ *    success, while False indicates failure.
+ *
+ *  - the Alloc function puts a small header on front of each
+ *    allocated block. The header contains a magic cookie and
+ *    the size of the allocated block. This allows calls to
+ *    Free without passing a block size as an argument, and thus
+ *    reduces the risks of memory leaks.
+ *
+ *  - it is possible to call Free with a nil pointer, in which
+ *    case nothing happens, and the result is set to True (success)
+ *
+ *    The pointer is set to nil after a call to Free in all cases.
+ *
+ *    This is done to clear the destructors code, allowing
+ *
+ *      if (pointer) then
+ *      begin
+ *        Free(pointer);
+ *        pointer := nil;
+ *      end;
+ *
+ *    to be replaced by a single line :
+ *
+ *      Free(pointer);
+ *
+ *
+ ******************************************************************)
+
+unit TTMemory;
+
+interface
+
+uses TTTypes;
+
+{$I TTCONFIG.INC}
+
+type
+  TMarkRecord = record
+                  Magic : longint;
+                  Top   : integer;
+                end;
+
+const
+  Font_Pool_Allocated : boolean = False;
+
+  function Alloc( var P; size : Longint ) : TError;
+  (* Allocates a new memory block in the current heap of 'size' bytes *)
+  (* - returns failure if no memory is left in the heap               *)
+
+  procedure  Free ( var P );
+  (* Releases a block previously allocated through 'Alloc' *)
+  (* - returns True (success) of P is nil before the call  *)
+  (* - sets P to nil before exit                           *)
+
+  function  TTMemory_Init : TError;
+  procedure TTMemory_Done;
+
+implementation
+
+uses TTError;
+
+type
+  TByte = array[0..0] of Byte;
+  PByte = ^TByte;
+
+  PBlock_Header = ^TBlock_Header;
+  TBlock_Header = record
+                    magic : Longint;  (* magic cookie                     *)
+                    size  : Longint;  (* allocated size, including header *)
+                  end;
+
+  TBlock_Headers = array[0..1] of TBlock_Header;
+  PBlock_Headers = ^TBlock_Headers;
+
+  (* Note that the Turbo-Pascal GetMem/FreeMem functions use no block *)
+  (* headers. That's why a byte size is needed for FreeMem. Thus, we  *)
+  (* do not waste space here compared to a C malloc implementation    *)
+
+const
+  Mark_Magic = $BABE0007;
+  (* This is the magic cookie used to recognize valide allocated blocks *)
+
+  Header_Size = sizeof(TBlock_Header);
+
+ (************************************************************************)
+ (*                                                                      *)
+ (* MyHeapErr :                                                          *)
+ (*                                                                      *)
+ (*   By default, a call to GetMem with insufficient memory left will    *)
+ (*   generate a runtime error. We define here a function that is used   *)
+ (*   to allow GetMem to return nil in such cases.                       *)
+ (*                                                                      *)
+ (************************************************************************)
+
+ function MyHeapErr( Size: Integer ): Integer; far;
+ begin
+   MyHeapErr := 1;
+ end;
+
+(*******************************************************************
+ *
+ *  Function    :  Alloc
+ *
+ *  Description :  allocate a new block in the current heap
+ *
+ *  Notes       :  If you want to replace this function with
+ *                 your own, please be sure to respect these
+ *                 simple rules :
+ *
+ *                 - P must be set to nil in case of failure
+ *
+ *                 - The allocated block must be zeroed !
+ *
+ *****************************************************************)
+
+ function Alloc( var P; size : Longint ) : TError;
+ var
+   OldHeapError : Pointer;
+
+   L  : Longint;
+   P2 : Pointer;
+ begin
+ {$IFNDEF DELPHI32}
+   OldHeapError := HeapError;
+   HeapError    := @@MyHeapErr;
+ {$ENDIF}
+
+   L := ( size + Header_Size + 3 ) and -4;
+
+   {$IFDEF MSDOS}
+   if L shr 16 <> 0 then
+   begin
+     Writeln('Sorry, but this font is too large to be handled by a 16-bit program' );
+     Alloc := Failure;
+   end;
+   {$ENDIF}
+
+   GetMem( Pointer(P), L );
+
+ {$IFNDEF DELPHI32}
+   HeapError := OldHeapError;
+ {$ENDIF}
+
+   if Pointer(P) <> nil then
+     begin
+       PBlock_Headers(P)^[0].magic := Mark_Magic;
+       PBlock_Headers(P)^[0].size  := L;
+
+       P2 := Pointer( @@(PBlock_Headers(P)^[1]) );
+
+       {$IFDEF MSDOS}
+       if (ofs(P2^) <> ofs(Pointer(P)^)+Header_Size) or
+          (seg(P2^) <> seg(Pointer(P)^)) then
+         begin
+           Writeln('AAARGH !!: Sorry, but I have problems with 64 Kb segments');
+           halt(1);
+         end;
+       {$ENDIF}
+
+       Pointer(P) := P2;
+       fillchar( P2^, size, 0 );
+       (* zero block *)
+
+       Alloc := Success;
+     end
+   else
+     Alloc := Failure;
+
+ end;
+
+
+(*******************************************************************
+ *
+ *  Function    :  Free
+ *
+ *  Description :  frees a block that was previsouly allocated
+ *                 by the Alloc function
+ *
+ *  Notes  :  Doesn't need any size parameter.
+ *
+ *  If you want to replace this function with your own, please
+ *  be sure to respect these two rules :
+ *
+ *  - the argument pointer can be nil, in which case the function
+ *    should return immediately, with a success report.
+ *
+ *  - the pointer P should be set to nil when exiting the
+ *    function, except in case of failure.
+ *
+ *****************************************************************)
+
+ procedure Free( var P );
+ var
+   head : PBlock_Header;
+   i    : Integer;
+   size : Longint;
+ begin
+   if Pointer(P) = nil then exit;
+
+   i    := -1;
+   head := @@(PBlock_Headers(P)^[i]);
+   (* A hack to get the header in PB, as the line             *)
+   (*  @@(PBlock_Headers(P)^[-1] would give a 'constant error' *)
+   (* at compile time. I'm unsure this works correctly in BP  *)
+
+   if head^.magic <> Mark_Magic then
+   begin
+     (* PANIC : An invalid Free call *)
+     Writeln('Invalid Free call');
+     halt(1);
+   end;
+
+   size := head^.size;
+
+   head^.magic := 0;  (* cleans the header *)
+   head^.size  := 0;
+
+   FreeMem( head, size );
+
+   Pointer(P) := nil;
+ end;
+
+(*******************************************************************
+ *
+ *  Function    : TTMemory_Init
+ *
+ *  Description : Initializes the Memory component
+ *
+ *****************************************************************)
+
+ function TTMemory_Init : TError;
+ begin
+   (* nothing to be done *)
+   TTMemory_Init := Success;
+ end;
+
+(*******************************************************************
+ *
+ *  Function    : TTMemory_Done
+ *
+ *  Description : Finalize the memory component
+ *
+ *****************************************************************)
+
+ procedure TTMemory_Done;
+ begin
+   (* nothing to be done *)
+ end;
+
+end.
+@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@@
+
+
+1.1.9.1
+log
+@OpenBSD just has imported exactly this tree into their vendor branch,
+called the same tag, in XF4/xc
+This is, apparently, the last XFree86 snapshot before the licence change
+(ie, addition of the advertising clause)
+
+Since the developers don't see any problems with that, and we would like
+to integrate improvements done by the remaining one or two (or so) XFree86
+developers (j/k), this prepares enabling us to update X-Window in the future.
+@
+text
+@@
+
+
+1.1.1.1
+log
+@Import OpenBSD 3.3 XF4 repository from CTM 3132 the first time
+This finalizes starting an OpenBSD-mirabile (aka MirBSD) repository.
+
+### MirBSD is:
+# Copyright (c) 1982-2003 by Thorsten "mirabile" Glaser <x86@@ePost.de>
+# Copyright © 1968-2003  The authors of And contributors to UNIX®, the
+#       C Language, BSD/Berkeley Unix; 386BSD, NetBSD 1.1 and OpenBSD.
+#
+# Anyone who obtained a copy of this work is hereby permitted to freely use,
+# distribute, modify, merge, sublicence, give away or sell it as long as the
+# authors are given due credit and the following notice is retained:
+#
+# This work is provided "as is", with no explicit or implicit warranty what-
+# soever. Use it only at your own risk. In no event may an author or contri-
+# butor be held liable for any damage, directly or indirectly, that origina-
+# ted through or is caused by creation or modification of this work.
+
+MirBSD is my private tree. MirBSD does not differ very much from OpenBSD
+and intentionally tracks OpenBSD. That's why it _is_ OpenBSD, just not the
+official one. It's like with DarrenBSD.
+
+At time of this writing, no advertising for MirBSD must be done,
+because the advertising clause has not yet been sorted out.
+
+http://templeofhate.com/tglaser/MirBSD/index.php
+@
+text
+@@

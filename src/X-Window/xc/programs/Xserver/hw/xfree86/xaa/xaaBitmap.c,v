@@ -1,0 +1,589 @@
+head	1.1;
+branch	1.1.1;
+access;
+symbols
+	tg-mergetmp-2:1.1.1.1
+	cvs-200410241530:1.1.1.1
+	cvs-200410012000:1.1.1.1
+	cvs-200407221130:1.1.1.1
+	cvs-200407141120:1.1.1.1
+	cvs-200406231010:1.1.1.1
+	MIRBSD_7quater:1.1.1.1
+	cvs-200405271510:1.1.1.1
+	XFree86_4_4_0:1.1.9.1
+	cvs-200403021700:1.1.1.1
+	XFREE86_20040213:1.1.9.1
+	xc:1.1.9
+	cvs-200401291925:1.1.1.1
+	MIRBSD_7_ALPHA:1.1.1.1.0.4
+	MIRBSD_7:1.1.1.1.0.2
+	MIRBSD_7ter:1.1.1.1
+	cvs-20011091815:1.1.1.1
+	cvs-200309162130:1.1.1.1
+	cvs-200308302005:1.1.1.1
+	ctmx-0387:1.1.1.1
+	ctmx-0384:1.1.1.1
+	MIRBSD_5:1.1.1.1
+	ctmx-0375:1.1.1.1
+	ctmx-0373:1.1.1.1
+	ctm-0371:1.1.1.1
+	ctm-0370:1.1.1.1
+	MIRBSD_4:1.1.1.1
+	ctm-0363:1.1.1.1
+	ctm-0359:1.1.1.1
+	ctm-0349:1.1.1.1
+	openbsd:1.1.1;
+locks; strict;
+comment	@ * @;
+
+
+1.1
+date	2003.03.22.20.09.03;	author tg;	state Exp;
+branches
+	1.1.1.1
+	1.1.9.1;
+next	;
+
+1.1.1.1
+date	2003.03.22.20.09.03;	author tg;	state Stab;
+branches;
+next	;
+
+1.1.9.1
+date	2004.02.14.19.25.43;	author tg;	state Exp;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@/* $XFree86: xc/programs/Xserver/hw/xfree86/xaa/xaaBitmap.c,v 1.10 2000/09/01 05:49:45 mvojkovi Exp $ */
+
+
+#include "xaa.h"
+#include "xaalocal.h"
+#include "xaacexp.h"
+#include "xf86.h"
+#include "xf86_ansic.h"
+
+
+
+/********** byte swapping ***************/
+
+
+#ifdef FIXEDBASE
+# define DEST(i)	*dest
+# define RETURN(i)	return(dest)
+#else
+# define DEST(i)	dest[i]
+# define RETURN(i)	return(dest + i)
+#endif
+
+#ifdef MSBFIRST
+# define SOURCE(i)	SWAP_BITS_IN_BYTES(src[i])
+#else
+# define SOURCE(i)	src[i]
+#endif
+
+
+typedef CARD32 *(* BitmapScanlineProcPtr)(CARD32 *, CARD32 *, int, int);
+
+#ifdef TRIPLE_BITS
+static CARD32*
+BitmapScanline(
+   CARD32 *src, CARD32 *base,
+   int count, int skipleft )
+{
+     CARD32 bits;
+
+     while(count >= 3) {
+	bits = *src;
+	WRITE_BITS3(bits);
+	src++;
+	count -= 3;
+     }
+     if (count == 2) {
+	bits = *src;
+	WRITE_BITS2(bits);
+     } else if (count == 1) {
+	bits = *src;
+	WRITE_BITS1(bits);
+     }
+     
+     return base;
+}
+
+static CARD32*
+BitmapScanline_Inverted(
+   CARD32 *src, CARD32 *base,
+   int count, int skipleft )
+{
+     CARD32 bits;
+
+     while(count >= 3) {
+	bits = ~(*src);
+	WRITE_BITS3(bits);
+	src++;
+	count -= 3;
+     }
+     if (count == 2) {
+	bits = ~(*src);
+	WRITE_BITS2(bits);
+     } else if (count == 1) {
+	bits = ~(*src);
+	WRITE_BITS1(bits);
+     }
+     
+     return base;
+}
+
+
+static CARD32*
+BitmapScanline_Shifted(
+   CARD32 *src, CARD32 *base,
+   int count, int skipleft )
+{
+     CARD32 bits;
+
+     while(count >= 3) {
+	bits = SHIFT_R(*src,skipleft) | SHIFT_L(*(src + 1),(32 - skipleft));
+	WRITE_BITS3(bits);
+	src++;
+	count -= 3;
+     }
+     if (count == 2) {
+	bits = SHIFT_R(*src,skipleft) | SHIFT_L(*(src + 1),(32 - skipleft));
+	WRITE_BITS2(bits);
+     } else if (count == 1) {
+	bits = SHIFT_R(*src,skipleft) | SHIFT_L(*(src + 1),(32 - skipleft));
+	WRITE_BITS1(bits);
+     }
+     
+     return base;
+}
+
+static CARD32*
+BitmapScanline_Shifted_Inverted(
+   CARD32 *src, CARD32 *base,
+   int count, int skipleft )
+{
+     CARD32 bits;
+
+     while(count >= 3) {
+	bits = ~(SHIFT_R(*src,skipleft) | SHIFT_L(*(src + 1),(32 - skipleft)));
+	WRITE_BITS3(bits);
+	src++;
+	count -= 3;
+     }
+     if (count == 2) {
+	bits = ~(SHIFT_R(*src,skipleft) | SHIFT_L(*(src + 1),(32 - skipleft)));
+	WRITE_BITS2(bits);
+     } else if (count == 1) {
+	bits = ~(SHIFT_R(*src,skipleft) | SHIFT_L(*(src + 1),(32 - skipleft)));
+	WRITE_BITS1(bits);
+     }
+     
+     return base;
+}
+
+#define BitmapScanline_Shifted_Careful BitmapScanline_Shifted
+#define BitmapScanline_Shifted_Inverted_Careful BitmapScanline_Shifted_Inverted
+
+#else
+static CARD32*
+BitmapScanline(
+   CARD32 *src, CARD32 *dest,
+   int count, int skipleft )
+{
+   while(count >= 4) {
+	DEST(0) = SOURCE(0);
+	DEST(1) = SOURCE(1);
+	DEST(2) = SOURCE(2);
+	DEST(3) = SOURCE(3);
+	count -= 4;
+	src += 4;
+#ifndef FIXEDBASE
+	dest += 4;
+#endif
+   }
+   
+   if(!count) return dest;
+   DEST(0) = SOURCE(0);
+   if(count == 1) RETURN(1);
+   DEST(1) = SOURCE(1);
+   if(count == 2) RETURN(2);
+   DEST(2) = SOURCE(2);
+   RETURN(3);
+}
+
+static CARD32*
+BitmapScanline_Inverted(
+   CARD32 *src, CARD32 *dest,
+   int count, int skipleft )
+{
+   while(count >= 4) {
+	DEST(0) = ~SOURCE(0);
+	DEST(1) = ~SOURCE(1);
+	DEST(2) = ~SOURCE(2);
+	DEST(3) = ~SOURCE(3);
+	count -= 4;
+	src += 4;
+#ifndef FIXEDBASE
+	dest += 4;
+#endif
+   }
+   
+   if(!count) return dest;
+   DEST(0) = ~SOURCE(0);
+   if(count == 1) RETURN(1);
+   DEST(1) = ~SOURCE(1);
+   if(count == 2) RETURN(2);
+   DEST(2) = ~SOURCE(2);
+   RETURN(3);
+}
+
+
+static CARD32*
+BitmapScanline_Shifted(
+   CARD32 *bits, CARD32 *base,
+   int count, int skipleft )
+{
+     while(count--) {
+	register CARD32 tmp = SHIFT_R(*bits,skipleft) | 
+			      SHIFT_L(*(bits + 1),(32 - skipleft));
+	WRITE_BITS(tmp);
+	bits++;
+     }
+     return base;
+}
+
+static CARD32*
+BitmapScanline_Shifted_Inverted(
+   CARD32 *bits, CARD32 *base,
+   int count, int skipleft )
+{
+     while(count--) {
+	register CARD32 tmp = ~(SHIFT_R(*bits,skipleft) | 
+				SHIFT_L(*(bits + 1),(32 - skipleft)));
+	WRITE_BITS(tmp);
+	bits++;
+     }
+     return base;
+}
+
+static CARD32*
+BitmapScanline_Shifted_Careful(
+   CARD32 *bits, CARD32 *base,
+   int count, int skipleft )
+{
+     register CARD32 tmp;
+     while(--count) {
+ 	tmp = SHIFT_R(*bits,skipleft) | SHIFT_L(*(bits + 1),(32 - skipleft));
+	WRITE_BITS(tmp);
+	bits++;
+     }
+     tmp = SHIFT_R(*bits,skipleft);
+     WRITE_BITS(tmp);
+
+     return base;
+}
+
+static CARD32*
+BitmapScanline_Shifted_Inverted_Careful(
+   CARD32 *bits, CARD32 *base,
+   int count, int skipleft )
+{
+     register CARD32 tmp;
+     while(--count) {
+	tmp = ~(SHIFT_R(*bits,skipleft) | SHIFT_L(*(bits + 1),(32 - skipleft)));
+	WRITE_BITS(tmp);
+	bits++;
+     }
+     tmp = ~(SHIFT_R(*bits,skipleft));
+     WRITE_BITS(tmp);
+     return base;
+}
+
+#endif
+
+/*  
+    When the accelerator is TRANSPARENCY_ONLY, WriteBitmap can do
+    the fill in two passes, inverting the source on the second pass.  
+    For GXcopy we can fill the backing rectangle as a solid rect and
+    avoid the invert.
+*/ 
+
+void
+#ifdef TRIPLE_BITS
+EXPNAME(XAAWriteBitmapColorExpand3)(
+#else
+EXPNAME(XAAWriteBitmapColorExpand)(
+#endif
+    ScrnInfoPtr pScrn,
+    int x, int y, int w, int H,
+    unsigned char *src,
+    int srcwidth,
+    int skipleft,
+    int fg, int bg,
+    int rop,
+    unsigned int planemask 
+)
+{
+    XAAInfoRecPtr infoRec = GET_XAAINFORECPTR_FROM_SCRNINFOPTR(pScrn);
+    CARD32* base;
+    unsigned char *srcp = src;
+    int SecondPassColor = -1;
+    int shift = 0, dwords;
+    BitmapScanlineProcPtr firstFunc;
+    BitmapScanlineProcPtr secondFunc;
+    int flag;
+    int h = H;
+
+#ifdef TRIPLE_BITS
+    if((bg != -1) && 
+	((infoRec->CPUToScreenColorExpandFillFlags & TRANSPARENCY_ONLY) ||
+	((infoRec->CPUToScreenColorExpandFillFlags & RGB_EQUAL) && 
+	(!CHECK_RGB_EQUAL(bg))))) {
+#else
+    if((bg != -1) && 
+	(infoRec->CPUToScreenColorExpandFillFlags & TRANSPARENCY_ONLY)) {
+#endif
+	if((rop == GXcopy) && infoRec->SetupForSolidFill) {
+    	    (*infoRec->SetupForSolidFill)(pScrn, bg, rop, planemask);
+            (*infoRec->SubsequentSolidFillRect)(pScrn, x, y, w, h);
+	} else SecondPassColor = bg;
+	bg = -1;
+    }
+
+#ifdef TRIPLE_BITS
+    if(skipleft) {
+#else
+    if(skipleft && 
+	(!(infoRec->CPUToScreenColorExpandFillFlags & LEFT_EDGE_CLIPPING) || 
+	(!(infoRec->CPUToScreenColorExpandFillFlags & LEFT_EDGE_CLIPPING_NEGATIVE_X) && 
+		(skipleft > x)))) {
+#endif
+	if((skipleft + ((w + 31) & ~31)) > ((skipleft + w + 31) & ~31)) {
+	    /* don't read past the end */
+	    firstFunc = BitmapScanline_Shifted_Careful;
+ 	    secondFunc = BitmapScanline_Shifted_Inverted_Careful;
+	} else {
+	    firstFunc = BitmapScanline_Shifted;
+ 	    secondFunc = BitmapScanline_Shifted_Inverted;
+	}
+	shift = skipleft;
+	skipleft = 0;
+    } else {
+	firstFunc = BitmapScanline;
+ 	secondFunc = BitmapScanline_Inverted;
+	w += skipleft;
+	x -= skipleft;
+    }
+
+#ifdef TRIPLE_BITS
+    dwords = (3 * w + 31) >> 5;
+#else
+    dwords = (w + 31) >> 5;
+#endif
+
+SECOND_PASS:
+
+    flag = (infoRec->CPUToScreenColorExpandFillFlags 
+	     & CPU_TRANSFER_PAD_QWORD) && ((dwords * h) & 0x01);
+    (*infoRec->SetupForCPUToScreenColorExpandFill)(
+					pScrn, fg, bg, rop, planemask);
+    (*infoRec->SubsequentCPUToScreenColorExpandFill)(
+					pScrn, x, y, w, h, skipleft);
+
+    base = (CARD32*)infoRec->ColorExpandBase;
+
+#ifndef FIXEDBASE
+    if((dwords * h) <= infoRec->ColorExpandRange)
+	while(h--) {
+	    base = (*firstFunc)((CARD32*)srcp, base, dwords, shift);
+	    srcp += srcwidth;
+    	}
+    else
+#endif
+	while(h--) {
+	    (*firstFunc)((CARD32*)srcp, base, dwords, shift);
+	    srcp += srcwidth;
+	}
+
+    if(flag){
+        base = (CARD32*)infoRec->ColorExpandBase;
+	base[0] = 0x00000000;
+    }
+
+    if(SecondPassColor != -1) {
+	h = H; /* Reset height */
+	fg = SecondPassColor;
+	SecondPassColor = -1;
+	firstFunc = secondFunc;
+	srcp = src;
+	goto SECOND_PASS;
+    }
+
+    if(infoRec->CPUToScreenColorExpandFillFlags & SYNC_AFTER_COLOR_EXPAND) 
+	(*infoRec->Sync)(pScrn);
+    else SET_SYNC_FLAG(infoRec);
+}
+
+#ifndef FIXEDBASE
+
+void
+#ifdef TRIPLE_BITS
+EXPNAME(XAAWriteBitmapScanlineColorExpand3)(
+#else
+EXPNAME(XAAWriteBitmapScanlineColorExpand)(
+#endif
+    ScrnInfoPtr pScrn,
+    int x, int y, int w, int h,
+    unsigned char *src,
+    int srcwidth,
+    int skipleft,
+    int fg, int bg,
+    int rop,
+    unsigned int planemask 
+)
+{
+    XAAInfoRecPtr infoRec = GET_XAAINFORECPTR_FROM_SCRNINFOPTR(pScrn);
+    CARD32* base;
+    unsigned char *srcp = src;
+    int SecondPassColor = -1;
+    int shift = 0, dwords, bufferNo;
+    BitmapScanlineProcPtr firstFunc;
+    BitmapScanlineProcPtr secondFunc;
+
+#ifdef TRIPLE_BITS
+    if((bg != -1) &&
+	((infoRec->ScanlineCPUToScreenColorExpandFillFlags & TRANSPARENCY_ONLY) 
+	|| ((infoRec->ScanlineCPUToScreenColorExpandFillFlags & RGB_EQUAL) && 
+	(!CHECK_RGB_EQUAL(bg))))) {
+#else
+    if((bg != -1) && 
+	(infoRec->ScanlineCPUToScreenColorExpandFillFlags & TRANSPARENCY_ONLY)){
+#endif
+	if((rop == GXcopy) && infoRec->SetupForSolidFill) {
+    	    (*infoRec->SetupForSolidFill)(pScrn, bg, rop, planemask);
+            (*infoRec->SubsequentSolidFillRect)(pScrn, x, y, w, h);
+	} else SecondPassColor = bg;
+	bg = -1;
+    }
+
+#ifdef TRIPLE_BITS
+    if(skipleft) {
+#else
+    if(skipleft && 
+	(!(infoRec->ScanlineCPUToScreenColorExpandFillFlags & 
+		LEFT_EDGE_CLIPPING) || 
+	(!(infoRec->ScanlineCPUToScreenColorExpandFillFlags &
+		 LEFT_EDGE_CLIPPING_NEGATIVE_X) && (skipleft > x)))) {
+#endif
+	if((skipleft + ((w + 31) & ~31)) > ((skipleft + w + 31) & ~31)) {
+	    /* don't read past the end */
+	    firstFunc = BitmapScanline_Shifted_Careful;
+ 	    secondFunc = BitmapScanline_Shifted_Inverted_Careful;
+	} else {
+	    firstFunc = BitmapScanline_Shifted;
+ 	    secondFunc = BitmapScanline_Shifted_Inverted;
+	}
+	shift = skipleft;
+	skipleft = 0;
+    } else {
+	firstFunc = BitmapScanline;
+ 	secondFunc = BitmapScanline_Inverted;
+	w += skipleft;
+	x -= skipleft;
+    }
+
+#ifdef TRIPLE_BITS
+    dwords = (3 * w + 31) >> 5;
+#else
+    dwords = (w + 31) >> 5;
+#endif
+
+SECOND_PASS:
+
+    (*infoRec->SetupForScanlineCPUToScreenColorExpandFill)(pScrn, fg, bg, rop, planemask);
+    (*infoRec->SubsequentScanlineCPUToScreenColorExpandFill)(
+					pScrn, x, y, w, h, skipleft);
+
+    bufferNo = 0;
+
+    while(h--) {
+	base = (CARD32*)infoRec->ScanlineColorExpandBuffers[bufferNo];
+	(*firstFunc)((CARD32*)srcp, base, dwords, shift);
+	(*infoRec->SubsequentColorExpandScanline)(pScrn, bufferNo++);
+	srcp += srcwidth;
+	if(bufferNo >= infoRec->NumScanlineColorExpandBuffers)
+	    bufferNo = 0;
+    }
+
+    if(SecondPassColor != -1) {
+	fg = SecondPassColor;
+	SecondPassColor = -1;
+	firstFunc = secondFunc;
+	srcp = src;
+	goto SECOND_PASS;
+    }
+
+    SET_SYNC_FLAG(infoRec);
+}
+
+#endif
+@
+
+
+1.1.9.1
+log
+@OpenBSD just has imported exactly this tree into their vendor branch,
+called the same tag, in XF4/xc
+This is, apparently, the last XFree86 snapshot before the licence change
+(ie, addition of the advertising clause)
+
+Since the developers don't see any problems with that, and we would like
+to integrate improvements done by the remaining one or two (or so) XFree86
+developers (j/k), this prepares enabling us to update X-Window in the future.
+@
+text
+@@
+
+
+1.1.1.1
+log
+@Import OpenBSD 3.3 XF4 repository from CTM 3132 the first time
+This finalizes starting an OpenBSD-mirabile (aka MirBSD) repository.
+
+### MirBSD is:
+# Copyright (c) 1982-2003 by Thorsten "mirabile" Glaser <x86@@ePost.de>
+# Copyright © 1968-2003  The authors of And contributors to UNIX®, the
+#       C Language, BSD/Berkeley Unix; 386BSD, NetBSD 1.1 and OpenBSD.
+#
+# Anyone who obtained a copy of this work is hereby permitted to freely use,
+# distribute, modify, merge, sublicence, give away or sell it as long as the
+# authors are given due credit and the following notice is retained:
+#
+# This work is provided "as is", with no explicit or implicit warranty what-
+# soever. Use it only at your own risk. In no event may an author or contri-
+# butor be held liable for any damage, directly or indirectly, that origina-
+# ted through or is caused by creation or modification of this work.
+
+MirBSD is my private tree. MirBSD does not differ very much from OpenBSD
+and intentionally tracks OpenBSD. That's why it _is_ OpenBSD, just not the
+official one. It's like with DarrenBSD.
+
+At time of this writing, no advertising for MirBSD must be done,
+because the advertising clause has not yet been sorted out.
+
+http://templeofhate.com/tglaser/MirBSD/index.php
+@
+text
+@@

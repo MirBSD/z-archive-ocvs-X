@@ -1,0 +1,507 @@
+head	1.1;
+branch	1.1.1;
+access;
+symbols
+	tg-mergetmp-2:1.1.1.2
+	cvs-200410241530:1.1.1.2
+	cvs-200410012000:1.1.1.2
+	cvs-200407141120:1.1.1.2
+	cvs-200406231010:1.1.1.2
+	MIRBSD_7quater:1.1.1.2
+	cvs-200405271510:1.1.1.2
+	XFree86_4_4_0:1.1.9.1
+	cvs-200403021700:1.1.1.2
+	XFREE86_20040213:1.1.9.1
+	xc:1.1.9
+	cvs-200401291925:1.1.1.2
+	MIRBSD_7_ALPHA:1.1.1.2.0.4
+	MIRBSD_7:1.1.1.2.0.2
+	MIRBSD_7ter:1.1.1.2
+	cvs-20011091815:1.1.1.2
+	cvs-200309162130:1.1.1.2
+	cvs-200308302005:1.1.1.2
+	ctmx-0387:1.1.1.2
+	ctmx-0384:1.1.1.2
+	MIRBSD_5:1.1.1.2
+	ctmx-0375:1.1.1.2
+	ctmx-0373:1.1.1.2
+	ctm-0371:1.1.1.2
+	ctm-0370:1.1.1.2
+	MIRBSD_4:1.1.1.2
+	ctm-0363:1.1.1.2
+	ctm-0359:1.1.1.2
+	ctm-0349:1.1.1.1
+	openbsd:1.1.1;
+locks; strict;
+comment	@ * @;
+
+
+1.1
+date	2003.03.22.20.06.30;	author tg;	state Exp;
+branches
+	1.1.1.1
+	1.1.9.1;
+next	;
+
+1.1.1.1
+date	2003.03.22.20.06.30;	author tg;	state Exp;
+branches;
+next	1.1.1.2;
+
+1.1.1.2
+date	2003.04.08.18.35.16;	author tg;	state Stab;
+branches;
+next	;
+
+1.1.9.1
+date	2004.02.14.19.22.11;	author tg;	state Exp;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@/*
+ * Abstraction of the AGP GART interface.
+ *
+ * This version is for both Linux and FreeBSD.
+ *
+ * Copyright © 2000-2001 Nokia Home Communications
+ * Copyright © 2000 VA Linux Systems, Inc.
+ 
+All rights reserved.
+
+Permission is hereby granted, free of charge, to any person obtaining
+a copy of this software and associated documentation files (the
+"Software"), to deal in the Software without restriction, including
+without limitation the rights to use, copy, modify, merge, publish,
+distribute, and/or sell copies of the Software, and to permit persons
+to whom the Software is furnished to do so, provided that the above
+copyright notice(s) and this permission notice appear in all copies of
+the Software and that both the above copyright notice(s) and this
+permission notice appear in supporting documentation.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT
+OF THIRD PARTY RIGHTS. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR
+HOLDERS INCLUDED IN THIS NOTICE BE LIABLE FOR ANY CLAIM, OR ANY
+SPECIAL INDIRECT OR CONSEQUENTIAL DAMAGES, OR ANY DAMAGES WHATSOEVER
+RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN ACTION OF
+CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF OR IN
+CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+
+Except as contained in this notice, the name of a copyright holder
+shall not be used in advertising or otherwise to promote the sale, use
+or other dealings in this Software without prior written authorization
+of the copyright holder.
+
+ */
+
+/* $XFree86: xc/programs/Xserver/hw/kdrive/linux/agp.c,v 1.1 2001/03/30 02:18:41 keithp Exp $ */
+
+/*
+ * Author: Pontus Lidman <pontus.lidman@@nokia.com> (adaption to KDrive) and others
+ */
+
+#include "X.h"
+
+#include "Xdefs.h"
+#include "Xmd.h"
+
+#include <unistd.h>
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <fcntl.h>
+#include <sys/ioctl.h>
+
+#include <stdio.h>
+#include <string.h>
+#include <errno.h>
+#include <stdlib.h>
+
+#include "agp.h"
+
+#if defined(linux)
+#include <asm/ioctl.h>
+
+#include "../../xfree86/os-support/linux/agpgart.h"
+
+#elif defined(__FreeBSD__)
+#include <sys/ioctl.h>
+#include <sys/agpio.h>
+#endif
+
+#ifndef AGP_DEVICE
+#define AGP_DEVICE		"/dev/agpgart"
+#endif
+/* AGP page size is independent of the host page size. */
+#ifndef AGP_PAGE_SIZE
+#define AGP_PAGE_SIZE		4096
+#endif
+#define AGPGART_MAJOR_VERSION	0
+#define AGPGART_MINOR_VERSION	99
+
+static int gartFd = -1;
+static int acquiredScreen = -1;
+
+/*
+ * Open /dev/agpgart.  Keep it open until server exit.
+ */
+
+static Bool
+GARTInit()
+{
+	static Bool initDone = FALSE;
+	struct _agp_info agpinf;
+
+	if (initDone)
+		return (gartFd != -1);
+
+	initDone = TRUE;
+
+	if (gartFd == -1)
+		gartFd = open(AGP_DEVICE, O_RDWR, 0);
+	else
+		return FALSE;
+
+	if (gartFd == -1) {
+            fprintf(stderr, "Unable to open " AGP_DEVICE " (%s)\n",
+                    strerror(errno)); 
+            return FALSE;
+	}
+
+	KdAcquireGART(-1);
+	/* Check the kernel driver version. */
+	if (ioctl(gartFd, AGPIOC_INFO, &agpinf) != 0) {
+            fprintf(stderr, "GARTInit: AGPIOC_INFO failed (%s)\n", 
+                    strerror(errno)); 
+            close(gartFd);
+            gartFd = -1;
+            return FALSE;
+	}
+	KdReleaseGART(-1);
+
+#if defined(linux)
+	/* Should this look for version >= rather than version == ? */
+	if (agpinf.version.major != AGPGART_MAJOR_VERSION &&
+	    agpinf.version.minor != AGPGART_MINOR_VERSION) {
+            fprintf(stderr, 
+                    "Kernel agpgart driver version is not current" 
+                    " (%d.%d vs %d.%d)\n", 
+                    agpinf.version.major, agpinf.version.minor, 
+                    AGPGART_MAJOR_VERSION, AGPGART_MINOR_VERSION); 
+            close(gartFd);
+            gartFd = -1;
+            return FALSE;
+	}
+#endif
+	
+	return TRUE;
+}
+
+Bool
+KdAgpGARTSupported()
+{
+	return GARTInit();
+}
+
+AgpInfoPtr
+KdGetAGPInfo(int screenNum)
+{
+	struct _agp_info agpinf;
+	AgpInfoPtr info;
+
+	if (!GARTInit())
+		return NULL;
+
+
+	if ((info = calloc(sizeof(AgpInfo), 1)) == NULL) {
+            fprintf(stderr, "Failed to allocate AgpInfo\n"); 
+            return NULL;
+	}
+
+	if (ioctl(gartFd, AGPIOC_INFO, &agpinf) != 0) {
+            fprintf(stderr, 
+                    "xf86GetAGPInfo: AGPIOC_INFO failed (%s)\n", 
+                    strerror(errno)); 
+            return NULL;
+	}
+
+	info->bridgeId = agpinf.bridge_id;
+	info->agpMode = agpinf.agp_mode;
+	info->base = agpinf.aper_base;
+	info->size = agpinf.aper_size;
+	info->totalPages = agpinf.pg_total;
+	info->systemPages = agpinf.pg_system;
+	info->usedPages = agpinf.pg_used;
+
+	return info;
+}
+
+/*
+ * XXX If multiple screens can acquire the GART, should we have a reference
+ * count instead of using acquiredScreen?
+ */
+
+Bool
+KdAcquireGART(int screenNum)
+{
+    if (screenNum != -1 && !GARTInit())
+        return FALSE;
+    
+    if (screenNum == -1 || acquiredScreen != screenNum) {
+        if (ioctl(gartFd, AGPIOC_ACQUIRE, 0) != 0) {
+            fprintf(stderr, 
+                    "AGPIOC_ACQUIRE failed (%s)\n", 
+                    strerror(errno)); 
+            return FALSE;
+        }
+        acquiredScreen = screenNum;
+    }
+    
+    return TRUE;
+}
+
+Bool
+KdReleaseGART(int screenNum)
+{
+	if (screenNum != -1 && !GARTInit())
+		return FALSE;
+
+	if (acquiredScreen == screenNum) {
+		if (ioctl(gartFd, AGPIOC_RELEASE, 0) != 0) {
+ 			fprintf(stderr,
+ 				   "AGPIOC_RELEASE failed (%s)\n",
+ 				   strerror(errno)); 
+			return FALSE;
+		}
+		acquiredScreen = -1;
+		return TRUE;
+	}
+	return FALSE;
+}
+
+int
+KdAllocateGARTMemory(int screenNum, unsigned long size, int type,
+			unsigned long *physical)
+{
+	struct _agp_allocate alloc;
+	int pages;
+
+	/*
+	 * Allocates "size" bytes of GART memory (rounds up to the next
+	 * page multiple) or type "type".  A handle (key) for the allocated
+	 * memory is returned.  On error, the return value is -1.
+	 */
+
+	if (!GARTInit() || acquiredScreen != screenNum)
+		return -1;
+
+	pages = (size / AGP_PAGE_SIZE);
+	if (size % AGP_PAGE_SIZE != 0)
+		pages++;
+
+	/* XXX check for pages == 0? */
+
+	alloc.pg_count = pages;
+	alloc.type = type;
+
+	if (ioctl(gartFd, AGPIOC_ALLOCATE, &alloc) != 0) {
+            fprintf(stderr, "KdAllocateGARTMemory: " 
+                    "allocation of %d pages failed\n\t(%s)\n", pages, 
+                    strerror(errno)); 
+		return -1;
+	}
+
+	if (physical)
+		*physical = alloc.physical;
+
+	return alloc.key;
+}
+
+
+/* Bind GART memory with "key" at "offset" */
+Bool
+KdBindGARTMemory(int screenNum, int key, unsigned long offset)
+{
+	struct _agp_bind bind;
+	int pageOffset;
+
+	if (!GARTInit() || acquiredScreen != screenNum)
+		return FALSE;
+
+	if (acquiredScreen != screenNum) {
+            fprintf(stderr, 
+                    "AGP not acquired by this screen\n"); 
+            return FALSE;
+	}
+
+	if (offset % AGP_PAGE_SIZE != 0) {
+            fprintf(stderr, "KdBindGARTMemory: " 
+                    "offset (0x%lx) is not page-aligned (%d)\n", 
+                    offset, AGP_PAGE_SIZE); 
+            return FALSE;
+	}
+	pageOffset = offset / AGP_PAGE_SIZE;
+
+	bind.pg_start = pageOffset;
+	bind.key = key;
+
+	if (ioctl(gartFd, AGPIOC_BIND, &bind) != 0) {
+		fprintf(stderr, "KdBindGARTMemory: "
+                        "binding of gart memory with key %d\n"
+                        "\tat offset 0x%lx failed (%s)\n",
+                        key, offset, strerror(errno));
+		return FALSE;
+	}
+
+	return TRUE;
+}
+
+
+/* Unbind GART memory with "key" */
+Bool
+KdUnbindGARTMemory(int screenNum, int key)
+{
+	struct _agp_unbind unbind;
+
+	if (!GARTInit() || acquiredScreen != screenNum)
+		return FALSE;
+
+	if (acquiredScreen != screenNum) {
+		fprintf(stderr,
+			   "AGP not acquired by this screen\n");
+		return FALSE;
+	}
+
+	unbind.priority = 0;
+	unbind.key = key;
+
+	if (ioctl(gartFd, AGPIOC_UNBIND, &unbind) != 0) {
+		fprintf(stderr, "KdUnbindGARTMemory: "
+			   "unbinding of gart memory with key %d "
+			   "failed (%s)\n", key, strerror(errno));
+		return FALSE;
+	}
+
+	return TRUE;
+}
+
+
+/* XXX Interface may change. */
+Bool
+KdEnableAGP(int screenNum, CARD32 mode)
+{
+	agp_setup setup;
+
+	if (!GARTInit() || acquiredScreen != screenNum)
+		return FALSE;
+
+	setup.agp_mode = mode;
+	if (ioctl(gartFd, AGPIOC_SETUP, &setup) != 0) {
+		fprintf(stderr, "KdEnableAGP: "
+			   "AGPIOC_SETUP with mode %ld failed (%s)\n",
+			   mode, strerror(errno));
+		return FALSE;
+	}
+
+	return TRUE;
+}
+
+@
+
+
+1.1.9.1
+log
+@OpenBSD just has imported exactly this tree into their vendor branch,
+called the same tag, in XF4/xc
+This is, apparently, the last XFree86 snapshot before the licence change
+(ie, addition of the advertising clause)
+
+Since the developers don't see any problems with that, and we would like
+to integrate improvements done by the remaining one or two (or so) XFree86
+developers (j/k), this prepares enabling us to update X-Window in the future.
+@
+text
+@d38 1
+a38 1
+/* $XFree86: xc/programs/Xserver/hw/kdrive/linux/agp.c,v 1.2 2002/12/12 18:29:05 eich Exp $ */
+d123 3
+a125 10
+	/* Per Dave Jones, every effort will be made to keep the
+	 * agpgart interface backwards compatible, so allow all
+	 * future versions.
+	 */
+	if (
+#if (AGPGART_MAJOR_VERSION > 0) /* quiet compiler */
+	    agpinf.version.major < AGPGART_MAJOR_VERSION ||
+#endif
+	    (agpinf.version.major == AGPGART_MAJOR_VERSION &&
+	     agpinf.version.minor < AGPGART_MINOR_VERSION)) {
+@
+
+
+1.1.1.1
+log
+@Import OpenBSD 3.3 XF4 repository from CTM 3132 the first time
+This finalizes starting an OpenBSD-mirabile (aka MirBSD) repository.
+
+### MirBSD is:
+# Copyright (c) 1982-2003 by Thorsten "mirabile" Glaser <x86@@ePost.de>
+# Copyright © 1968-2003  The authors of And contributors to UNIX®, the
+#       C Language, BSD/Berkeley Unix; 386BSD, NetBSD 1.1 and OpenBSD.
+#
+# Anyone who obtained a copy of this work is hereby permitted to freely use,
+# distribute, modify, merge, sublicence, give away or sell it as long as the
+# authors are given due credit and the following notice is retained:
+#
+# This work is provided "as is", with no explicit or implicit warranty what-
+# soever. Use it only at your own risk. In no event may an author or contri-
+# butor be held liable for any damage, directly or indirectly, that origina-
+# ted through or is caused by creation or modification of this work.
+
+MirBSD is my private tree. MirBSD does not differ very much from OpenBSD
+and intentionally tracks OpenBSD. That's why it _is_ OpenBSD, just not the
+official one. It's like with DarrenBSD.
+
+At time of this writing, no advertising for MirBSD must be done,
+because the advertising clause has not yet been sorted out.
+
+http://templeofhate.com/tglaser/MirBSD/index.php
+@
+text
+@@
+
+
+1.1.1.2
+log
+@The X-Windowing System
+
+Import XFree86 4.3 from OpenBSD by CTM, in the hope it's stable
+@
+text
+@d38 1
+a38 1
+/* $XFree86: xc/programs/Xserver/hw/kdrive/linux/agp.c,v 1.2 2002/12/12 18:29:05 eich Exp $ */
+d123 3
+a125 10
+	/* Per Dave Jones, every effort will be made to keep the
+	 * agpgart interface backwards compatible, so allow all
+	 * future versions.
+	 */
+	if (
+#if (AGPGART_MAJOR_VERSION > 0) /* quiet compiler */
+	    agpinf.version.major < AGPGART_MAJOR_VERSION ||
+#endif
+	    (agpinf.version.major == AGPGART_MAJOR_VERSION &&
+	     agpinf.version.minor < AGPGART_MINOR_VERSION)) {
+@
+

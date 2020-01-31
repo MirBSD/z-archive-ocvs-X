@@ -1,0 +1,385 @@
+head	1.1;
+branch	1.1.1;
+access;
+symbols
+	tg-mergetmp-2:1.1.1.2
+	cvs-200410241530:1.1.1.2
+	cvs-200410012000:1.1.1.2
+	cvs-200407141120:1.1.1.2
+	cvs-200406231010:1.1.1.2
+	MIRBSD_7quater:1.1.1.1
+	cvs-200405271510:1.1.1.2
+	XFree86_4_4_0:1.1.9.1
+	cvs-200403021700:1.1.1.2
+	XFREE86_20040213:1.1.9.1
+	xc:1.1.9
+	cvs-200401291925:1.1.1.1
+	MIRBSD_7_ALPHA:1.1.1.1.0.4
+	MIRBSD_7:1.1.1.1.0.2
+	MIRBSD_7ter:1.1.1.1
+	cvs-20011091815:1.1.1.1
+	cvs-200309162130:1.1.1.1
+	cvs-200308302005:1.1.1.1
+	ctmx-0387:1.1.1.1
+	ctmx-0384:1.1.1.1
+	MIRBSD_5:1.1.1.1
+	ctmx-0375:1.1.1.1
+	ctmx-0373:1.1.1.1
+	ctm-0371:1.1.1.1
+	ctm-0370:1.1.1.1
+	MIRBSD_4:1.1.1.1
+	ctm-0363:1.1.1.1
+	ctm-0359:1.1.1.1
+	ctm-0349:1.1.1.1
+	openbsd:1.1.1;
+locks; strict;
+comment	@ * @;
+
+
+1.1
+date	2003.03.22.20.04.40;	author tg;	state Exp;
+branches
+	1.1.1.1
+	1.1.9.1;
+next	;
+
+1.1.1.1
+date	2003.03.22.20.04.40;	author tg;	state Exp;
+branches;
+next	1.1.1.2;
+
+1.1.1.2
+date	2004.03.02.18.02.17;	author tg;	state Stab;
+branches;
+next	;
+
+1.1.9.1
+date	2004.02.14.19.18.50;	author tg;	state Exp;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@/* $Xorg: imLcIc.c,v 1.3 2000/08/17 19:45:13 cpqbld Exp $ */
+/******************************************************************
+
+                Copyright 1992,1993, 1994 by FUJITSU LIMITED
+
+Permission to use, copy, modify, distribute, and sell this software
+and its documentation for any purpose is hereby granted without fee,
+provided that the above copyright notice appear in all copies and
+that both that copyright notice and this permission notice appear
+in supporting documentation, and that the name of FUJITSU LIMITED
+not be used in advertising or publicity pertaining to distribution
+of the software without specific, written prior permission.
+FUJITSU LIMITED makes no representations about the suitability of
+this software for any purpose. 
+It is provided "as is" without express or implied warranty.
+
+FUJITSU LIMITED DISCLAIM ALL WARRANTIES WITH REGARD TO THIS SOFTWARE,
+INCLUDING ALL IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS, IN NO
+EVENT SHALL FUJITSU LIMITED BE LIABLE FOR ANY SPECIAL, INDIRECT OR
+CONSEQUENTIAL DAMAGES OR ANY DAMAGES WHATSOEVER RESULTING FROM LOSS OF
+USE, DATA OR PROFITS, WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR
+OTHER TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR
+PERFORMANCE OF THIS SOFTWARE.
+
+  Author: Takashi Fujiwara     FUJITSU LIMITED 
+                               fujiwara@@a80.tech.yk.fujitsu.co.jp
+
+******************************************************************/
+/* $XFree86: xc/lib/X11/imLcIc.c,v 1.4 2001/01/17 19:41:52 dawes Exp $ */
+
+#include <stdio.h>
+#include <X11/Xlib.h>
+#include <X11/Xmd.h>
+#include "Xlibint.h"
+#include "Xlcint.h"
+#include "Ximint.h"
+
+Private void
+_XimLocalUnSetFocus(xic)
+    XIC	 xic;
+{
+    Xic  ic = (Xic)xic;
+    ((Xim)ic->core.im)->private.local.current_ic = (XIC)NULL;
+
+    if (ic->core.focus_window)
+	_XUnregisterFilter(ic->core.im->core.display,
+			ic->core.focus_window, _XimLocalFilter, (XPointer)ic);
+    return;
+}
+
+Private void
+_XimLocalDestroyIC(xic)
+    XIC	 xic;
+{
+    Xic	 ic = (Xic)xic;
+
+    if(((Xim)ic->core.im)->private.local.current_ic == (XIC)ic) {
+	((Xim)ic->core.im)->private.local.current_ic = (XIC)NULL;
+    }
+    if (ic->core.focus_window)
+	_XUnregisterFilter(ic->core.im->core.display,
+			ic->core.focus_window, _XimLocalFilter, (XPointer)ic);
+    if(ic->private.local.ic_resources) {
+	Xfree(ic->private.local.ic_resources);
+	ic->private.local.ic_resources = NULL;
+    }
+    return;
+}
+
+Private void
+_XimLocalSetFocus(xic)
+    XIC	 xic;
+{
+    Xic	 ic = (Xic)xic;
+    XIC	 current_ic = ((Xim)ic->core.im)->private.local.current_ic;
+
+    if (current_ic == (XIC)ic)
+	return;
+
+    if (current_ic != (XIC)NULL) {
+	_XimLocalUnSetFocus(current_ic);
+    }
+    ((Xim)ic->core.im)->private.local.current_ic = (XIC)ic;
+
+    if (ic->core.focus_window)
+	_XRegisterFilterByType(ic->core.im->core.display,
+			ic->core.focus_window, KeyPress, KeyPress,
+			_XimLocalFilter, (XPointer)ic);
+    return;
+}
+
+Private void
+_XimLocalReset(xic)
+    XIC	 xic;
+{
+    Xic	 ic = (Xic)xic;
+    ic->private.local.composed = (DefTree *)NULL;
+    ic->private.local.context  = ((Xim)ic->core.im)->private.local.top;
+}
+
+Private char *
+_XimLocalMbReset(xic)
+    XIC	 xic;
+{
+    _XimLocalReset(xic);
+    return (char *)NULL;
+}
+
+Private wchar_t *
+_XimLocalWcReset(xic)
+    XIC	 xic;
+{
+    _XimLocalReset(xic);
+    return (wchar_t *)NULL;
+}
+
+Private XICMethodsRec Local_ic_methods = {
+    _XimLocalDestroyIC, 	/* destroy */
+    _XimLocalSetFocus,  	/* set_focus */
+    _XimLocalUnSetFocus,	/* unset_focus */
+    _XimLocalSetICValues,	/* set_values */
+    _XimLocalGetICValues,	/* get_values */
+    _XimLocalMbReset,		/* mb_reset */
+    _XimLocalWcReset,		/* wc_reset */
+    _XimLocalMbReset,		/* utf8_reset */
+    _XimLocalMbLookupString,	/* mb_lookup_string */
+    _XimLocalWcLookupString,	/* wc_lookup_string */
+    _XimLocalUtf8LookupString	/* utf8_lookup_string */
+};
+
+Public XIC
+_XimLocalCreateIC(im, values)
+    XIM			 im;
+    XIMArg		*values;
+{
+    Xic			 ic;
+    XimDefICValues	 ic_values;
+    XIMResourceList	 res;
+    unsigned int	 num;
+    int			 len;
+
+    if((ic = (Xic)Xmalloc(sizeof(XicRec))) == (Xic)NULL) {
+	return ((XIC)NULL);
+    }
+    bzero((char *)ic, sizeof(XicRec));
+
+    ic->methods = &Local_ic_methods;
+    ic->core.im = im;
+    ic->private.local.context   = ((Xim)im)->private.local.top;
+    ic->private.local.composed  = (DefTree *)NULL;
+
+    num = im->core.ic_num_resources;
+    len = sizeof(XIMResource) * num;
+    if((res = (XIMResourceList)Xmalloc(len)) == (XIMResourceList)NULL) {
+	goto Set_Error;
+    }
+    (void)memcpy((char *)res, (char *)im->core.ic_resources, len);
+    ic->private.local.ic_resources     = res;
+    ic->private.local.ic_num_resources = num;
+
+    bzero((char *)&ic_values, sizeof(XimDefICValues));
+    if(_XimCheckLocalInputStyle(ic, (XPointer)&ic_values, values,
+				 im->core.styles, res, num) == False) {
+	goto Set_Error;
+    }
+
+    _XimSetICMode(res, num, ic_values.input_style);
+
+    if(_XimSetICValueData(ic, (XPointer)&ic_values,
+			ic->private.local.ic_resources,
+			ic->private.local.ic_num_resources,
+			values, XIM_CREATEIC, True)) {
+	goto Set_Error;
+    }
+    ic_values.filter_events = KeyPressMask;
+    _XimSetCurrentICValues(ic, &ic_values);
+    if(_XimSetICDefaults(ic, (XPointer)&ic_values,
+				XIM_SETICDEFAULTS, res, num) == False) {
+	goto Set_Error;
+    }
+    _XimSetCurrentICValues(ic, &ic_values);
+
+    return((XIC)ic);
+
+Set_Error :
+    if (ic->private.local.ic_resources) {
+	Xfree(ic->private.local.ic_resources);
+	ic->private.local.ic_resources = NULL;
+    }
+    Xfree(ic);
+    return((XIC)NULL);
+}
+@
+
+
+1.1.9.1
+log
+@OpenBSD just has imported exactly this tree into their vendor branch,
+called the same tag, in XF4/xc
+This is, apparently, the last XFree86 snapshot before the licence change
+(ie, addition of the advertising clause)
+
+Since the developers don't see any problems with that, and we would like
+to integrate improvements done by the remaining one or two (or so) XFree86
+developers (j/k), this prepares enabling us to update X-Window in the future.
+@
+text
+@d29 1
+a29 1
+/* $XFree86: xc/lib/X11/imLcIc.c,v 1.5 2003/04/13 19:22:21 dawes Exp $ */
+d39 2
+a40 2
+_XimLocalUnSetFocus(
+    XIC	 xic)
+d52 2
+a53 2
+_XimLocalDestroyIC(
+    XIC	 xic)
+d71 2
+a72 2
+_XimLocalSetFocus(
+    XIC	 xic)
+d93 2
+a94 2
+_XimLocalReset(
+    XIC	 xic)
+d102 2
+a103 2
+_XimLocalMbReset(
+    XIC	 xic)
+d110 2
+a111 2
+_XimLocalWcReset(
+    XIC	 xic)
+d132 3
+a134 3
+_XimLocalCreateIC(
+    XIM			 im,
+    XIMArg		*values)
+@
+
+
+1.1.1.1
+log
+@Import OpenBSD 3.3 XF4 repository from CTM 3132 the first time
+This finalizes starting an OpenBSD-mirabile (aka MirBSD) repository.
+
+### MirBSD is:
+# Copyright (c) 1982-2003 by Thorsten "mirabile" Glaser <x86@@ePost.de>
+# Copyright © 1968-2003  The authors of And contributors to UNIX®, the
+#       C Language, BSD/Berkeley Unix; 386BSD, NetBSD 1.1 and OpenBSD.
+#
+# Anyone who obtained a copy of this work is hereby permitted to freely use,
+# distribute, modify, merge, sublicence, give away or sell it as long as the
+# authors are given due credit and the following notice is retained:
+#
+# This work is provided "as is", with no explicit or implicit warranty what-
+# soever. Use it only at your own risk. In no event may an author or contri-
+# butor be held liable for any damage, directly or indirectly, that origina-
+# ted through or is caused by creation or modification of this work.
+
+MirBSD is my private tree. MirBSD does not differ very much from OpenBSD
+and intentionally tracks OpenBSD. That's why it _is_ OpenBSD, just not the
+official one. It's like with DarrenBSD.
+
+At time of this writing, no advertising for MirBSD must be done,
+because the advertising clause has not yet been sorted out.
+
+http://templeofhate.com/tglaser/MirBSD/index.php
+@
+text
+@@
+
+
+1.1.1.2
+log
+@That's what OpenBSD will, probably, ship as XF4 in 3.5
+their last sync against XFree86 4.3-current has been
+imported into our vendor branch, too
+@
+text
+@d29 1
+a29 1
+/* $XFree86: xc/lib/X11/imLcIc.c,v 1.5 2003/04/13 19:22:21 dawes Exp $ */
+d39 2
+a40 2
+_XimLocalUnSetFocus(
+    XIC	 xic)
+d52 2
+a53 2
+_XimLocalDestroyIC(
+    XIC	 xic)
+d71 2
+a72 2
+_XimLocalSetFocus(
+    XIC	 xic)
+d93 2
+a94 2
+_XimLocalReset(
+    XIC	 xic)
+d102 2
+a103 2
+_XimLocalMbReset(
+    XIC	 xic)
+d110 2
+a111 2
+_XimLocalWcReset(
+    XIC	 xic)
+d132 3
+a134 3
+_XimLocalCreateIC(
+    XIM			 im,
+    XIMArg		*values)
+@
+

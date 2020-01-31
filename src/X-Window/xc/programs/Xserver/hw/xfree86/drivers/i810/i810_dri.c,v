@@ -1,0 +1,3430 @@
+head	1.1;
+branch	1.1.1;
+access;
+symbols
+	tg-mergetmp-2:1.1.1.3
+	cvs-200410241530:1.1.1.3
+	cvs-200410012000:1.1.1.3
+	cvs-200407221130:1.1.1.3
+	cvs-200407141120:1.1.1.3
+	cvs-200406231010:1.1.1.3
+	MIRBSD_7quater:1.1.1.2
+	cvs-200405271510:1.1.1.3
+	XFree86_4_4_0:1.1.9.1
+	cvs-200403021700:1.1.1.3
+	XFREE86_20040213:1.1.9.1
+	xc:1.1.9
+	cvs-200401291925:1.1.1.2
+	MIRBSD_7_ALPHA:1.1.1.2.0.4
+	MIRBSD_7:1.1.1.2.0.2
+	MIRBSD_7ter:1.1.1.2
+	cvs-20011091815:1.1.1.2
+	cvs-200309162130:1.1.1.2
+	cvs-200308302005:1.1.1.2
+	ctmx-0387:1.1.1.2
+	ctmx-0384:1.1.1.2
+	MIRBSD_5:1.1.1.2
+	ctmx-0375:1.1.1.2
+	ctmx-0373:1.1.1.2
+	ctm-0371:1.1.1.2
+	ctm-0370:1.1.1.2
+	MIRBSD_4:1.1.1.2
+	ctm-0363:1.1.1.2
+	ctm-0359:1.1.1.2
+	ctm-0349:1.1.1.1
+	openbsd:1.1.1;
+locks; strict;
+comment	@ * @;
+
+
+1.1
+date	2003.03.22.20.07.11;	author tg;	state Exp;
+branches
+	1.1.1.1
+	1.1.9.1;
+next	;
+
+1.1.1.1
+date	2003.03.22.20.07.11;	author tg;	state Exp;
+branches;
+next	1.1.1.2;
+
+1.1.1.2
+date	2003.04.08.18.36.17;	author tg;	state Exp;
+branches;
+next	1.1.1.3;
+
+1.1.1.3
+date	2004.03.02.18.17.33;	author tg;	state Stab;
+branches;
+next	;
+
+1.1.9.1
+date	2004.02.14.19.23.13;	author tg;	state Exp;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@/* $XFree86: xc/programs/Xserver/hw/xfree86/drivers/i810/i810_dri.c,v 1.25 2001/12/21 21:04:36 dawes Exp $ */
+
+#include "xf86.h"
+#include "xf86_OSproc.h"
+#include "xf86_ansic.h"
+#include "xf86Priv.h"
+
+#include "xf86PciInfo.h"
+#include "xf86Pci.h"
+
+#include "windowstr.h"
+
+#include "GL/glxtokens.h"
+
+#include "i810.h"
+#include "i810_dri.h"
+
+static char I810KernelDriverName[] = "i810";
+static char I810ClientDriverName[] = "i810";
+
+static Bool I810InitVisualConfigs(ScreenPtr pScreen);
+static Bool I810CreateContext(ScreenPtr pScreen, VisualPtr visual,
+			      drmContext hwContext, void *pVisualConfigPriv,
+			      DRIContextType contextStore);
+static void I810DestroyContext(ScreenPtr pScreen, drmContext hwContext,
+			       DRIContextType contextStore);
+static void I810DRISwapContext(ScreenPtr pScreen, DRISyncType syncType,
+			       DRIContextType readContextType,
+			       void *readContextStore,
+			       DRIContextType writeContextType,
+			       void *writeContextStore);
+static void I810DRIInitBuffers(WindowPtr pWin, RegionPtr prgn, CARD32 index);
+static void I810DRIMoveBuffers(WindowPtr pParent, DDXPointRec ptOldOrg,
+			       RegionPtr prgnSrc, CARD32 index);
+
+extern void GlxSetVisualConfigs(int nconfigs,
+				__GLXvisualConfig *configs,
+				void **configprivs);
+
+static int i810_pitches[] = {
+   512,
+   1024,
+   2048,
+   4096,
+   0
+};
+
+static int i810_pitch_flags[] = {
+    0x0,
+    0x1,
+    0x2,
+    0x3,
+    0
+};
+
+Bool I810CleanupDma(ScrnInfoPtr pScrn)
+{
+   I810Ptr pI810 = I810PTR(pScrn);
+   Bool ret_val;
+
+   ret_val = drmI810CleanupDma(pI810->drmSubFD);
+   if (ret_val == FALSE)
+      xf86DrvMsg(pScrn->scrnIndex, X_ERROR, "[dri] I810 Dma Cleanup Failed\n");
+   return ret_val;
+}
+
+Bool I810InitDma(ScrnInfoPtr pScrn)
+{
+   I810Ptr pI810 = I810PTR(pScrn);
+   I810RingBuffer *ring = &(pI810->LpRing);
+   I810DRIPtr pI810DRI = (I810DRIPtr) pI810->pDRIInfo->devPrivate;
+   drmI810Init info;
+   Bool ret_val;
+
+   info.start = ring->mem.Start;
+   info.end = ring->mem.End;
+   info.size = ring->mem.Size;
+   info.mmio_offset = (unsigned int)pI810DRI->regs;
+   info.buffers_offset = (unsigned int)pI810->buffer_map;
+   info.sarea_off = sizeof(XF86DRISAREARec);
+
+   info.front_offset = 0;
+   info.back_offset = pI810->BackBuffer.Start;
+   info.depth_offset = pI810->DepthBuffer.Start;
+   info.overlay_offset = pI810->OverlayStart;
+   info.overlay_physical = pI810->OverlayPhysical;
+   info.w = pScrn->virtualX;
+   info.h = pScrn->virtualY;
+   info.pitch = pI810->auxPitch;
+   info.pitch_bits = pI810->auxPitchBits;
+
+   ret_val = drmI810InitDma(pI810->drmSubFD, &info);
+   if(ret_val == FALSE) {
+      xf86DrvMsg(pScrn->scrnIndex, X_ERROR,
+                 "[drm] I810 Dma Initialization failed.\n");
+   }
+   return ret_val;
+}
+
+static Bool
+I810InitVisualConfigs(ScreenPtr pScreen)
+{
+   ScrnInfoPtr pScrn = xf86Screens[pScreen->myNum];
+   I810Ptr pI810 = I810PTR(pScrn);
+   int numConfigs = 0;
+   __GLXvisualConfig *pConfigs = 0;
+   I810ConfigPrivPtr pI810Configs = 0;
+   I810ConfigPrivPtr *pI810ConfigPtrs = 0;
+   int accum, stencil, db, depth;
+   int i;
+
+   switch (pScrn->bitsPerPixel) {
+   case 8:
+   case 24:
+   case 32:
+      break;
+   case 16:
+      numConfigs = 8;
+
+      pConfigs = (__GLXvisualConfig *) xcalloc(sizeof(__GLXvisualConfig), numConfigs);
+      if (!pConfigs)
+	 return FALSE;
+
+      pI810Configs = (I810ConfigPrivPtr) xcalloc(sizeof(I810ConfigPrivRec), numConfigs);
+      if (!pI810Configs) {
+	 xfree(pConfigs);
+	 return FALSE;
+      }
+
+      pI810ConfigPtrs = (I810ConfigPrivPtr *) xcalloc(sizeof(I810ConfigPrivPtr), numConfigs);
+      if (!pI810ConfigPtrs) {
+	 xfree(pConfigs);
+	 xfree(pI810Configs);
+	 return FALSE;
+      }
+
+      for (i=0; i<numConfigs; i++)
+	 pI810ConfigPtrs[i] = &pI810Configs[i];
+
+      i = 0;
+      depth = 1;
+      for (accum = 0; accum <= 1; accum++) {
+         for (stencil = 0; stencil <= 1; stencil++) {
+            for (db = 1; db >= 0; db--) {
+               pConfigs[i].vid = -1;
+               pConfigs[i].class = -1;
+               pConfigs[i].rgba = TRUE;
+               pConfigs[i].redSize = 5;
+               pConfigs[i].greenSize = 6;
+               pConfigs[i].blueSize = 5;
+               pConfigs[i].redMask = 0x0000F800;
+               pConfigs[i].greenMask = 0x000007E0;
+               pConfigs[i].blueMask = 0x0000001F;
+               pConfigs[i].alphaMask = 0;
+               if (accum) {
+                  pConfigs[i].accumRedSize = 16;
+                  pConfigs[i].accumGreenSize = 16;
+                  pConfigs[i].accumBlueSize = 16;
+                  pConfigs[i].accumAlphaSize = 16;
+               }
+               else {
+                  pConfigs[i].accumRedSize = 0;
+                  pConfigs[i].accumGreenSize = 0;
+                  pConfigs[i].accumBlueSize = 0;
+                  pConfigs[i].accumAlphaSize = 0;
+               }
+               pConfigs[i].doubleBuffer = db ? TRUE : FALSE;
+               pConfigs[i].stereo = FALSE;
+               pConfigs[i].bufferSize = 16;
+               if (depth)
+                  pConfigs[i].depthSize = 16;
+               else
+                  pConfigs[i].depthSize = 0;
+               if (stencil)
+                  pConfigs[i].stencilSize = 8;
+               else
+                  pConfigs[i].stencilSize = 0;
+               pConfigs[i].auxBuffers = 0;
+               pConfigs[i].level = 0;
+               if (stencil || accum)
+                  pConfigs[i].visualRating = GLX_SLOW_VISUAL_EXT;
+               else
+                  pConfigs[i].visualRating = GLX_NONE_EXT;
+               pConfigs[i].transparentPixel = 0;
+               pConfigs[i].transparentRed = 0;
+               pConfigs[i].transparentGreen = 0;
+               pConfigs[i].transparentBlue = 0;
+               pConfigs[i].transparentAlpha = 0;
+               pConfigs[i].transparentIndex = 0;
+               i++;
+            }
+         }
+      }
+      assert(i == numConfigs);
+      break;
+   }
+   pI810->numVisualConfigs = numConfigs;
+   pI810->pVisualConfigs = pConfigs;
+   pI810->pVisualConfigsPriv = pI810Configs;
+   GlxSetVisualConfigs(numConfigs, pConfigs, (void**)pI810ConfigPtrs);
+   return TRUE;
+}
+
+
+static unsigned int mylog2(unsigned int n)
+{
+   unsigned int log2 = 1;
+   while (n>1) n >>= 1, log2++;
+   return log2;
+}
+
+Bool I810DRIScreenInit(ScreenPtr pScreen)
+{
+   ScrnInfoPtr pScrn = xf86Screens[pScreen->myNum];
+   I810Ptr pI810 = I810PTR(pScrn);
+   DRIInfoPtr pDRIInfo;
+   I810DRIPtr pI810DRI;
+   unsigned long tom;
+   unsigned long agpHandle;
+   unsigned long dcacheHandle;
+   int sysmem_size = 0;
+   int back_size = 0;
+   int pitch_idx = 0;
+   int bufs;
+   int width = pScrn->displayWidth * pI810->cpp;
+   int i;
+
+   /* Hardware 3D rendering only implemented for 16bpp */
+   /* And it only works for 5:6:5 (Mark) */
+   if (pScrn->depth != 16)
+      return FALSE;
+
+   /* Check that the GLX, DRI, and DRM modules have been loaded by testing
+    * for known symbols in each module. */
+   if (!xf86LoaderCheckSymbol("GlxSetVisualConfigs")) return FALSE;
+   if (!xf86LoaderCheckSymbol("DRIScreenInit"))       return FALSE;
+   if (!xf86LoaderCheckSymbol("drmAvailable"))        return FALSE;
+   if (!xf86LoaderCheckSymbol("DRIQueryVersion")) {
+      xf86DrvMsg(pScreen->myNum, X_ERROR,
+                 "[dri] I810DRIScreenInit failed (libdri.a too old)\n");
+      return FALSE;
+   }
+
+   /* Check the DRI version */
+   {
+      int major, minor, patch;
+      DRIQueryVersion(&major, &minor, &patch);
+      if (major != 4 || minor < 0) {
+         xf86DrvMsg(pScreen->myNum, X_ERROR,
+                    "[dri] I810DRIScreenInit failed because of a version mismatch.\n"
+                    "[dri] libDRI version is %d.%d.%d bug version 4.0.x is needed.\n"
+                    "[dri] Disabling DRI.\n",
+                    major, minor, patch);
+         return FALSE;
+      }
+   }
+
+   pDRIInfo = DRICreateInfoRec();
+   if (!pDRIInfo) {
+      xf86DrvMsg(pScreen->myNum, X_ERROR,
+                 "[dri] DRICreateInfoRec failed.  Disabling DRI.\n");
+      return FALSE;
+   }
+
+
+/*     pDRIInfo->wrap.ValidateTree = 0;    */
+/*     pDRIInfo->wrap.PostValidateTree = 0;    */
+
+   pI810->pDRIInfo = pDRIInfo;
+   pI810->LockHeld = 0;
+
+   pDRIInfo->drmDriverName = I810KernelDriverName;
+   pDRIInfo->clientDriverName = I810ClientDriverName;
+   pDRIInfo->busIdString = xalloc(64);
+
+   sprintf(pDRIInfo->busIdString, "PCI:%d:%d:%d",
+	   ((pciConfigPtr)pI810->PciInfo->thisCard)->busnum,
+	   ((pciConfigPtr)pI810->PciInfo->thisCard)->devnum,
+	   ((pciConfigPtr)pI810->PciInfo->thisCard)->funcnum);
+   pDRIInfo->ddxDriverMajorVersion = I810_MAJOR_VERSION;
+   pDRIInfo->ddxDriverMinorVersion = I810_MINOR_VERSION;
+   pDRIInfo->ddxDriverPatchVersion = I810_PATCHLEVEL;
+   pDRIInfo->frameBufferPhysicalAddress = pI810->LinearAddr;
+   pDRIInfo->frameBufferSize = (((pScrn->displayWidth *
+				  pScrn->virtualY * pI810->cpp) +
+				 4096 - 1) / 4096) * 4096;
+
+   pDRIInfo->frameBufferStride = pScrn->displayWidth*pI810->cpp;
+   pDRIInfo->ddxDrawableTableEntry = I810_MAX_DRAWABLES;
+
+   if (SAREA_MAX_DRAWABLES < I810_MAX_DRAWABLES)
+      pDRIInfo->maxDrawableTableEntry = SAREA_MAX_DRAWABLES;
+   else
+      pDRIInfo->maxDrawableTableEntry = I810_MAX_DRAWABLES;
+
+   /* For now the mapping works by using a fixed size defined
+    * in the SAREA header
+    */
+   if (sizeof(XF86DRISAREARec)+sizeof(I810SAREARec)>SAREA_MAX) {
+      xf86DrvMsg(pScreen->myNum, X_ERROR, "[dri] Data does not fit in SAREA\n");
+      return FALSE;
+   }
+   pDRIInfo->SAREASize = SAREA_MAX;
+
+   if (!(pI810DRI = (I810DRIPtr)xcalloc(sizeof(I810DRIRec),1))) {
+      DRIDestroyInfoRec(pI810->pDRIInfo);
+      pI810->pDRIInfo=0;
+      return FALSE;
+   }
+   pDRIInfo->devPrivate = pI810DRI;
+   pDRIInfo->devPrivateSize = sizeof(I810DRIRec);
+   pDRIInfo->contextSize = sizeof(I810DRIContextRec);
+
+   pDRIInfo->CreateContext = I810CreateContext;
+   pDRIInfo->DestroyContext = I810DestroyContext;
+   pDRIInfo->SwapContext = I810DRISwapContext;
+   pDRIInfo->InitBuffers = I810DRIInitBuffers;
+   pDRIInfo->MoveBuffers = I810DRIMoveBuffers;
+   pDRIInfo->bufferRequests = DRI_ALL_WINDOWS;
+
+   pDRIInfo->createDummyCtx = TRUE;
+   pDRIInfo->createDummyCtxPriv = FALSE;
+
+   /* This adds the framebuffer as a drm map *before* we have asked agp
+    * to allocate it.  Scary stuff, hold on...
+    */
+   if (!DRIScreenInit(pScreen, pDRIInfo, &pI810->drmSubFD)) {
+      xf86DrvMsg(pScreen->myNum, X_ERROR,
+                 "[dri] DRIScreenInit failed.  Disabling DRI.\n");
+      xfree(pDRIInfo->devPrivate);
+      pDRIInfo->devPrivate=0;
+      DRIDestroyInfoRec(pI810->pDRIInfo);
+      pI810->pDRIInfo=0;
+      return FALSE;
+   }
+
+   /* Check the i810 DRM version */
+   {
+      drmVersionPtr version = drmGetVersion(pI810->drmSubFD);
+      if (version) {
+         if (version->version_major != 1 ||
+             version->version_minor < 2) {
+            /* incompatible drm version */
+            xf86DrvMsg(pScreen->myNum, X_ERROR,
+                       "[dri] I810DRIScreenInit failed because of a version mismatch.\n"
+                       "[dri] i810.o kernel module version is %d.%d.%d but version 1.2 or greater is needed.\n"
+                       "[dri] Disabling DRI.\n",
+                       version->version_major,
+                       version->version_minor,
+                       version->version_patchlevel);
+            I810DRICloseScreen(pScreen);
+            drmFreeVersion(version);
+            return FALSE;
+         }
+         drmFreeVersion(version);
+      }
+   }
+
+   pI810DRI->regsSize=I810_REG_SIZE;
+   if (drmAddMap(pI810->drmSubFD, (drmHandle)pI810->MMIOAddr,
+		 pI810DRI->regsSize, DRM_REGISTERS, 0, &pI810DRI->regs)<0) {
+      xf86DrvMsg(pScreen->myNum, X_ERROR, "[drm] drmAddMap(regs) failed\n");
+      DRICloseScreen(pScreen);
+      return FALSE;
+   }
+   xf86DrvMsg(pScreen->myNum, X_INFO, "[drm] Registers = 0x%08lx\n",
+	      pI810DRI->regs);
+
+   pI810->backHandle = 0;
+   pI810->zHandle = 0;
+   pI810->cursorHandle = 0;
+   pI810->xvmcHandle = 0;
+   pI810->sysmemHandle = 0;
+   pI810->agpAcquired = FALSE;
+   pI810->dcacheHandle = 0;
+
+   /* Agp Support - Need this just to get the framebuffer.
+    */
+   if(drmAgpAcquire(pI810->drmSubFD) < 0) {
+      xf86DrvMsg(pScreen->myNum, X_ERROR, "[agp] drmAgpAquire failed\n");
+      DRICloseScreen(pScreen);
+      return FALSE;
+   }
+   pI810->agpAcquired = TRUE;
+
+   if (drmAgpEnable(pI810->drmSubFD, 0) < 0) {
+      xf86DrvMsg(pScreen->myNum, X_ERROR, "[agp] drmAgpEnable failed\n");
+      DRICloseScreen(pScreen);
+      return FALSE;
+   }
+
+   memset (&pI810->DcacheMem, 0, sizeof(I810MemRange));
+   memset (&pI810->BackBuffer, 0, sizeof(I810MemRange));
+   memset (&pI810->DepthBuffer, 0, sizeof(I810MemRange));
+   pI810->CursorPhysical = 0;
+
+   /* Dcache - half the speed of normal ram, but has use as a Z buffer
+    * under the DRI.
+    */
+
+   drmAgpAlloc(pI810->drmSubFD, 4096 * 1024, 1, NULL, &dcacheHandle);
+   pI810->dcacheHandle = dcacheHandle;
+   xf86DrvMsg(pScreen->myNum, X_INFO, "[agp] dcacheHandle : %p\n", dcacheHandle);
+
+#define Elements(x) sizeof(x)/sizeof(*x)
+   for (pitch_idx = 0 ; pitch_idx < Elements(i810_pitches) ; pitch_idx++)
+      if (width <= i810_pitches[pitch_idx])
+	 break;
+
+   if (pitch_idx == Elements(i810_pitches)) {
+      xf86DrvMsg(pScrn->scrnIndex, X_INFO,
+		 "[dri] Couldn't find depth/back buffer pitch");
+      DRICloseScreen(pScreen);
+      return FALSE;
+   }
+   else {
+      back_size = i810_pitches[pitch_idx] * (pScrn->virtualY + 4);
+      back_size = ((back_size + 4096 - 1) / 4096) * 4096;
+   }
+
+   sysmem_size = pScrn->videoRam * 1024;
+   if (dcacheHandle != 0) {
+      if (back_size > 4*1024*1024) {
+	 xf86DrvMsg(pScreen->myNum, X_INFO, "[dri] Backsize is larger then 4 meg\n");
+	 sysmem_size = sysmem_size - 2*back_size;
+	 drmAgpFree(pI810->drmSubFD, dcacheHandle);
+	 pI810->dcacheHandle = dcacheHandle = 0;
+      }
+      else {
+	 sysmem_size = sysmem_size - back_size;
+      }
+   }
+   else {
+      sysmem_size = sysmem_size - 2*back_size;
+   }
+
+    /* Max size is 48 without XvMC, 41 with 6 surfaces, 40 with 7 surfaces */
+   if(pI810->numSurfaces && (pI810->numSurfaces == 6)) {
+         if(sysmem_size > (pI810->FbMapSize - 7*1024*1024)) {
+            sysmem_size = (pI810->FbMapSize - 7*1024*1024);
+            xf86DrvMsg(pScrn->scrnIndex, X_INFO,
+               "User requested more memory then fits in the agp aperture\n"
+               "Truncating to %d bytes of memory\n",
+               sysmem_size);
+         }
+   }
+   if(pI810->numSurfaces && (pI810->numSurfaces == 7)) {
+        if(sysmem_size > (pI810->FbMapSize - 8*1024*1024)) {
+           sysmem_size = (pI810->FbMapSize - 8*1024*1024);
+           xf86DrvMsg(pScrn->scrnIndex, X_INFO,
+               "User requested more memory then fits in the agp aperture\n"
+               "Truncating to %d bytes of memory\n",
+               sysmem_size);
+        }
+   }
+
+   if(sysmem_size > pI810->FbMapSize) {
+      sysmem_size = pI810->FbMapSize;
+
+      xf86DrvMsg(pScrn->scrnIndex, X_INFO, 
+		 "[dri] User requested more memory then fits in the agp"
+		 " aperture\n\tTruncating to %d bytes of memory\n",
+ 		 sysmem_size);
+   }
+
+   sysmem_size -= 4096;		/* remove 4k for the hw cursor */
+
+   pI810->SysMem.Start = 0;
+   pI810->SysMem.Size = sysmem_size;
+   pI810->SysMem.End = sysmem_size;
+   tom = sysmem_size;
+
+   pI810->SavedSysMem = pI810->SysMem;
+
+   if (dcacheHandle != 0) {
+      if(drmAgpBind(pI810->drmSubFD, dcacheHandle, pI810->DepthOffset) == 0) {
+	 memset (&pI810->DcacheMem, 0, sizeof(I810MemRange));
+	 xf86DrvMsg(pScrn->scrnIndex, X_INFO,
+		    "[agp] GART: Found 4096K Z buffer memory\n");
+	 pI810->DcacheMem.Start = pI810->DepthOffset;
+	 pI810->DcacheMem.Size = 1024 * 4096;
+	 pI810->DcacheMem.End = pI810->DcacheMem.Start + pI810->DcacheMem.Size;
+	 if (!I810AllocLow(&(pI810->DepthBuffer),
+			   &(pI810->DcacheMem),
+			   back_size))
+	 {
+	    xf86DrvMsg(pScrn->scrnIndex, X_INFO,
+		       "[agp] Depth buffer allocation failed\n");
+	    DRICloseScreen(pScreen);
+	    return FALSE;
+	 }
+      } else {
+	 xf86DrvMsg(pScrn->scrnIndex, X_INFO, "[agp] GART: dcache bind failed\n");
+	 drmAgpFree(pI810->drmSubFD, dcacheHandle);
+	 pI810->dcacheHandle = dcacheHandle = 0;
+      }
+   } else {
+      xf86DrvMsg(pScrn->scrnIndex, X_INFO, "[agp] GART: no dcache memory found\n");
+   }
+
+   drmAgpAlloc(pI810->drmSubFD, back_size, 0, NULL, &agpHandle);
+   pI810->backHandle = agpHandle;
+
+   if (agpHandle != 0) {
+      if(drmAgpBind(pI810->drmSubFD, agpHandle, pI810->BackOffset) == 0) {
+	 xf86DrvMsg(pScrn->scrnIndex, X_INFO,
+		    "[agp] Bound backbuffer memory\n");
+
+	 pI810->BackBuffer.Start = pI810->BackOffset;
+	 pI810->BackBuffer.Size = back_size;
+	 pI810->BackBuffer.End = (pI810->BackBuffer.Start +
+				  pI810->BackBuffer.Size);
+      } else {
+	 xf86DrvMsg(pScrn->scrnIndex, X_INFO,
+                    "[agp] Unable to bind backbuffer.  Disabling DRI.\n");
+	 DRICloseScreen(pScreen);
+	 return FALSE;
+      }
+   } else {
+      xf86DrvMsg(pScrn->scrnIndex, X_INFO,
+		 "[dri] Unable to allocate backbuffer memory.  Disabling DRI.\n");
+      DRICloseScreen(pScreen);
+      return FALSE;
+   }
+
+   if(dcacheHandle == 0) {
+      drmAgpAlloc(pI810->drmSubFD, back_size, 0,
+		  NULL, &agpHandle);
+      pI810->zHandle = agpHandle;
+
+      if(agpHandle != 0) {
+	 if(drmAgpBind(pI810->drmSubFD, agpHandle, pI810->DepthOffset) == 0) {
+	    xf86DrvMsg(pScrn->scrnIndex, X_INFO, "[agp] Bound depthbuffer memory\n");
+	    pI810->DepthBuffer.Start = pI810->DepthOffset;
+	    pI810->DepthBuffer.Size = back_size;
+	    pI810->DepthBuffer.End = (pI810->DepthBuffer.Start +
+				      pI810->DepthBuffer.Size);
+	 } else {
+	    xf86DrvMsg(pScrn->scrnIndex, X_INFO,
+		       "[agp] Unable to bind depthbuffer.  Disabling DRI.\n");
+	    DRICloseScreen(pScreen);
+	    return FALSE;
+	 }
+      } else {
+	 xf86DrvMsg(pScrn->scrnIndex, X_INFO,
+		    "[agp] Unable to allocate depthbuffer memory.  Disabling DRI.\n");
+	 DRICloseScreen(pScreen);
+	 return FALSE;
+      }
+   }
+
+   /* Now allocate and bind the agp space.  This memory will include the
+    * regular framebuffer as well as texture memory.
+    */
+   drmAgpAlloc(pI810->drmSubFD, sysmem_size, 0, NULL, &agpHandle);
+   if (agpHandle == 0) {
+      xf86DrvMsg(pScreen->myNum, X_ERROR, "[agp] drmAgpAlloc failed\n");
+      DRICloseScreen(pScreen);
+      return FALSE;
+   }
+   pI810->sysmemHandle = agpHandle;
+
+   if (drmAgpBind(pI810->drmSubFD, agpHandle, 0) != 0) {
+      xf86DrvMsg(pScreen->myNum, X_ERROR, "[agp] drmAgpBind failed\n");
+      DRICloseScreen(pScreen);
+      return FALSE;
+   }
+
+/* Allocate 7 or 8MB for XvMC this is setup as follows to best use tiled
+   regions and required surface pitches. (Numbers are adjusted if the
+   AGP region is only 32MB
+   For numSurfaces == 6
+   44 - 48MB = 4MB Fence, 8 Tiles wide
+   43 - 44MB = 1MB Fence, 8 Tiles wide
+   42 - 43MB = 1MB Fence, 4 Tiles wide
+   41 - 42MB = 1MB Fence, 4 Tiles wide
+   For numSurfaces == 7
+   44 - 48MB   = 4MB Fence, 8 Tiles wide
+   43 - 44MB   = 1MB Fence, 8 Tiles wide
+   42.5 - 43MB = 0.5MB Fence, 8 Tiles wide
+   42 - 42.5MB = 0.5MB Fence, 4 Tiles wide
+   40 - 42MB   = 2MB Fence, 4 Tiles wide
+ */
+   if(pI810->numSurfaces) {
+      if(pI810->numSurfaces == 6) {
+         pI810->MC.Size = 7*1024*1024;
+         pI810->MC.Start = pI810->FbMapSize - 7*1024*1024;
+
+      }
+      if(pI810->numSurfaces == 7) {
+         pI810->MC.Size = 8*1024*1024;
+         pI810->MC.Start = pI810->FbMapSize - 8*1024*1024;
+      }
+      drmAgpAlloc(pI810->drmSubFD, pI810->MC.Size, 0, NULL, &agpHandle);
+      pI810->xvmcHandle = agpHandle;
+
+      if (agpHandle != 0) {
+         if (drmAgpBind(pI810->drmSubFD, agpHandle, pI810->MC.Start) == 0) {
+            xf86DrvMsg(pScrn->scrnIndex, X_INFO,
+                       "GART: Allocated 7MB for HWMC\n");
+            pI810->MC.End = pI810->MC.Start + pI810->MC.Size;
+         }
+         else {
+            xf86DrvMsg(pScrn->scrnIndex, X_INFO, "GART: HWMC bind failed\n");
+            pI810->MC.Start = 0;
+            pI810->MC.Size = 0;
+            pI810->MC.End = 0;
+         }
+      } else {
+         xf86DrvMsg(pScrn->scrnIndex, X_INFO, "GART: HWMC alloc failed\n");
+         pI810->MC.Start = 0;
+         pI810->MC.Size = 0;
+         pI810->MC.End = 0;
+      }
+      pI810->xvmcContext = 0;
+   }
+
+   drmAgpAlloc(pI810->drmSubFD, 4096, 2,
+	       (unsigned long *)&pI810->CursorPhysical, &agpHandle);
+   pI810->cursorHandle = agpHandle;
+
+   if (agpHandle != 0) {
+      tom = sysmem_size;
+
+      if (drmAgpBind(pI810->drmSubFD, agpHandle, tom) == 0) {
+	 xf86DrvMsg(pScrn->scrnIndex, X_INFO,
+		    "[agp] GART: Allocated 4K for mouse cursor image\n");
+	 pI810->CursorStart = tom;
+	 tom += 4096;
+      }
+      else {
+	 xf86DrvMsg(pScrn->scrnIndex, X_INFO, "[agp] GART: cursor bind failed\n");
+	 pI810->CursorPhysical = 0;
+      }
+   }
+   else {
+      xf86DrvMsg(pScrn->scrnIndex, X_INFO, "[agp] GART: cursor alloc failed\n");
+      pI810->CursorPhysical = 0;
+   }
+
+   /* Steal some of the excess cursor space for the overlay regs.
+    */
+    pI810->OverlayPhysical = pI810->CursorPhysical + 1024;
+    pI810->OverlayStart = pI810->CursorStart + 1024;
+
+
+
+
+   I810SetTiledMemory(pScrn, 1,
+		      pI810->DepthBuffer.Start,
+		      i810_pitches[pitch_idx],
+		      8*1024*1024);
+
+   I810SetTiledMemory(pScrn, 2,
+		      pI810->BackBuffer.Start,
+		      i810_pitches[pitch_idx],
+		      8*1024*1024);
+
+
+   /* These are for HWMC surfaces */
+   if(pI810->numSurfaces == 6) {
+      I810SetTiledMemory(pScrn, 3,
+                    pI810->MC.Start,
+                    512,
+                    1024*1024);
+
+      I810SetTiledMemory(pScrn, 4,
+                    pI810->MC.Start + 1024*1024,
+                    512,
+                    1024*1024);
+
+      I810SetTiledMemory(pScrn, 5,
+                    pI810->MC.Start + 1024*1024*2,
+                    1024,
+                    1024*1024);
+
+      I810SetTiledMemory(pScrn, 6,
+                    pI810->MC.Start + 1024*1024*3,
+                    1024,
+                    4*1024*1024);
+   }
+   if(pI810->numSurfaces == 7) {
+      I810SetTiledMemory(pScrn, 3,
+                      pI810->MC.Start,
+                      512,
+                      2*1024*1024);
+
+      I810SetTiledMemory(pScrn, 4,
+                      pI810->MC.Start + 2*1024*1024,
+                      512,
+                      512*1024);
+
+      I810SetTiledMemory(pScrn, 5,
+                      pI810->MC.Start + 2*1024*1024 + 512*1024,
+                      1024,
+                      512*1024);
+
+      I810SetTiledMemory(pScrn, 6,
+                      pI810->MC.Start + 3*1024*1024,
+                      1024,
+                      1*1024*1024);
+
+      I810SetTiledMemory(pScrn, 7,
+                      pI810->MC.Start + 4*1024*1024,
+                      1024,
+                      4*1024*1024);
+
+   }
+
+   pI810->auxPitch = i810_pitches[pitch_idx];
+   pI810->auxPitchBits = i810_pitch_flags[pitch_idx];
+   pI810->SavedDcacheMem = pI810->DcacheMem;
+   pI810DRI->backbufferSize = pI810->BackBuffer.Size;
+
+   if (drmAddMap(pI810->drmSubFD, (drmHandle)pI810->BackBuffer.Start,
+		 pI810->BackBuffer.Size, DRM_AGP, 0,
+		 &pI810DRI->backbuffer) < 0) {
+      xf86DrvMsg(pScreen->myNum, X_ERROR,
+                 "[drm] drmAddMap(backbuffer) failed.  Disabling DRI\n");
+      DRICloseScreen(pScreen);
+      return FALSE;
+   }
+
+   pI810DRI->depthbufferSize = pI810->DepthBuffer.Size;
+   if (drmAddMap(pI810->drmSubFD, (drmHandle)pI810->DepthBuffer.Start,
+		 pI810->DepthBuffer.Size, DRM_AGP, 0,
+		 &pI810DRI->depthbuffer) < 0) {
+      xf86DrvMsg(pScreen->myNum, X_ERROR,
+                 "[drm] drmAddMap(depthbuffer) failed.  Disabling DRI.\n");
+      DRICloseScreen(pScreen);
+      return FALSE;
+   }
+
+   /* Allocate FrontBuffer etc. */
+   if (!I810AllocateFront(pScrn)) {
+      DRICloseScreen(pScreen);
+      return FALSE;
+   }
+
+   /* Allocate buffer memory */
+   I810AllocHigh( &(pI810->BufferMem), &(pI810->SysMem),
+		  I810_DMA_BUF_NR * I810_DMA_BUF_SZ);
+
+   xf86DrvMsg(pScreen->myNum, X_INFO, "[dri] Buffer map : %lx\n",
+              pI810->BufferMem.Start);
+
+   if (pI810->BufferMem.Start == 0 ||
+      pI810->BufferMem.End - pI810->BufferMem.Start >
+      I810_DMA_BUF_NR * I810_DMA_BUF_SZ) {
+      xf86DrvMsg(pScreen->myNum, X_ERROR,
+                 "[dri] Not enough memory for dma buffers.  Disabling DRI.\n");
+      DRICloseScreen(pScreen);
+      return FALSE;
+   }
+   if (drmAddMap(pI810->drmSubFD, (drmHandle)pI810->BufferMem.Start,
+		pI810->BufferMem.Size, DRM_AGP, 0,
+		&pI810->buffer_map) < 0) {
+      xf86DrvMsg(pScreen->myNum, X_ERROR,
+                 "[drm] drmAddMap(buffer_map) failed.  Disabling DRI.\n");
+      DRICloseScreen(pScreen);
+      return FALSE;
+   }
+
+   pI810DRI->agp_buffers = pI810->buffer_map;
+   pI810DRI->agp_buf_size = pI810->BufferMem.Size;
+
+   if (drmAddMap(pI810->drmSubFD, (drmHandle)pI810->LpRing.mem.Start,
+		 pI810->LpRing.mem.Size, DRM_AGP, 0,
+		 &pI810->ring_map) < 0) {
+      xf86DrvMsg(pScreen->myNum, X_ERROR,
+                 "[drm] drmAddMap(ring_map) failed.  Disabling DRI.\n");
+      DRICloseScreen(pScreen);
+      return FALSE;
+   }
+
+   /* Use the rest of memory for textures. */
+   pI810DRI->textureSize = pI810->SysMem.Size;
+
+   i = mylog2(pI810DRI->textureSize / I810_NR_TEX_REGIONS);
+
+   if (i < I810_LOG_MIN_TEX_REGION_SIZE)
+      i = I810_LOG_MIN_TEX_REGION_SIZE;
+
+   pI810DRI->logTextureGranularity = i;
+   pI810DRI->textureSize = (pI810DRI->textureSize >> i) << i; /* truncate */
+
+   if(pI810DRI->textureSize < 512*1024) {
+      xf86DrvMsg(pScreen->myNum, X_ERROR,
+                 "[drm] Less then 512k memory left for textures.  Disabling DRI.\n");
+      DRICloseScreen(pScreen);
+      return FALSE;
+   }
+
+   I810AllocLow( &(pI810->TexMem), &(pI810->SysMem),
+		 pI810DRI->textureSize);
+
+   if (drmAddMap(pI810->drmSubFD, (drmHandle)pI810->TexMem.Start,
+		 pI810->TexMem.Size, DRM_AGP, 0,
+		 &pI810DRI->textures) < 0) {
+      xf86DrvMsg(pScreen->myNum, X_ERROR,
+                 "[drm] drmAddMap(textures) failed.  Disabling DRI.\n");
+      DRICloseScreen(pScreen);
+      return FALSE;
+   }
+
+   if((bufs = drmAddBufs(pI810->drmSubFD,
+			 I810_DMA_BUF_NR,
+			 I810_DMA_BUF_SZ,
+			 DRM_AGP_BUFFER, pI810->BufferMem.Start)) <= 0) {
+      xf86DrvMsg(pScrn->scrnIndex, X_INFO,
+		 "[drm] failure adding %d %d byte DMA buffers.  Disabling DRI.\n",
+		 I810_DMA_BUF_NR,
+		 I810_DMA_BUF_SZ);
+      DRICloseScreen(pScreen);
+      return FALSE;
+   }
+
+   xf86DrvMsg(pScrn->scrnIndex, X_INFO, "[drm] added %d %d byte DMA buffers\n",
+	      bufs, I810_DMA_BUF_SZ);
+
+   xf86EnablePciBusMaster(pI810->PciInfo, TRUE);
+
+   I810InitDma(pScrn);
+
+   /* Okay now initialize the dma engine */
+
+   if (!pI810DRI->irq) {
+      pI810DRI->irq = drmGetInterruptFromBusID(pI810->drmSubFD,
+					       ((pciConfigPtr)pI810->PciInfo
+						->thisCard)->busnum,
+					       ((pciConfigPtr)pI810->PciInfo
+						->thisCard)->devnum,
+					       ((pciConfigPtr)pI810->PciInfo
+						->thisCard)->funcnum);
+      if((drmCtlInstHandler(pI810->drmSubFD, pI810DRI->irq)) != 0) {
+	 xf86DrvMsg(pScrn->scrnIndex, X_INFO,
+		    "[drm] failure adding irq handler, there is a device "
+		    "already using that irq\n Consider rearranging your "
+		    "PCI cards.  Disabling DRI.\n");
+	 DRICloseScreen(pScreen);
+	 return FALSE;
+      }
+   }
+
+   xf86DrvMsg(pScrn->scrnIndex, X_INFO,
+	      "[drm] dma control initialized, using IRQ %d\n",
+	      pI810DRI->irq);
+
+   pI810DRI->deviceID=pI810->PciInfo->chipType;
+   pI810DRI->width=pScrn->virtualX;
+   pI810DRI->height=pScrn->virtualY;
+   pI810DRI->mem=pScrn->videoRam*1024;
+   pI810DRI->cpp=pI810->cpp;
+
+   pI810DRI->fbOffset=pI810->FrontBuffer.Start;
+   pI810DRI->fbStride=pI810->auxPitch;
+
+   pI810DRI->bitsPerPixel = pScrn->bitsPerPixel;
+
+
+   pI810DRI->textureOffset=pI810->TexMem.Start;
+
+   pI810DRI->backOffset=pI810->BackBuffer.Start;
+   pI810DRI->depthOffset=pI810->DepthBuffer.Start;
+
+   pI810DRI->ringOffset=pI810->LpRing.mem.Start;
+   pI810DRI->ringSize=pI810->LpRing.mem.Size;
+
+   pI810DRI->auxPitch = pI810->auxPitch;
+   pI810DRI->auxPitchBits = pI810->auxPitchBits;
+   pI810DRI->sarea_priv_offset = sizeof(XF86DRISAREARec);
+
+   if (!(I810InitVisualConfigs(pScreen))) {
+      xf86DrvMsg(pScreen->myNum, X_ERROR,
+                 "[dri] I810InitVisualConfigs failed.  Disabling DRI.\n");
+      DRICloseScreen(pScreen);
+      return FALSE;
+   }
+
+   xf86DrvMsg(pScrn->scrnIndex, X_INFO, "[dri] visual configs initialized.\n" );
+   pI810->pDRIInfo->driverSwapMethod = DRI_HIDE_X_CONTEXT;
+
+   return TRUE;
+}
+
+void
+I810DRICloseScreen(ScreenPtr pScreen)
+{
+   ScrnInfoPtr pScrn = xf86Screens[pScreen->myNum];
+   I810Ptr pI810 = I810PTR(pScrn);
+
+   I810CleanupDma(pScrn);
+
+   if(pI810->dcacheHandle) drmAgpFree(pI810->drmSubFD, pI810->dcacheHandle);
+   if(pI810->backHandle) drmAgpFree(pI810->drmSubFD, pI810->backHandle);
+   if(pI810->zHandle) drmAgpFree(pI810->drmSubFD, pI810->zHandle);
+   if(pI810->cursorHandle) drmAgpFree(pI810->drmSubFD, pI810->cursorHandle);
+   if(pI810->xvmcHandle) drmAgpFree(pI810->drmSubFD, pI810->xvmcHandle);
+   if(pI810->sysmemHandle) drmAgpFree(pI810->drmSubFD, pI810->sysmemHandle);
+
+   if(pI810->agpAcquired == TRUE) drmAgpRelease(pI810->drmSubFD);
+
+   pI810->backHandle = 0;
+   pI810->zHandle = 0;
+   pI810->cursorHandle = 0;
+   pI810->xvmcHandle = 0;
+   pI810->sysmemHandle = 0;
+   pI810->agpAcquired = FALSE;
+   pI810->dcacheHandle = 0;
+
+
+   DRICloseScreen(pScreen);
+
+   if (pI810->pDRIInfo) {
+      if (pI810->pDRIInfo->devPrivate) {
+	 xfree(pI810->pDRIInfo->devPrivate);
+	 pI810->pDRIInfo->devPrivate=0;
+      }
+      DRIDestroyInfoRec(pI810->pDRIInfo);
+      pI810->pDRIInfo=0;
+   }
+   if (pI810->pVisualConfigs) xfree(pI810->pVisualConfigs);
+   if (pI810->pVisualConfigsPriv) xfree(pI810->pVisualConfigsPriv);
+}
+
+static Bool
+I810CreateContext(ScreenPtr pScreen, VisualPtr visual,
+		  drmContext hwContext, void *pVisualConfigPriv,
+		  DRIContextType contextStore)
+{
+   return TRUE;
+}
+
+static void
+I810DestroyContext(ScreenPtr pScreen, drmContext hwContext,
+		   DRIContextType contextStore)
+{
+}
+
+
+Bool
+I810DRIFinishScreenInit(ScreenPtr pScreen)
+{
+   I810SAREARec *sPriv = (I810SAREARec *)DRIGetSAREAPrivate(pScreen);
+   memset( sPriv, 0, sizeof(sPriv) );
+   return DRIFinishScreenInit(pScreen);
+}
+
+void
+I810DRISwapContext(ScreenPtr pScreen, DRISyncType syncType,
+		   DRIContextType oldContextType, void *oldContext,
+		   DRIContextType newContextType, void *newContext)
+{
+   ScrnInfoPtr pScrn = xf86Screens[pScreen->myNum];
+   I810Ptr pI810 = I810PTR(pScrn);
+
+   if (syncType == DRI_3D_SYNC &&
+       oldContextType == DRI_2D_CONTEXT &&
+       newContextType == DRI_2D_CONTEXT)
+   {
+      if (I810_DEBUG & DEBUG_VERBOSE_DRI)
+	 ErrorF("I810DRISwapContext (in)\n");
+
+      pI810->LockHeld = 1;
+      I810RefreshRing( pScrn );
+   }
+   else if (syncType == DRI_2D_SYNC &&
+	    oldContextType == DRI_NO_CONTEXT &&
+	    newContextType == DRI_2D_CONTEXT)
+   {
+      pI810->LockHeld = 0;
+      if (I810_DEBUG & DEBUG_VERBOSE_DRI)
+	 ErrorF("I810DRISwapContext (out)\n");
+   }
+   else if (I810_DEBUG & DEBUG_VERBOSE_DRI)
+      ErrorF("I810DRISwapContext (other)\n");
+}
+
+static void
+I810DRIInitBuffers(WindowPtr pWin, RegionPtr prgn, CARD32 index)
+{
+   ScreenPtr pScreen = pWin->drawable.pScreen;
+   ScrnInfoPtr pScrn = xf86Screens[pScreen->myNum];
+   I810Ptr pI810 = I810PTR(pScrn);
+   BoxPtr pbox = REGION_RECTS(prgn);
+   int nbox = REGION_NUM_RECTS(prgn);
+
+   if (I810_DEBUG & DEBUG_VERBOSE_DRI)
+      ErrorF( "I810DRIInitBuffers\n");
+
+   I810SetupForSolidFill(pScrn, 0, GXcopy, -1);
+   while (nbox--) {
+      I810SelectBuffer(pScrn, I810_BACK);
+      I810SubsequentSolidFillRect(pScrn, pbox->x1, pbox->y1,
+				  pbox->x2-pbox->x1, pbox->y2-pbox->y1);
+      pbox++;
+   }
+
+   /* Clear the depth buffer - uses 0xffff rather than 0.
+    */
+   pbox = REGION_RECTS(prgn);
+   nbox = REGION_NUM_RECTS(prgn);
+   I810SelectBuffer(pScrn, I810_DEPTH);
+   I810SetupForSolidFill(pScrn, 0xffff, GXcopy, -1);
+   while (nbox--) {
+      I810SubsequentSolidFillRect(pScrn, pbox->x1, pbox->y1,
+				  pbox->x2-pbox->x1, pbox->y2-pbox->y1);
+      pbox++;
+   }
+   I810SelectBuffer(pScrn, I810_FRONT);
+   pI810->AccelInfoRec->NeedToSync = TRUE;
+}
+
+/* This routine is a modified form of XAADoBitBlt with the calls to
+ * ScreenToScreenBitBlt built in. My routine has the prgnSrc as source
+ * instead of destination. My origin is upside down so the ydir cases
+ * are reversed.
+ *
+ * KW: can you believe that this is called even when a 2d window moves?
+ */
+static void
+I810DRIMoveBuffers(WindowPtr pParent, DDXPointRec ptOldOrg,
+		   RegionPtr prgnSrc, CARD32 index)
+{
+   ScreenPtr pScreen = pParent->drawable.pScreen;
+   ScrnInfoPtr pScrn = xf86Screens[pScreen->myNum];
+   I810Ptr pI810 = I810PTR(pScrn);
+   BoxPtr pboxTmp, pboxNext, pboxBase;
+   DDXPointPtr pptTmp, pptNew2;
+   int xdir, ydir;
+
+   int screenwidth = pScrn->virtualX;
+   int screenheight = pScrn->virtualY;
+
+   BoxPtr pbox = REGION_RECTS(prgnSrc);
+   int nbox = REGION_NUM_RECTS(prgnSrc);
+
+   BoxPtr pboxNew1 = 0;
+   BoxPtr pboxNew2 = 0;
+   DDXPointPtr pptNew1 = 0;
+   DDXPointPtr pptSrc = &ptOldOrg;
+
+   int dx = pParent->drawable.x - ptOldOrg.x;
+   int dy = pParent->drawable.y - ptOldOrg.y;
+
+   /* If the copy will overlap in Y, reverse the order */
+   if (dy>0) {
+      ydir = -1;
+
+      if (nbox>1) {
+	 /* Keep ordering in each band, reverse order of bands */
+	 pboxNew1 = (BoxPtr)ALLOCATE_LOCAL(sizeof(BoxRec)*nbox);
+	 if (!pboxNew1) return;
+	 pptNew1 = (DDXPointPtr)ALLOCATE_LOCAL(sizeof(DDXPointRec)*nbox);
+	 if (!pptNew1) {
+	    DEALLOCATE_LOCAL(pboxNew1);
+	    return;
+	 }
+	 pboxBase = pboxNext = pbox+nbox-1;
+	 while (pboxBase >= pbox) {
+	    while ((pboxNext >= pbox) && (pboxBase->y1 == pboxNext->y1))
+	       pboxNext--;
+	    pboxTmp = pboxNext+1;
+	    pptTmp = pptSrc + (pboxTmp - pbox);
+	    while (pboxTmp <= pboxBase) {
+	       *pboxNew1++ = *pboxTmp++;
+	       *pptNew1++ = *pptTmp++;
+	    }
+	    pboxBase = pboxNext;
+	 }
+	 pboxNew1 -= nbox;
+	 pbox = pboxNew1;
+	 pptNew1 -= nbox;
+	 pptSrc = pptNew1;
+      }
+   } else {
+      /* No changes required */
+      ydir = 1;
+   }
+
+   /* If the regions will overlap in X, reverse the order */
+   if (dx>0) {
+      xdir = -1;
+
+      if (nbox > 1) {
+	 /*reverse orderof rects in each band */
+	 pboxNew2 = (BoxPtr)ALLOCATE_LOCAL(sizeof(BoxRec)*nbox);
+	 pptNew2 = (DDXPointPtr)ALLOCATE_LOCAL(sizeof(DDXPointRec)*nbox);
+	 if (!pboxNew2 || !pptNew2) {
+	    if (pptNew2) DEALLOCATE_LOCAL(pptNew2);
+	    if (pboxNew2) DEALLOCATE_LOCAL(pboxNew2);
+	    if (pboxNew1) {
+	       DEALLOCATE_LOCAL(pptNew1);
+	       DEALLOCATE_LOCAL(pboxNew1);
+	    }
+	    return;
+	 }
+	 pboxBase = pboxNext = pbox;
+	 while (pboxBase < pbox+nbox) {
+	    while ((pboxNext < pbox+nbox) && (pboxNext->y1 == pboxBase->y1))
+	       pboxNext++;
+	    pboxTmp = pboxNext;
+	    pptTmp = pptSrc + (pboxTmp - pbox);
+	    while (pboxTmp != pboxBase) {
+	       *pboxNew2++ = *--pboxTmp;
+	       *pptNew2++ = *--pptTmp;
+	    }
+	    pboxBase = pboxNext;
+	 }
+	 pboxNew2 -= nbox;
+	 pbox = pboxNew2;
+	 pptNew2 -= nbox;
+	 pptSrc = pptNew2;
+      }
+   } else {
+      /* No changes are needed */
+      xdir = 1;
+   }
+
+   /* SelectBuffer isn't really a good concept for the i810.
+    */
+   I810EmitFlush(pScrn);
+   I810SetupForScreenToScreenCopy(pScrn, xdir, ydir, GXcopy, -1, -1);
+   for ( ; nbox-- ; pbox++ ) {
+
+      int x1 = pbox->x1;
+      int y1 = pbox->y1;
+      int destx = x1 + dx;
+      int desty = y1 + dy;
+      int w = pbox->x2 - x1 + 1;
+      int h = pbox->y2 - y1 + 1;
+
+      if ( destx < 0 ) x1 -= destx, w += destx, destx = 0;
+      if ( desty < 0 ) y1 -= desty, h += desty, desty = 0;
+      if ( destx + w > screenwidth ) w = screenwidth - destx;
+      if ( desty + h > screenheight ) h = screenheight - desty;
+      if ( w <= 0 ) continue;
+      if ( h <= 0 ) continue;
+
+
+      if (I810_DEBUG & DEBUG_VERBOSE_DRI)
+	 ErrorF( "MoveBuffers %d,%d %dx%d dx: %d dy: %d\n",
+		 x1, y1, w, h, dx, dy);
+
+      I810SelectBuffer(pScrn, I810_BACK);
+      I810SubsequentScreenToScreenCopy(pScrn, x1, y1, destx, desty, w, h);
+      I810SelectBuffer(pScrn, I810_DEPTH);
+      I810SubsequentScreenToScreenCopy(pScrn, x1, y1, destx, desty, w, h);
+   }
+   I810SelectBuffer(pScrn, I810_FRONT);
+   I810EmitFlush(pScrn);
+
+   if (pboxNew2) {
+      DEALLOCATE_LOCAL(pptNew2);
+      DEALLOCATE_LOCAL(pboxNew2);
+   }
+   if (pboxNew1) {
+      DEALLOCATE_LOCAL(pptNew1);
+      DEALLOCATE_LOCAL(pboxNew1);
+   }
+
+   pI810->AccelInfoRec->NeedToSync = TRUE;
+}
+@
+
+
+1.1.9.1
+log
+@OpenBSD just has imported exactly this tree into their vendor branch,
+called the same tag, in XF4/xc
+This is, apparently, the last XFree86 snapshot before the licence change
+(ie, addition of the advertising clause)
+
+Since the developers don't see any problems with that, and we would like
+to integrate improvements done by the remaining one or two (or so) XFree86
+developers (j/k), this prepares enabling us to update X-Window in the future.
+@
+text
+@d1 1
+a1 13
+/* $XFree86: xc/programs/Xserver/hw/xfree86/drivers/i810/i810_dri.c,v 1.42 2003/09/28 20:15:58 alanh Exp $ */
+/*
+ * Reformatted with GNU indent (2.2.8), using the following options:
+ *
+ *    -bad -bap -c41 -cd0 -ncdb -ci6 -cli0 -cp0 -ncs -d0 -di3 -i3 -ip3 -l78
+ *    -lp -npcs -psl -sob -ss -br -ce -sc -hnl
+ *
+ * This provides a good match with the original i810 code and preferred
+ * XFree86 formatting conventions.
+ *
+ * When editing this driver, please follow the existing formatting, and edit
+ * with <TAB> characters expanded at 8-column intervals.
+ */
+a11 2
+#include "shadow.h"
+#include "shadowfb.h"
+a35 12
+
+static Bool I810DRIOpenFullScreen(ScreenPtr pScreen);
+static Bool I810DRICloseFullScreen(ScreenPtr pScreen);
+static void I810EnablePageFlip(ScreenPtr pScreen);
+static void I810DisablePageFlip(ScreenPtr pScreen);
+static void I810DRITransitionSingleToMulti3d(ScreenPtr pScreen);
+static void I810DRITransitionMultiToSingle3d(ScreenPtr pScreen);
+static void I810DRITransitionTo3d(ScreenPtr pScreen);
+static void I810DRITransitionTo2d(ScreenPtr pScreen);
+
+static void I810DRIRefreshArea(ScrnInfoPtr pScrn, int num, BoxPtr pbox);
+
+d37 1
+a37 1
+				__GLXvisualConfig * configs,
+d49 5
+a53 5
+   0x0,
+   0x1,
+   0x2,
+   0x3,
+   0
+d56 1
+a56 4
+static unsigned int i810_drm_version = 0;
+
+Bool
+I810CleanupDma(ScrnInfoPtr pScrn)
+d59 1
+a59 1
+   drmI810Init info;
+d61 4
+a64 11
+   memset(&info, 0, sizeof(drmI810Init));
+   info.func = I810_CLEANUP_DMA;
+
+   if (drmCommandWrite(pI810->drmSubFD, DRM_I810_INIT,
+		       &info, sizeof(drmI810Init))) {
+      xf86DrvMsg(pScrn->scrnIndex, X_ERROR,
+		 "[dri] I810 Dma Cleanup Failed\n");
+      return FALSE;
+   }
+
+   return TRUE;
+d67 1
+a67 2
+Bool
+I810InitDma(ScrnInfoPtr pScrn)
+d73 1
+d75 3
+a77 5
+   memset(&info, 0, sizeof(drmI810Init));
+
+   info.ring_start = ring->mem.Start;
+   info.ring_end = ring->mem.End;
+   info.ring_size = ring->mem.Size;
+d80 1
+a80 1
+   info.sarea_priv_offset = sizeof(XF86DRISAREARec);
+d92 2
+a93 24
+   /* We require DRM v1.2 or greater. Since DRM v1.2 broke compatibility
+    * we created a new v1.4 that supports a new init function. Eventually the
+    * old init function will go away. If you change the drm interface, make a
+    * new init type too so that we can detect the new client.
+    */
+   switch(i810_drm_version) {
+   case ((1<<16) | 0):
+   case ((1<<16) | 1):
+   case ((1<<16) | 2):
+   case ((1<<16) | 3):
+      /* Use OLD drm < 1.4 init */
+      info.func = I810_INIT_DMA;
+      xf86DrvMsg(pScrn->scrnIndex, X_INFO, "[drm] Init PRE v1.4 interface.\n");
+      break;
+   default:
+   case ((1<<16) | 4):
+      /*  DRM version 1.3 or greater init */
+      info.func = I810_INIT_DMA_1_4;
+      xf86DrvMsg(pScrn->scrnIndex, X_INFO, "[drm] Init v1.4 interface.\n");
+      break;
+   }
+
+   if (drmCommandWrite(pI810->drmSubFD, DRM_I810_INIT,
+		       &info, sizeof(drmI810Init))) {
+d95 1
+a95 2
+		 "[drm] I810 Dma Initialization failed.\n");
+      return FALSE;
+d97 1
+a97 2
+
+   return TRUE;
+d120 1
+a120 3
+      pConfigs =
+	    (__GLXvisualConfig *) xcalloc(sizeof(__GLXvisualConfig),
+					  numConfigs);
+d124 1
+a124 3
+      pI810Configs =
+	    (I810ConfigPrivPtr) xcalloc(sizeof(I810ConfigPrivRec),
+					numConfigs);
+d130 1
+a130 3
+      pI810ConfigPtrs =
+	    (I810ConfigPrivPtr *) xcalloc(sizeof(I810ConfigPrivPtr),
+					  numConfigs);
+d137 1
+a137 1
+      for (i = 0; i < numConfigs; i++)
+d143 50
+a192 49
+	 for (stencil = 0; stencil <= 1; stencil++) {
+	    for (db = 1; db >= 0; db--) {
+	       pConfigs[i].vid = -1;
+	       pConfigs[i].class = -1;
+	       pConfigs[i].rgba = TRUE;
+	       pConfigs[i].redSize = 5;
+	       pConfigs[i].greenSize = 6;
+	       pConfigs[i].blueSize = 5;
+	       pConfigs[i].redMask = 0x0000F800;
+	       pConfigs[i].greenMask = 0x000007E0;
+	       pConfigs[i].blueMask = 0x0000001F;
+	       pConfigs[i].alphaMask = 0;
+	       if (accum) {
+		  pConfigs[i].accumRedSize = 16;
+		  pConfigs[i].accumGreenSize = 16;
+		  pConfigs[i].accumBlueSize = 16;
+		  pConfigs[i].accumAlphaSize = 0;
+	       } else {
+		  pConfigs[i].accumRedSize = 0;
+		  pConfigs[i].accumGreenSize = 0;
+		  pConfigs[i].accumBlueSize = 0;
+		  pConfigs[i].accumAlphaSize = 0;
+	       }
+	       pConfigs[i].doubleBuffer = db ? TRUE : FALSE;
+	       pConfigs[i].stereo = FALSE;
+	       pConfigs[i].bufferSize = 16;
+	       if (depth)
+		  pConfigs[i].depthSize = 16;
+	       else
+		  pConfigs[i].depthSize = 0;
+	       if (stencil)
+		  pConfigs[i].stencilSize = 8;
+	       else
+		  pConfigs[i].stencilSize = 0;
+	       pConfigs[i].auxBuffers = 0;
+	       pConfigs[i].level = 0;
+	       if (stencil || accum)
+		  pConfigs[i].visualRating = GLX_SLOW_CONFIG;
+	       else
+		  pConfigs[i].visualRating = GLX_NONE;
+	       pConfigs[i].transparentPixel = GLX_NONE;
+	       pConfigs[i].transparentRed = 0;
+	       pConfigs[i].transparentGreen = 0;
+	       pConfigs[i].transparentBlue = 0;
+	       pConfigs[i].transparentAlpha = 0;
+	       pConfigs[i].transparentIndex = 0;
+	       i++;
+	    }
+	 }
+d200 1
+a200 1
+   GlxSetVisualConfigs(numConfigs, pConfigs, (void **)pI810ConfigPtrs);
+d204 2
+a205 2
+static unsigned int
+mylog2(unsigned int n)
+d208 1
+a208 3
+
+   while (n > 1)
+      n >>= 1, log2++;
+d212 1
+a212 2
+Bool
+I810DRIScreenInit(ScreenPtr pScreen)
+d235 3
+a237 6
+   if (!xf86LoaderCheckSymbol("GlxSetVisualConfigs"))
+      return FALSE;
+   if (!xf86LoaderCheckSymbol("DRIScreenInit"))
+      return FALSE;
+   if (!xf86LoaderCheckSymbol("drmAvailable"))
+      return FALSE;
+d240 1
+a240 1
+		 "[dri] I810DRIScreenInit failed (libdri.a too old)\n");
+a246 1
+
+d249 6
+a254 5
+	 xf86DrvMsg(pScreen->myNum, X_ERROR,
+		    "[dri] I810DRIScreenInit failed because of a version mismatch.\n"
+		    "[dri] libDRI version is %d.%d.%d bug version 4.0.x is needed.\n"
+		    "[dri] Disabling DRI.\n", major, minor, patch);
+	 return FALSE;
+d261 1
+a261 1
+		 "[dri] DRICreateInfoRec failed.  Disabling DRI.\n");
+d265 1
+d277 3
+a279 3
+	   ((pciConfigPtr) pI810->PciInfo->thisCard)->busnum,
+	   ((pciConfigPtr) pI810->PciInfo->thisCard)->devnum,
+	   ((pciConfigPtr) pI810->PciInfo->thisCard)->funcnum);
+d288 1
+a288 1
+   pDRIInfo->frameBufferStride = pScrn->displayWidth * pI810->cpp;
+d299 2
+a300 3
+   if (sizeof(XF86DRISAREARec) + sizeof(I810SAREARec) > SAREA_MAX) {
+      xf86DrvMsg(pScreen->myNum, X_ERROR,
+		 "[dri] Data does not fit in SAREA\n");
+d305 1
+a305 1
+   if (!(pI810DRI = (I810DRIPtr) xcalloc(sizeof(I810DRIRec), 1))) {
+d307 1
+a307 1
+      pI810->pDRIInfo = 0;
+a319 6
+   pDRIInfo->OpenFullScreen = I810DRIOpenFullScreen;
+   pDRIInfo->CloseFullScreen = I810DRICloseFullScreen;
+   pDRIInfo->TransitionTo2d = I810DRITransitionTo2d;
+   pDRIInfo->TransitionTo3d = I810DRITransitionTo3d;
+   pDRIInfo->TransitionSingleToMulti3D = I810DRITransitionSingleToMulti3d;
+   pDRIInfo->TransitionMultiToSingle3D = I810DRITransitionMultiToSingle3d;
+d329 1
+a329 1
+		 "[dri] DRIScreenInit failed.  Disabling DRI.\n");
+d331 1
+a331 1
+      pDRIInfo->devPrivate = 0;
+d333 1
+a333 1
+      pI810->pDRIInfo = 0;
+d337 1
+a337 1
+   /* Check the i810 DRM versioning */
+d339 1
+a339 22
+      drmVersionPtr version;
+
+      /* Check the DRM lib version.
+       * drmGetLibVersion was not supported in version 1.0, so check for
+       * symbol first to avoid possible crash or hang.
+       */
+      if (xf86LoaderCheckSymbol("drmGetLibVersion")) {
+	 version = drmGetLibVersion(pI810->drmSubFD);
+      } else
+      {
+	 /* drmlib version 1.0.0 didn't have the drmGetLibVersion
+	  * entry point.  Fake it by allocating a version record
+	  * via drmGetVersion and changing it to version 1.0.0
+	  */
+	 version = drmGetVersion(pI810->drmSubFD);
+	 version->version_major = 1;
+	 version->version_minor = 0;
+	 version->version_patchlevel = 0;
+      }
+
+#define REQ_MAJ 1
+#define REQ_MIN 1
+d341 15
+a355 36
+	 if (version->version_major != REQ_MAJ ||
+	     version->version_minor < REQ_MIN) {
+	    /* incompatible drm library version */
+	    xf86DrvMsg(pScreen->myNum, X_ERROR,
+		       "[dri] I810DRIScreenInit failed because of a version mismatch.\n"
+		       "[dri] libdrm.a module version is %d.%d.%d but version %d.%d.x is needed.\n"
+		       "[dri] Disabling DRI.\n",
+		       version->version_major,
+		       version->version_minor, version->version_patchlevel,
+		       REQ_MAJ, REQ_MIN);
+	    drmFreeVersion(version);
+	    I810DRICloseScreen(pScreen);
+	    return FALSE;
+	 }
+	 drmFreeVersion(version);
+      }
+
+      /* Check the i810 DRM version */
+      version = drmGetVersion(pI810->drmSubFD);
+      if (version) {
+	i810_drm_version = (version->version_major<<16) |
+	                    version->version_minor;
+	 if (version->version_major != 1 || version->version_minor < 2) {
+	    /* incompatible drm version */
+	    xf86DrvMsg(pScreen->myNum, X_ERROR,
+		       "[dri] I810DRIScreenInit failed because of a version mismatch.\n"
+		       "[dri] i810.o kernel module version is %d.%d.%d but version 1.2.0 or greater is needed.\n"
+		       "[dri] Disabling DRI.\n",
+		       version->version_major,
+		       version->version_minor, version->version_patchlevel);
+	    I810DRICloseScreen(pScreen);
+	    drmFreeVersion(version);
+	    return FALSE;
+	 }
+         pI810->drmMinor = version->version_minor;
+	 drmFreeVersion(version);
+d359 3
+a361 3
+   pI810DRI->regsSize = I810_REG_SIZE;
+   if (drmAddMap(pI810->drmSubFD, (drmHandle) pI810->MMIOAddr,
+		 pI810DRI->regsSize, DRM_REGISTERS, 0, &pI810DRI->regs) < 0) {
+d369 5
+a373 5
+   pI810->backHandle = DRM_AGP_NO_HANDLE;
+   pI810->zHandle = DRM_AGP_NO_HANDLE;
+   pI810->cursorHandle = DRM_AGP_NO_HANDLE;
+   pI810->xvmcHandle = DRM_AGP_NO_HANDLE;
+   pI810->sysmemHandle = DRM_AGP_NO_HANDLE;
+d375 1
+a375 1
+   pI810->dcacheHandle = DRM_AGP_NO_HANDLE;
+d379 1
+a379 1
+   if (drmAgpAcquire(pI810->drmSubFD) < 0) {
+d392 3
+a394 3
+   memset(&pI810->DcacheMem, 0, sizeof(I810MemRange));
+   memset(&pI810->BackBuffer, 0, sizeof(I810MemRange));
+   memset(&pI810->DepthBuffer, 0, sizeof(I810MemRange));
+d403 1
+a403 3
+
+   xf86DrvMsg(pScreen->myNum, X_INFO, "[agp] dcacheHandle : 0x%lx\n",
+	      dcacheHandle);
+d406 1
+a406 1
+   for (pitch_idx = 0; pitch_idx < Elements(i810_pitches); pitch_idx++)
+d415 3
+a417 6
+   } else {
+      /* for tiled memory to work, the buffer needs to have the
+       * number of lines as a multiple of 16 (the tile size),
+       *  - airlied */
+      int lines = (pScrn->virtualY + 15) / 16 * 16;
+      back_size = i810_pitches[pitch_idx] * lines;
+d422 4
+a425 5
+   if (dcacheHandle != DRM_AGP_NO_HANDLE) {
+      if (back_size > 4 * 1024 * 1024) {
+	 xf86DrvMsg(pScreen->myNum, X_INFO,
+		    "[dri] Backsize is larger then 4 meg\n");
+	 sysmem_size = sysmem_size - 2 * back_size;
+d427 3
+a429 2
+	 pI810->dcacheHandle = dcacheHandle = DRM_AGP_NO_HANDLE;
+      } else {
+d432 3
+a434 2
+   } else {
+      sysmem_size = sysmem_size - 2 * back_size;
+d437 18
+a454 16
+   /* Max size is 48 without XvMC, 41 with 6 surfaces, 40 with 7 surfaces */
+   if (pI810->numSurfaces && (pI810->numSurfaces == 6)) {
+      if (sysmem_size > (pI810->FbMapSize - 7 * 1024 * 1024)) {
+	 sysmem_size = (pI810->FbMapSize - 7 * 1024 * 1024);
+	 xf86DrvMsg(pScrn->scrnIndex, X_INFO,
+		    "User requested more memory then fits in the agp aperture\n"
+		    "Truncating to %d bytes of memory\n", sysmem_size);
+      }
+   }
+   if (pI810->numSurfaces && (pI810->numSurfaces == 7)) {
+      if (sysmem_size > (pI810->FbMapSize - 8 * 1024 * 1024)) {
+	 sysmem_size = (pI810->FbMapSize - 8 * 1024 * 1024);
+	 xf86DrvMsg(pScrn->scrnIndex, X_INFO,
+		    "User requested more memory then fits in the agp aperture\n"
+		    "Truncating to %d bytes of memory\n", sysmem_size);
+      }
+d457 1
+a457 1
+   if (sysmem_size > pI810->FbMapSize) {
+d460 1
+a460 1
+      xf86DrvMsg(pScrn->scrnIndex, X_INFO,
+d463 1
+a463 1
+		 sysmem_size);
+d466 1
+a466 1
+   sysmem_size -= 4096;			/* remove 4k for the hw cursor */
+d475 3
+a477 3
+   if (dcacheHandle != DRM_AGP_NO_HANDLE) {
+      if (drmAgpBind(pI810->drmSubFD, dcacheHandle, pI810->DepthOffset) == 0) {
+	 memset(&pI810->DcacheMem, 0, sizeof(I810MemRange));
+d482 5
+a486 4
+	 pI810->DcacheMem.End =
+	       pI810->DcacheMem.Start + pI810->DcacheMem.Size;
+	 if (!I810AllocLow
+	     (&(pI810->DepthBuffer), &(pI810->DcacheMem), back_size)) {
+d493 1
+a493 2
+	 xf86DrvMsg(pScrn->scrnIndex, X_INFO,
+		    "[agp] GART: dcache bind failed\n");
+d495 1
+a495 1
+	 pI810->dcacheHandle = dcacheHandle = DRM_AGP_NO_HANDLE;
+d498 1
+a498 2
+      xf86DrvMsg(pScrn->scrnIndex, X_INFO,
+		 "[agp] GART: no dcache memory found\n");
+d504 2
+a505 2
+   if (agpHandle != DRM_AGP_NO_HANDLE) {
+      if (drmAgpBind(pI810->drmSubFD, agpHandle, pI810->BackOffset) == 0) {
+d515 1
+a515 1
+		    "[agp] Unable to bind backbuffer.  Disabling DRI.\n");
+d526 3
+a528 3
+   if (dcacheHandle == DRM_AGP_NO_HANDLE) {
+     drmAgpAlloc(pI810->drmSubFD, back_size, 0, NULL, &agpHandle);
+
+d531 3
+a533 4
+      if (agpHandle != DRM_AGP_NO_HANDLE) {
+	 if (drmAgpBind(pI810->drmSubFD, agpHandle, pI810->DepthOffset) == 0) {
+	    xf86DrvMsg(pScrn->scrnIndex, X_INFO,
+		       "[agp] Bound depthbuffer memory\n");
+d556 1
+a556 2
+
+   if (agpHandle == DRM_AGP_NO_HANDLE) {
+d584 4
+a587 4
+   if (pI810->numSurfaces) {
+      if (pI810->numSurfaces == 6) {
+	 pI810->MC.Size = 7 * 1024 * 1024;
+	 pI810->MC.Start = pI810->FbMapSize - 7 * 1024 * 1024;
+d590 3
+a592 3
+      if (pI810->numSurfaces == 7) {
+	 pI810->MC.Size = 8 * 1024 * 1024;
+	 pI810->MC.Start = pI810->FbMapSize - 8 * 1024 * 1024;
+a594 1
+      
+d597 12
+a608 11
+      if (agpHandle != DRM_AGP_NO_HANDLE) {
+	 if (drmAgpBind(pI810->drmSubFD, agpHandle, pI810->MC.Start) == 0) {
+	    xf86DrvMsg(pScrn->scrnIndex, X_INFO,
+		       "GART: Allocated 7MB for HWMC\n");
+	    pI810->MC.End = pI810->MC.Start + pI810->MC.Size;
+	 } else {
+	    xf86DrvMsg(pScrn->scrnIndex, X_INFO, "GART: HWMC bind failed\n");
+	    pI810->MC.Start = 0;
+	    pI810->MC.Size = 0;
+	    pI810->MC.End = 0;
+	 }
+d610 4
+a613 4
+	 xf86DrvMsg(pScrn->scrnIndex, X_INFO, "GART: HWMC alloc failed\n");
+	 pI810->MC.Start = 0;
+	 pI810->MC.Size = 0;
+	 pI810->MC.End = 0;
+a619 1
+
+d622 1
+a622 1
+   if (agpHandle != DRM_AGP_NO_HANDLE) {
+d630 3
+a632 3
+      } else {
+	 xf86DrvMsg(pScrn->scrnIndex, X_INFO,
+		    "[agp] GART: cursor bind failed\n");
+d635 3
+a637 3
+   } else {
+      xf86DrvMsg(pScrn->scrnIndex, X_INFO,
+		 "[agp] GART: cursor alloc failed\n");
+d643 5
+a647 2
+   pI810->OverlayPhysical = pI810->CursorPhysical + 1024;
+   pI810->OverlayStart = pI810->CursorStart + 1024;
+d651 2
+a652 1
+		      i810_pitches[pitch_idx], 8 * 1024 * 1024);
+d656 3
+a658 1
+		      i810_pitches[pitch_idx], 8 * 1024 * 1024);
+d661 5
+a665 2
+   if (pI810->numSurfaces == 6) {
+      I810SetTiledMemory(pScrn, 3, pI810->MC.Start, 512, 1024 * 1024);
+d668 3
+a670 1
+			 pI810->MC.Start + 1024 * 1024, 512, 1024 * 1024);
+d673 3
+a675 2
+			 pI810->MC.Start + 1024 * 1024 * 2,
+			 1024, 1024 * 1024);
+d678 9
+a686 5
+			 pI810->MC.Start + 1024 * 1024 * 3,
+			 1024, 4 * 1024 * 1024);
+   }
+   if (pI810->numSurfaces == 7) {
+      I810SetTiledMemory(pScrn, 3, pI810->MC.Start, 512, 2 * 1024 * 1024);
+d689 3
+a691 1
+			 pI810->MC.Start + 2 * 1024 * 1024, 512, 512 * 1024);
+d694 3
+a696 2
+			 pI810->MC.Start + 2 * 1024 * 1024 + 512 * 1024,
+			 1024, 512 * 1024);
+d699 3
+a701 2
+			 pI810->MC.Start + 3 * 1024 * 1024,
+			 1024, 1 * 1024 * 1024);
+d704 3
+a706 2
+			 pI810->MC.Start + 4 * 1024 * 1024,
+			 1024, 4 * 1024 * 1024);
+d715 1
+a715 1
+   if (drmAddMap(pI810->drmSubFD, (drmHandle) pI810->BackBuffer.Start,
+d719 1
+a719 1
+		 "[drm] drmAddMap(backbuffer) failed.  Disabling DRI\n");
+d725 1
+a725 1
+   if (drmAddMap(pI810->drmSubFD, (drmHandle) pI810->DepthBuffer.Start,
+d729 1
+a729 1
+		 "[drm] drmAddMap(depthbuffer) failed.  Disabling DRI.\n");
+d741 2
+a742 2
+   I810AllocHigh(&(pI810->BufferMem), &(pI810->SysMem),
+		 I810_DMA_BUF_NR * I810_DMA_BUF_SZ);
+d745 1
+a745 1
+	      pI810->BufferMem.Start);
+d748 2
+a749 2
+       pI810->BufferMem.End - pI810->BufferMem.Start >
+       I810_DMA_BUF_NR * I810_DMA_BUF_SZ) {
+d751 1
+a751 1
+		 "[dri] Not enough memory for dma buffers.  Disabling DRI.\n");
+d755 3
+a757 2
+   if (drmAddMap(pI810->drmSubFD, (drmHandle) pI810->BufferMem.Start,
+		 pI810->BufferMem.Size, DRM_AGP, 0, &pI810->buffer_map) < 0) {
+d759 1
+a759 1
+		 "[drm] drmAddMap(buffer_map) failed.  Disabling DRI.\n");
+d767 3
+a769 2
+   if (drmAddMap(pI810->drmSubFD, (drmHandle) pI810->LpRing.mem.Start,
+		 pI810->LpRing.mem.Size, DRM_AGP, 0, &pI810->ring_map) < 0) {
+d771 1
+a771 1
+		 "[drm] drmAddMap(ring_map) failed.  Disabling DRI.\n");
+d785 1
+a785 1
+   pI810DRI->textureSize = (pI810DRI->textureSize >> i) << i;	/* truncate */
+d787 1
+a787 1
+   if (pI810DRI->textureSize < 512 * 1024) {
+d789 1
+a789 1
+		 "[drm] Less then 512k memory left for textures.  Disabling DRI.\n");
+d794 2
+a795 1
+   I810AllocLow(&(pI810->TexMem), &(pI810->SysMem), pI810DRI->textureSize);
+d797 3
+a799 2
+   if (drmAddMap(pI810->drmSubFD, (drmHandle) pI810->TexMem.Start,
+		 pI810->TexMem.Size, DRM_AGP, 0, &pI810DRI->textures) < 0) {
+d801 1
+a801 1
+		 "[drm] drmAddMap(textures) failed.  Disabling DRI.\n");
+d806 4
+a809 4
+   if ((bufs = drmAddBufs(pI810->drmSubFD,
+			  I810_DMA_BUF_NR,
+			  I810_DMA_BUF_SZ,
+			  DRM_AGP_BUFFER, pI810->BufferMem.Start)) <= 0) {
+d812 2
+a813 1
+		 I810_DMA_BUF_NR, I810_DMA_BUF_SZ);
+d818 4
+a821 2
+   xf86DrvMsg(pScrn->scrnIndex, X_INFO,
+	      "[drm] added %d %d byte DMA buffers\n", bufs, I810_DMA_BUF_SZ);
+d829 7
+a835 7
+					       ((pciConfigPtr) pI810->
+						PciInfo->thisCard)->busnum,
+					       ((pciConfigPtr) pI810->
+						PciInfo->thisCard)->devnum,
+					       ((pciConfigPtr) pI810->
+						PciInfo->thisCard)->funcnum);
+      if ((drmCtlInstHandler(pI810->drmSubFD, pI810DRI->irq)) != 0) {
+d846 2
+a847 1
+	      "[drm] dma control initialized, using IRQ %d\n", pI810DRI->irq);
+d849 5
+a853 5
+   pI810DRI->deviceID = pI810->PciInfo->chipType;
+   pI810DRI->width = pScrn->virtualX;
+   pI810DRI->height = pScrn->virtualY;
+   pI810DRI->mem = pScrn->videoRam * 1024;
+   pI810DRI->cpp = pI810->cpp;
+d855 2
+a856 2
+   pI810DRI->fbOffset = pI810->FrontBuffer.Start;
+   pI810DRI->fbStride = pI810->auxPitch;
+a859 1
+   pI810DRI->textureOffset = pI810->TexMem.Start;
+d861 4
+a864 2
+   pI810DRI->backOffset = pI810->BackBuffer.Start;
+   pI810DRI->depthOffset = pI810->DepthBuffer.Start;
+d866 2
+a867 2
+   pI810DRI->ringOffset = pI810->LpRing.mem.Start;
+   pI810DRI->ringSize = pI810->LpRing.mem.Size;
+d875 1
+a875 1
+		 "[dri] I810InitVisualConfigs failed.  Disabling DRI.\n");
+d880 1
+a880 2
+   xf86DrvMsg(pScrn->scrnIndex, X_INFO,
+	      "[dri] visual configs initialized.\n");
+a890 6
+   I810DRIPtr pI810DRI = (I810DRIPtr) pI810->pDRIInfo->devPrivate;
+
+   if (pI810DRI->irq) {
+       drmCtlUninstHandler(pI810->drmSubFD);
+       pI810DRI->irq = 0;
+   }
+d894 14
+a907 21
+   if (pI810->dcacheHandle!=DRM_AGP_NO_HANDLE)
+      drmAgpFree(pI810->drmSubFD, pI810->dcacheHandle);
+   if (pI810->backHandle!=DRM_AGP_NO_HANDLE)
+      drmAgpFree(pI810->drmSubFD, pI810->backHandle);
+   if (pI810->zHandle!=DRM_AGP_NO_HANDLE)
+      drmAgpFree(pI810->drmSubFD, pI810->zHandle);
+   if (pI810->cursorHandle!=DRM_AGP_NO_HANDLE)
+      drmAgpFree(pI810->drmSubFD, pI810->cursorHandle);
+   if (pI810->xvmcHandle!=DRM_AGP_NO_HANDLE)
+      drmAgpFree(pI810->drmSubFD, pI810->xvmcHandle);
+   if (pI810->sysmemHandle!=DRM_AGP_NO_HANDLE)
+      drmAgpFree(pI810->drmSubFD, pI810->sysmemHandle);
+
+   if (pI810->agpAcquired == TRUE)
+      drmAgpRelease(pI810->drmSubFD);
+
+   pI810->backHandle = DRM_AGP_NO_HANDLE;
+   pI810->zHandle = DRM_AGP_NO_HANDLE;
+   pI810->cursorHandle = DRM_AGP_NO_HANDLE;
+   pI810->xvmcHandle = DRM_AGP_NO_HANDLE;
+   pI810->sysmemHandle = DRM_AGP_NO_HANDLE;
+d909 2
+a910 1
+   pI810->dcacheHandle = DRM_AGP_NO_HANDLE;
+d917 1
+a917 1
+	 pI810->pDRIInfo->devPrivate = 0;
+d920 1
+a920 1
+      pI810->pDRIInfo = 0;
+d922 2
+a923 4
+   if (pI810->pVisualConfigs)
+      xfree(pI810->pVisualConfigs);
+   if (pI810->pVisualConfigsPriv)
+      xfree(pI810->pVisualConfigsPriv);
+d940 1
+d944 2
+a945 13
+   I810SAREARec *sPriv = (I810SAREARec *) DRIGetSAREAPrivate(pScreen);
+   ScrnInfoPtr        pScrn = xf86Screens[pScreen->myNum];
+   I810Ptr info  = I810PTR(pScrn);
+
+   memset(sPriv, 0, sizeof(sPriv));
+
+   /* Have shadow run only while there is 3d active.
+    */
+   if (info->allowPageFlip && info->drmMinor >= 3) {
+     ShadowFBInit( pScreen, I810DRIRefreshArea );
+   } 
+   else
+     info->allowPageFlip = 0;
+d958 3
+a960 1
+       oldContextType == DRI_2D_CONTEXT && newContextType == DRI_2D_CONTEXT) {
+a963 2
+      if (!pScrn->vtSema)
+	  return;
+d965 6
+a970 4
+      I810RefreshRing(pScrn);
+   } else if (syncType == DRI_2D_SYNC &&
+	      oldContextType == DRI_NO_CONTEXT &&
+	      newContextType == DRI_2D_CONTEXT) {
+d974 2
+a975 1
+   } else if (I810_DEBUG & DEBUG_VERBOSE_DRI)
+d989 1
+a989 1
+      ErrorF("I810DRIInitBuffers\n");
+d993 1
+a993 1
+      I810SelectBuffer(pScrn, I810_SELECT_BACK);
+d995 1
+a995 1
+				  pbox->x2 - pbox->x1, pbox->y2 - pbox->y1);
+d1003 1
+a1003 1
+   I810SelectBuffer(pScrn, I810_SELECT_DEPTH);
+d1007 1
+a1007 1
+				  pbox->x2 - pbox->x1, pbox->y2 - pbox->y1);
+d1010 1
+a1010 1
+   I810SelectBuffer(pScrn, I810_SELECT_FRONT);
+d1047 1
+a1047 1
+   if (dy > 0) {
+d1050 1
+a1050 1
+      if (nbox > 1) {
+d1052 3
+a1054 4
+	 pboxNew1 = (BoxPtr) ALLOCATE_LOCAL(sizeof(BoxRec) * nbox);
+	 if (!pboxNew1)
+	    return;
+	 pptNew1 = (DDXPointPtr) ALLOCATE_LOCAL(sizeof(DDXPointRec) * nbox);
+d1059 1
+a1059 1
+	 pboxBase = pboxNext = pbox + nbox - 1;
+d1063 1
+a1063 1
+	    pboxTmp = pboxNext + 1;
+d1082 1
+a1082 1
+   if (dx > 0) {
+d1087 2
+a1088 2
+	 pboxNew2 = (BoxPtr) ALLOCATE_LOCAL(sizeof(BoxRec) * nbox);
+	 pptNew2 = (DDXPointPtr) ALLOCATE_LOCAL(sizeof(DDXPointRec) * nbox);
+d1090 2
+a1091 4
+	    if (pptNew2)
+	       DEALLOCATE_LOCAL(pptNew2);
+	    if (pboxNew2)
+	       DEALLOCATE_LOCAL(pboxNew2);
+d1099 2
+a1100 2
+	 while (pboxBase < pbox + nbox) {
+	    while ((pboxNext < pbox + nbox) && (pboxNext->y1 == pboxBase->y1))
+d1124 1
+a1124 1
+   for (; nbox--; pbox++) {
+d1133 7
+a1139 12
+      if (destx < 0)
+	 x1 -= destx, w += destx, destx = 0;
+      if (desty < 0)
+	 y1 -= desty, h += desty, desty = 0;
+      if (destx + w > screenwidth)
+	 w = screenwidth - destx;
+      if (desty + h > screenheight)
+	 h = screenheight - desty;
+      if (w <= 0)
+	 continue;
+      if (h <= 0)
+	 continue;
+d1142 4
+a1145 4
+	 ErrorF("MoveBuffers %d,%d %dx%d dx: %d dy: %d\n",
+		x1, y1, w, h, dx, dy);
+      
+      I810SelectBuffer(pScrn, I810_SELECT_BACK);
+d1147 1
+a1147 1
+      I810SelectBuffer(pScrn, I810_SELECT_DEPTH);
+d1150 1
+a1150 1
+   I810SelectBuffer(pScrn, I810_SELECT_FRONT);
+a1162 216
+}
+
+
+/* Fullscreen hooks.  The DRI fullscreen mode can probably be removed as
+ * it adds little or nothing above the mechanism below (and isn't widely
+ * used).
+ */
+static Bool I810DRIOpenFullScreen(ScreenPtr pScreen)
+{
+    return TRUE;
+}
+
+static Bool I810DRICloseFullScreen(ScreenPtr pScreen)
+{
+    return TRUE;
+}
+/* Use the miext/shadow module to maintain a list of dirty rectangles.
+ * These are blitted to the back buffer to keep both buffers clean
+ * during page-flipping when the 3d application isn't fullscreen.
+ *
+ * Unlike most use of the shadow code, both buffers are in video memory.
+ *
+ * An alternative to this would be to organize for all on-screen drawing
+ * operations to be duplicated for the two buffers.  That might be
+ * faster, but seems like a lot more work...
+ */
+
+
+/* This should be done *before* XAA syncs or fires its buffer.
+ * Otherwise will have to fire it again???
+ */
+static void I810DRIRefreshArea(ScrnInfoPtr pScrn, int num, BoxPtr pbox)
+{
+    I810Ptr pI810 = I810PTR(pScrn);
+    int i;
+    I810SAREAPtr  pSAREAPriv = DRIGetSAREAPrivate(pScrn->pScreen);
+    unsigned int br13;
+    int cpp=2;
+
+    
+    /* Don't want to do this when no 3d is active and pages are
+     * right-way-round
+     */
+    if (!pSAREAPriv->pf_active && pSAREAPriv->pf_current_page == 0)
+      return;
+
+    br13 = (pI810->auxPitch) | (0xcc << 16);
+    
+    for (i = 0 ; i < num ; i++, pbox++) {
+      unsigned int w = min(pbox->y2, pScrn->virtualY-1) - max(pbox->y1, 0) + 1;
+      unsigned int h = min(pbox->x2, pScrn->virtualX-1) - max(pbox->x1, 0) + 1;
+      unsigned int dst = max(pbox->x1, 0)*cpp + (max(pbox->y1, 0)*pI810->auxPitch);
+      
+      BEGIN_LP_RING(6);
+
+      OUT_RING(BR00_BITBLT_CLIENT | BR00_OP_SRC_COPY_BLT | 0x4);
+      OUT_RING(br13);
+      OUT_RING( (h<<16) | (w*cpp) );
+      OUT_RING(pI810->BackBuffer.Start + dst);
+      OUT_RING(br13 & 0xffff);
+      OUT_RING(dst);
+
+      ADVANCE_LP_RING();
+    }
+
+}
+
+static void I810EnablePageFlip(ScreenPtr pScreen)
+{
+    ScrnInfoPtr         pScrn      = xf86Screens[pScreen->myNum];
+    I810Ptr       pI810       = I810PTR(pScrn);
+    I810SAREAPtr  pSAREAPriv = DRIGetSAREAPrivate(pScreen);
+    int cpp=2;
+    pSAREAPriv->pf_enabled = pI810->allowPageFlip;
+    pSAREAPriv->pf_active = 0;
+    
+   if (pI810->allowPageFlip) {
+      unsigned int br13 = pI810->auxPitch | (0xcc << 16);
+      
+      BEGIN_LP_RING(6);
+
+      OUT_RING(BR00_BITBLT_CLIENT | BR00_OP_SRC_COPY_BLT | 0x4);
+      OUT_RING(br13);
+      OUT_RING((pScrn->virtualY << 16) | (pScrn->virtualX*cpp));
+      OUT_RING(pI810->BackBuffer.Start);
+      OUT_RING(br13 & 0xFFFF);
+      OUT_RING(0);
+      ADVANCE_LP_RING();
+
+      pSAREAPriv->pf_active = 1;
+   }
+   
+}
+
+static void I810DisablePageFlip(ScreenPtr pScreen)
+{
+    I810SAREAPtr  pSAREAPriv = DRIGetSAREAPrivate(pScreen);
+
+    pSAREAPriv->pf_active=0;
+}
+
+static void I810DRITransitionSingleToMulti3d(ScreenPtr pScreen)
+{
+    /* Tell the clients not to pageflip.  How?
+     *   -- Field in sarea, plus bumping the window counters.
+     *   -- DRM needs to cope with Front-to-Back swapbuffers.
+     */
+    I810DisablePageFlip(pScreen);
+}
+
+static void I810DRITransitionMultiToSingle3d(ScreenPtr pScreen)
+{
+    /* Let the remaining 3d app start page flipping again */
+    I810EnablePageFlip(pScreen);
+}
+
+static void I810DRITransitionTo3d(ScreenPtr pScreen)
+{
+    ScrnInfoPtr    pScrn = xf86Screens[pScreen->myNum];
+    I810Ptr  pI810  = I810PTR(pScrn);
+
+    I810EnablePageFlip(pScreen);
+    pI810->have3DWindows = 1;
+}
+
+static void I810DRITransitionTo2d(ScreenPtr pScreen)
+{
+    ScrnInfoPtr         pScrn      = xf86Screens[pScreen->myNum];
+    I810Ptr       pI810       = I810PTR(pScrn);
+    I810SAREAPtr  pSAREAPriv = DRIGetSAREAPrivate(pScreen);
+
+    /* Shut down shadowing if we've made it back to the front page */
+    if (pSAREAPriv->pf_current_page == 0) {
+	I810DisablePageFlip(pScreen);
+    }
+    pI810->have3DWindows = 0;
+}
+
+Bool
+I810DRILeave(ScrnInfoPtr pScrn)
+{
+   I810Ptr pI810 = I810PTR(pScrn);
+    
+   if (pI810->directRenderingEnabled) {
+      if (pI810->dcacheHandle != 0) 
+	 if (drmAgpUnbind(pI810->drmSubFD, pI810->dcacheHandle) != 0) {
+	    xf86DrvMsg(pScrn->scrnIndex, X_ERROR,"%s\n",strerror(errno));
+	    return FALSE;
+	 }
+      if (pI810->backHandle != 0) 
+	 if (drmAgpUnbind(pI810->drmSubFD, pI810->backHandle) != 0) {
+	    xf86DrvMsg(pScrn->scrnIndex, X_ERROR,"%s\n",strerror(errno));
+ 	    return FALSE;
+	 }
+      if (pI810->zHandle != 0)
+	 if (drmAgpUnbind(pI810->drmSubFD, pI810->zHandle) != 0) {
+	    xf86DrvMsg(pScrn->scrnIndex, X_ERROR,"%s\n",strerror(errno));
+  	    return FALSE;
+	 }
+      if (pI810->sysmemHandle != 0)
+	 if (drmAgpUnbind(pI810->drmSubFD, pI810->sysmemHandle) != 0) {
+	    xf86DrvMsg(pScrn->scrnIndex, X_ERROR,"%s\n",strerror(errno));
+  	    return FALSE;
+	 }
+      if (pI810->xvmcHandle != 0)
+	 if (drmAgpUnbind(pI810->drmSubFD, pI810->xvmcHandle) != 0) {
+	    xf86DrvMsg(pScrn->scrnIndex, X_ERROR,"%s\n",strerror(errno));
+  	    return FALSE;
+	 }
+      if (pI810->cursorHandle != 0)
+	 if (drmAgpUnbind(pI810->drmSubFD, pI810->cursorHandle) != 0) {
+	    xf86DrvMsg(pScrn->scrnIndex, X_ERROR,"%s\n",strerror(errno));
+	    return FALSE;
+	 }
+      if (pI810->agpAcquired == TRUE)
+	 drmAgpRelease(pI810->drmSubFD);
+      pI810->agpAcquired = FALSE;
+   }
+   return TRUE;
+}
+
+Bool
+I810DRIEnter(ScrnInfoPtr pScrn)
+{
+   I810Ptr pI810 = I810PTR(pScrn);
+
+   if (pI810->directRenderingEnabled) {
+
+      if (pI810->agpAcquired == FALSE)
+	 drmAgpAcquire(pI810->drmSubFD);
+      pI810->agpAcquired = TRUE;
+      if (pI810->dcacheHandle != 0)
+	 if (drmAgpBind(pI810->drmSubFD, pI810->dcacheHandle,
+			pI810->DepthOffset) != 0)
+	    return FALSE;
+      if (pI810->backHandle != 0)
+	 if (drmAgpBind(pI810->drmSubFD, pI810->backHandle,
+			pI810->BackOffset) != 0)
+	    return FALSE;
+      if (pI810->zHandle != 0)
+	 if (drmAgpBind(pI810->drmSubFD, pI810->zHandle,
+			pI810->DepthOffset) != 0)
+	    return FALSE;
+      if (pI810->sysmemHandle != 0)
+	 if (drmAgpBind(pI810->drmSubFD, pI810->sysmemHandle, 0) != 0)
+	    return FALSE;
+      if (pI810->xvmcHandle != 0)
+	 if (drmAgpBind(pI810->drmSubFD, pI810->xvmcHandle,
+			pI810->MC.Start) != 0)
+	    return FALSE;
+      if (pI810->cursorHandle != 0)
+	 if (drmAgpBind(pI810->drmSubFD, pI810->cursorHandle,
+			pI810->CursorStart) != 0)
+	    return FALSE;
+   }
+   return TRUE;
+@
+
+
+1.1.1.1
+log
+@Import OpenBSD 3.3 XF4 repository from CTM 3132 the first time
+This finalizes starting an OpenBSD-mirabile (aka MirBSD) repository.
+
+### MirBSD is:
+# Copyright (c) 1982-2003 by Thorsten "mirabile" Glaser <x86@@ePost.de>
+# Copyright © 1968-2003  The authors of And contributors to UNIX®, the
+#       C Language, BSD/Berkeley Unix; 386BSD, NetBSD 1.1 and OpenBSD.
+#
+# Anyone who obtained a copy of this work is hereby permitted to freely use,
+# distribute, modify, merge, sublicence, give away or sell it as long as the
+# authors are given due credit and the following notice is retained:
+#
+# This work is provided "as is", with no explicit or implicit warranty what-
+# soever. Use it only at your own risk. In no event may an author or contri-
+# butor be held liable for any damage, directly or indirectly, that origina-
+# ted through or is caused by creation or modification of this work.
+
+MirBSD is my private tree. MirBSD does not differ very much from OpenBSD
+and intentionally tracks OpenBSD. That's why it _is_ OpenBSD, just not the
+official one. It's like with DarrenBSD.
+
+At time of this writing, no advertising for MirBSD must be done,
+because the advertising clause has not yet been sorted out.
+
+http://templeofhate.com/tglaser/MirBSD/index.php
+@
+text
+@@
+
+
+1.1.1.2
+log
+@The X-Windowing System
+
+Import XFree86 4.3 from OpenBSD by CTM, in the hope it's stable
+@
+text
+@d1 1
+a1 13
+/* $XFree86: xc/programs/Xserver/hw/xfree86/drivers/i810/i810_dri.c,v 1.33 2002/12/10 01:27:04 dawes Exp $ */
+/*
+ * Reformatted with GNU indent (2.2.8), using the following options:
+ *
+ *    -bad -bap -c41 -cd0 -ncdb -ci6 -cli0 -cp0 -ncs -d0 -di3 -i3 -ip3 -l78
+ *    -lp -npcs -psl -sob -ss -br -ce -sc -hnl
+ *
+ * This provides a good match with the original i810 code and preferred
+ * XFree86 formatting conventions.
+ *
+ * When editing this driver, please follow the existing formatting, and edit
+ * with <TAB> characters expanded at 8-column intervals.
+ */
+d37 1
+a37 1
+				__GLXvisualConfig * configs,
+d49 5
+a53 5
+   0x0,
+   0x1,
+   0x2,
+   0x3,
+   0
+d56 1
+a56 2
+Bool
+I810CleanupDma(ScrnInfoPtr pScrn)
+d59 1
+a59 11
+   drmI810Init info;
+
+   memset(&info, 0, sizeof(drmI810Init));
+   info.func = I810_CLEANUP_DMA;
+
+   if (drmCommandWrite(pI810->drmSubFD, DRM_I810_INIT,
+		       &info, sizeof(drmI810Init))) {
+      xf86DrvMsg(pScrn->scrnIndex, X_ERROR,
+		 "[dri] I810 Dma Cleanup Failed\n");
+      return FALSE;
+   }
+d61 4
+a64 1
+   return TRUE;
+d67 1
+a67 2
+Bool
+I810InitDma(ScrnInfoPtr pScrn)
+d73 1
+d75 3
+a77 7
+   memset(&info, 0, sizeof(drmI810Init));
+
+   info.func = I810_INIT_DMA;
+
+   info.ring_start = ring->mem.Start;
+   info.ring_end = ring->mem.End;
+   info.ring_size = ring->mem.Size;
+d80 1
+a80 1
+   info.sarea_priv_offset = sizeof(XF86DRISAREARec);
+d92 2
+a93 2
+   if (drmCommandWrite(pI810->drmSubFD, DRM_I810_INIT,
+		       &info, sizeof(drmI810Init))) {
+d95 1
+a95 2
+		 "[drm] I810 Dma Initialization failed.\n");
+      return FALSE;
+d97 1
+a97 2
+
+   return TRUE;
+d120 1
+a120 3
+      pConfigs =
+	    (__GLXvisualConfig *) xcalloc(sizeof(__GLXvisualConfig),
+					  numConfigs);
+d124 1
+a124 3
+      pI810Configs =
+	    (I810ConfigPrivPtr) xcalloc(sizeof(I810ConfigPrivRec),
+					numConfigs);
+d130 1
+a130 3
+      pI810ConfigPtrs =
+	    (I810ConfigPrivPtr *) xcalloc(sizeof(I810ConfigPrivPtr),
+					  numConfigs);
+d137 1
+a137 1
+      for (i = 0; i < numConfigs; i++)
+d143 50
+a192 49
+	 for (stencil = 0; stencil <= 1; stencil++) {
+	    for (db = 1; db >= 0; db--) {
+	       pConfigs[i].vid = -1;
+	       pConfigs[i].class = -1;
+	       pConfigs[i].rgba = TRUE;
+	       pConfigs[i].redSize = 5;
+	       pConfigs[i].greenSize = 6;
+	       pConfigs[i].blueSize = 5;
+	       pConfigs[i].redMask = 0x0000F800;
+	       pConfigs[i].greenMask = 0x000007E0;
+	       pConfigs[i].blueMask = 0x0000001F;
+	       pConfigs[i].alphaMask = 0;
+	       if (accum) {
+		  pConfigs[i].accumRedSize = 16;
+		  pConfigs[i].accumGreenSize = 16;
+		  pConfigs[i].accumBlueSize = 16;
+		  pConfigs[i].accumAlphaSize = 16;
+	       } else {
+		  pConfigs[i].accumRedSize = 0;
+		  pConfigs[i].accumGreenSize = 0;
+		  pConfigs[i].accumBlueSize = 0;
+		  pConfigs[i].accumAlphaSize = 0;
+	       }
+	       pConfigs[i].doubleBuffer = db ? TRUE : FALSE;
+	       pConfigs[i].stereo = FALSE;
+	       pConfigs[i].bufferSize = 16;
+	       if (depth)
+		  pConfigs[i].depthSize = 16;
+	       else
+		  pConfigs[i].depthSize = 0;
+	       if (stencil)
+		  pConfigs[i].stencilSize = 8;
+	       else
+		  pConfigs[i].stencilSize = 0;
+	       pConfigs[i].auxBuffers = 0;
+	       pConfigs[i].level = 0;
+	       if (stencil || accum)
+		  pConfigs[i].visualRating = GLX_SLOW_VISUAL_EXT;
+	       else
+		  pConfigs[i].visualRating = GLX_NONE_EXT;
+	       pConfigs[i].transparentPixel = 0;
+	       pConfigs[i].transparentRed = 0;
+	       pConfigs[i].transparentGreen = 0;
+	       pConfigs[i].transparentBlue = 0;
+	       pConfigs[i].transparentAlpha = 0;
+	       pConfigs[i].transparentIndex = 0;
+	       i++;
+	    }
+	 }
+d200 1
+a200 1
+   GlxSetVisualConfigs(numConfigs, pConfigs, (void **)pI810ConfigPtrs);
+d204 2
+a205 2
+static unsigned int
+mylog2(unsigned int n)
+d208 1
+a208 3
+
+   while (n > 1)
+      n >>= 1, log2++;
+d212 1
+a212 2
+Bool
+I810DRIScreenInit(ScreenPtr pScreen)
+d235 3
+a237 6
+   if (!xf86LoaderCheckSymbol("GlxSetVisualConfigs"))
+      return FALSE;
+   if (!xf86LoaderCheckSymbol("DRIScreenInit"))
+      return FALSE;
+   if (!xf86LoaderCheckSymbol("drmAvailable"))
+      return FALSE;
+d240 1
+a240 1
+		 "[dri] I810DRIScreenInit failed (libdri.a too old)\n");
+a246 1
+
+d249 6
+a254 5
+	 xf86DrvMsg(pScreen->myNum, X_ERROR,
+		    "[dri] I810DRIScreenInit failed because of a version mismatch.\n"
+		    "[dri] libDRI version is %d.%d.%d bug version 4.0.x is needed.\n"
+		    "[dri] Disabling DRI.\n", major, minor, patch);
+	 return FALSE;
+d261 1
+a261 1
+		 "[dri] DRICreateInfoRec failed.  Disabling DRI.\n");
+d265 1
+d277 3
+a279 3
+	   ((pciConfigPtr) pI810->PciInfo->thisCard)->busnum,
+	   ((pciConfigPtr) pI810->PciInfo->thisCard)->devnum,
+	   ((pciConfigPtr) pI810->PciInfo->thisCard)->funcnum);
+d288 1
+a288 1
+   pDRIInfo->frameBufferStride = pScrn->displayWidth * pI810->cpp;
+d299 2
+a300 3
+   if (sizeof(XF86DRISAREARec) + sizeof(I810SAREARec) > SAREA_MAX) {
+      xf86DrvMsg(pScreen->myNum, X_ERROR,
+		 "[dri] Data does not fit in SAREA\n");
+d305 1
+a305 1
+   if (!(pI810DRI = (I810DRIPtr) xcalloc(sizeof(I810DRIRec), 1))) {
+d307 1
+a307 1
+      pI810->pDRIInfo = 0;
+d329 1
+a329 1
+		 "[dri] DRIScreenInit failed.  Disabling DRI.\n");
+d331 1
+a331 1
+      pDRIInfo->devPrivate = 0;
+d333 1
+a333 1
+      pI810->pDRIInfo = 0;
+d337 1
+a337 1
+   /* Check the i810 DRM versioning */
+d339 1
+a339 42
+      drmVersionPtr version;
+
+      /* Check the DRM lib version.
+       * drmGetLibVersion was not supported in version 1.0, so check for
+       * symbol first to avoid possible crash or hang.
+       */
+      if (xf86LoaderCheckSymbol("drmGetLibVersion")) {
+	 version = drmGetLibVersion(pI810->drmSubFD);
+      } else
+      {
+	 /* drmlib version 1.0.0 didn't have the drmGetLibVersion
+	  * entry point.  Fake it by allocating a version record
+	  * via drmGetVersion and changing it to version 1.0.0
+	  */
+	 version = drmGetVersion(pI810->drmSubFD);
+	 version->version_major = 1;
+	 version->version_minor = 0;
+	 version->version_patchlevel = 0;
+      }
+
+#define REQ_MAJ 1
+#define REQ_MIN 1
+      if (version) {
+	 if (version->version_major != REQ_MAJ ||
+	     version->version_minor < REQ_MIN) {
+	    /* incompatible drm library version */
+	    xf86DrvMsg(pScreen->myNum, X_ERROR,
+		       "[dri] I810DRIScreenInit failed because of a version mismatch.\n"
+		       "[dri] libdrm.a module version is %d.%d.%d but version %d.%d.x is needed.\n"
+		       "[dri] Disabling DRI.\n",
+		       version->version_major,
+		       version->version_minor, version->version_patchlevel,
+		       REQ_MAJ, REQ_MIN);
+	    drmFreeVersion(version);
+	    I810DRICloseScreen(pScreen);
+	    return FALSE;
+	 }
+	 drmFreeVersion(version);
+      }
+
+      /* Check the i810 DRM version */
+      version = drmGetVersion(pI810->drmSubFD);
+d341 15
+a355 13
+	 if (version->version_major != 1 || version->version_minor < 2) {
+	    /* incompatible drm version */
+	    xf86DrvMsg(pScreen->myNum, X_ERROR,
+		       "[dri] I810DRIScreenInit failed because of a version mismatch.\n"
+		       "[dri] i810.o kernel module version is %d.%d.%d but version 1.2.0 or greater is needed.\n"
+		       "[dri] Disabling DRI.\n",
+		       version->version_major,
+		       version->version_minor, version->version_patchlevel);
+	    I810DRICloseScreen(pScreen);
+	    drmFreeVersion(version);
+	    return FALSE;
+	 }
+	 drmFreeVersion(version);
+d359 3
+a361 3
+   pI810DRI->regsSize = I810_REG_SIZE;
+   if (drmAddMap(pI810->drmSubFD, (drmHandle) pI810->MMIOAddr,
+		 pI810DRI->regsSize, DRM_REGISTERS, 0, &pI810DRI->regs) < 0) {
+d379 1
+a379 1
+   if (drmAgpAcquire(pI810->drmSubFD) < 0) {
+d392 3
+a394 3
+   memset(&pI810->DcacheMem, 0, sizeof(I810MemRange));
+   memset(&pI810->BackBuffer, 0, sizeof(I810MemRange));
+   memset(&pI810->DepthBuffer, 0, sizeof(I810MemRange));
+d403 1
+a403 2
+   xf86DrvMsg(pScreen->myNum, X_INFO, "[agp] dcacheHandle : %p\n",
+	      dcacheHandle);
+d406 1
+a406 1
+   for (pitch_idx = 0; pitch_idx < Elements(i810_pitches); pitch_idx++)
+d415 2
+a416 1
+   } else {
+d423 3
+a425 4
+      if (back_size > 4 * 1024 * 1024) {
+	 xf86DrvMsg(pScreen->myNum, X_INFO,
+		    "[dri] Backsize is larger then 4 meg\n");
+	 sysmem_size = sysmem_size - 2 * back_size;
+d428 2
+a429 1
+      } else {
+d432 3
+a434 2
+   } else {
+      sysmem_size = sysmem_size - 2 * back_size;
+d437 18
+a454 16
+   /* Max size is 48 without XvMC, 41 with 6 surfaces, 40 with 7 surfaces */
+   if (pI810->numSurfaces && (pI810->numSurfaces == 6)) {
+      if (sysmem_size > (pI810->FbMapSize - 7 * 1024 * 1024)) {
+	 sysmem_size = (pI810->FbMapSize - 7 * 1024 * 1024);
+	 xf86DrvMsg(pScrn->scrnIndex, X_INFO,
+		    "User requested more memory then fits in the agp aperture\n"
+		    "Truncating to %d bytes of memory\n", sysmem_size);
+      }
+   }
+   if (pI810->numSurfaces && (pI810->numSurfaces == 7)) {
+      if (sysmem_size > (pI810->FbMapSize - 8 * 1024 * 1024)) {
+	 sysmem_size = (pI810->FbMapSize - 8 * 1024 * 1024);
+	 xf86DrvMsg(pScrn->scrnIndex, X_INFO,
+		    "User requested more memory then fits in the agp aperture\n"
+		    "Truncating to %d bytes of memory\n", sysmem_size);
+      }
+d457 1
+a457 1
+   if (sysmem_size > pI810->FbMapSize) {
+d460 1
+a460 1
+      xf86DrvMsg(pScrn->scrnIndex, X_INFO,
+d463 1
+a463 1
+		 sysmem_size);
+d466 1
+a466 1
+   sysmem_size -= 4096;			/* remove 4k for the hw cursor */
+d476 2
+a477 2
+      if (drmAgpBind(pI810->drmSubFD, dcacheHandle, pI810->DepthOffset) == 0) {
+	 memset(&pI810->DcacheMem, 0, sizeof(I810MemRange));
+d482 5
+a486 4
+	 pI810->DcacheMem.End =
+	       pI810->DcacheMem.Start + pI810->DcacheMem.Size;
+	 if (!I810AllocLow
+	     (&(pI810->DepthBuffer), &(pI810->DcacheMem), back_size)) {
+d493 1
+a493 2
+	 xf86DrvMsg(pScrn->scrnIndex, X_INFO,
+		    "[agp] GART: dcache bind failed\n");
+d498 1
+a498 2
+      xf86DrvMsg(pScrn->scrnIndex, X_INFO,
+		 "[agp] GART: no dcache memory found\n");
+d505 1
+a505 1
+      if (drmAgpBind(pI810->drmSubFD, agpHandle, pI810->BackOffset) == 0) {
+d515 1
+a515 1
+		    "[agp] Unable to bind backbuffer.  Disabling DRI.\n");
+d526 3
+a528 2
+   if (dcacheHandle == 0) {
+      drmAgpAlloc(pI810->drmSubFD, back_size, 0, NULL, &agpHandle);
+d531 3
+a533 4
+      if (agpHandle != 0) {
+	 if (drmAgpBind(pI810->drmSubFD, agpHandle, pI810->DepthOffset) == 0) {
+	    xf86DrvMsg(pScrn->scrnIndex, X_INFO,
+		       "[agp] Bound depthbuffer memory\n");
+d584 4
+a587 4
+   if (pI810->numSurfaces) {
+      if (pI810->numSurfaces == 6) {
+	 pI810->MC.Size = 7 * 1024 * 1024;
+	 pI810->MC.Start = pI810->FbMapSize - 7 * 1024 * 1024;
+d590 3
+a592 3
+      if (pI810->numSurfaces == 7) {
+	 pI810->MC.Size = 8 * 1024 * 1024;
+	 pI810->MC.Start = pI810->FbMapSize - 8 * 1024 * 1024;
+d598 11
+a608 10
+	 if (drmAgpBind(pI810->drmSubFD, agpHandle, pI810->MC.Start) == 0) {
+	    xf86DrvMsg(pScrn->scrnIndex, X_INFO,
+		       "GART: Allocated 7MB for HWMC\n");
+	    pI810->MC.End = pI810->MC.Start + pI810->MC.Size;
+	 } else {
+	    xf86DrvMsg(pScrn->scrnIndex, X_INFO, "GART: HWMC bind failed\n");
+	    pI810->MC.Start = 0;
+	    pI810->MC.Size = 0;
+	    pI810->MC.End = 0;
+	 }
+d610 4
+a613 4
+	 xf86DrvMsg(pScrn->scrnIndex, X_INFO, "GART: HWMC alloc failed\n");
+	 pI810->MC.Start = 0;
+	 pI810->MC.Size = 0;
+	 pI810->MC.End = 0;
+d630 3
+a632 3
+      } else {
+	 xf86DrvMsg(pScrn->scrnIndex, X_INFO,
+		    "[agp] GART: cursor bind failed\n");
+d635 3
+a637 3
+   } else {
+      xf86DrvMsg(pScrn->scrnIndex, X_INFO,
+		 "[agp] GART: cursor alloc failed\n");
+d643 5
+a647 2
+   pI810->OverlayPhysical = pI810->CursorPhysical + 1024;
+   pI810->OverlayStart = pI810->CursorStart + 1024;
+d651 2
+a652 1
+		      i810_pitches[pitch_idx], 8 * 1024 * 1024);
+d656 3
+a658 1
+		      i810_pitches[pitch_idx], 8 * 1024 * 1024);
+d661 5
+a665 2
+   if (pI810->numSurfaces == 6) {
+      I810SetTiledMemory(pScrn, 3, pI810->MC.Start, 512, 1024 * 1024);
+d668 3
+a670 1
+			 pI810->MC.Start + 1024 * 1024, 512, 1024 * 1024);
+d673 3
+a675 2
+			 pI810->MC.Start + 1024 * 1024 * 2,
+			 1024, 1024 * 1024);
+d678 9
+a686 5
+			 pI810->MC.Start + 1024 * 1024 * 3,
+			 1024, 4 * 1024 * 1024);
+   }
+   if (pI810->numSurfaces == 7) {
+      I810SetTiledMemory(pScrn, 3, pI810->MC.Start, 512, 2 * 1024 * 1024);
+d689 3
+a691 1
+			 pI810->MC.Start + 2 * 1024 * 1024, 512, 512 * 1024);
+d694 3
+a696 2
+			 pI810->MC.Start + 2 * 1024 * 1024 + 512 * 1024,
+			 1024, 512 * 1024);
+d699 3
+a701 2
+			 pI810->MC.Start + 3 * 1024 * 1024,
+			 1024, 1 * 1024 * 1024);
+d704 3
+a706 2
+			 pI810->MC.Start + 4 * 1024 * 1024,
+			 1024, 4 * 1024 * 1024);
+d715 1
+a715 1
+   if (drmAddMap(pI810->drmSubFD, (drmHandle) pI810->BackBuffer.Start,
+d719 1
+a719 1
+		 "[drm] drmAddMap(backbuffer) failed.  Disabling DRI\n");
+d725 1
+a725 1
+   if (drmAddMap(pI810->drmSubFD, (drmHandle) pI810->DepthBuffer.Start,
+d729 1
+a729 1
+		 "[drm] drmAddMap(depthbuffer) failed.  Disabling DRI.\n");
+d741 2
+a742 2
+   I810AllocHigh(&(pI810->BufferMem), &(pI810->SysMem),
+		 I810_DMA_BUF_NR * I810_DMA_BUF_SZ);
+d745 1
+a745 1
+	      pI810->BufferMem.Start);
+d748 2
+a749 2
+       pI810->BufferMem.End - pI810->BufferMem.Start >
+       I810_DMA_BUF_NR * I810_DMA_BUF_SZ) {
+d751 1
+a751 1
+		 "[dri] Not enough memory for dma buffers.  Disabling DRI.\n");
+d755 3
+a757 2
+   if (drmAddMap(pI810->drmSubFD, (drmHandle) pI810->BufferMem.Start,
+		 pI810->BufferMem.Size, DRM_AGP, 0, &pI810->buffer_map) < 0) {
+d759 1
+a759 1
+		 "[drm] drmAddMap(buffer_map) failed.  Disabling DRI.\n");
+d767 3
+a769 2
+   if (drmAddMap(pI810->drmSubFD, (drmHandle) pI810->LpRing.mem.Start,
+		 pI810->LpRing.mem.Size, DRM_AGP, 0, &pI810->ring_map) < 0) {
+d771 1
+a771 1
+		 "[drm] drmAddMap(ring_map) failed.  Disabling DRI.\n");
+d785 1
+a785 1
+   pI810DRI->textureSize = (pI810DRI->textureSize >> i) << i;	/* truncate */
+d787 1
+a787 1
+   if (pI810DRI->textureSize < 512 * 1024) {
+d789 1
+a789 1
+		 "[drm] Less then 512k memory left for textures.  Disabling DRI.\n");
+d794 2
+a795 1
+   I810AllocLow(&(pI810->TexMem), &(pI810->SysMem), pI810DRI->textureSize);
+d797 3
+a799 2
+   if (drmAddMap(pI810->drmSubFD, (drmHandle) pI810->TexMem.Start,
+		 pI810->TexMem.Size, DRM_AGP, 0, &pI810DRI->textures) < 0) {
+d801 1
+a801 1
+		 "[drm] drmAddMap(textures) failed.  Disabling DRI.\n");
+d806 4
+a809 4
+   if ((bufs = drmAddBufs(pI810->drmSubFD,
+			  I810_DMA_BUF_NR,
+			  I810_DMA_BUF_SZ,
+			  DRM_AGP_BUFFER, pI810->BufferMem.Start)) <= 0) {
+d812 2
+a813 1
+		 I810_DMA_BUF_NR, I810_DMA_BUF_SZ);
+d818 4
+a821 2
+   xf86DrvMsg(pScrn->scrnIndex, X_INFO,
+	      "[drm] added %d %d byte DMA buffers\n", bufs, I810_DMA_BUF_SZ);
+d829 7
+a835 7
+					       ((pciConfigPtr) pI810->
+						PciInfo->thisCard)->busnum,
+					       ((pciConfigPtr) pI810->
+						PciInfo->thisCard)->devnum,
+					       ((pciConfigPtr) pI810->
+						PciInfo->thisCard)->funcnum);
+      if ((drmCtlInstHandler(pI810->drmSubFD, pI810DRI->irq)) != 0) {
+d846 2
+a847 1
+	      "[drm] dma control initialized, using IRQ %d\n", pI810DRI->irq);
+d849 5
+a853 5
+   pI810DRI->deviceID = pI810->PciInfo->chipType;
+   pI810DRI->width = pScrn->virtualX;
+   pI810DRI->height = pScrn->virtualY;
+   pI810DRI->mem = pScrn->videoRam * 1024;
+   pI810DRI->cpp = pI810->cpp;
+d855 2
+a856 2
+   pI810DRI->fbOffset = pI810->FrontBuffer.Start;
+   pI810DRI->fbStride = pI810->auxPitch;
+a859 1
+   pI810DRI->textureOffset = pI810->TexMem.Start;
+d861 1
+a861 2
+   pI810DRI->backOffset = pI810->BackBuffer.Start;
+   pI810DRI->depthOffset = pI810->DepthBuffer.Start;
+d863 5
+a867 2
+   pI810DRI->ringOffset = pI810->LpRing.mem.Start;
+   pI810DRI->ringSize = pI810->LpRing.mem.Size;
+d875 1
+a875 1
+		 "[dri] I810InitVisualConfigs failed.  Disabling DRI.\n");
+d880 1
+a880 2
+   xf86DrvMsg(pScrn->scrnIndex, X_INFO,
+	      "[dri] visual configs initialized.\n");
+d894 6
+a899 12
+   if (pI810->dcacheHandle)
+      drmAgpFree(pI810->drmSubFD, pI810->dcacheHandle);
+   if (pI810->backHandle)
+      drmAgpFree(pI810->drmSubFD, pI810->backHandle);
+   if (pI810->zHandle)
+      drmAgpFree(pI810->drmSubFD, pI810->zHandle);
+   if (pI810->cursorHandle)
+      drmAgpFree(pI810->drmSubFD, pI810->cursorHandle);
+   if (pI810->xvmcHandle)
+      drmAgpFree(pI810->drmSubFD, pI810->xvmcHandle);
+   if (pI810->sysmemHandle)
+      drmAgpFree(pI810->drmSubFD, pI810->sysmemHandle);
+d901 1
+a901 2
+   if (pI810->agpAcquired == TRUE)
+      drmAgpRelease(pI810->drmSubFD);
+d911 1
+d917 1
+a917 1
+	 pI810->pDRIInfo->devPrivate = 0;
+d920 1
+a920 1
+      pI810->pDRIInfo = 0;
+d922 2
+a923 4
+   if (pI810->pVisualConfigs)
+      xfree(pI810->pVisualConfigs);
+   if (pI810->pVisualConfigsPriv)
+      xfree(pI810->pVisualConfigsPriv);
+d940 1
+d944 2
+a945 3
+   I810SAREARec *sPriv = (I810SAREARec *) DRIGetSAREAPrivate(pScreen);
+
+   memset(sPriv, 0, sizeof(sPriv));
+d958 3
+a960 1
+       oldContextType == DRI_2D_CONTEXT && newContextType == DRI_2D_CONTEXT) {
+a963 2
+      if (!pScrn->vtSema)
+	  return;
+d965 6
+a970 4
+      I810RefreshRing(pScrn);
+   } else if (syncType == DRI_2D_SYNC &&
+	      oldContextType == DRI_NO_CONTEXT &&
+	      newContextType == DRI_2D_CONTEXT) {
+d974 2
+a975 1
+   } else if (I810_DEBUG & DEBUG_VERBOSE_DRI)
+d989 1
+a989 1
+      ErrorF("I810DRIInitBuffers\n");
+d993 1
+a993 1
+      I810SelectBuffer(pScrn, I810_SELECT_BACK);
+d995 1
+a995 1
+				  pbox->x2 - pbox->x1, pbox->y2 - pbox->y1);
+d1003 1
+a1003 1
+   I810SelectBuffer(pScrn, I810_SELECT_DEPTH);
+d1007 1
+a1007 1
+				  pbox->x2 - pbox->x1, pbox->y2 - pbox->y1);
+d1010 1
+a1010 1
+   I810SelectBuffer(pScrn, I810_SELECT_FRONT);
+d1047 1
+a1047 1
+   if (dy > 0) {
+d1050 1
+a1050 1
+      if (nbox > 1) {
+d1052 3
+a1054 4
+	 pboxNew1 = (BoxPtr) ALLOCATE_LOCAL(sizeof(BoxRec) * nbox);
+	 if (!pboxNew1)
+	    return;
+	 pptNew1 = (DDXPointPtr) ALLOCATE_LOCAL(sizeof(DDXPointRec) * nbox);
+d1059 1
+a1059 1
+	 pboxBase = pboxNext = pbox + nbox - 1;
+d1063 1
+a1063 1
+	    pboxTmp = pboxNext + 1;
+d1082 1
+a1082 1
+   if (dx > 0) {
+d1087 2
+a1088 2
+	 pboxNew2 = (BoxPtr) ALLOCATE_LOCAL(sizeof(BoxRec) * nbox);
+	 pptNew2 = (DDXPointPtr) ALLOCATE_LOCAL(sizeof(DDXPointRec) * nbox);
+d1090 2
+a1091 4
+	    if (pptNew2)
+	       DEALLOCATE_LOCAL(pptNew2);
+	    if (pboxNew2)
+	       DEALLOCATE_LOCAL(pboxNew2);
+d1099 2
+a1100 2
+	 while (pboxBase < pbox + nbox) {
+	    while ((pboxNext < pbox + nbox) && (pboxNext->y1 == pboxBase->y1))
+d1124 1
+a1124 1
+   for (; nbox--; pbox++) {
+d1133 7
+a1139 12
+      if (destx < 0)
+	 x1 -= destx, w += destx, destx = 0;
+      if (desty < 0)
+	 y1 -= desty, h += desty, desty = 0;
+      if (destx + w > screenwidth)
+	 w = screenwidth - destx;
+      if (desty + h > screenheight)
+	 h = screenheight - desty;
+      if (w <= 0)
+	 continue;
+      if (h <= 0)
+	 continue;
+d1142 2
+a1143 2
+	 ErrorF("MoveBuffers %d,%d %dx%d dx: %d dy: %d\n",
+		x1, y1, w, h, dx, dy);
+d1145 1
+a1145 1
+      I810SelectBuffer(pScrn, I810_SELECT_BACK);
+d1147 1
+a1147 1
+      I810SelectBuffer(pScrn, I810_SELECT_DEPTH);
+d1150 1
+a1150 1
+   I810SelectBuffer(pScrn, I810_SELECT_FRONT);
+@
+
+
+1.1.1.3
+log
+@That's what OpenBSD will, probably, ship as XF4 in 3.5
+their last sync against XFree86 4.3-current has been
+imported into our vendor branch, too
+@
+text
+@d1 1
+a1 1
+/* $XFree86: xc/programs/Xserver/hw/xfree86/drivers/i810/i810_dri.c,v 1.42 2003/09/28 20:15:58 alanh Exp $ */
+a23 2
+#include "shadow.h"
+#include "shadowfb.h"
+a47 12
+
+static Bool I810DRIOpenFullScreen(ScreenPtr pScreen);
+static Bool I810DRICloseFullScreen(ScreenPtr pScreen);
+static void I810EnablePageFlip(ScreenPtr pScreen);
+static void I810DisablePageFlip(ScreenPtr pScreen);
+static void I810DRITransitionSingleToMulti3d(ScreenPtr pScreen);
+static void I810DRITransitionMultiToSingle3d(ScreenPtr pScreen);
+static void I810DRITransitionTo3d(ScreenPtr pScreen);
+static void I810DRITransitionTo2d(ScreenPtr pScreen);
+
+static void I810DRIRefreshArea(ScrnInfoPtr pScrn, int num, BoxPtr pbox);
+
+a67 2
+static unsigned int i810_drm_version = 0;
+
+d97 2
+a115 22
+   /* We require DRM v1.2 or greater. Since DRM v1.2 broke compatibility
+    * we created a new v1.4 that supports a new init function. Eventually the
+    * old init function will go away. If you change the drm interface, make a
+    * new init type too so that we can detect the new client.
+    */
+   switch(i810_drm_version) {
+   case ((1<<16) | 0):
+   case ((1<<16) | 1):
+   case ((1<<16) | 2):
+   case ((1<<16) | 3):
+      /* Use OLD drm < 1.4 init */
+      info.func = I810_INIT_DMA;
+      xf86DrvMsg(pScrn->scrnIndex, X_INFO, "[drm] Init PRE v1.4 interface.\n");
+      break;
+   default:
+   case ((1<<16) | 4):
+      /*  DRM version 1.3 or greater init */
+      info.func = I810_INIT_DMA_1_4;
+      xf86DrvMsg(pScrn->scrnIndex, X_INFO, "[drm] Init v1.4 interface.\n");
+      break;
+   }
+
+d191 1
+a191 1
+		  pConfigs[i].accumAlphaSize = 0;
+d212 1
+a212 1
+		  pConfigs[i].visualRating = GLX_SLOW_CONFIG;
+d214 2
+a215 2
+		  pConfigs[i].visualRating = GLX_NONE;
+	       pConfigs[i].transparentPixel = GLX_NONE;
+a356 6
+   pDRIInfo->OpenFullScreen = I810DRIOpenFullScreen;
+   pDRIInfo->CloseFullScreen = I810DRICloseFullScreen;
+   pDRIInfo->TransitionTo2d = I810DRITransitionTo2d;
+   pDRIInfo->TransitionTo3d = I810DRITransitionTo3d;
+   pDRIInfo->TransitionSingleToMulti3D = I810DRITransitionSingleToMulti3d;
+   pDRIInfo->TransitionMultiToSingle3D = I810DRITransitionMultiToSingle3d;
+a418 2
+	i810_drm_version = (version->version_major<<16) |
+	                    version->version_minor;
+a430 1
+         pI810->drmMinor = version->version_minor;
+d445 5
+a449 5
+   pI810->backHandle = DRM_AGP_NO_HANDLE;
+   pI810->zHandle = DRM_AGP_NO_HANDLE;
+   pI810->cursorHandle = DRM_AGP_NO_HANDLE;
+   pI810->xvmcHandle = DRM_AGP_NO_HANDLE;
+   pI810->sysmemHandle = DRM_AGP_NO_HANDLE;
+d451 1
+a451 1
+   pI810->dcacheHandle = DRM_AGP_NO_HANDLE;
+d479 1
+a479 2
+
+   xf86DrvMsg(pScreen->myNum, X_INFO, "[agp] dcacheHandle : 0x%lx\n",
+d493 1
+a493 5
+      /* for tiled memory to work, the buffer needs to have the
+       * number of lines as a multiple of 16 (the tile size),
+       *  - airlied */
+      int lines = (pScrn->virtualY + 15) / 16 * 16;
+      back_size = i810_pitches[pitch_idx] * lines;
+d498 1
+a498 1
+   if (dcacheHandle != DRM_AGP_NO_HANDLE) {
+d504 1
+a504 1
+	 pI810->dcacheHandle = dcacheHandle = DRM_AGP_NO_HANDLE;
+d548 1
+a548 1
+   if (dcacheHandle != DRM_AGP_NO_HANDLE) {
+d568 1
+a568 1
+	 pI810->dcacheHandle = dcacheHandle = DRM_AGP_NO_HANDLE;
+d578 1
+a578 1
+   if (agpHandle != DRM_AGP_NO_HANDLE) {
+d600 2
+a601 3
+   if (dcacheHandle == DRM_AGP_NO_HANDLE) {
+     drmAgpAlloc(pI810->drmSubFD, back_size, 0, NULL, &agpHandle);
+
+d604 1
+a604 1
+      if (agpHandle != DRM_AGP_NO_HANDLE) {
+d630 1
+a630 2
+
+   if (agpHandle == DRM_AGP_NO_HANDLE) {
+a668 1
+      
+d671 1
+a671 1
+      if (agpHandle != DRM_AGP_NO_HANDLE) {
+a692 1
+
+d695 1
+a695 1
+   if (agpHandle != DRM_AGP_NO_HANDLE) {
+a934 6
+   I810DRIPtr pI810DRI = (I810DRIPtr) pI810->pDRIInfo->devPrivate;
+
+   if (pI810DRI->irq) {
+       drmCtlUninstHandler(pI810->drmSubFD);
+       pI810DRI->irq = 0;
+   }
+d938 1
+a938 1
+   if (pI810->dcacheHandle!=DRM_AGP_NO_HANDLE)
+d940 1
+a940 1
+   if (pI810->backHandle!=DRM_AGP_NO_HANDLE)
+d942 1
+a942 1
+   if (pI810->zHandle!=DRM_AGP_NO_HANDLE)
+d944 1
+a944 1
+   if (pI810->cursorHandle!=DRM_AGP_NO_HANDLE)
+d946 1
+a946 1
+   if (pI810->xvmcHandle!=DRM_AGP_NO_HANDLE)
+d948 1
+a948 1
+   if (pI810->sysmemHandle!=DRM_AGP_NO_HANDLE)
+d954 5
+a958 5
+   pI810->backHandle = DRM_AGP_NO_HANDLE;
+   pI810->zHandle = DRM_AGP_NO_HANDLE;
+   pI810->cursorHandle = DRM_AGP_NO_HANDLE;
+   pI810->xvmcHandle = DRM_AGP_NO_HANDLE;
+   pI810->sysmemHandle = DRM_AGP_NO_HANDLE;
+d960 1
+a960 1
+   pI810->dcacheHandle = DRM_AGP_NO_HANDLE;
+a995 2
+   ScrnInfoPtr        pScrn = xf86Screens[pScreen->myNum];
+   I810Ptr info  = I810PTR(pScrn);
+a997 8
+
+   /* Have shadow run only while there is 3d active.
+    */
+   if (info->allowPageFlip && info->drmMinor >= 3) {
+     ShadowFBInit( pScreen, I810DRIRefreshArea );
+   } 
+   else
+     info->allowPageFlip = 0;
+d1201 1
+a1201 1
+      
+a1219 216
+}
+
+
+/* Fullscreen hooks.  The DRI fullscreen mode can probably be removed as
+ * it adds little or nothing above the mechanism below (and isn't widely
+ * used).
+ */
+static Bool I810DRIOpenFullScreen(ScreenPtr pScreen)
+{
+    return TRUE;
+}
+
+static Bool I810DRICloseFullScreen(ScreenPtr pScreen)
+{
+    return TRUE;
+}
+/* Use the miext/shadow module to maintain a list of dirty rectangles.
+ * These are blitted to the back buffer to keep both buffers clean
+ * during page-flipping when the 3d application isn't fullscreen.
+ *
+ * Unlike most use of the shadow code, both buffers are in video memory.
+ *
+ * An alternative to this would be to organize for all on-screen drawing
+ * operations to be duplicated for the two buffers.  That might be
+ * faster, but seems like a lot more work...
+ */
+
+
+/* This should be done *before* XAA syncs or fires its buffer.
+ * Otherwise will have to fire it again???
+ */
+static void I810DRIRefreshArea(ScrnInfoPtr pScrn, int num, BoxPtr pbox)
+{
+    I810Ptr pI810 = I810PTR(pScrn);
+    int i;
+    I810SAREAPtr  pSAREAPriv = DRIGetSAREAPrivate(pScrn->pScreen);
+    unsigned int br13;
+    int cpp=2;
+
+    
+    /* Don't want to do this when no 3d is active and pages are
+     * right-way-round
+     */
+    if (!pSAREAPriv->pf_active && pSAREAPriv->pf_current_page == 0)
+      return;
+
+    br13 = (pI810->auxPitch) | (0xcc << 16);
+    
+    for (i = 0 ; i < num ; i++, pbox++) {
+      unsigned int w = min(pbox->y2, pScrn->virtualY-1) - max(pbox->y1, 0) + 1;
+      unsigned int h = min(pbox->x2, pScrn->virtualX-1) - max(pbox->x1, 0) + 1;
+      unsigned int dst = max(pbox->x1, 0)*cpp + (max(pbox->y1, 0)*pI810->auxPitch);
+      
+      BEGIN_LP_RING(6);
+
+      OUT_RING(BR00_BITBLT_CLIENT | BR00_OP_SRC_COPY_BLT | 0x4);
+      OUT_RING(br13);
+      OUT_RING( (h<<16) | (w*cpp) );
+      OUT_RING(pI810->BackBuffer.Start + dst);
+      OUT_RING(br13 & 0xffff);
+      OUT_RING(dst);
+
+      ADVANCE_LP_RING();
+    }
+
+}
+
+static void I810EnablePageFlip(ScreenPtr pScreen)
+{
+    ScrnInfoPtr         pScrn      = xf86Screens[pScreen->myNum];
+    I810Ptr       pI810       = I810PTR(pScrn);
+    I810SAREAPtr  pSAREAPriv = DRIGetSAREAPrivate(pScreen);
+    int cpp=2;
+    pSAREAPriv->pf_enabled = pI810->allowPageFlip;
+    pSAREAPriv->pf_active = 0;
+    
+   if (pI810->allowPageFlip) {
+      unsigned int br13 = pI810->auxPitch | (0xcc << 16);
+      
+      BEGIN_LP_RING(6);
+
+      OUT_RING(BR00_BITBLT_CLIENT | BR00_OP_SRC_COPY_BLT | 0x4);
+      OUT_RING(br13);
+      OUT_RING((pScrn->virtualY << 16) | (pScrn->virtualX*cpp));
+      OUT_RING(pI810->BackBuffer.Start);
+      OUT_RING(br13 & 0xFFFF);
+      OUT_RING(0);
+      ADVANCE_LP_RING();
+
+      pSAREAPriv->pf_active = 1;
+   }
+   
+}
+
+static void I810DisablePageFlip(ScreenPtr pScreen)
+{
+    I810SAREAPtr  pSAREAPriv = DRIGetSAREAPrivate(pScreen);
+
+    pSAREAPriv->pf_active=0;
+}
+
+static void I810DRITransitionSingleToMulti3d(ScreenPtr pScreen)
+{
+    /* Tell the clients not to pageflip.  How?
+     *   -- Field in sarea, plus bumping the window counters.
+     *   -- DRM needs to cope with Front-to-Back swapbuffers.
+     */
+    I810DisablePageFlip(pScreen);
+}
+
+static void I810DRITransitionMultiToSingle3d(ScreenPtr pScreen)
+{
+    /* Let the remaining 3d app start page flipping again */
+    I810EnablePageFlip(pScreen);
+}
+
+static void I810DRITransitionTo3d(ScreenPtr pScreen)
+{
+    ScrnInfoPtr    pScrn = xf86Screens[pScreen->myNum];
+    I810Ptr  pI810  = I810PTR(pScrn);
+
+    I810EnablePageFlip(pScreen);
+    pI810->have3DWindows = 1;
+}
+
+static void I810DRITransitionTo2d(ScreenPtr pScreen)
+{
+    ScrnInfoPtr         pScrn      = xf86Screens[pScreen->myNum];
+    I810Ptr       pI810       = I810PTR(pScrn);
+    I810SAREAPtr  pSAREAPriv = DRIGetSAREAPrivate(pScreen);
+
+    /* Shut down shadowing if we've made it back to the front page */
+    if (pSAREAPriv->pf_current_page == 0) {
+	I810DisablePageFlip(pScreen);
+    }
+    pI810->have3DWindows = 0;
+}
+
+Bool
+I810DRILeave(ScrnInfoPtr pScrn)
+{
+   I810Ptr pI810 = I810PTR(pScrn);
+    
+   if (pI810->directRenderingEnabled) {
+      if (pI810->dcacheHandle != 0) 
+	 if (drmAgpUnbind(pI810->drmSubFD, pI810->dcacheHandle) != 0) {
+	    xf86DrvMsg(pScrn->scrnIndex, X_ERROR,"%s\n",strerror(errno));
+	    return FALSE;
+	 }
+      if (pI810->backHandle != 0) 
+	 if (drmAgpUnbind(pI810->drmSubFD, pI810->backHandle) != 0) {
+	    xf86DrvMsg(pScrn->scrnIndex, X_ERROR,"%s\n",strerror(errno));
+ 	    return FALSE;
+	 }
+      if (pI810->zHandle != 0)
+	 if (drmAgpUnbind(pI810->drmSubFD, pI810->zHandle) != 0) {
+	    xf86DrvMsg(pScrn->scrnIndex, X_ERROR,"%s\n",strerror(errno));
+  	    return FALSE;
+	 }
+      if (pI810->sysmemHandle != 0)
+	 if (drmAgpUnbind(pI810->drmSubFD, pI810->sysmemHandle) != 0) {
+	    xf86DrvMsg(pScrn->scrnIndex, X_ERROR,"%s\n",strerror(errno));
+  	    return FALSE;
+	 }
+      if (pI810->xvmcHandle != 0)
+	 if (drmAgpUnbind(pI810->drmSubFD, pI810->xvmcHandle) != 0) {
+	    xf86DrvMsg(pScrn->scrnIndex, X_ERROR,"%s\n",strerror(errno));
+  	    return FALSE;
+	 }
+      if (pI810->cursorHandle != 0)
+	 if (drmAgpUnbind(pI810->drmSubFD, pI810->cursorHandle) != 0) {
+	    xf86DrvMsg(pScrn->scrnIndex, X_ERROR,"%s\n",strerror(errno));
+	    return FALSE;
+	 }
+      if (pI810->agpAcquired == TRUE)
+	 drmAgpRelease(pI810->drmSubFD);
+      pI810->agpAcquired = FALSE;
+   }
+   return TRUE;
+}
+
+Bool
+I810DRIEnter(ScrnInfoPtr pScrn)
+{
+   I810Ptr pI810 = I810PTR(pScrn);
+
+   if (pI810->directRenderingEnabled) {
+
+      if (pI810->agpAcquired == FALSE)
+	 drmAgpAcquire(pI810->drmSubFD);
+      pI810->agpAcquired = TRUE;
+      if (pI810->dcacheHandle != 0)
+	 if (drmAgpBind(pI810->drmSubFD, pI810->dcacheHandle,
+			pI810->DepthOffset) != 0)
+	    return FALSE;
+      if (pI810->backHandle != 0)
+	 if (drmAgpBind(pI810->drmSubFD, pI810->backHandle,
+			pI810->BackOffset) != 0)
+	    return FALSE;
+      if (pI810->zHandle != 0)
+	 if (drmAgpBind(pI810->drmSubFD, pI810->zHandle,
+			pI810->DepthOffset) != 0)
+	    return FALSE;
+      if (pI810->sysmemHandle != 0)
+	 if (drmAgpBind(pI810->drmSubFD, pI810->sysmemHandle, 0) != 0)
+	    return FALSE;
+      if (pI810->xvmcHandle != 0)
+	 if (drmAgpBind(pI810->drmSubFD, pI810->xvmcHandle,
+			pI810->MC.Start) != 0)
+	    return FALSE;
+      if (pI810->cursorHandle != 0)
+	 if (drmAgpBind(pI810->drmSubFD, pI810->cursorHandle,
+			pI810->CursorStart) != 0)
+	    return FALSE;
+   }
+   return TRUE;
+@
+
+

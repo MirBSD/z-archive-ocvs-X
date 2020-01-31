@@ -1,0 +1,406 @@
+head	1.1;
+branch	1.1.1;
+access;
+symbols
+	tg-mergetmp-2:1.1.1.2
+	cvs-200410241530:1.1.1.2
+	cvs-200410012000:1.1.1.2
+	cvs-200407141120:1.1.1.2
+	cvs-200406231010:1.1.1.2
+	MIRBSD_7quater:1.1.1.2
+	cvs-200405271510:1.1.1.2
+	XFree86_4_4_0:1.1.9.1
+	cvs-200403021700:1.1.1.2
+	XFREE86_20040213:1.1.9.1
+	xc:1.1.9
+	cvs-200401291925:1.1.1.2
+	MIRBSD_7_ALPHA:1.1.1.2.0.4
+	MIRBSD_7:1.1.1.2.0.2
+	MIRBSD_7ter:1.1.1.2
+	cvs-20011091815:1.1.1.2
+	cvs-200309162130:1.1.1.2
+	cvs-200308302005:1.1.1.2
+	ctmx-0387:1.1.1.2
+	ctmx-0384:1.1.1.2
+	MIRBSD_5:1.1.1.2
+	ctmx-0375:1.1.1.2
+	ctmx-0373:1.1.1.2
+	ctm-0371:1.1.1.2
+	ctm-0370:1.1.1.2
+	MIRBSD_4:1.1.1.2
+	ctm-0363:1.1.1.2
+	ctm-0359:1.1.1.2
+	ctm-0349:1.1.1.1
+	openbsd:1.1.1;
+locks; strict;
+comment	@ * @;
+
+
+1.1
+date	2003.03.22.20.04.57;	author tg;	state Exp;
+branches
+	1.1.1.1
+	1.1.9.1;
+next	;
+
+1.1.1.1
+date	2003.03.22.20.04.57;	author tg;	state Exp;
+branches;
+next	1.1.1.2;
+
+1.1.1.2
+date	2003.04.08.18.32.45;	author tg;	state Stab;
+branches;
+next	;
+
+1.1.9.1
+date	2004.02.14.19.19.33;	author tg;	state Exp;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@/*
+ * $XFree86: xc/lib/Xrender/Picture.c,v 1.8 2001/12/16 18:27:55 keithp Exp $
+ *
+ * Copyright © 2000 SuSE, Inc.
+ *
+ * Permission to use, copy, modify, distribute, and sell this software and its
+ * documentation for any purpose is hereby granted without fee, provided that
+ * the above copyright notice appear in all copies and that both that
+ * copyright notice and this permission notice appear in supporting
+ * documentation, and that the name of SuSE not be used in advertising or
+ * publicity pertaining to distribution of the software without specific,
+ * written prior permission.  SuSE makes no representations about the
+ * suitability of this software for any purpose.  It is provided "as is"
+ * without express or implied warranty.
+ *
+ * SuSE DISCLAIMS ALL WARRANTIES WITH REGARD TO THIS SOFTWARE, INCLUDING ALL
+ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS, IN NO EVENT SHALL SuSE
+ * BE LIABLE FOR ANY SPECIAL, INDIRECT OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
+ * WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN ACTION
+ * OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF OR IN 
+ * CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+ *
+ * Author:  Keith Packard, SuSE, Inc.
+ */
+
+#include "Xrenderint.h"
+#include "region.h"
+
+static void
+_XRenderProcessPictureAttributes (Display		    *dpy,
+				  xRenderChangePictureReq   *req,
+				  unsigned long		    valuemask,
+				  _Xconst XRenderPictureAttributes  *attributes)
+{
+    unsigned long values[32];
+    register unsigned long *value = values;
+    unsigned int nvalues;
+    
+    if (valuemask & CPRepeat)
+	*value++ = attributes->repeat;
+    if (valuemask & CPAlphaMap)
+	*value++ = attributes->alpha_map;
+    if (valuemask & CPAlphaXOrigin)
+	*value++ = attributes->alpha_x_origin;
+    if (valuemask & CPAlphaYOrigin)
+	*value++ = attributes->alpha_y_origin;
+    if (valuemask & CPClipXOrigin)
+	*value++ = attributes->clip_x_origin;
+    if (valuemask & CPClipYOrigin)
+	*value++ = attributes->clip_y_origin;
+    if (valuemask & CPClipMask)
+	*value++ = attributes->clip_mask;
+    if (valuemask & CPGraphicsExposure)
+	*value++ = attributes->graphics_exposures;
+    if (valuemask & CPSubwindowMode)
+	*value++ = attributes->subwindow_mode;
+    if (valuemask & CPPolyEdge)
+	*value++ = attributes->poly_edge;
+    if (valuemask & CPPolyMode)
+	*value++ = attributes->poly_mode;
+    if (valuemask & CPDither)
+	*value++ = attributes->dither;
+    if (valuemask & CPComponentAlpha)
+	*value++ = attributes->component_alpha;
+
+    req->length += (nvalues = value - values);
+
+    nvalues <<= 2;			    /* watch out for macros... */
+    Data32 (dpy, (long *) values, (long)nvalues);
+}
+
+Picture
+XRenderCreatePicture (Display			*dpy,
+		      Drawable			drawable,
+		      _Xconst XRenderPictFormat		*format,
+		      unsigned long		valuemask,
+		      _Xconst XRenderPictureAttributes	*attributes)
+{
+    XExtDisplayInfo	    *info = XRenderFindDisplay (dpy);
+    Picture		    pid;
+    xRenderCreatePictureReq *req;
+
+    RenderCheckExtension (dpy, info, 0);
+    LockDisplay(dpy);
+    GetReq(RenderCreatePicture, req);
+    req->reqType = info->codes->major_opcode;
+    req->renderReqType = X_RenderCreatePicture;
+    req->pid = pid = XAllocID(dpy);
+    req->drawable = drawable;
+    req->format = format->id;
+    if ((req->mask = valuemask))
+	_XRenderProcessPictureAttributes (dpy,
+					  (xRenderChangePictureReq *) req,
+					  valuemask,
+					  attributes);
+    UnlockDisplay(dpy);
+    SyncHandle();
+    return pid;
+}
+
+void
+XRenderChangePicture (Display                   *dpy,
+		      Picture			picture,
+		      unsigned long             valuemask,
+		      _Xconst XRenderPictureAttributes  *attributes)
+{
+    XExtDisplayInfo	    *info = XRenderFindDisplay (dpy);
+    xRenderChangePictureReq *req;
+    
+    RenderSimpleCheckExtension (dpy, info);
+    LockDisplay(dpy);
+    GetReq(RenderChangePicture, req);
+    req->reqType = info->codes->major_opcode;
+    req->renderReqType = X_RenderChangePicture;
+    req->picture = picture;
+    req->mask = valuemask;
+    _XRenderProcessPictureAttributes (dpy,
+				      req,
+				      valuemask,
+				      attributes);
+    UnlockDisplay(dpy);
+    SyncHandle();
+}
+
+static void
+_XRenderSetPictureClipRectangles (Display	    *dpy,
+				  XExtDisplayInfo   *info,
+				  Picture	    picture,
+				  int		    xOrigin,
+				  int		    yOrigin,
+				  _Xconst XRectangle	    *rects,
+				  int		    n)
+{
+    xRenderSetPictureClipRectanglesReq	*req;
+    long				len;
+
+    GetReq (RenderSetPictureClipRectangles, req);
+    req->reqType = info->codes->major_opcode;
+    req->renderReqType = X_RenderSetPictureClipRectangles;
+    req->picture = picture;
+    req->xOrigin = xOrigin;
+    req->yOrigin = yOrigin;
+    len = ((long) n) << 1;
+    SetReqLen (req, len, 1);
+    len <<= 2;
+    Data16 (dpy, (short *) rects, len);
+}
+
+void
+XRenderSetPictureClipRectangles (Display	*dpy,
+				 Picture	picture,
+				 int		xOrigin,
+				 int		yOrigin,
+				 _Xconst XRectangle	*rects,
+				 int		n)
+{
+    XExtDisplayInfo	    *info = XRenderFindDisplay (dpy);
+    
+    RenderSimpleCheckExtension (dpy, info);
+    LockDisplay(dpy);
+    _XRenderSetPictureClipRectangles (dpy, info, picture, 
+				      xOrigin, yOrigin, rects, n);
+    UnlockDisplay (dpy);
+    SyncHandle ();
+}
+
+void
+XRenderSetPictureClipRegion (Display	    *dpy,
+			     Picture	    picture,
+			     Region	    r)
+{
+    XExtDisplayInfo *info = XRenderFindDisplay (dpy);
+    int		    i;
+    XRectangle	    *xr, *pr;
+    BOX		    *pb;
+    unsigned long   total;
+    
+    RenderSimpleCheckExtension (dpy, info);
+    LockDisplay(dpy);
+    total = r->numRects * sizeof (XRectangle);
+    if ((xr = (XRectangle *) _XAllocTemp(dpy, total))) {
+	for (pr = xr, pb = r->rects, i = r->numRects; --i >= 0; pr++, pb++) {
+	    pr->x = pb->x1;
+	    pr->y = pb->y1;
+	    pr->width = pb->x2 - pb->x1;
+	    pr->height = pb->y2 - pb->y1;
+	}
+    }
+    if (xr || !r->numRects)
+	_XRenderSetPictureClipRectangles (dpy, info, picture, 0, 0, 
+					  xr, r->numRects);
+    if (xr)
+	_XFreeTemp(dpy, (char *)xr, total);
+    UnlockDisplay(dpy);
+    SyncHandle();
+}    
+
+void
+XRenderFreePicture (Display                   *dpy,
+		    Picture                   picture)
+{
+    XExtDisplayInfo         *info = XRenderFindDisplay (dpy);
+    xRenderFreePictureReq   *req;
+
+    RenderSimpleCheckExtension (dpy, info);
+    LockDisplay(dpy);
+    GetReq(RenderFreePicture, req);
+    req->reqType = info->codes->major_opcode;
+    req->renderReqType = X_RenderFreePicture;
+    req->picture = picture;
+    UnlockDisplay(dpy);
+    SyncHandle();
+}
+@
+
+
+1.1.9.1
+log
+@OpenBSD just has imported exactly this tree into their vendor branch,
+called the same tag, in XF4/xc
+This is, apparently, the last XFree86 snapshot before the licence change
+(ie, addition of the advertising clause)
+
+Since the developers don't see any problems with that, and we would like
+to integrate improvements done by the remaining one or two (or so) XFree86
+developers (j/k), this prepares enabling us to update X-Window in the future.
+@
+text
+@d2 1
+a2 1
+ * $XFree86: xc/lib/Xrender/Picture.c,v 1.9 2002/09/26 02:56:52 keithp Exp $
+a196 28
+
+void
+XRenderSetPictureTransform (Display	*dpy,
+			    Picture	picture,
+			    XTransform	*transform)
+{
+    XExtDisplayInfo		    *info = XRenderFindDisplay (dpy);
+    xRenderSetPictureTransformReq   *req;
+    
+    RenderSimpleCheckExtension (dpy, info);
+    LockDisplay (dpy);
+    GetReq(RenderSetPictureTransform, req);
+    req->reqType = info->codes->major_opcode;
+    req->renderReqType = X_RenderSetPictureTransform;
+    req->picture = picture;
+    req->transform.matrix11 = transform->matrix[0][0];
+    req->transform.matrix12 = transform->matrix[0][1];
+    req->transform.matrix13 = transform->matrix[0][2];
+    req->transform.matrix21 = transform->matrix[1][0];
+    req->transform.matrix22 = transform->matrix[1][1];
+    req->transform.matrix23 = transform->matrix[1][2];
+    req->transform.matrix31 = transform->matrix[2][0];
+    req->transform.matrix32 = transform->matrix[2][1];
+    req->transform.matrix33 = transform->matrix[2][2];
+    UnlockDisplay(dpy);
+    SyncHandle();
+    
+}
+@
+
+
+1.1.1.1
+log
+@Import OpenBSD 3.3 XF4 repository from CTM 3132 the first time
+This finalizes starting an OpenBSD-mirabile (aka MirBSD) repository.
+
+### MirBSD is:
+# Copyright (c) 1982-2003 by Thorsten "mirabile" Glaser <x86@@ePost.de>
+# Copyright © 1968-2003  The authors of And contributors to UNIX®, the
+#       C Language, BSD/Berkeley Unix; 386BSD, NetBSD 1.1 and OpenBSD.
+#
+# Anyone who obtained a copy of this work is hereby permitted to freely use,
+# distribute, modify, merge, sublicence, give away or sell it as long as the
+# authors are given due credit and the following notice is retained:
+#
+# This work is provided "as is", with no explicit or implicit warranty what-
+# soever. Use it only at your own risk. In no event may an author or contri-
+# butor be held liable for any damage, directly or indirectly, that origina-
+# ted through or is caused by creation or modification of this work.
+
+MirBSD is my private tree. MirBSD does not differ very much from OpenBSD
+and intentionally tracks OpenBSD. That's why it _is_ OpenBSD, just not the
+official one. It's like with DarrenBSD.
+
+At time of this writing, no advertising for MirBSD must be done,
+because the advertising clause has not yet been sorted out.
+
+http://templeofhate.com/tglaser/MirBSD/index.php
+@
+text
+@@
+
+
+1.1.1.2
+log
+@The X-Windowing System
+
+Import XFree86 4.3 from OpenBSD by CTM, in the hope it's stable
+@
+text
+@d2 1
+a2 1
+ * $XFree86: xc/lib/Xrender/Picture.c,v 1.9 2002/09/26 02:56:52 keithp Exp $
+a196 28
+
+void
+XRenderSetPictureTransform (Display	*dpy,
+			    Picture	picture,
+			    XTransform	*transform)
+{
+    XExtDisplayInfo		    *info = XRenderFindDisplay (dpy);
+    xRenderSetPictureTransformReq   *req;
+    
+    RenderSimpleCheckExtension (dpy, info);
+    LockDisplay (dpy);
+    GetReq(RenderSetPictureTransform, req);
+    req->reqType = info->codes->major_opcode;
+    req->renderReqType = X_RenderSetPictureTransform;
+    req->picture = picture;
+    req->transform.matrix11 = transform->matrix[0][0];
+    req->transform.matrix12 = transform->matrix[0][1];
+    req->transform.matrix13 = transform->matrix[0][2];
+    req->transform.matrix21 = transform->matrix[1][0];
+    req->transform.matrix22 = transform->matrix[1][1];
+    req->transform.matrix23 = transform->matrix[1][2];
+    req->transform.matrix31 = transform->matrix[2][0];
+    req->transform.matrix32 = transform->matrix[2][1];
+    req->transform.matrix33 = transform->matrix[2][2];
+    UnlockDisplay(dpy);
+    SyncHandle();
+    
+}
+@
+

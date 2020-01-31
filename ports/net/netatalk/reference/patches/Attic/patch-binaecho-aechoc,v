@@ -1,0 +1,288 @@
+head	1.2;
+access;
+symbols
+	ctm-3449:1.1.1.1
+	cvs-200307191610:1.1.1.1
+	ctm-3416:1.1.1.1
+	cvs-200307091500:1.1.1.1
+	ctm-3389:1.1.1.1
+	cvs-200306291800:1.1.1.1
+	ctm-3369:1.1.1.1
+	ctm-3341:1.1.1.1
+	MIRBSD_5:1.1.1.1
+	cvs-200306082100:1.1.1.1
+	ctm-3316:1.1.1.1
+	ctm-3272:1.1.1.1
+	ctm-3264:1.1.1.1
+	ctm-3258:1.1.1.1
+	MIRBSD_4:1.1.1.1
+	ctm-3200:1.1.1.1
+	ctm-3188:1.1.1.1
+	ctm-3155:1.1.1.1
+	ctm-3132:1.1.1.1
+	openbsd:1.1.1;
+locks; strict;
+comment	@# @;
+
+
+1.2
+date	2003.08.18.15.57.56;	author tg;	state dead;
+branches;
+next	1.1;
+
+1.1
+date	2003.03.22.19.52.44;	author tg;	state Exp;
+branches
+	1.1.1.1;
+next	;
+
+1.1.1.1
+date	2003.03.22.19.52.44;	author tg;	state Exp;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.2
+log
+@merge OpenBSD
+@
+text
+@--- bin/aecho/aecho.c.orig	Sun Oct 20 07:13:18 1996
++++ bin/aecho/aecho.c	Wed Nov 10 13:57:25 1999
+@@@@ -29,10 +29,13 @@@@
+ #include <sys/param.h>
+ #include <sys/socket.h>
+ #include <sys/time.h>
+-#include <sys/errno.h>
++#include <errno.h>
+ 
+ #include <signal.h>
+ #include <stdio.h>
++#include <stdlib.h>
++#include <string.h>
++#include <unistd.h>
+ #include <netdb.h>
+ 
+ #include <netatalk/endian.h>
+@@@@ -44,7 +47,28 @@@@
+ 
+ struct sockaddr_at	target;
+ int			s, nsent = 0, nrecv = 0;
+-long			totalms = 0, minms = -1, maxms = -1;
++time_t			totalms = 0, minms = -1, maxms = -1;
++static unsigned int	count = 0;
++void			usage();
++int			atalk_aton();
++
++#if !defined( ibm032 ) && !defined( _IBMR2 )
++    void
++#endif ibm032 _IBMR2
++finish()
++{
++    if ( nsent > 0 ) {
++        printf( "\n----%d.%d AEP Statistics----\n",
++                ntohs( target.sat_addr.s_net ), target.sat_addr.s_node );
++        printf( "%d packets sent, %d packets received, %d%% packet loss\n",
++                nsent, nrecv, (( nsent - nrecv ) * 100 ) / nsent );
++        if ( nrecv > 0 ) {
++            printf( "round-trip (ms)  min/avg/max = %d/%d/%d\n",
++                    minms, totalms / nrecv, maxms );
++        }
++    }
++    exit( 0 );
++}
+ 
+ #if !defined( ibm032 ) && !defined( _IBMR2 )
+     void
+@@@@ -58,7 +82,7 @@@@
+     p = buf;
+     *p++ = DDPTYPE_AEP;
+     *p++ = AEPOP_REQUEST;
+-    bcopy( &seq, p, sizeof( unsigned int ));
++    memcpy( p, &seq, sizeof( unsigned int ));
+     p += sizeof( unsigned int );
+     seq++;
+ 
+@@@@ -66,7 +90,7 @@@@
+ 	perror( "gettimeofday" );
+ 	exit( 1 );
+     }
+-    bcopy( &tv, p, sizeof( struct timeval ));
++    memcpy( p, &tv, sizeof( struct timeval ));
+     p += sizeof( struct timeval );
+ 
+     if ( sendto( s, buf, p - buf, 0, (struct sockaddr *) &target,
+@@@@ -75,26 +99,10 @@@@
+ 	exit( 1 );
+     }
+     nsent++;
++	if (count && nsent > count) finish();
+ }
+ 
+-#if !defined( ibm032 ) && !defined( _IBMR2 )
+-    void
+-#endif ibm032 _IBMR2
+-done()
+-{
+-    if ( nsent > 0 ) {
+-	printf( "\n----%d.%d AEP Statistics----\n",
+-		ntohs( target.sat_addr.s_net ), target.sat_addr.s_node );
+-	printf( "%d packets sent, %d packets received, %d%% packet loss\n",
+-		nsent, nrecv, (( nsent - nrecv ) * 100 ) / nsent );
+-	if ( nrecv > 0 ) {
+-	    printf( "round-trip (ms)  min/avg/max = %d/%d/%d\n",
+-		    minms, totalms / nrecv, maxms );
+-	}	
+-    }
+-    exit( 0 );
+-}
+-
++int
+ main( ac, av )
+     int		ac;
+     char	**av;
+@@@@ -106,14 +114,29 @@@@
+     struct timeval	tv, atv;
+     struct nbpnve	nn;
+     char		*obj = NULL, *type = "Workstation", *zone = "*";
+-    int			satlen, cc;
+-    unsigned int	seq;
+-    long		ms;
++    int			cc;
++    unsigned int	satlen, seq;
++    time_t		ms;
+     char		buf[ 1024 ], *p;
+     unsigned char	port;
+-    extern int		errno;
++    extern char		*optarg;
++    extern int		optind;
+ 
+-    if ( ac != 2 ) usage( av[ 0 ] );
++    while (( cc = getopt( ac, av, "c:" )) != EOF ) {
++	switch ( cc ) {
++	case 'c' :
++	    count = atoi( optarg );
++	    break;
++
++	default :
++	    usage( av[ 0 ] );
++	    exit( 1 );
++	}
++    }
++    if ( ac - optind != 1 ) {
++	usage( av[ 0 ] );
++	exit( 1 );
++    }
+ 
+     /*
+      * Save the port, since nbp_lookup calls getservbyname() to get the
+@@@@ -125,21 +148,21 @@@@
+     }
+     port = ntohs( se->s_port );
+ 
+-    bzero( &target, sizeof( struct sockaddr_at ));
++    memset( &target, 0, sizeof( struct sockaddr_at ));
+ #ifdef BSD4_4
+     target.sat_len = sizeof( struct sockaddr_at );
+ #endif BSD4_4
+     target.sat_family = AF_APPLETALK;
+-    if ( !atalk_aton( av[ 1 ], &target.sat_addr )) {
+-	if ( nbp_name( av[ 1 ], &obj, &type, &zone ) || !obj ) {
+-	    fprintf( stderr, "Bad name: %s\n", av[ 1 ] );
++    if ( !atalk_aton( av[ optind ], &target.sat_addr )) {
++	if ( nbp_name( av[ optind ], &obj, &type, &zone ) || !obj ) {
++	    fprintf( stderr, "Bad name: %s\n", av[ optind ] );
+ 	    exit( 1 );
+ 	}
+ 	if ( nbp_lookup( obj, type, zone, &nn, 1 ) <= 0 ) {
+-	    fprintf( stderr, "Can't find: %s\n", av[ 1 ] );
++	    fprintf( stderr, "Can't find: %s\n", av[ optind ] );
+ 	    exit( 1 );
+ 	}
+-	bcopy( &nn.nn_sat, &target, sizeof( struct sockaddr_at ));
++	memcpy( &target, &nn.nn_sat, sizeof( struct sockaddr_at ));
+     }
+     target.sat_port = port;
+ 
+@@@@ -157,7 +180,7 @@@@
+ 	exit( 1 );
+     }
+ 
+-    sv.sa_handler = done;
++    sv.sa_handler = finish;
+     sigemptyset( &sv.sa_mask );
+     sigaddset( &sv.sa_mask, SIGALRM );
+     sv.sa_flags = SA_RESTART;
+@@@@ -197,9 +220,9 @@@@
+ 	    perror( "gettimeofday" );
+ 	    exit( 1 );
+ 	}
+-	bcopy( p, &seq, sizeof( unsigned int ));
++	memcpy( &seq, p, sizeof( unsigned int ));
+ 	p += sizeof( unsigned int );
+-	bcopy( p, &atv, sizeof( struct timeval ));
++	memcpy( &atv, p, sizeof( struct timeval ));
+ 	nrecv++;
+ 	ms = ( tv.tv_sec - atv.tv_sec ) * 1000 +
+ 		( tv.tv_usec - atv.tv_usec ) / 1000;
+@@@@ -213,11 +236,14 @@@@
+ 	printf( "%d bytes from %u.%u: aep_seq=%d. time=%d. ms\n",
+ 		cc, ntohs( sat.sat_addr.s_net ), sat.sat_addr.s_node,
+ 		seq, ms );
++	if (count && seq + 1 >= count) finish();
+     }
+ }
+ 
++void
+ usage( av0 )
++	char	*av0;
+ {
+-    fprintf( stderr, "Usage:\t%s ( addr | nbpname )\n", av0 );
++    fprintf( stderr, "Usage:\t%s [-c count ] ( addr | nbpname )\n", av0 );
+     exit( 1 );
+ }
+@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@@
+
+
+1.1.1.1
+log
+@Import OpenBSD 3.3 ports repository from CTM 3132 the first time
+This continues opening an OpenBSD-mirabile (aka MirBSD) repository.
+
+### MirBSD is:
+# Copyright (c) 1982-2003 by Thorsten "mirabile" Glaser <x86@@ePost.de>
+# Copyright © 1968-2003  The authors of And contributors to UNIX®, the
+#       C Language, BSD/Berkeley Unix; 386BSD, NetBSD 1.1 and OpenBSD.
+#
+# Anyone who obtained a copy of this work is hereby permitted to freely use,
+# distribute, modify, merge, sublicence, give away or sell it as long as the
+# authors are given due credit and the following notice is retained:
+#
+# This work is provided "as is", with no explicit or implicit warranty what-
+# soever. Use it only at your own risk. In no event may an author or contri-
+# butor be held liable for any damage, directly or indirectly, that origina-
+# ted through or is caused by creation or modification of this work.
+
+MirBSD is my private tree. MirBSD does not differ very much from OpenBSD
+and intentionally tracks OpenBSD. That's why it _is_ OpenBSD, just not the
+official one. It's like with DarrenBSD.
+
+At time of this writing, no advertising for MirBSD must be done,
+because the advertising clause has not yet been sorted out.
+
+http://templeofhate.com/tglaser/MirBSD/index.php
+@
+text
+@@

@@ -1,0 +1,541 @@
+head	1.1;
+branch	1.1.1;
+access;
+symbols
+	tg-mergetmp-2:1.1.1.3
+	cvs-200410241530:1.1.1.3
+	cvs-200410012000:1.1.1.3
+	cvs-200407221130:1.1.1.3
+	cvs-200407141120:1.1.1.3
+	cvs-200406231010:1.1.1.3
+	cvs-200406052200:1.1.1.3
+	MIRBSD_7quater:1.1.1.2
+	cvs-200405271510:1.1.1.3
+	XFree86_4_4_0:1.1.9.1
+	cvs-200403021700:1.1.1.3
+	XFREE86_20040213:1.1.9.1
+	xc:1.1.9
+	cvs-200401291925:1.1.1.2
+	MIRBSD_7_ALPHA:1.1.1.2.0.4
+	MIRBSD_7:1.1.1.2.0.2
+	MIRBSD_7ter:1.1.1.2
+	cvs-20011091815:1.1.1.2
+	cvs-200309162130:1.1.1.2
+	cvs-200308302005:1.1.1.2
+	ctmx-0387:1.1.1.2
+	ctmx-0384:1.1.1.2
+	MIRBSD_5:1.1.1.2
+	ctmx-0375:1.1.1.2
+	ctmx-0373:1.1.1.2
+	ctm-0371:1.1.1.2
+	ctm-0370:1.1.1.2
+	MIRBSD_4:1.1.1.2
+	ctm-0363:1.1.1.2
+	ctm-0359:1.1.1.2
+	ctm-0349:1.1.1.1
+	openbsd:1.1.1;
+locks; strict;
+comment	@ * @;
+
+
+1.1
+date	2003.03.22.20.08.32;	author tg;	state Exp;
+branches
+	1.1.1.1
+	1.1.9.1;
+next	;
+
+1.1.1.1
+date	2003.03.22.20.08.32;	author tg;	state Exp;
+branches;
+next	1.1.1.2;
+
+1.1.1.2
+date	2003.04.08.18.37.30;	author tg;	state Exp;
+branches;
+next	1.1.1.3;
+
+1.1.1.3
+date	2004.03.02.18.24.37;	author tg;	state Stab;
+branches;
+next	;
+
+1.1.9.1
+date	2004.02.14.19.25.05;	author tg;	state Exp;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@/* drm_fops.h -- File operations for DRM -*- linux-c -*-
+ * Created: Mon Jan  4 08:58:31 1999 by faith@@valinux.com
+ *
+ * Copyright 1999 Precision Insight, Inc., Cedar Park, Texas.
+ * Copyright 2000 VA Linux Systems, Inc., Sunnyvale, California.
+ * All Rights Reserved.
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a
+ * copy of this software and associated documentation files (the "Software"),
+ * to deal in the Software without restriction, including without limitation
+ * the rights to use, copy, modify, merge, publish, distribute, sublicense,
+ * and/or sell copies of the Software, and to permit persons to whom the
+ * Software is furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice (including the next
+ * paragraph) shall be included in all copies or substantial portions of the
+ * Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL
+ * VA LINUX SYSTEMS AND/OR ITS SUPPLIERS BE LIABLE FOR ANY CLAIM, DAMAGES OR
+ * OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE,
+ * ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR
+ * OTHER DEALINGS IN THE SOFTWARE.
+ *
+ * Authors:
+ *    Rickard E. (Rik) Faith <faith@@valinux.com>
+ *    Daryll Strauss <daryll@@valinux.com>
+ *    Gareth Hughes <gareth@@valinux.com>
+ */
+
+#define __NO_VERSION__
+#include "drmP.h"
+
+
+#include <sys/signalvar.h>
+#include <sys/poll.h>
+
+drm_file_t *DRM(find_file_by_proc)(drm_device_t *dev, DRM_OS_STRUCTPROC *p)
+{
+#if __FreeBSD_version >= 500021
+	uid_t uid = p->td_proc->p_ucred->cr_svuid;
+	pid_t pid = p->td_proc->p_pid;
+#else
+	uid_t uid = p->p_cred->p_svuid;
+	pid_t pid = p->p_pid;
+#endif
+	drm_file_t *priv;
+
+	TAILQ_FOREACH(priv, &dev->files, link)
+		if (priv->pid == pid && priv->uid == uid)
+			return priv;
+	return NULL;
+}
+
+/* DRM(open) is called whenever a process opens /dev/drm. */
+
+int DRM(open_helper)(dev_t kdev, int flags, int fmt, DRM_OS_STRUCTPROC *p,
+		    drm_device_t *dev)
+{
+	int	     m = minor(kdev);
+	drm_file_t   *priv;
+
+	if (flags & O_EXCL)
+		return EBUSY; /* No exclusive opens */
+	dev->flags = flags;
+	if (!DRM(cpu_valid)())
+		DRM_OS_RETURN(EINVAL);
+
+	DRM_DEBUG("pid = %d, minor = %d\n", DRM_OS_CURRENTPID, m);
+
+	/* FIXME: linux mallocs and bzeros here */
+	priv = (drm_file_t *) DRM(find_file_by_proc)(dev, p);
+	if (priv) {
+		priv->refs++;
+	} else {
+		priv = (drm_file_t *) DRM(alloc)(sizeof(*priv), DRM_MEM_FILES);
+		bzero(priv, sizeof(*priv));
+#if __FreeBSD_version >= 500000
+		priv->uid		= p->td_proc->p_ucred->cr_svuid;
+		priv->pid		= p->td_proc->p_pid;
+#else
+		priv->uid		= p->p_cred->p_svuid;
+		priv->pid		= p->p_pid;
+#endif
+
+		priv->refs		= 1;
+		priv->minor		= m;
+		priv->devXX		= dev;
+		priv->ioctl_count 	= 0;
+		priv->authenticated	= !DRM_OS_CHECKSUSER;
+		lockmgr(&dev->dev_lock, LK_EXCLUSIVE, 0, p);
+		TAILQ_INSERT_TAIL(&dev->files, priv, link);
+		lockmgr(&dev->dev_lock, LK_RELEASE, 0, p);
+	}
+
+	kdev->si_drv1 = dev;
+
+
+	return 0;
+}
+
+
+/* The drm_read and drm_write_string code (especially that which manages
+   the circular buffer), is based on Alessandro Rubini's LINUX DEVICE
+   DRIVERS (Cambridge: O'Reilly, 1998), pages 111-113. */
+
+ssize_t DRM(read)(dev_t kdev, struct uio *uio, int ioflag)
+{
+	DRM_OS_DEVICE;
+	int	      left;
+	int	      avail;
+	int	      send;
+	int	      cur;
+	int           error = 0;
+
+	DRM_DEBUG("%p, %p\n", dev->buf_rp, dev->buf_wp);
+
+	while (dev->buf_rp == dev->buf_wp) {
+		DRM_DEBUG("  sleeping\n");
+		if (dev->flags & FASYNC)
+			return EWOULDBLOCK;
+		error = tsleep(&dev->buf_rp, PZERO|PCATCH, "drmrd", 0);
+		if (error) {
+			DRM_DEBUG("  interrupted\n");
+			return error;
+		}
+		DRM_DEBUG("  awake\n");
+	}
+
+	left  = (dev->buf_rp + DRM_BSZ - dev->buf_wp) % DRM_BSZ;
+	avail = DRM_BSZ - left;
+	send  = DRM_MIN(avail, uio->uio_resid);
+
+	while (send) {
+		if (dev->buf_wp > dev->buf_rp) {
+			cur = DRM_MIN(send, dev->buf_wp - dev->buf_rp);
+		} else {
+			cur = DRM_MIN(send, dev->buf_end - dev->buf_rp);
+		}
+		error = uiomove(dev->buf_rp, cur, uio);
+		if (error)
+			break;
+		dev->buf_rp += cur;
+		if (dev->buf_rp == dev->buf_end) dev->buf_rp = dev->buf;
+		send -= cur;
+	}
+
+	wakeup(&dev->buf_wp);
+	return error;
+}
+
+int DRM(write_string)(drm_device_t *dev, const char *s)
+{
+	int left   = (dev->buf_rp + DRM_BSZ - dev->buf_wp) % DRM_BSZ;
+	int send   = strlen(s);
+	int count;
+
+	DRM_DEBUG("%d left, %d to send (%p, %p)\n",
+		  left, send, dev->buf_rp, dev->buf_wp);
+
+	if (left == 1 || dev->buf_wp != dev->buf_rp) {
+		DRM_ERROR("Buffer not empty (%d left, wp = %p, rp = %p)\n",
+			  left,
+			  dev->buf_wp,
+			  dev->buf_rp);
+	}
+
+	while (send) {
+		if (dev->buf_wp >= dev->buf_rp) {
+			count = DRM_MIN(send, dev->buf_end - dev->buf_wp);
+			if (count == left) --count; /* Leave a hole */
+		} else {
+			count = DRM_MIN(send, dev->buf_rp - dev->buf_wp - 1);
+		}
+		strncpy(dev->buf_wp, s, count);
+		dev->buf_wp += count;
+		if (dev->buf_wp == dev->buf_end) dev->buf_wp = dev->buf;
+		send -= count;
+	}
+
+	if (dev->buf_selecting) {
+		dev->buf_selecting = 0;
+		selwakeup(&dev->buf_sel);
+	}
+		
+	DRM_DEBUG("dev->buf_sigio=%p\n", dev->buf_sigio);
+	if (dev->buf_sigio) {
+		DRM_DEBUG("dev->buf_sigio->sio_pgid=%d\n", dev->buf_sigio->sio_pgid);
+		pgsigio(dev->buf_sigio, SIGIO, 0);
+	}
+	DRM_DEBUG("waking\n");
+	wakeup(&dev->buf_rp);
+
+	return 0;
+}
+
+int DRM(poll)(dev_t kdev, int events, DRM_OS_STRUCTPROC *p)
+{
+	drm_device_t  *dev    = kdev->si_drv1;
+	int           s;
+	int	      revents = 0;
+
+	s = spldrm();
+	if (events & (POLLIN | POLLRDNORM)) {
+		int left  = (dev->buf_rp + DRM_BSZ - dev->buf_wp) % DRM_BSZ;
+		if (left > 0)
+			revents |= events & (POLLIN | POLLRDNORM);
+		else
+			selrecord(p, &dev->buf_sel);
+	}
+	splx(s);
+
+	return revents;
+}
+
+int DRM(write)(dev_t kdev, struct uio *uio, int ioflag)
+{
+        DRM_DEBUG("pid = %d, device = %p, open_count = %d\n",
+                  curproc->p_pid, ((drm_device_t *)kdev->si_drv1)->device, ((drm_device_t *)kdev->si_drv1)->open_count);
+        return 0;
+}
+@
+
+
+1.1.9.1
+log
+@OpenBSD just has imported exactly this tree into their vendor branch,
+called the same tag, in XF4/xc
+This is, apparently, the last XFree86 snapshot before the licence change
+(ie, addition of the advertising clause)
+
+Since the developers don't see any problems with that, and we would like
+to integrate improvements done by the remaining one or two (or so) XFree86
+developers (j/k), this prepares enabling us to update X-Window in the future.
+@
+text
+@a30 1
+ *
+d33 1
+d36 5
+a40 1
+drm_file_t *DRM(find_file_by_proc)(drm_device_t *dev, DRM_STRUCTPROC *p)
+d43 1
+a43 1
+	uid_t uid = p->td_ucred->cr_svuid;
+a50 2
+	DRM_SPINLOCK_ASSERT(&dev->dev_lock);
+
+d57 3
+a59 2
+/* DRM(open_helper) is called whenever a process opens /dev/drm. */
+int DRM(open_helper)(dev_t kdev, int flags, int fmt, DRM_STRUCTPROC *p,
+d68 2
+d71 1
+a71 1
+	DRM_DEBUG("pid = %d, minor = %d\n", DRM_CURRENTPID, m);
+d73 2
+a74 2
+	DRM_LOCK();
+	priv = DRM(find_file_by_proc)(dev, p);
+a78 4
+		if (priv == NULL) {
+			DRM_UNLOCK();
+			return DRM_ERR(ENOMEM);
+		}
+d81 1
+a81 1
+		priv->uid		= p->td_ucred->cr_svuid;
+d92 2
+a93 4
+		priv->authenticated	= !DRM_SUSER(p);
+
+		DRIVER_OPEN_HELPER( priv, dev );
+
+d95 1
+d97 1
+a97 2
+	DRM_UNLOCK();
+#ifdef __FreeBSD__
+d99 2
+a100 1
+#endif
+d105 48
+a152 2
+/* The DRM(read) and DRM(poll) are stubs to prevent spurious errors
+ * on older X Servers (4.3.0 and earlier) */
+d154 1
+a154 1
+int DRM(read)(dev_t kdev, struct uio *uio, int ioflag)
+d156 40
+d199 20
+a218 1
+int DRM(poll)(dev_t kdev, int events, DRM_STRUCTPROC *p)
+d220 3
+a222 1
+	return 0;
+@
+
+
+1.1.1.1
+log
+@Import OpenBSD 3.3 XF4 repository from CTM 3132 the first time
+This finalizes starting an OpenBSD-mirabile (aka MirBSD) repository.
+
+### MirBSD is:
+# Copyright (c) 1982-2003 by Thorsten "mirabile" Glaser <x86@@ePost.de>
+# Copyright © 1968-2003  The authors of And contributors to UNIX®, the
+#       C Language, BSD/Berkeley Unix; 386BSD, NetBSD 1.1 and OpenBSD.
+#
+# Anyone who obtained a copy of this work is hereby permitted to freely use,
+# distribute, modify, merge, sublicence, give away or sell it as long as the
+# authors are given due credit and the following notice is retained:
+#
+# This work is provided "as is", with no explicit or implicit warranty what-
+# soever. Use it only at your own risk. In no event may an author or contri-
+# butor be held liable for any damage, directly or indirectly, that origina-
+# ted through or is caused by creation or modification of this work.
+
+MirBSD is my private tree. MirBSD does not differ very much from OpenBSD
+and intentionally tracks OpenBSD. That's why it _is_ OpenBSD, just not the
+official one. It's like with DarrenBSD.
+
+At time of this writing, no advertising for MirBSD must be done,
+because the advertising clause has not yet been sorted out.
+
+http://templeofhate.com/tglaser/MirBSD/index.php
+@
+text
+@@
+
+
+1.1.1.2
+log
+@The X-Windowing System
+
+Import XFree86 4.3 from OpenBSD by CTM, in the hope it's stable
+@
+text
+@d33 1
+d36 5
+a40 1
+drm_file_t *DRM(find_file_by_proc)(drm_device_t *dev, DRM_STRUCTPROC *p)
+d59 1
+a59 1
+int DRM(open_helper)(dev_t kdev, int flags, int fmt, DRM_STRUCTPROC *p,
+d69 1
+a69 1
+		return DRM_ERR(EINVAL);
+d71 1
+a71 1
+	DRM_DEBUG("pid = %d, minor = %d\n", DRM_CURRENTPID, m);
+d92 2
+a93 2
+		priv->authenticated	= !DRM_SUSER(p);
+		DRM_LOCK;
+d95 1
+a95 1
+		DRM_UNLOCK;
+d97 1
+a97 1
+#ifdef __FreeBSD__
+d99 2
+a100 1
+#endif
+d111 1
+a111 1
+	DRM_DEVICE;
+a158 3
+#ifdef __NetBSD__
+	struct proc *p;
+#endif /* __NetBSD__ */
+a188 1
+#ifdef __FreeBSD__
+a190 3
+#if __FreeBSD_version >= 500000
+		pgsigio(&dev->buf_sigio, SIGIO, 0);
+#else
+a191 1
+#endif /* __FreeBSD_version */
+a192 9
+#endif /* __FreeBSD__ */
+#ifdef __NetBSD__
+	if (dev->buf_pgid) {
+		DRM_DEBUG("dev->buf_pgid=%d\n", dev->buf_pgid);
+		if(dev->buf_pgid > 0)
+			gsignal(dev->buf_pgid, SIGIO);
+		else if(dev->buf_pgid && (p = pfind(-dev->buf_pgid)) != NULL)
+			psignal(p, SIGIO);
+#endif /* __NetBSD__ */
+d199 1
+a199 1
+int DRM(poll)(dev_t kdev, int events, DRM_STRUCTPROC *p)
+d201 1
+a201 1
+	DRM_DEVICE;
+d220 3
+a222 11
+#if DRM_DEBUG_CODE
+	DRM_DEVICE;
+#endif
+#ifdef __FreeBSD__
+	DRM_DEBUG("pid = %d, device = %p, open_count = %d\n",
+		  curproc->p_pid, dev->device, dev->open_count);
+#elif defined(__NetBSD__)
+	DRM_DEBUG("pid = %d, device = %p, open_count = %d\n",
+		  curproc->p_pid, &dev->device, dev->open_count);
+#endif
+	return 0;
+@
+
+
+1.1.1.3
+log
+@That's what OpenBSD will, probably, ship as XF4 in 3.5
+their last sync against XFree86 4.3-current has been
+imported into our vendor branch, too
+@
+text
+@a30 1
+ *
+d38 1
+a38 1
+	uid_t uid = p->td_ucred->cr_svuid;
+a45 2
+	DRM_SPINLOCK_ASSERT(&dev->dev_lock);
+
+d52 2
+a53 1
+/* DRM(open_helper) is called whenever a process opens /dev/drm. */
+d63 2
+d68 2
+a69 2
+	DRM_LOCK();
+	priv = DRM(find_file_by_proc)(dev, p);
+a73 4
+		if (priv == NULL) {
+			DRM_UNLOCK();
+			return DRM_ERR(ENOMEM);
+		}
+d76 1
+a76 1
+		priv->uid		= p->td_ucred->cr_svuid;
+d88 1
+a88 3
+
+		DRIVER_OPEN_HELPER( priv, dev );
+
+d90 1
+a91 1
+	DRM_UNLOCK();
+d99 3
+a101 2
+/* The DRM(read) and DRM(poll) are stubs to prevent spurious errors
+ * on older X Servers (4.3.0 and earlier) */
+d103 1
+a103 1
+int DRM(read)(dev_t kdev, struct uio *uio, int ioflag)
+d105 102
+d212 29
+@
+
+

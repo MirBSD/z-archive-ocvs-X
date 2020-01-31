@@ -1,0 +1,367 @@
+head	1.12;
+access;
+symbols;
+locks; strict;
+comment	@# @;
+
+
+1.12
+date	2005.03.05.20.15.34;	author tg;	state Exp;
+branches;
+next	1.11;
+
+1.11
+date	2005.02.28.22.14.40;	author tg;	state Exp;
+branches;
+next	1.10;
+
+1.10
+date	2005.02.28.22.10.00;	author tg;	state Exp;
+branches;
+next	1.9;
+
+1.9
+date	2005.02.28.20.59.31;	author tg;	state Exp;
+branches;
+next	1.8;
+
+1.8
+date	2005.02.28.20.35.03;	author tg;	state Exp;
+branches;
+next	1.7;
+
+1.7
+date	2005.02.27.12.32.47;	author tg;	state Exp;
+branches;
+next	1.6;
+
+1.6
+date	2005.02.27.12.28.13;	author tg;	state Exp;
+branches;
+next	1.5;
+
+1.5
+date	2005.02.26.14.08.39;	author tg;	state Exp;
+branches;
+next	1.4;
+
+1.4
+date	2005.02.26.12.43.42;	author tg;	state Exp;
+branches;
+next	1.3;
+
+1.3
+date	2005.02.24.19.27.54;	author tg;	state Exp;
+branches;
+next	1.2;
+
+1.2
+date	2005.02.23.22.34.41;	author tg;	state Exp;
+branches;
+next	1.1;
+
+1.1
+date	2005.02.23.22.29.23;	author tg;	state Exp;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.12
+log
+@[18:29] <benz> + mmake install BINDIR=/usr/mpkg/bin MANDIR=/usr/mpkg/man/cat
+[18:29] <benz> install -c -s -o root -g bin  -m 555 pax /usr/mpkg/bin/
+[18:29] <benz> install -c -o root -g bin  -m 444 pax.cat1 /usr/mpkg/man/cat1/pax.0
+[18:29] <benz> install: /usr/mpkg/man/cat1/pax.0: No such file or directory
+[18:29] <benz> *** Error code 71
+[18:29] <benz> MIRA!
+
+looks like I missed some mkdir -p magic
+
+[18:30] <benz> fang ich halt nochmal an und erstelle die verzeichnisse manuell
+
+a good idea if you want to continue ;)
+remember, "pax mirabilis" aka MirCpio went in late,
+so I couldn't test all.
+
+[18:38] <benz> man sollte vielleicht den mtree-schritt vorziehen
+
+I'd like to do this, but I'm _not_ going to waste ANY
+effort in a GNU bash script.
+
+Eventually, darwin-setup.sh will be split into
+- darwin-setup.sh (bash)
+- darwin-setup-stage2.sh (mksh)
+Then, yes.
+@
+text
+@#!/bin/bash
+# $MirOS: src/share/misc/licence.template,v 1.1 2005/02/11 14:23:55 tg Rel $
+#-
+# Copyright (c) 2005
+#	Thorsten "mirabile" Glaser <tg@@66h.42h.de>
+#
+# Licensee is hereby permitted to deal in this work without restric-
+# tion, including unlimited rights to use, publicly perform, modify,
+# merge, distribute, sell, give away or sublicence, provided all co-
+# pyright notices above, these terms and the disclaimer are retained
+# in all redistributions or reproduced in accompanying documentation
+# or other materials provided with binary redistributions.
+#
+# All advertising materials mentioning features or use of this soft-
+# ware must display the following acknowledgement:
+#	This product includes material provided by Thorsten Glaser.
+#
+# Licensor hereby provides this work "AS IS" and WITHOUT WARRANTY of
+# any kind, expressed or implied, to the maximum extent permitted by
+# applicable law, but with the warranty of being written without ma-
+# licious intent or gross negligence; in no event shall licensor, an
+# author or contributor be held liable for any damage, direct, indi-
+# rect or other, however caused, arising in any way out of the usage
+# of this work, even if advised of the possibility of such damage.
+#-
+# Retrieve prerequisites for running MirPorts on Mac OSX
+
+export PATH=/bin:/sbin:/usr/bin:/usr/sbin
+
+bd=$(cd $(dirname $0); pwd)
+td=$(cd $bd/../../..; pwd)
+
+#target=${1:-/usr/mpkg}
+mirror=$1 # will be $2
+binown=$(echo "${2:-root:bin}" | sed 's/:.*$//') # will be $3
+bingrp=$(echo "${2:-root:bin}" | sed 's/^.*://') # will be $3
+[ -z $mirror ] && mirror=http://mirbsd.mirsolutions.de/MirOS/distfiles/
+
+mksh=mirbsdksh-R20.cpio.gz
+make=mirmake-20050228.cpio.gz
+mtar=paxmirabilis-20050228.cpio.gz
+
+T=$(mktemp -d /tmp/mirports.XXXXXXXXXX) || { echo Cannot generate temp dir; \
+    exit 1; }
+
+cd $T
+case "$mirror" in
+/*)	# file
+	echo cp $mirror/$mksh .
+	cp $mirror/$mksh .
+	echo cp $mirror/$make .
+	cp $mirror/$make .
+	echo cp $mirror/$mtar .
+	cp $mirror/$mtar .
+	;;
+*)	# http
+	echo ftp $mirror$mksh
+	ftp $mirror$mksh
+	echo ftp $mirror$make
+	ftp $mirror$make
+	echo ftp $mirror$mtar
+	ftp $mirror$mtar
+	;;
+esac
+echo 'checking MD5 sums... (tell Apple to make RMD160 part of the base OS!)'
+md5 $mksh >s
+md5 $make >>s
+md5 $mtar >>s
+echo "MD5 ($mksh) = 2267876639a682dd8d43f28aa697241c" >t
+echo "MD5 ($make) = 8f09cb31652a23207b4f4fa4cf26a2b0" >>t
+echo "MD5 ($mtar) = e7169bcb482f3d3be30848a5d9993f3e" >>t
+
+if ! cmp -s s t; then
+	echo Checksum failure!
+	diff -u12 s t | fgrep MD5
+	cd $td
+	rm -rf $T
+	exit 1
+fi
+
+set -e # XXX should set up a trap, but...
+set -x
+
+gzip -dc $mksh | cpio -id
+cd ksh
+SHELL=/bin/bash WEIRD_OS=1 bash ./Build.sh
+install -c -s -o $binown -g $bingrp -m 555 mksh /bin/mksh
+install -c -o $binown -g $bingrp -m 444 mksh.1 /usr/share/man/man1/mksh.1
+if ! fgrep /bin/mksh /etc/shells >/dev/null 2>&1; then
+	echo /bin/mksh >>/etc/shells
+fi
+cd ..
+rm -rf ksh
+
+gzip -dc $make | cpio -id
+cd mirmake
+SHELL=/bin/mksh /bin/mksh ./Build.sh \
+    Darwin /usr/mpkg man/man mmake \
+    "" "" Darwin \
+    /bin/mksh $binown:$bingrp
+/bin/mksh ./Install.sh
+cd ..
+export PATH=/usr/mpkg/bin:$PATH
+rm -rf mirmake
+
+gzip -dc $mtar | cpio -id
+cd pax
+SHELL=/bin/mksh mmake obj
+SHELL=/bin/mksh mmake depend
+SHELL=/bin/mksh mmake
+mkdir -p /usr/mpkg/bin /usr/mpkg/man/cat1
+SHELL=/bin/mksh mmake install BINDIR=/usr/mpkg/bin MANDIR=/usr/mpkg/man/cat
+cd ..
+rm -rf pax
+
+cd $td
+rm -rf $T
+mmake setup SHELL=/bin/mksh
+@
+
+
+1.11
+log
+@/usr/mpkg/bin before /bin, /usr/bin in PATH!
+@
+text
+@d111 1
+@
+
+
+1.10
+log
+@improve checksum failing programme and update MirMake with tsort
+@
+text
+@d103 1
+a103 1
+export PATH=$PATH:/usr/mpkg/bin
+@
+
+
+1.9
+log
+@right checksum but wrong date
+@
+text
+@d70 1
+a70 1
+echo "MD5 ($make) = 3b2b88719c2edb30019c3d9aa7e99dc6" >>t
+d75 1
+@
+
+
+1.8
+log
+@switch to $PKG_CMDDIR/mirports_tar for creating packages
+on Darwin (and maybe later, on old MirOS and OpenBSD versions),
+this is MirCpio (which is built by darwin-setup.sh)
+@
+text
+@d40 1
+a40 1
+make=mirmake-20050226.cpio.gz
+@
+
+
+1.7
+log
+@oops
+@
+text
+@d41 1
+d53 2
+d61 2
+d68 1
+d70 2
+a71 1
+echo "MD5 ($make) = 8649ff735f1eb5c41d03bc4fbc65b7c5" >>t
+d82 1
+d93 1
+d101 13
+a115 1
+export PATH=$PATH:/usr/mpkg/bin
+@
+
+
+1.6
+log
+@allow "downloading" from local file
+
+"Au ja!" and requested by cnuke@@
+@
+text
+@d49 2
+a50 2
+	cp $mirror/$make .
+	echo cp $mirror/$mksh .
+@
+
+
+1.5
+log
+@use mirmake of today
+@
+text
+@d46 14
+a59 4
+echo ftp $mirror$mksh
+ftp $mirror$mksh
+echo ftp $mirror$make
+ftp $mirror$make
+@
+
+
+1.4
+log
+@fix mktemp calls, Darwin mktemp(1) (FreeBSD!) doesn't like
+to be called w/o template (wtf?!)
+@
+text
+@d40 1
+a40 1
+make=mirmake-20050223.cpio.gz
+d53 2
+a54 2
+echo 'MD5 (mirbsdksh-R20.cpio.gz) = 2267876639a682dd8d43f28aa697241c' >t
+echo 'MD5 (mirmake-20050223.cpio.gz) = c222d1abed90904677523ffcbeb4d494' >>t
+@
+
+
+1.3
+log
+@add /bin/mksh as an available shell for users
+@
+text
+@d42 2
+a43 1
+T=$(mktemp -d /tmp/mirports.XXXXXXXXXX) || { echo Cannot generate temp dir; exit 1; }
+@
+
+
+1.2
+log
+@fix (as much as I can test it)
+@
+text
+@d69 3
+@
+
+
+1.1
+log
+@first stomp at the promised install script
+now I wish I had (sudo access to) a mac to test
+@
+text
+@d42 1
+a42 1
+T=$(mktemp -d) || { echo Cannot generate temp dir; exit 1; }
+d45 1
+d47 1
+d49 1
+d62 2
+a63 1
+set -e
+@
+

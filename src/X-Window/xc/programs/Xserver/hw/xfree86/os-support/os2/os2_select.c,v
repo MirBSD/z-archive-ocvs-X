@@ -1,0 +1,1565 @@
+head	1.2;
+access;
+symbols
+	tg-mergetmp-2:1.2
+	cvs-200410241530:1.1.1.2
+	cvs-200410012000:1.1.1.2
+	cvs-200407221130:1.1.1.2
+	cvs-200407141120:1.1.1.2
+	cvs-200406231010:1.1.1.2
+	MIRBSD_7quater:1.1.1.1
+	cvs-200405271510:1.1.1.2
+	XFree86_4_4_0:1.1.9.2
+	cvs-200403021700:1.1.1.2
+	XFREE86_20040213:1.1.9.1
+	xc:1.1.9
+	cvs-200401291925:1.1.1.1
+	MIRBSD_7_ALPHA:1.1.1.1.0.4
+	MIRBSD_7:1.1.1.1.0.2
+	MIRBSD_7ter:1.1.1.1
+	cvs-20011091815:1.1.1.1
+	cvs-200309162130:1.1.1.1
+	cvs-200308302005:1.1.1.1
+	ctmx-0387:1.1.1.1
+	ctmx-0384:1.1.1.1
+	MIRBSD_5:1.1.1.1
+	ctmx-0375:1.1.1.1
+	ctmx-0373:1.1.1.1
+	ctm-0371:1.1.1.1
+	ctm-0370:1.1.1.1
+	MIRBSD_4:1.1.1.1
+	ctm-0363:1.1.1.1
+	ctm-0359:1.1.1.1
+	ctm-0349:1.1.1.1
+	openbsd:1.1.1;
+locks; strict;
+comment	@ * @;
+
+
+1.2
+date	2004.03.07.18.38.35;	author tg;	state Stab;
+branches;
+next	1.1;
+
+1.1
+date	2003.03.22.20.08.53;	author tg;	state Exp;
+branches
+	1.1.1.1
+	1.1.9.1;
+next	;
+
+1.1.1.1
+date	2003.03.22.20.08.53;	author tg;	state Exp;
+branches;
+next	1.1.1.2;
+
+1.1.1.2
+date	2004.03.02.18.25.42;	author tg;	state Exp;
+branches;
+next	;
+
+1.1.9.1
+date	2004.02.14.19.25.19;	author tg;	state Exp;
+branches;
+next	1.1.9.2;
+
+1.1.9.2
+date	2004.03.05.22.34.23;	author tg;	state Exp;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.2
+log
+@semi-automagic merge of these files (ie, I've skipped through the diffs,
+and most of that was done by cvs or that weird script of some minutes ago)
+@
+text
+@/* $XConsortium: os2_select.c /main/6 1996/10/27 11:48:55 kaleb $ */
+
+
+
+
+/* $XFree86: xc/programs/Xserver/hw/xfree86/os-support/os2/os2_select.c,v 3.10 2004/02/14 00:10:18 dawes Exp $ */
+
+/*
+ * (c) Copyright 1996 by Sebastien Marineau
+ *			<marineau@@genie.uottawa.ca>
+ *     Modified 1999 by Holger.Veit@@gmd.de
+ *     Modified 2004 by Frank Giessler
+ *			<giessler@@biomag.uni-jena.de>
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a
+ * copy of this software and associated documentation files (the "Software"),
+ * to deal in the Software without restriction, including without limitation
+ * the rights to use, copy, modify, merge, publish, distribute, sublicense,
+ * and/or sell copies of the Software, and to permit persons to whom the
+ * Software is furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in
+ * all copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL
+ * HOLGER VEIT  BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY,
+ * WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF
+ * OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+ * SOFTWARE.
+ *
+ * Except as contained in this notice, the name of Sebastien Marineau shall not be
+ * used in advertising or otherwise to promote the sale, use or other dealings
+ * in this Software without prior written authorization from Sebastien Marineau.
+ *
+ */
+
+/* os2_select.c: reimplementation of the xserver select(), optimized for speed */
+
+#include <stdlib.h>
+#include <stdio.h>
+#include <memory.h>
+#include <io.h>
+#include <sys/types.h>
+#include <sys/time.h>
+#include <sys/errno.h>
+#include <emx/io.h>
+
+#define I_NEED_OS2_H
+#define INCL_DOSSEMAPHORES
+#define INCL_DOSPROFILE
+#define INCL_DOSPROCESS
+#define INCL_DOSFILEMGR
+#define INCL_DOSMISC
+#define INCL_DOSMODULEMGR
+
+
+#include "Xpoll.h"
+#include "xf86.h"
+#include "xf86Priv.h"
+#include "xf86_OSlib.h"
+
+#include "os2_select.h"
+
+int os2MouseQueueQuery();
+int os2KbdQueueQuery();
+void os2RecoverFromPopup();
+void os2CheckPopupPending();
+void os2SocketMonitorThread();
+extern BOOL os2PopupErrorPending;
+
+extern HEV hKbdSem;
+extern HEV hMouseSem;
+extern HEV hevServerHasFocus;
+HEV hPipeSem;
+HEV hSocketSem;
+HEV hActivateSocketSem;
+HEV hSwitchToSem;
+static HMUX hSelectWait;
+SEMRECORD SelectMuxRecord[5];
+HMODULE hmod_so32dll;
+static struct select_data sd;
+
+static int (*os2_tcp_select)(int *,int,int,int,long);
+static int (*os2_so_cancel)(int);
+static int (*os2_sock_errno)();
+int os2_set_error(ULONG);
+extern int _files[];
+
+
+
+/* This is a new implementation of select, for improved efficiency */
+/* This function performs select() on sockets  */
+/* but uses OS/2 internal fncts to check mouse */
+/* and keyboard. S. Marineau, 27/4/96          */
+
+/* This is still VERY messy */
+
+/* A few note on optimizations: this select has been tuned for maximum
+* performance, and thus has a different approach than a general-purpose
+* select. It should not be used in another app without modifications. Further,
+* it may need modifications if the Xserver os code is modified
+* Assumptions: this is never called with anything in exceptfds. This is
+* silently ignored. Further, if any pipes are specified in the write mask, it is
+* because they have just been stuffed full by the xserver. There is not much
+* in immediately returning with those bits set. Instead, we block on the
+* semaphore for at least one tick, which will let the client at least start
+* to flush the pipe. */
+
+int os2PseudoSelect(nfds,readfds,writefds,exceptfds,timeout)
+	int nfds;
+	fd_set *readfds,*writefds,*exceptfds;
+	struct timeval *timeout;
+{
+
+	static BOOL FirstTime=TRUE;
+
+	int n,ns,np;
+	int ready_handles;
+	ULONG timeout_ms;
+	BOOL any_ready;
+	ULONG semKey,postCount;
+	APIRET rc;
+	char faildata[16];
+	static int Socket_Tid;
+
+	sd.have_read=FALSE; sd.have_write=FALSE;
+	sd.socket_nread=0; sd.socket_nwrite=0; sd.socket_ntotal=0;
+	sd.max_fds=31; ready_handles=0; any_ready=FALSE;
+	sd.pipe_ntotal=0; sd.pipe_have_write=FALSE;
+
+	/* Stuff we have to do the first time this is called to set up various parameters */
+
+	if (FirstTime) {
+		/* First load the so32dll.dll module and get a pointer to the SELECT fn */
+
+		if ((rc=DosLoadModule(faildata,sizeof(faildata),"SO32DLL",&hmod_so32dll))!=0) {
+			FatalError("Could not load module so32dll.dll, rc = %d. Error note %s\n",rc,faildata);
+		}
+		if ((rc = DosQueryProcAddr(hmod_so32dll, 0, "SELECT", (PPFN)&os2_tcp_select))!=0) {
+			FatalError("Could not query address of SELECT, rc = %d.\n",rc);
+		}
+		if ((rc = DosQueryProcAddr(hmod_so32dll, 0, "SO_CANCEL", (PPFN)&os2_so_cancel))!=0) {
+			FatalError("Could not query address of SO_CANCEL, rc = %d.\n",rc);
+		}
+		if ((rc = DosQueryProcAddr(hmod_so32dll, 0, "SOCK_ERRNO", (PPFN)&os2_sock_errno))!=0) {
+			FatalError("Could not query address of SOCK_ERRNO, rc = %d.\n",rc);
+		}
+
+		/* Call these a first time to set the semaphore */
+		xf86OsMouseEvents();
+		xf86KbdEvents();
+
+		DosCreateEventSem(NULL, &hSocketSem,DC_SEM_SHARED,FALSE);
+		DosResetEventSem(hSocketSem,&postCount);
+
+		DosCreateEventSem(NULL, &hActivateSocketSem, DC_SEM_SHARED, FALSE);
+		DosResetEventSem(hActivateSocketSem, &postCount);
+
+		DosCreateEventSem(NULL, &hSwitchToSem, DC_SEM_SHARED, FALSE);
+		DosResetEventSem(hSwitchToSem, &postCount);
+
+		Socket_Tid = _beginthread(os2SocketMonitorThread, NULL, 0x2000,(void *) NULL);
+		xf86Msg(X_INFO,
+			"Started Socket monitor thread, TID=%d\n",Socket_Tid);
+
+		SelectMuxRecord[0].hsemCur = (HSEM)hMouseSem;
+		SelectMuxRecord[0].ulUser = MOUSE_SEM_KEY;
+		SelectMuxRecord[1].hsemCur = (HSEM)hKbdSem;
+		SelectMuxRecord[1].ulUser = KBD_SEM_KEY;
+		SelectMuxRecord[2].hsemCur = (HSEM)hPipeSem;
+		SelectMuxRecord[2].ulUser = PIPE_SEM_KEY;
+		SelectMuxRecord[3].hsemCur = (HSEM)hSocketSem;
+		SelectMuxRecord[3].ulUser = SOCKET_SEM_KEY;
+		SelectMuxRecord[4].hsemCur = (HSEM)hSwitchToSem;
+		SelectMuxRecord[4].ulUser = SWITCHTO_SEM_KEY;
+		
+		rc = DosCreateMuxWaitSem(NULL, &hSelectWait, 5, SelectMuxRecord,
+                DC_SEM_SHARED | DCMW_WAIT_ANY);
+		if (rc) {
+			xf86Msg(X_ERROR,"Could not create MuxWait semaphore, rc=%d\n",rc);
+		}
+		FirstTime = FALSE;
+	}
+
+	rc = DosResetEventSem(hActivateSocketSem, &postCount);
+	/* Set up the time delay structs */
+
+	if (timeout!=NULL) {
+	timeout_ms=timeout->tv_sec*1000+timeout->tv_usec/1000;
+	} else {
+		timeout_ms=1000000;  /* This should be large enough... */
+	}
+
+	/* Zero our local fd_masks */
+	{FD_ZERO(&sd.read_copy);}
+	{FD_ZERO(&sd.write_copy);}
+
+	/* Copy the masks for later use */
+	if (readfds!=NULL) { XFD_COPYSET(readfds,&sd.read_copy); sd.have_read=TRUE; }
+	if (writefds!=NULL) {XFD_COPYSET(writefds,&sd.write_copy); sd.have_write=TRUE; }
+
+	/* And zero the original masks */
+	if (sd.have_read){ FD_ZERO(readfds); }
+	if (sd.have_write) {FD_ZERO(writefds); }
+	if (exceptfds != NULL) {FD_ZERO(exceptfds); }
+
+	/* Now we parse the fd_sets passed to select and separate pipe/sockets */
+	n = os2_parse_select(&sd,nfds);
+
+	/* Now check if we have sockets ready! */
+
+	if (sd.socket_ntotal > 0) {
+		ns = os2_poll_sockets(&sd,readfds,writefds);
+		if (ns>0) {
+			ready_handles+=ns;
+			any_ready = TRUE;
+		} else if (ns == -1) {
+			return(-1);
+		}
+	}
+
+	/* And pipes */
+
+	if (sd.pipe_ntotal > 0) {
+           np = os2_check_pipes(&sd,readfds,writefds);
+		if (np > 0) {
+			ready_handles+=np;
+			any_ready = TRUE;
+		} else if (np == -1) {
+			return(-1);
+		}
+	}
+
+	/* And finally poll input devices */
+	if(!os2MouseQueueQuery() || !os2KbdQueueQuery() ) any_ready = TRUE;
+
+	if (xf86Info.vtRequestsPending) any_ready=TRUE;
+
+	if (os2PopupErrorPending)
+		os2RecoverFromPopup();
+
+	if (!any_ready && timeout_ms) {
+		DosResetEventSem(hSocketSem,&postCount);
+
+		/* Activate the socket thread */
+		if (sd.socket_ntotal>0) {
+			rc = DosPostEventSem(hActivateSocketSem);
+		}
+
+		rc = DosWaitMuxWaitSem(hSelectWait, timeout_ms, &semKey);
+
+		/* If our socket monitor thread is still blocked in os2_tcp_select()
+		 * we have to wake it up by calling os2_so_cancel().
+		 * After that, call os2_tcp_select() once more to get rid of
+		 * error SOCEINTR (10004)
+		 */
+		if (sd.socket_ntotal>0) {
+			rc = DosQueryEventSem(hSocketSem, &postCount);
+
+			if (postCount == 0) {		/* os2_select still blocked */
+				int i,f,g;
+				struct select_data *sd_ptr=&sd;
+
+				if (sd.socket_nread > 0) {
+					for (i=0; i<sd.socket_nread; i++) {
+						f = g = sd_ptr->tcp_select_mask[i];
+						os2_so_cancel(f);
+						os2_tcp_select(&g, 1, 0, 0, 0);  /* get rid of error 10004 */
+					}
+				}
+				if (sd.socket_nwrite > 0) {
+					for (i=sd.socket_nread;
+					     i<sd.socket_nread+sd.socket_nwrite;
+					     i++) {
+						f = g = sd_ptr->tcp_select_mask[i];
+						os2_so_cancel(f);
+						os2_tcp_select(&g, 0, 1, 0, 0); /* get rid of error 10004 */
+					}
+				}
+			} else {		/* not blocked, something must be ready -> get it */
+				ns = os2_poll_sockets(&sd,readfds,writefds);
+				if (ns>0) {
+					ready_handles+=ns;
+				} else if (ns == -1) {
+					return(-1);
+				}
+			}
+		}
+		if (sd.pipe_ntotal > 0) {
+			rc = DosQueryEventSem(hPipeSem,&postCount);
+			if (postCount > 0) {
+				np = os2_check_pipes(&sd,readfds,writefds);
+				if (np > 0) {
+					ready_handles+=np;
+				} else if (np == -1) {
+					return(-1);
+				}
+			}
+		}
+	}
+	/* The polling of sockets/pipe automatically set the proper bits */
+	return (ready_handles);
+}
+
+
+int os2_parse_select(sd,nfds)
+	struct select_data *sd;
+	int nfds;
+{
+   int i;
+	/* First we determine up to which descriptor we need to check.              */
+	/* No need to check up to 256 if we don't have to (and usually we dont...)*/
+	/* Note: stuff here is hardcoded for fd_sets which are int[8] as in EMX!!!    */
+
+	if (nfds > sd->max_fds) {
+		for (i=0;i<((FD_SETSIZE+31)/32);i++) {
+			if (sd->read_copy.fds_bits[i] ||
+			    sd->write_copy.fds_bits[i])
+				sd->max_fds=(i*32) +32;
+		}
+	} else { sd->max_fds = nfds; }
+
+	/* Check if this is greater than specified in select() call */
+	if(sd->max_fds > nfds) sd->max_fds = nfds;
+
+	if (sd->have_read) {
+		for (i = 0; i < sd->max_fds; ++i) {
+			if (FD_ISSET (i, &sd->read_copy)) {
+				if(_files[i] & F_SOCKET) {
+					sd->tcp_select_mask[sd->socket_ntotal]=_getsockhandle(i);
+					sd->tcp_emx_handles[sd->socket_ntotal]=i;
+					sd->socket_ntotal++; sd->socket_nread++;
+				} else if (_files[i] & F_PIPE) {
+					sd -> pipe_ntotal++;
+				}
+			}
+		}
+	}
+	if (sd->have_write) {
+		for (i = 0; i < sd->max_fds; ++i) {
+			if (FD_ISSET (i, &sd->write_copy)) {
+				if (_files[i] & F_SOCKET) {
+					sd->tcp_select_mask[sd->socket_ntotal]=_getsockhandle(i);
+					sd->tcp_emx_handles[sd->socket_ntotal]=i;
+					sd->socket_ntotal++; sd->socket_nwrite++;
+				} else if (_files[i] & F_PIPE) {
+					sd -> pipe_ntotal++;
+					sd -> pipe_have_write=TRUE;
+				}
+			}
+		}
+	}
+	return(sd->socket_ntotal);
+}
+
+
+int os2_poll_sockets(sd,readfds,writefds)
+	struct select_data *sd;
+	fd_set *readfds,*writefds;
+{
+	int e,i;
+	int j,n;
+
+	memcpy(sd->tcp_select_copy,sd->tcp_select_mask,
+	          sd->socket_ntotal*sizeof(int));
+
+	e = os2_tcp_select(sd->tcp_select_copy,sd->socket_nread,
+	                      sd->socket_nwrite, 0, 0);
+
+	if (e == 0) return(e);
+
+	/* We have something ready? */
+	if (e>0) {
+		j = 0; n = 0;
+		for (i = 0; i < sd->socket_nread; ++i, ++j)
+			if (sd->tcp_select_copy[j] != -1) {
+				FD_SET (sd->tcp_emx_handles[j], readfds);
+				n ++;
+			}
+		for (i = 0; i < sd->socket_nwrite; ++i, ++j)
+			if (sd->tcp_select_copy[j] != -1) {
+				FD_SET (sd->tcp_emx_handles[j], writefds);
+				n ++;
+			}
+		errno = 0;
+
+		return n;
+	}
+	if (e<0) {
+		/*Error -- TODO */
+		xf86Msg(X_ERROR,"Error in server select! sock_errno = %d\n",os2_sock_errno());
+		errno = EBADF;
+		return (-1);
+	}
+}
+
+/* Check to see if anything is ready on pipes */
+
+int os2_check_pipes(sd,readfds,writefds)
+	struct select_data *sd;
+	fd_set *readfds,*writefds;
+{
+	int i,e;
+	ULONG ulPostCount;
+	PIPESEMSTATE pipeSemState[128];
+	APIRET rc;
+
+	e = 0;
+	rc = DosResetEventSem(hPipeSem,&ulPostCount);
+	rc = DosQueryNPipeSemState((HSEM) hPipeSem, (PPIPESEMSTATE)&pipeSemState,
+	                              sizeof(pipeSemState));
+	if(rc) xf86Msg(X_ERROR,"SELECT: rc from QueryNPipeSem: %d\n",rc);
+	i=0;
+	while (pipeSemState[i].fStatus != 0) {
+/*           xf86Msg(X_INFO,"SELECT: sem entry, stat=%d, flag=%d, key=%d,avail=%d\n",
+                pipeSemState[i].fStatus,pipeSemState[i].fFlag,pipeSemState[i].usKey,
+                pipeSemState[i].usAvail);  */
+		if ((pipeSemState[i].fStatus == 1) &&
+		    (FD_ISSET(pipeSemState[i].usKey,&sd->read_copy))) {
+			FD_SET(pipeSemState[i].usKey,readfds);
+			e++;
+		} else if ((pipeSemState[i].fStatus == 2)  &&
+		           (FD_ISSET(pipeSemState[i].usKey,&sd->write_copy))) {
+			FD_SET(pipeSemState[i].usKey,writefds);
+			e++;
+		} else if ((pipeSemState[i].fStatus == 3) &&
+		           ((FD_ISSET(pipeSemState[i].usKey,&sd->read_copy)) ||
+		            (FD_ISSET(pipeSemState[i].usKey,&sd->write_copy)) )) {
+			errno = EBADF;
+			/* xf86Msg(X_ERROR,"Pipe has closed down, fd=%d\n",pipeSemState[i].usKey); */
+			return (-1);
+		}
+		i++;
+	} /* endwhile */
+
+	errno = 0;
+	return(e);
+}
+
+
+void os2SocketMonitorThread(void *arg)
+{
+	struct select_data *sd_ptr = &sd;
+	ULONG ulPostCount;
+	int e,rc;
+
+	/* Make thread time critical */
+	DosSetPriority(2L,3L,0L,0L);
+
+	while (1) {
+		rc = DosWaitEventSem(hActivateSocketSem, SEM_INDEFINITE_WAIT);
+		if (rc != 0 )
+			xf86Msg(X_ERROR,"Socket monitor: DosWaitEventSem(hActivateSocketSem..) returned %d\n",rc);
+
+		rc = DosResetEventSem(hActivateSocketSem,&ulPostCount);
+		if (rc != 0 )
+			xf86Msg(X_ERROR,"Socket monitor: DosResetEventSem(&hActivateSocketSem..) returned %d\n",rc);
+
+		/* fg300104:
+		 * The next line shouldn't be here, but the DosPostEventSem()
+		 * below will return 299 from time to time under heavy load
+		 */
+/*		DosResetEventSem(hSocketSem,&ulPostCount);*/
+
+		memcpy(sd_ptr->tcp_select_monitor,sd_ptr->tcp_select_mask,
+		        sd_ptr->socket_ntotal*sizeof(int));
+
+		/* call os2_select(), return only if either something is ready or
+		 * os2_so_cancel() was called
+		 */
+		e = os2_tcp_select(sd_ptr->tcp_select_monitor, sd_ptr->socket_nread,
+		                    sd_ptr->socket_nwrite, 0, -1);
+
+		if (e>0) {
+			rc = DosPostEventSem(hSocketSem);
+			if (rc != 0 )
+				xf86Msg(X_ERROR,"Socket monitor: DosPostEventSem(hSocketSem..) returned %d\n",rc);
+		} else if (e<0) {
+			rc = os2_sock_errno();
+			if (rc != 10004)
+				xf86Msg(X_ERROR,"Socket monitor: os2_select: sock_errno = %d\n",rc);
+		}
+
+		rc = DosQueryEventSem(hevServerHasFocus, &ulPostCount);
+
+		/* no need to rush while switched away */
+		if ((rc==0) && (ulPostCount==0))
+			rc == DosWaitEventSem(hevServerHasFocus,31L);
+	}
+}
+
+@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@d6 1
+a6 1
+/* $XFree86: xc/programs/Xserver/hw/xfree86/os-support/os2/os2_select.c,v 3.8 2000/04/05 18:13:53 dawes Exp $ */
+d11 3
+a13 1
+ *     Modified 1999 by Holger.Veit@@gmd.de 
+d15 5
+a19 5
+ * Permission is hereby granted, free of charge, to any person obtaining a 
+ * copy of this software and associated documentation files (the "Software"), 
+ * to deal in the Software without restriction, including without limitation 
+ * the rights to use, copy, modify, merge, publish, distribute, sublicense, 
+ * and/or sell copies of the Software, and to permit persons to whom the 
+d24 1
+a24 1
+ * 
+d27 4
+a30 4
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL 
+ * HOLGER VEIT  BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, 
+ * WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF 
+ * OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE 
+d32 1
+a32 1
+ * 
+d70 1
+a70 1
+void os2HighResTimerThread();
+d77 3
+a79 1
+HEV hHRTSem;
+a80 1
+Bool os2HRTimerFlag=FALSE;
+d83 1
+d86 2
+a88 1
+ULONG os2_get_sys_millis();
+d100 2
+a101 2
+/* A few note on optimizations: this select has been tuned for maximum 
+* performance, and thus has a different approach than a general-purpose 
+d103 2
+a104 2
+* it may need modifications if the Xserver os code is modified           
+* Assumptions: this is never called with anything in exceptfds. This is 
+d112 3
+a114 3
+int nfds;
+fd_set *readfds,*writefds,*exceptfds;
+struct timeval *timeout;
+d117 15
+a131 1
+static BOOL FirstTime=TRUE;
+d133 47
+a179 48
+int i,j,n,ns,np;
+int ready_handles;
+ULONG timeout_ms;
+BOOL any_ready;
+ULONG semKey,postCount,start_millis,now_millis;
+APIRET rc;
+char faildata[16];
+struct timeval dummy_timeout;
+struct select_data sd;
+static int HRT_Tid;
+
+sd.have_read=FALSE; sd.have_write=FALSE; 
+sd.socket_nread=0; sd.socket_nwrite=0; sd.socket_ntotal=0;
+sd.max_fds=31; ready_handles=0; any_ready=FALSE;
+sd.pipe_ntotal=0; sd.pipe_have_write=FALSE;
+
+/* Stuff we have to do the first time this is called to set up various parameters */
+
+if(FirstTime){
+   /* First load the so32dll.dll module and get a pointer to the SELECT fn */
+
+   if((rc=DosLoadModule(faildata,sizeof(faildata),"SO32DLL",&hmod_so32dll))!=0){
+        FatalError("Could not load module so32dll.dll, rc = %d. Error note %s\n",rc,faildata);
+        }
+   if((rc = DosQueryProcAddr(hmod_so32dll, 0, "SELECT", (PPFN)&os2_tcp_select))!=0){
+        FatalError("Could not query address of SELECT, rc = %d.\n",rc);
+        }
+   /* Call these a first time to set the semaphore */
+   xf86OsMouseEvents();
+   xf86KbdEvents();
+
+   DosCreateEventSem(NULL, &hHRTSem,DC_SEM_SHARED,FALSE);
+   DosResetEventSem(hHRTSem,&postCount);
+   if (os2HRTimerFlag) {
+	HRT_Tid = _beginthread(os2HighResTimerThread, NULL, 0x2000,(void *) NULL);
+	xf86Msg(X_INFO,
+		"Started high-resolution timer thread, TID=%d\n",HRT_Tid);
+        }
+  
+   SelectMuxRecord[0].hsemCur = (HSEM)hMouseSem;
+   SelectMuxRecord[0].ulUser = MOUSE_SEM_KEY;
+   SelectMuxRecord[1].hsemCur = (HSEM)hKbdSem;
+   SelectMuxRecord[1].ulUser = KBD_SEM_KEY;
+   SelectMuxRecord[2].hsemCur = (HSEM)hPipeSem;
+   SelectMuxRecord[2].ulUser = PIPE_SEM_KEY;
+   SelectMuxRecord[3].hsemCur = (HSEM)hHRTSem;
+   SelectMuxRecord[3].ulUser = HRT_SEM_KEY;
+   rc = DosCreateMuxWaitSem(NULL, &hSelectWait, 4, SelectMuxRecord,
+d181 5
+a185 5
+   if(rc){
+        xf86Msg(X_ERROR,"Could not create MuxWait semaphore, rc=%d\n",rc);
+        }
+   FirstTime = FALSE;
+}
+d187 2
+a188 1
+/* Set up the time delay structs */
+d190 1
+a190 1
+    if(timeout!=NULL) {
+d192 2
+a194 2
+    else { timeout_ms=1000000; }  /* This should be large enough... */
+    if(timeout_ms>0) start_millis=os2_get_sys_millis();
+d196 27
+a222 28
+/* Zero our local fd_masks */
+     {FD_ZERO(&sd.read_copy);}
+     {FD_ZERO(&sd.write_copy);}
+
+/* Copy the masks for later use */
+	     if(readfds!=NULL){ XFD_COPYSET(readfds,&sd.read_copy); sd.have_read=TRUE;}
+	     if(writefds!=NULL) {XFD_COPYSET(writefds,&sd.write_copy);sd.have_write=TRUE;}
+
+/* And zero the original masks */
+	     if(sd.have_read){ FD_ZERO(readfds);}
+	     if(sd.have_write) {FD_ZERO(writefds);}
+	     if(exceptfds != NULL) {FD_ZERO(exceptfds);}
+
+/* Now we parse the fd_sets passed to select and separate pipe/sockets */
+        n = os2_parse_select(&sd,nfds);
+
+/* Now check if we have sockets ready! */
+
+        if (sd.socket_ntotal > 0){
+           ns = os2_poll_sockets(&sd,readfds,writefds);
+           if(ns>0){
+               ready_handles+=ns;
+               any_ready = TRUE;
+               }
+           else if (ns == -1) {return(-1);}
+           }
+   
+/* And pipes */
+d224 3
+a226 1
+        if(sd.pipe_ntotal > 0){
+d228 23
+a250 50
+           if(np > 0){
+              ready_handles+=np;
+              any_ready = TRUE;
+              }
+           else if (np == -1) { return(-1); }
+          }
+
+/* ... */
+
+/* And finally poll input devices */
+         if(!os2MouseQueueQuery() || !os2KbdQueueQuery() ) any_ready = TRUE;
+
+        while(!any_ready && timeout_ms){
+                DosResetEventSem(hHRTSem,&postCount);
+                rc = DosWaitMuxWaitSem(hSelectWait, 5, &semKey);
+                if ((rc == 0) && (semKey != HRT_SEM_KEY) && (semKey != PIPE_SEM_KEY)){
+                   any_ready = TRUE;
+                   }
+                if (os2PopupErrorPending) {
+                        os2RecoverFromPopup();
+                        any_ready=TRUE;
+                        }
+                if(xf86Info.vtRequestsPending) any_ready=TRUE;
+                if (sd.socket_ntotal > 0){
+                   ns = os2_poll_sockets(&sd,readfds,writefds,exceptfds);
+                   if(ns>0){
+                        ready_handles+=ns;
+                        any_ready = TRUE;
+                       }
+                   else if (ns == -1) {return(-1);}
+                  }
+
+                rc = DosQueryEventSem(hPipeSem,&postCount);
+                if(postCount && (sd.pipe_ntotal > 0)){
+                        np = os2_check_pipes(&sd,readfds,writefds);
+                        if(np > 0){
+                        ready_handles+=np;
+                        any_ready = TRUE;
+                        }
+                        else if (np == -1) { 
+                                return(-1); }
+                      }
+
+
+                  if (i%8 == 0) { 
+                    now_millis = os2_get_sys_millis();
+                    if((now_millis-start_millis) > timeout_ms) timeout_ms = 0;
+                    }
+                  i++;
+             }
+d252 1
+a252 1
+/* The polling of sockets/pipe automatically set the proper bits */
+d254 51
+a304 1
+return (ready_handles);
+d309 2
+a310 2
+struct select_data *sd;
+int nfds;
+d313 14
+a326 53
+/* First we determine up to which descriptor we need to check.              */
+/* No need to check up to 256 if we don't have to (and usually we dont...)*/
+/* Note: stuff here is hardcoded for fd_sets which are int[8] as in EMX!!!    */
+
+
+  if(nfds > sd->max_fds){
+     for(i=0;i<((FD_SETSIZE+31)/32);i++){
+        if(sd->read_copy.fds_bits[i] ||
+            sd->write_copy.fds_bits[i])
+                        sd->max_fds=(i*32) +32;
+        }
+     }
+   else { sd->max_fds = nfds; }
+
+/* Check if this is greater than specified in select() call */
+  if(sd->max_fds > nfds) sd->max_fds = nfds;
+
+  if (sd->have_read)
+    {
+      for (i = 0; i < sd->max_fds; ++i) {
+        if (FD_ISSET (i, &sd->read_copy)){
+         if(_files[i] & F_SOCKET)
+           {
+            sd->tcp_select_mask[sd->socket_ntotal]=_getsockhandle(i);
+            sd->tcp_emx_handles[sd->socket_ntotal]=i;
+            sd->socket_ntotal++; sd->socket_nread++;
+           }
+         else if (_files[i] & F_PIPE)
+          {
+            sd -> pipe_ntotal++;
+          }
+        }
+      }
+    }
+
+  if (sd->have_write)
+    {
+      for (i = 0; i < sd->max_fds; ++i) {
+        if (FD_ISSET (i, &sd->write_copy)){
+         if(_files[i] & F_SOCKET)
+         {
+            sd->tcp_select_mask[sd->socket_ntotal]=_getsockhandle(i);
+            sd->tcp_emx_handles[sd->socket_ntotal]=i;
+            sd->socket_ntotal++; sd->socket_nwrite++;
+         }
+         else if (_files[i] & F_PIPE)
+          {
+            sd -> pipe_ntotal++;
+            sd -> pipe_have_write=TRUE;
+          }
+        }
+      }
+    }
+d328 28
+a355 1
+return(sd->socket_ntotal);
+d360 2
+a361 2
+struct select_data *sd;
+fd_set *readfds,*writefds;
+d363 10
+a372 7
+   int e,i;
+   int j,n;
+        memcpy(sd->tcp_select_copy,sd->tcp_select_mask,
+                sd->socket_ntotal*sizeof(int));
+ 
+        e = os2_tcp_select(sd->tcp_select_copy,sd->socket_nread,
+                sd->socket_nwrite, 0, 0);
+a373 1
+        if(e == 0) return(e);
+d375 23
+a397 25
+        if(e>0){
+            j = 0; n = 0;
+            for (i = 0; i < sd->socket_nread; ++i, ++j)
+                 if (sd->tcp_select_copy[j] != -1)
+                    {
+                    FD_SET (sd->tcp_emx_handles[j], readfds);
+                    n ++;
+                    }
+             for (i = 0; i < sd->socket_nwrite; ++i, ++j)
+                  if (sd->tcp_select_copy[j] != -1)
+                     {
+                     FD_SET (sd->tcp_emx_handles[j], writefds);
+                     n ++;
+                     }
+               errno = 0;
+               
+               return n;
+              }
+        if(e<0){
+           /*Error -- TODO */
+           xf86Msg(X_ERROR,"Error in server select! e=%d\n",e);
+           errno = EBADF;
+           return (-1);
+           }
+ }
+d402 2
+a403 2
+struct select_data *sd;
+fd_set *readfds,*writefds;
+d409 8
+a416 7
+        e = 0;
+        rc = DosResetEventSem(hPipeSem,&ulPostCount);
+        rc = DosQueryNPipeSemState((HSEM) hPipeSem, (PPIPESEMSTATE)&pipeSemState, 
+                sizeof(pipeSemState));
+        if(rc) xf86Msg(X_ERROR,"SELECT: rc from QueryNPipeSem: %d\n",rc);
+        i=0;
+        while (pipeSemState[i].fStatus != 0) {
+d420 17
+a436 19
+           if((pipeSemState[i].fStatus == 1) &&
+                    (FD_ISSET(pipeSemState[i].usKey,&sd->read_copy))){
+                FD_SET(pipeSemState[i].usKey,readfds);
+                e++;
+                }
+           else if((pipeSemState[i].fStatus == 2)  &&
+                    (FD_ISSET(pipeSemState[i].usKey,&sd->write_copy))){
+                FD_SET(pipeSemState[i].usKey,writefds);
+                e++;
+                }
+            else if( (pipeSemState[i].fStatus == 3) &&
+                ( (FD_ISSET(pipeSemState[i].usKey,&sd->read_copy)) ||
+                  (FD_ISSET(pipeSemState[i].usKey,&sd->write_copy)) )){
+                errno = EBADF;
+                /* xf86Msg(X_ERROR,"Pipe has closed down, fd=%d\n",pipeSemState[i].usKey); */
+                return (-1);
+                }
+            i++;
+            } /* endwhile */
+d443 1
+a443 8
+/* This thread runs with the high-res timer, timer0.sys */
+/* The semaphore hHRTSem gets posted every HRT_DELAY ms */
+/* Temptation may be strong to decrease this delay, but it already */
+/* consumes proportionally quite a bit of cpu and 12 ms seems quite good*/
+
+#define HRT_DELAY 12
+
+void os2HighResTimerThread(void* arg)
+d445 3
+a447 4
+	HFILE hTimer;
+	ULONG ulDelay,ulAction,ulSize,ulPostCount;
+	APIRET rc;
+	char *fmt;
+d449 2
+a450 2
+	ulDelay = HRT_DELAY;
+	ulSize=sizeof(ulDelay);
+a451 16
+	rc = DosOpen("TIMER0$",&hTimer,&ulAction,
+		0,0,OPEN_ACTION_OPEN_IF_EXISTS,
+		OPEN_FLAGS_FAIL_ON_ERROR | OPEN_SHARE_DENYNONE | OPEN_ACCESS_READWRITE, 
+		NULL);
+	if (rc) {
+		fmt = "Open TIMER0.SYS failed, rc=%d. No High-resolution available\n";
+		goto errexit2;
+	}
+	hTimer = _imphandle(hTimer);
+	if (hTimer<0) {
+		fmt = "Could not import handle from TIMER0.SYS, rc=%d.\n";
+		goto errexit2;
+	}
+
+	/* Make the thread time critical */
+	DosSetPriority(2L,3L,0L,0L);
+d453 31
+a483 18
+		rc = DosDevIOCtl(hTimer,0x80,5,
+				 &ulDelay,ulSize,&ulSize,
+				 NULL,0,NULL);
+		if (rc != 0) {
+			fmt = "Bad return code from timer0.sys, rc=%d\n";
+			goto errexit1;
+		}
+
+		rc = DosQueryEventSem(hHRTSem,&ulPostCount);
+		if (rc != 0) {
+			fmt = "Bad return code from QueryEventSem, rc=%d\n";
+			goto errexit1;
+		}
+
+		if (ulPostCount == 0) rc = DosPostEventSem(hHRTSem);
+		if (rc != 0 && rc != 299) {
+			fmt = "Bad return code from PostEventSem, rc=%d\n";
+			goto errexit1;
+d486 1
+a486 9
+		rc = DosQueryEventSem(hevServerHasFocus,&ulPostCount);
+		if (rc != 0) {
+			fmt = "Bad return code from QueryEventSem for server focus, rc=%d\n";
+			goto errexit1;
+		}
+
+		/* Disable the HRT timer thread while switched away. */
+		if (ulPostCount == 0) 
+			DosWaitEventSem(hevServerHasFocus, SEM_INDEFINITE_WAIT);
+d488 3
+a491 11
+
+	/* XXX reached? */
+	DosClose(hTimer);
+	return;
+
+	/* error catch blocks */
+errexit1:
+	DosClose(hTimer);
+errexit2:
+	xf86Msg(X_ERROR,fmt,rc);
+	DosExitList(0l,0l);
+a493 14
+ULONG os2_get_sys_millis() 
+{
+	APIRET rc;
+	ULONG milli;
+
+	rc = DosQuerySysInfo(14, 14, &milli, sizeof(milli));
+	if (rc) {
+	        xf86Msg(X_ERROR,
+			"Bad return code querying the millisecond counter! rc=%d\n",
+			rc);
+		return 0;
+	}
+	return milli;
+}
+@
+
+
+1.1.9.1
+log
+@OpenBSD just has imported exactly this tree into their vendor branch,
+called the same tag, in XF4/xc
+This is, apparently, the last XFree86 snapshot before the licence change
+(ie, addition of the advertising clause)
+
+Since the developers don't see any problems with that, and we would like
+to integrate improvements done by the remaining one or two (or so) XFree86
+developers (j/k), this prepares enabling us to update X-Window in the future.
+@
+text
+@d6 1
+a6 1
+/* $XFree86: xc/programs/Xserver/hw/xfree86/os-support/os2/os2_select.c,v 3.9 2003/03/25 04:18:24 dawes Exp $ */
+a418 1
+ULONG hrt_delay;
+a426 4
+	if ((hrt_delay > 0) && (hrt_delay < 21)) {
+		ulDelay = hrt_delay;
+		}
+	else {
+a427 2
+	}
+		
+a429 3
+#if 0
+	xf86Msg(X_INFO,"hrt_delay = %d\n", ulDelay);
+#endif
+@
+
+
+1.1.9.2
+log
+@Import XFree86 4.4 from The XFree86(TM) Project, Inc.
+(integrity cannot be checked)
+
+got via cvs -qd anoncvs@@anoncvs.xfree86.org:/cvs co -Prxf-4_4_0 xc
+@
+text
+@d6 1
+a6 1
+/* $XFree86: xc/programs/Xserver/hw/xfree86/os-support/os2/os2_select.c,v 3.10 2004/02/14 00:10:18 dawes Exp $ */
+d11 1
+a11 3
+ *     Modified 1999 by Holger.Veit@@gmd.de
+ *     Modified 2004 by Frank Giessler
+ *			<giessler@@biomag.uni-jena.de>
+d13 5
+a17 5
+ * Permission is hereby granted, free of charge, to any person obtaining a
+ * copy of this software and associated documentation files (the "Software"),
+ * to deal in the Software without restriction, including without limitation
+ * the rights to use, copy, modify, merge, publish, distribute, sublicense,
+ * and/or sell copies of the Software, and to permit persons to whom the
+d22 1
+a22 1
+ *
+d25 4
+a28 4
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL
+ * HOLGER VEIT  BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY,
+ * WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF
+ * OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+d30 1
+a30 1
+ *
+d68 1
+a68 1
+void os2SocketMonitorThread();
+d75 1
+a75 3
+HEV hSocketSem;
+HEV hActivateSocketSem;
+HEV hSwitchToSem;
+d77 1
+a79 1
+static struct select_data sd;
+a81 2
+static int (*os2_so_cancel)(int);
+static int (*os2_sock_errno)();
+d83 1
+d95 2
+a96 2
+/* A few note on optimizations: this select has been tuned for maximum
+* performance, and thus has a different approach than a general-purpose
+d98 2
+a99 2
+* it may need modifications if the Xserver os code is modified
+* Assumptions: this is never called with anything in exceptfds. This is
+d107 3
+a109 3
+	int nfds;
+	fd_set *readfds,*writefds,*exceptfds;
+	struct timeval *timeout;
+d112 1
+a112 33
+	static BOOL FirstTime=TRUE;
+
+	int n,ns,np;
+	int ready_handles;
+	ULONG timeout_ms;
+	BOOL any_ready;
+	ULONG semKey,postCount;
+	APIRET rc;
+	char faildata[16];
+	static int Socket_Tid;
+
+	sd.have_read=FALSE; sd.have_write=FALSE;
+	sd.socket_nread=0; sd.socket_nwrite=0; sd.socket_ntotal=0;
+	sd.max_fds=31; ready_handles=0; any_ready=FALSE;
+	sd.pipe_ntotal=0; sd.pipe_have_write=FALSE;
+
+	/* Stuff we have to do the first time this is called to set up various parameters */
+
+	if (FirstTime) {
+		/* First load the so32dll.dll module and get a pointer to the SELECT fn */
+
+		if ((rc=DosLoadModule(faildata,sizeof(faildata),"SO32DLL",&hmod_so32dll))!=0) {
+			FatalError("Could not load module so32dll.dll, rc = %d. Error note %s\n",rc,faildata);
+		}
+		if ((rc = DosQueryProcAddr(hmod_so32dll, 0, "SELECT", (PPFN)&os2_tcp_select))!=0) {
+			FatalError("Could not query address of SELECT, rc = %d.\n",rc);
+		}
+		if ((rc = DosQueryProcAddr(hmod_so32dll, 0, "SO_CANCEL", (PPFN)&os2_so_cancel))!=0) {
+			FatalError("Could not query address of SO_CANCEL, rc = %d.\n",rc);
+		}
+		if ((rc = DosQueryProcAddr(hmod_so32dll, 0, "SOCK_ERRNO", (PPFN)&os2_sock_errno))!=0) {
+			FatalError("Could not query address of SOCK_ERRNO, rc = %d.\n",rc);
+		}
+d114 48
+a161 29
+		/* Call these a first time to set the semaphore */
+		xf86OsMouseEvents();
+		xf86KbdEvents();
+
+		DosCreateEventSem(NULL, &hSocketSem,DC_SEM_SHARED,FALSE);
+		DosResetEventSem(hSocketSem,&postCount);
+
+		DosCreateEventSem(NULL, &hActivateSocketSem, DC_SEM_SHARED, FALSE);
+		DosResetEventSem(hActivateSocketSem, &postCount);
+
+		DosCreateEventSem(NULL, &hSwitchToSem, DC_SEM_SHARED, FALSE);
+		DosResetEventSem(hSwitchToSem, &postCount);
+
+		Socket_Tid = _beginthread(os2SocketMonitorThread, NULL, 0x2000,(void *) NULL);
+		xf86Msg(X_INFO,
+			"Started Socket monitor thread, TID=%d\n",Socket_Tid);
+
+		SelectMuxRecord[0].hsemCur = (HSEM)hMouseSem;
+		SelectMuxRecord[0].ulUser = MOUSE_SEM_KEY;
+		SelectMuxRecord[1].hsemCur = (HSEM)hKbdSem;
+		SelectMuxRecord[1].ulUser = KBD_SEM_KEY;
+		SelectMuxRecord[2].hsemCur = (HSEM)hPipeSem;
+		SelectMuxRecord[2].ulUser = PIPE_SEM_KEY;
+		SelectMuxRecord[3].hsemCur = (HSEM)hSocketSem;
+		SelectMuxRecord[3].ulUser = SOCKET_SEM_KEY;
+		SelectMuxRecord[4].hsemCur = (HSEM)hSwitchToSem;
+		SelectMuxRecord[4].ulUser = SWITCHTO_SEM_KEY;
+		
+		rc = DosCreateMuxWaitSem(NULL, &hSelectWait, 5, SelectMuxRecord,
+d163 5
+a167 5
+		if (rc) {
+			xf86Msg(X_ERROR,"Could not create MuxWait semaphore, rc=%d\n",rc);
+		}
+		FirstTime = FALSE;
+	}
+d169 1
+a169 2
+	rc = DosResetEventSem(hActivateSocketSem, &postCount);
+	/* Set up the time delay structs */
+d171 1
+a171 1
+	if (timeout!=NULL) {
+a172 2
+	} else {
+		timeout_ms=1000000;  /* This should be large enough... */
+d174 2
+d177 28
+a204 27
+	/* Zero our local fd_masks */
+	{FD_ZERO(&sd.read_copy);}
+	{FD_ZERO(&sd.write_copy);}
+
+	/* Copy the masks for later use */
+	if (readfds!=NULL) { XFD_COPYSET(readfds,&sd.read_copy); sd.have_read=TRUE; }
+	if (writefds!=NULL) {XFD_COPYSET(writefds,&sd.write_copy); sd.have_write=TRUE; }
+
+	/* And zero the original masks */
+	if (sd.have_read){ FD_ZERO(readfds); }
+	if (sd.have_write) {FD_ZERO(writefds); }
+	if (exceptfds != NULL) {FD_ZERO(exceptfds); }
+
+	/* Now we parse the fd_sets passed to select and separate pipe/sockets */
+	n = os2_parse_select(&sd,nfds);
+
+	/* Now check if we have sockets ready! */
+
+	if (sd.socket_ntotal > 0) {
+		ns = os2_poll_sockets(&sd,readfds,writefds);
+		if (ns>0) {
+			ready_handles+=ns;
+			any_ready = TRUE;
+		} else if (ns == -1) {
+			return(-1);
+		}
+	}
+d206 1
+a206 3
+	/* And pipes */
+
+	if (sd.pipe_ntotal > 0) {
+d208 50
+a257 23
+		if (np > 0) {
+			ready_handles+=np;
+			any_ready = TRUE;
+		} else if (np == -1) {
+			return(-1);
+		}
+	}
+
+	/* And finally poll input devices */
+	if(!os2MouseQueueQuery() || !os2KbdQueueQuery() ) any_ready = TRUE;
+
+	if (xf86Info.vtRequestsPending) any_ready=TRUE;
+
+	if (os2PopupErrorPending)
+		os2RecoverFromPopup();
+
+	if (!any_ready && timeout_ms) {
+		DosResetEventSem(hSocketSem,&postCount);
+
+		/* Activate the socket thread */
+		if (sd.socket_ntotal>0) {
+			rc = DosPostEventSem(hActivateSocketSem);
+		}
+d259 1
+a259 1
+		rc = DosWaitMuxWaitSem(hSelectWait, timeout_ms, &semKey);
+d261 1
+a261 51
+		/* If our socket monitor thread is still blocked in os2_tcp_select()
+		 * we have to wake it up by calling os2_so_cancel().
+		 * After that, call os2_tcp_select() once more to get rid of
+		 * error SOCEINTR (10004)
+		 */
+		if (sd.socket_ntotal>0) {
+			rc = DosQueryEventSem(hSocketSem, &postCount);
+
+			if (postCount == 0) {		/* os2_select still blocked */
+				int i,f,g;
+				struct select_data *sd_ptr=&sd;
+
+				if (sd.socket_nread > 0) {
+					for (i=0; i<sd.socket_nread; i++) {
+						f = g = sd_ptr->tcp_select_mask[i];
+						os2_so_cancel(f);
+						os2_tcp_select(&g, 1, 0, 0, 0);  /* get rid of error 10004 */
+					}
+				}
+				if (sd.socket_nwrite > 0) {
+					for (i=sd.socket_nread;
+					     i<sd.socket_nread+sd.socket_nwrite;
+					     i++) {
+						f = g = sd_ptr->tcp_select_mask[i];
+						os2_so_cancel(f);
+						os2_tcp_select(&g, 0, 1, 0, 0); /* get rid of error 10004 */
+					}
+				}
+			} else {		/* not blocked, something must be ready -> get it */
+				ns = os2_poll_sockets(&sd,readfds,writefds);
+				if (ns>0) {
+					ready_handles+=ns;
+				} else if (ns == -1) {
+					return(-1);
+				}
+			}
+		}
+		if (sd.pipe_ntotal > 0) {
+			rc = DosQueryEventSem(hPipeSem,&postCount);
+			if (postCount > 0) {
+				np = os2_check_pipes(&sd,readfds,writefds);
+				if (np > 0) {
+					ready_handles+=np;
+				} else if (np == -1) {
+					return(-1);
+				}
+			}
+		}
+	}
+	/* The polling of sockets/pipe automatically set the proper bits */
+	return (ready_handles);
+d266 2
+a267 2
+	struct select_data *sd;
+	int nfds;
+d270 53
+a322 11
+	/* First we determine up to which descriptor we need to check.              */
+	/* No need to check up to 256 if we don't have to (and usually we dont...)*/
+	/* Note: stuff here is hardcoded for fd_sets which are int[8] as in EMX!!!    */
+
+	if (nfds > sd->max_fds) {
+		for (i=0;i<((FD_SETSIZE+31)/32);i++) {
+			if (sd->read_copy.fds_bits[i] ||
+			    sd->write_copy.fds_bits[i])
+				sd->max_fds=(i*32) +32;
+		}
+	} else { sd->max_fds = nfds; }
+d324 1
+a324 31
+	/* Check if this is greater than specified in select() call */
+	if(sd->max_fds > nfds) sd->max_fds = nfds;
+
+	if (sd->have_read) {
+		for (i = 0; i < sd->max_fds; ++i) {
+			if (FD_ISSET (i, &sd->read_copy)) {
+				if(_files[i] & F_SOCKET) {
+					sd->tcp_select_mask[sd->socket_ntotal]=_getsockhandle(i);
+					sd->tcp_emx_handles[sd->socket_ntotal]=i;
+					sd->socket_ntotal++; sd->socket_nread++;
+				} else if (_files[i] & F_PIPE) {
+					sd -> pipe_ntotal++;
+				}
+			}
+		}
+	}
+	if (sd->have_write) {
+		for (i = 0; i < sd->max_fds; ++i) {
+			if (FD_ISSET (i, &sd->write_copy)) {
+				if (_files[i] & F_SOCKET) {
+					sd->tcp_select_mask[sd->socket_ntotal]=_getsockhandle(i);
+					sd->tcp_emx_handles[sd->socket_ntotal]=i;
+					sd->socket_ntotal++; sd->socket_nwrite++;
+				} else if (_files[i] & F_PIPE) {
+					sd -> pipe_ntotal++;
+					sd -> pipe_have_write=TRUE;
+				}
+			}
+		}
+	}
+	return(sd->socket_ntotal);
+d329 2
+a330 2
+	struct select_data *sd;
+	fd_set *readfds,*writefds;
+d332 7
+a338 10
+	int e,i;
+	int j,n;
+
+	memcpy(sd->tcp_select_copy,sd->tcp_select_mask,
+	          sd->socket_ntotal*sizeof(int));
+
+	e = os2_tcp_select(sd->tcp_select_copy,sd->socket_nread,
+	                      sd->socket_nwrite, 0, 0);
+
+	if (e == 0) return(e);
+d340 1
+d342 25
+a366 23
+	if (e>0) {
+		j = 0; n = 0;
+		for (i = 0; i < sd->socket_nread; ++i, ++j)
+			if (sd->tcp_select_copy[j] != -1) {
+				FD_SET (sd->tcp_emx_handles[j], readfds);
+				n ++;
+			}
+		for (i = 0; i < sd->socket_nwrite; ++i, ++j)
+			if (sd->tcp_select_copy[j] != -1) {
+				FD_SET (sd->tcp_emx_handles[j], writefds);
+				n ++;
+			}
+		errno = 0;
+
+		return n;
+	}
+	if (e<0) {
+		/*Error -- TODO */
+		xf86Msg(X_ERROR,"Error in server select! sock_errno = %d\n",os2_sock_errno());
+		errno = EBADF;
+		return (-1);
+	}
+}
+d371 2
+a372 2
+	struct select_data *sd;
+	fd_set *readfds,*writefds;
+d378 7
+a384 8
+
+	e = 0;
+	rc = DosResetEventSem(hPipeSem,&ulPostCount);
+	rc = DosQueryNPipeSemState((HSEM) hPipeSem, (PPIPESEMSTATE)&pipeSemState,
+	                              sizeof(pipeSemState));
+	if(rc) xf86Msg(X_ERROR,"SELECT: rc from QueryNPipeSem: %d\n",rc);
+	i=0;
+	while (pipeSemState[i].fStatus != 0) {
+d388 19
+a406 17
+		if ((pipeSemState[i].fStatus == 1) &&
+		    (FD_ISSET(pipeSemState[i].usKey,&sd->read_copy))) {
+			FD_SET(pipeSemState[i].usKey,readfds);
+			e++;
+		} else if ((pipeSemState[i].fStatus == 2)  &&
+		           (FD_ISSET(pipeSemState[i].usKey,&sd->write_copy))) {
+			FD_SET(pipeSemState[i].usKey,writefds);
+			e++;
+		} else if ((pipeSemState[i].fStatus == 3) &&
+		           ((FD_ISSET(pipeSemState[i].usKey,&sd->read_copy)) ||
+		            (FD_ISSET(pipeSemState[i].usKey,&sd->write_copy)) )) {
+			errno = EBADF;
+			/* xf86Msg(X_ERROR,"Pipe has closed down, fd=%d\n",pipeSemState[i].usKey); */
+			return (-1);
+		}
+		i++;
+	} /* endwhile */
+d413 9
+a421 1
+void os2SocketMonitorThread(void *arg)
+d423 30
+a452 3
+	struct select_data *sd_ptr = &sd;
+	ULONG ulPostCount;
+	int e,rc;
+d454 1
+a454 1
+	/* Make thread time critical */
+d456 14
+d471 10
+a480 32
+	while (1) {
+		rc = DosWaitEventSem(hActivateSocketSem, SEM_INDEFINITE_WAIT);
+		if (rc != 0 )
+			xf86Msg(X_ERROR,"Socket monitor: DosWaitEventSem(hActivateSocketSem..) returned %d\n",rc);
+
+		rc = DosResetEventSem(hActivateSocketSem,&ulPostCount);
+		if (rc != 0 )
+			xf86Msg(X_ERROR,"Socket monitor: DosResetEventSem(&hActivateSocketSem..) returned %d\n",rc);
+
+		/* fg300104:
+		 * The next line shouldn't be here, but the DosPostEventSem()
+		 * below will return 299 from time to time under heavy load
+		 */
+/*		DosResetEventSem(hSocketSem,&ulPostCount);*/
+
+		memcpy(sd_ptr->tcp_select_monitor,sd_ptr->tcp_select_mask,
+		        sd_ptr->socket_ntotal*sizeof(int));
+
+		/* call os2_select(), return only if either something is ready or
+		 * os2_so_cancel() was called
+		 */
+		e = os2_tcp_select(sd_ptr->tcp_select_monitor, sd_ptr->socket_nread,
+		                    sd_ptr->socket_nwrite, 0, -1);
+
+		if (e>0) {
+			rc = DosPostEventSem(hSocketSem);
+			if (rc != 0 )
+				xf86Msg(X_ERROR,"Socket monitor: DosPostEventSem(hSocketSem..) returned %d\n",rc);
+		} else if (e<0) {
+			rc = os2_sock_errno();
+			if (rc != 10004)
+				xf86Msg(X_ERROR,"Socket monitor: os2_select: sock_errno = %d\n",rc);
+d483 3
+a485 1
+		rc = DosQueryEventSem(hevServerHasFocus, &ulPostCount);
+a486 3
+		/* no need to rush while switched away */
+		if ((rc==0) && (ulPostCount==0))
+			rc == DosWaitEventSem(hevServerHasFocus,31L);
+d488 11
+d501 14
+@
+
+
+1.1.1.1
+log
+@Import OpenBSD 3.3 XF4 repository from CTM 3132 the first time
+This finalizes starting an OpenBSD-mirabile (aka MirBSD) repository.
+
+### MirBSD is:
+# Copyright (c) 1982-2003 by Thorsten "mirabile" Glaser <x86@@ePost.de>
+# Copyright © 1968-2003  The authors of And contributors to UNIX®, the
+#       C Language, BSD/Berkeley Unix; 386BSD, NetBSD 1.1 and OpenBSD.
+#
+# Anyone who obtained a copy of this work is hereby permitted to freely use,
+# distribute, modify, merge, sublicence, give away or sell it as long as the
+# authors are given due credit and the following notice is retained:
+#
+# This work is provided "as is", with no explicit or implicit warranty what-
+# soever. Use it only at your own risk. In no event may an author or contri-
+# butor be held liable for any damage, directly or indirectly, that origina-
+# ted through or is caused by creation or modification of this work.
+
+MirBSD is my private tree. MirBSD does not differ very much from OpenBSD
+and intentionally tracks OpenBSD. That's why it _is_ OpenBSD, just not the
+official one. It's like with DarrenBSD.
+
+At time of this writing, no advertising for MirBSD must be done,
+because the advertising clause has not yet been sorted out.
+
+http://templeofhate.com/tglaser/MirBSD/index.php
+@
+text
+@@
+
+
+1.1.1.2
+log
+@That's what OpenBSD will, probably, ship as XF4 in 3.5
+their last sync against XFree86 4.3-current has been
+imported into our vendor branch, too
+@
+text
+@d6 1
+a6 1
+/* $XFree86: xc/programs/Xserver/hw/xfree86/os-support/os2/os2_select.c,v 3.9 2003/03/25 04:18:24 dawes Exp $ */
+a418 1
+ULONG hrt_delay;
+a426 4
+	if ((hrt_delay > 0) && (hrt_delay < 21)) {
+		ulDelay = hrt_delay;
+		}
+	else {
+a427 2
+	}
+		
+a429 3
+#if 0
+	xf86Msg(X_INFO,"hrt_delay = %d\n", ulDelay);
+#endif
+@
+

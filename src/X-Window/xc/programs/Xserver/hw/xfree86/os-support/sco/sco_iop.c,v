@@ -1,0 +1,215 @@
+head	1.1;
+branch	1.1.1;
+access;
+symbols
+	tg-mergetmp-2:1.1.1.1
+	cvs-200410241530:1.1.1.1
+	cvs-200410012000:1.1.1.1
+	cvs-200407221130:1.1.1.1
+	cvs-200407141120:1.1.1.1
+	cvs-200406231010:1.1.1.1
+	MIRBSD_7quater:1.1.1.1
+	cvs-200405271510:1.1.1.1
+	XFree86_4_4_0:1.1.9.1
+	cvs-200403021700:1.1.1.1
+	XFREE86_20040213:1.1.9.1
+	xc:1.1.9
+	cvs-200401291925:1.1.1.1
+	MIRBSD_7_ALPHA:1.1.1.1.0.4
+	MIRBSD_7:1.1.1.1.0.2
+	MIRBSD_7ter:1.1.1.1
+	cvs-20011091815:1.1.1.1
+	cvs-200309162130:1.1.1.1
+	cvs-200308302005:1.1.1.1
+	ctmx-0387:1.1.1.1
+	ctmx-0384:1.1.1.1
+	MIRBSD_5:1.1.1.1
+	ctmx-0375:1.1.1.1
+	ctmx-0373:1.1.1.1
+	ctm-0371:1.1.1.1
+	ctm-0370:1.1.1.1
+	MIRBSD_4:1.1.1.1
+	ctm-0363:1.1.1.1
+	ctm-0359:1.1.1.1
+	openbsd:1.1.1;
+locks; strict;
+comment	@ * @;
+
+
+1.1
+date	2003.04.08.18.37.37;	author tg;	state Exp;
+branches
+	1.1.1.1
+	1.1.9.1;
+next	;
+
+1.1.1.1
+date	2003.04.08.18.37.37;	author tg;	state Stab;
+branches;
+next	;
+
+1.1.9.1
+date	2004.02.14.19.25.22;	author tg;	state Exp;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@/* $XFree86: xc/programs/Xserver/hw/xfree86/os-support/sco/sco_iop.c,v 1.1 2002/06/03 21:22:10 dawes Exp $ */
+/*
+ * Copyright 2001 by J. Kean Johnston <jkj@@caldera.com>
+ *
+ * Permission to use, copy, modify, distribute, and sell this software and its
+ * documentation for any purpose is hereby granted without fee, provided that
+ * the above copyright notice appear in all copies and that both that
+ * copyright notice and this permission notice appear in supporting
+ * documentation, and that the name J. Kean Johnston not be used in
+ * advertising or publicity pertaining to distribution of the software without
+ * specific, written prior permission.  J. Kean Johnston makes no
+ * representations about the suitability of this software for any purpose.
+ * It is provided "as is" without express or implied warranty.
+ *
+ * J. KEAN JOHNSTON DISCLAIMS ALL WARRANTIES WITH REGARD TO THIS SOFTWARE,
+ * INCLUDING ALL IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS, IN NO
+ * EVENT SHALL J. KEAN JOHNSTON BE LIABLE FOR ANY SPECIAL, INDIRECT OR
+ * CONSEQUENTIAL DAMAGES OR ANY DAMAGES WHATSOEVER RESULTING FROM LOSS OF
+ * USE, DATA OR PROFITS, WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR
+ * OTHER TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR
+ * PERFORMANCE OF THIS SOFTWARE.
+ */
+/* $XConsortium$ */
+
+
+#include "X.h"
+
+#include "compiler.h"
+
+#define _NEED_SYSI86
+#include "xf86.h"
+#include "xf86Priv.h"
+#include "xf86OSpriv.h"
+#include "xf86_OSlib.h"
+
+
+/***************************************************************************/
+/* I/O Permissions section                                                 */
+/***************************************************************************/
+
+/*
+ * There is a right way and a wrong way of doing this. Unfortunately, we
+ * are forced to do it the wrong way. The right way is to be told the range
+ * or ranges of I/O ports the driver(s) need access to, in order to use the
+ * CONS_IOPERM ioctl() to grant access only to those ports we care about.
+ * This way we can guarantee some small level of stability because a driver
+ * does not have access to all ports (which would mean it could play with
+ * the PIT and thus affect scheduling times, or a whole slew of other
+ * nasty things). However, because XFree86 currently only enables or disables
+ * ALL port access, we need to run at IOPL 3, which basically means the
+ * X Server runs at the same level as the kernel. You can image why this is
+ * unsafe. Oh, and this is not a problem unique to OSR5, other OSes are
+ * affected by this as well.
+ *
+ * So, for the time being, we change our IOPL until such time as the XFree86
+ * architecture is changed to allow for tighter control of I/O ports. If and
+ * when it is, then the CONS_ADDIOP/DELIOP ioctl() should be used to enable 
+ * or disable access to the desired ports.
+ */
+
+extern long sysi86 (int cmd, ...);
+
+static Bool IOEnabled = FALSE;
+
+void xf86EnableIO(void)
+{
+	if (IOEnabled)
+		return;
+
+	if (sysi86(SI86V86, V86SC_IOPL, PS_IOPL) < 0)
+		FatalError("Failed to set IOPL for extended I/O\n");
+	IOEnabled = TRUE;
+}
+
+void xf86DisableIO(void)
+{
+	if (!IOEnabled)
+		return;
+
+	sysi86(SI86V86, V86SC_IOPL, 0);
+	IOEnabled = FALSE;
+}
+
+/***************************************************************************/
+/* Interrupt Handling section                                              */
+/***************************************************************************/
+
+Bool xf86DisableInterrupts()
+{
+  if (!IOEnabled) {
+    if (sysi86(SI86V86, V86SC_IOPL, PS_IOPL) < 0)
+      return FALSE;
+  }
+
+#ifdef __GNUC__
+  __asm__ __volatile__("cli");
+#else 
+  asm("cli");
+#endif /* __GNUC__ */
+
+  if (!IOEnabled) {
+    sysi86(SI86V86, V86SC_IOPL, PS_IOPL);
+  }
+
+  return(TRUE);
+}
+
+void xf86EnableInterrupts()
+{
+  if (!IOEnabled) {
+    if (sysi86(SI86V86, V86SC_IOPL, PS_IOPL) < 0)
+      return;
+  }
+
+#ifdef __GNUC__
+  __asm__ __volatile__("sti");
+#else 
+  asm("sti");
+#endif /* __GNUC__ */
+
+  if (!IOEnabled) {
+    sysi86(SI86V86, V86SC_IOPL, PS_IOPL);
+  }
+}
+@
+
+
+1.1.9.1
+log
+@OpenBSD just has imported exactly this tree into their vendor branch,
+called the same tag, in XF4/xc
+This is, apparently, the last XFree86 snapshot before the licence change
+(ie, addition of the advertising clause)
+
+Since the developers don't see any problems with that, and we would like
+to integrate improvements done by the remaining one or two (or so) XFree86
+developers (j/k), this prepares enabling us to update X-Window in the future.
+@
+text
+@@
+
+
+1.1.1.1
+log
+@The X-Windowing System
+
+Import XFree86 4.3 from OpenBSD by CTM, in the hope it's stable
+@
+text
+@@

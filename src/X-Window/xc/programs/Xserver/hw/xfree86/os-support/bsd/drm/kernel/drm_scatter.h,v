@@ -1,0 +1,574 @@
+head	1.1;
+branch	1.1.1;
+access;
+symbols
+	tg-mergetmp-2:1.1.1.3
+	cvs-200410241530:1.1.1.3
+	cvs-200410012000:1.1.1.3
+	cvs-200407221130:1.1.1.3
+	cvs-200407141120:1.1.1.3
+	cvs-200406231010:1.1.1.3
+	cvs-200406052200:1.1.1.3
+	MIRBSD_7quater:1.1.1.2
+	cvs-200405271510:1.1.1.3
+	XFree86_4_4_0:1.1.9.1
+	cvs-200403021700:1.1.1.3
+	XFREE86_20040213:1.1.9.1
+	xc:1.1.9
+	cvs-200401291925:1.1.1.2
+	MIRBSD_7_ALPHA:1.1.1.2.0.4
+	MIRBSD_7:1.1.1.2.0.2
+	MIRBSD_7ter:1.1.1.2
+	cvs-20011091815:1.1.1.2
+	cvs-200309162130:1.1.1.2
+	cvs-200308302005:1.1.1.2
+	ctmx-0387:1.1.1.2
+	ctmx-0384:1.1.1.2
+	MIRBSD_5:1.1.1.2
+	ctmx-0375:1.1.1.2
+	ctmx-0373:1.1.1.2
+	ctm-0371:1.1.1.2
+	ctm-0370:1.1.1.2
+	MIRBSD_4:1.1.1.2
+	ctm-0363:1.1.1.2
+	ctm-0359:1.1.1.2
+	ctm-0349:1.1.1.1
+	openbsd:1.1.1;
+locks; strict;
+comment	@ * @;
+
+
+1.1
+date	2003.03.22.20.08.33;	author tg;	state Exp;
+branches
+	1.1.1.1
+	1.1.9.1;
+next	;
+
+1.1.1.1
+date	2003.03.22.20.08.33;	author tg;	state Exp;
+branches;
+next	1.1.1.2;
+
+1.1.1.2
+date	2003.04.08.18.37.30;	author tg;	state Exp;
+branches;
+next	1.1.1.3;
+
+1.1.1.3
+date	2004.03.02.18.24.41;	author tg;	state Stab;
+branches;
+next	;
+
+1.1.9.1
+date	2004.02.14.19.25.05;	author tg;	state Exp;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@/* drm_scatter.h -- IOCTLs to manage scatter/gather memory -*- linux-c -*-
+ * Created: Mon Dec 18 23:20:54 2000 by gareth@@valinux.com
+ *
+ * Copyright 2000 VA Linux Systems, Inc., Sunnyvale, California.
+ * All Rights Reserved.
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a
+ * copy of this software and associated documentation files (the "Software"),
+ * to deal in the Software without restriction, including without limitation
+ * the rights to use, copy, modify, merge, publish, distribute, sublicense,
+ * and/or sell copies of the Software, and to permit persons to whom the
+ * Software is furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice (including the next
+ * paragraph) shall be included in all copies or substantial portions of the
+ * Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL
+ * PRECISION INSIGHT AND/OR ITS SUPPLIERS BE LIABLE FOR ANY CLAIM, DAMAGES OR
+ * OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE,
+ * ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+ * DEALINGS IN THE SOFTWARE.
+ *
+ * Authors:
+ *   Gareth Hughes <gareth@@valinux.com>
+ */
+
+#define __NO_VERSION__
+#include <linux/config.h>
+#include <linux/vmalloc.h>
+#include "drmP.h"
+
+#define DEBUG_SCATTER 0
+
+void DRM(sg_cleanup)( drm_sg_mem_t *entry )
+{
+	struct page *page;
+	int i;
+
+	for ( i = 0 ; i < entry->pages ; i++ ) {
+		page = entry->pagelist[i];
+		if ( page )
+			ClearPageReserved( page );
+	}
+
+	vfree( entry->virtual );
+
+	DRM(free)( entry->busaddr,
+		   entry->pages * sizeof(*entry->busaddr),
+		   DRM_MEM_PAGES );
+	DRM(free)( entry->pagelist,
+		   entry->pages * sizeof(*entry->pagelist),
+		   DRM_MEM_PAGES );
+	DRM(free)( entry,
+		   sizeof(*entry),
+		   DRM_MEM_SGLISTS );
+}
+
+int DRM(sg_alloc)( struct inode *inode, struct file *filp,
+		   unsigned int cmd, unsigned long arg )
+{
+	drm_file_t *priv = filp->private_data;
+	drm_device_t *dev = priv->dev;
+	drm_scatter_gather_t request;
+	drm_sg_mem_t *entry;
+	unsigned long pages, i, j;
+	pgd_t *pgd;
+	pmd_t *pmd;
+	pte_t *pte;
+
+	DRM_DEBUG( "%s\n", __FUNCTION__ );
+
+	if ( dev->sg )
+		return -EINVAL;
+
+	if ( copy_from_user( &request,
+			     (drm_scatter_gather_t *)arg,
+			     sizeof(request) ) )
+		return -EFAULT;
+
+	entry = DRM(alloc)( sizeof(*entry), DRM_MEM_SGLISTS );
+	if ( !entry )
+		return -ENOMEM;
+
+   	memset( entry, 0, sizeof(*entry) );
+
+	pages = (request.size + PAGE_SIZE - 1) / PAGE_SIZE;
+	DRM_DEBUG( "sg size=%ld pages=%ld\n", request.size, pages );
+
+	entry->pages = pages;
+	entry->pagelist = DRM(alloc)( pages * sizeof(*entry->pagelist),
+				     DRM_MEM_PAGES );
+	if ( !entry->pagelist ) {
+		DRM(free)( entry, sizeof(*entry), DRM_MEM_SGLISTS );
+		return -ENOMEM;
+	}
+
+	entry->busaddr = DRM(alloc)( pages * sizeof(*entry->busaddr),
+				     DRM_MEM_PAGES );
+	if ( !entry->busaddr ) {
+		DRM(free)( entry->pagelist,
+			   entry->pages * sizeof(*entry->pagelist),
+			   DRM_MEM_PAGES );
+		DRM(free)( entry,
+			   sizeof(*entry),
+			   DRM_MEM_SGLISTS );
+		return -ENOMEM;
+	}
+	memset( (void *)entry->busaddr, 0, pages * sizeof(*entry->busaddr) );
+
+	entry->virtual = vmalloc_32( pages << PAGE_SHIFT );
+	if ( !entry->virtual ) {
+		DRM(free)( entry->busaddr,
+			   entry->pages * sizeof(*entry->busaddr),
+			   DRM_MEM_PAGES );
+		DRM(free)( entry->pagelist,
+			   entry->pages * sizeof(*entry->pagelist),
+			   DRM_MEM_PAGES );
+		DRM(free)( entry,
+			   sizeof(*entry),
+			   DRM_MEM_SGLISTS );
+		return -ENOMEM;
+	}
+
+	/* This also forces the mapping of COW pages, so our page list
+	 * will be valid.  Please don't remove it...
+	 */
+	memset( entry->virtual, 0, pages << PAGE_SHIFT );
+
+	entry->handle = (unsigned long)entry->virtual;
+
+	DRM_DEBUG( "sg alloc handle  = %08lx\n", entry->handle );
+	DRM_DEBUG( "sg alloc virtual = %p\n", entry->virtual );
+
+	for ( i = entry->handle, j = 0 ; j < pages ; i += PAGE_SIZE, j++ ) {
+		pgd = pgd_offset_k( i );
+		if ( !pgd_present( *pgd ) )
+			goto failed;
+
+		pmd = pmd_offset( pgd, i );
+		if ( !pmd_present( *pmd ) )
+			goto failed;
+
+		pte = pte_offset( pmd, i );
+		if ( !pte_present( *pte ) )
+			goto failed;
+
+		entry->pagelist[j] = pte_page( *pte );
+
+		SetPageReserved( entry->pagelist[j] );
+	}
+
+	request.handle = entry->handle;
+
+	if ( copy_to_user( (drm_scatter_gather_t *)arg,
+			   &request,
+			   sizeof(request) ) ) {
+		DRM(sg_cleanup)( entry );
+		return -EFAULT;
+	}
+
+	dev->sg = entry;
+
+#if DEBUG_SCATTER
+	/* Verify that each page points to its virtual address, and vice
+	 * versa.
+	 */
+	{
+	int error = 0;
+
+	for ( i = 0 ; i < pages ; i++ ) {
+		unsigned long *tmp;
+
+		tmp = page_address( entry->pagelist[i] );
+		for ( j = 0 ;
+		      j < PAGE_SIZE / sizeof(unsigned long) ;
+		      j++, tmp++ ) {
+			*tmp = 0xcafebabe;
+		}
+		tmp = (unsigned long *)((u8 *)entry->virtual +
+					(PAGE_SIZE * i));
+		for( j = 0 ;
+		     j < PAGE_SIZE / sizeof(unsigned long) ;
+		     j++, tmp++ ) {
+			if ( *tmp != 0xcafebabe && error == 0 ) {
+				error = 1;
+				DRM_ERROR( "Scatter allocation error, "
+					   "pagelist does not match "
+					   "virtual mapping\n" );
+			}
+		}
+		tmp = page_address( entry->pagelist[i] );
+		for(j = 0 ;
+		    j < PAGE_SIZE / sizeof(unsigned long) ;
+		    j++, tmp++) {
+			*tmp = 0;
+		}
+	}
+	if (error == 0)
+		DRM_ERROR( "Scatter allocation matches pagelist\n" );
+	}
+#endif
+
+	return 0;
+
+ failed:
+	DRM(sg_cleanup)( entry );
+	return -ENOMEM;
+}
+
+int DRM(sg_free)( struct inode *inode, struct file *filp,
+		 unsigned int cmd, unsigned long arg )
+{
+	drm_file_t *priv = filp->private_data;
+	drm_device_t *dev = priv->dev;
+	drm_scatter_gather_t request;
+	drm_sg_mem_t *entry;
+
+	if ( copy_from_user( &request,
+			     (drm_scatter_gather_t *)arg,
+			     sizeof(request) ) )
+		return -EFAULT;
+
+	entry = dev->sg;
+	dev->sg = NULL;
+
+	if ( !entry || entry->handle != request.handle )
+		return -EINVAL;
+
+	DRM_DEBUG( "sg free virtual  = %p\n", entry->virtual );
+
+	DRM(sg_cleanup)( entry );
+
+	return 0;
+}
+@
+
+
+1.1.9.1
+log
+@OpenBSD just has imported exactly this tree into their vendor branch,
+called the same tag, in XF4/xc
+This is, apparently, the last XFree86 snapshot before the licence change
+(ie, addition of the advertising clause)
+
+Since the developers don't see any problems with that, and we would like
+to integrate improvements done by the remaining one or two (or so) XFree86
+developers (j/k), this prepares enabling us to update X-Window in the future.
+@
+text
+@a27 2
+ *   Eric Anholt <anholt@@FreeBSD.org>
+ *
+d30 3
+a36 2
+#if __REALLY_HAVE_SG
+
+d39 10
+a48 1
+	free( entry->virtual, DRM(M_DRM) );
+d53 3
+d61 2
+a62 1
+int DRM(sg_alloc)( DRM_IOCTL_ARGS )
+d64 2
+a65 1
+	DRM_DEVICE;
+d68 4
+a71 1
+	unsigned long pages;
+d76 1
+a76 1
+		return EINVAL;
+d78 4
+a81 2
+	DRM_COPY_FROM_USER_IOCTL(request, (drm_scatter_gather_t *)data,
+			     sizeof(request) );
+d85 1
+a85 1
+		return ENOMEM;
+d87 1
+a87 1
+   	bzero( entry, sizeof(*entry) );
+d89 1
+a89 1
+	pages = round_page(request.size) / PAGE_SIZE;
+d93 6
+d103 3
+d109 1
+a109 1
+		return ENOMEM;
+d111 1
+a111 1
+	bzero( (void *)entry->busaddr, pages * sizeof(*entry->busaddr) );
+d113 1
+a113 1
+	entry->virtual = malloc( pages << PAGE_SHIFT, DRM(M_DRM), M_WAITOK );
+d118 3
+d124 1
+a124 1
+		return ENOMEM;
+d127 4
+a130 1
+	bzero( entry->virtual, pages << PAGE_SHIFT );
+d137 18
+d157 6
+a162 3
+	DRM_COPY_TO_USER_IOCTL( (drm_scatter_gather_t *)data,
+			   request,
+			   sizeof(request) );
+d166 40
+d208 1
+d210 1
+a210 1
+	return ENOMEM;
+d213 2
+a214 1
+int DRM(sg_free)( DRM_IOCTL_ARGS )
+d216 2
+a217 1
+	DRM_DEVICE;
+d221 4
+a224 2
+	DRM_COPY_FROM_USER_IOCTL( request, (drm_scatter_gather_t *)data,
+			     sizeof(request) );
+d230 1
+a230 1
+		return EINVAL;
+a237 13
+
+#else /* __REALLY_HAVE_SG */
+
+int DRM(sg_alloc)( DRM_IOCTL_ARGS )
+{
+	return DRM_ERR(EINVAL);
+}
+int DRM(sg_free)( DRM_IOCTL_ARGS )
+{
+	return DRM_ERR(EINVAL);
+}
+
+#endif
+@
+
+
+1.1.1.1
+log
+@Import OpenBSD 3.3 XF4 repository from CTM 3132 the first time
+This finalizes starting an OpenBSD-mirabile (aka MirBSD) repository.
+
+### MirBSD is:
+# Copyright (c) 1982-2003 by Thorsten "mirabile" Glaser <x86@@ePost.de>
+# Copyright © 1968-2003  The authors of And contributors to UNIX®, the
+#       C Language, BSD/Berkeley Unix; 386BSD, NetBSD 1.1 and OpenBSD.
+#
+# Anyone who obtained a copy of this work is hereby permitted to freely use,
+# distribute, modify, merge, sublicence, give away or sell it as long as the
+# authors are given due credit and the following notice is retained:
+#
+# This work is provided "as is", with no explicit or implicit warranty what-
+# soever. Use it only at your own risk. In no event may an author or contri-
+# butor be held liable for any damage, directly or indirectly, that origina-
+# ted through or is caused by creation or modification of this work.
+
+MirBSD is my private tree. MirBSD does not differ very much from OpenBSD
+and intentionally tracks OpenBSD. That's why it _is_ OpenBSD, just not the
+official one. It's like with DarrenBSD.
+
+At time of this writing, no advertising for MirBSD must be done,
+because the advertising clause has not yet been sorted out.
+
+http://templeofhate.com/tglaser/MirBSD/index.php
+@
+text
+@@
+
+
+1.1.1.2
+log
+@The X-Windowing System
+
+Import XFree86 4.3 from OpenBSD by CTM, in the hope it's stable
+@
+text
+@d30 3
+a36 2
+#if __REALLY_HAVE_SG
+
+d39 10
+a48 1
+	free( entry->virtual, DRM(M_DRM) );
+d61 2
+a62 1
+int DRM(sg_alloc)( DRM_IOCTL_ARGS )
+d64 2
+a65 1
+	DRM_DEVICE;
+d68 4
+a71 1
+	unsigned long pages;
+d76 1
+a76 1
+		return EINVAL;
+d78 4
+a81 2
+	DRM_COPY_FROM_USER_IOCTL(request, (drm_scatter_gather_t *)data,
+			     sizeof(request) );
+d85 1
+a85 1
+		return ENOMEM;
+d87 1
+a87 1
+   	bzero( entry, sizeof(*entry) );
+d89 1
+a89 1
+	pages = round_page(request.size) / PAGE_SIZE;
+d97 1
+a97 1
+		return ENOMEM;
+a99 2
+	bzero(entry->pagelist, pages * sizeof(*entry->pagelist));
+
+d109 1
+a109 1
+		return ENOMEM;
+d111 1
+a111 1
+	bzero( (void *)entry->busaddr, pages * sizeof(*entry->busaddr) );
+d113 1
+a113 1
+	entry->virtual = malloc( pages << PAGE_SHIFT, DRM(M_DRM), M_WAITOK );
+d124 1
+a124 1
+		return ENOMEM;
+d127 4
+a130 1
+	bzero( entry->virtual, pages << PAGE_SHIFT );
+d137 18
+d157 6
+a162 3
+	DRM_COPY_TO_USER_IOCTL( (drm_scatter_gather_t *)data,
+			   request,
+			   sizeof(request) );
+d208 1
+d210 1
+a210 1
+	return ENOMEM;
+d213 2
+a214 1
+int DRM(sg_free)( DRM_IOCTL_ARGS )
+d216 2
+a217 1
+	DRM_DEVICE;
+d221 4
+a224 2
+	DRM_COPY_FROM_USER_IOCTL( request, (drm_scatter_gather_t *)data,
+			     sizeof(request) );
+d230 1
+a230 1
+		return EINVAL;
+a237 13
+
+#else /* __REALLY_HAVE_SG */
+
+int DRM(sg_alloc)( DRM_IOCTL_ARGS )
+{
+	return DRM_ERR(EINVAL);
+}
+int DRM(sg_free)( DRM_IOCTL_ARGS )
+{
+	return DRM_ERR(EINVAL);
+}
+
+#endif
+@
+
+
+1.1.1.3
+log
+@That's what OpenBSD will, probably, ship as XF4 in 3.5
+their last sync against XFree86 4.3-current has been
+imported into our vendor branch, too
+@
+text
+@a27 2
+ *   Eric Anholt <anholt@@FreeBSD.org>
+ *
+d43 3
+d76 8
+d88 3
+d103 3
+d126 40
+@
+
+

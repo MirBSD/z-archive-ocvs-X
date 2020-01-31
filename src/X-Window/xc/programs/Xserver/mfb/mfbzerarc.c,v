@@ -1,0 +1,432 @@
+head	1.1;
+branch	1.1.1;
+access;
+symbols
+	tg-mergetmp-2:1.1.1.3
+	cvs-200410241530:1.1.1.3
+	cvs-200410012000:1.1.1.3
+	cvs-200407141120:1.1.1.3
+	cvs-200406231010:1.1.1.3
+	MIRBSD_7quater:1.1.1.2
+	cvs-200405271510:1.1.1.3
+	XFree86_4_4_0:1.1.9.1
+	cvs-200403021700:1.1.1.3
+	XFREE86_20040213:1.1.9.1
+	xc:1.1.9
+	cvs-200401291925:1.1.1.2
+	MIRBSD_7_ALPHA:1.1.1.2.0.4
+	MIRBSD_7:1.1.1.2.0.2
+	MIRBSD_7ter:1.1.1.2
+	cvs-20011091815:1.1.1.2
+	cvs-200309162130:1.1.1.2
+	cvs-200308302005:1.1.1.2
+	ctmx-0387:1.1.1.2
+	ctmx-0384:1.1.1.2
+	MIRBSD_5:1.1.1.2
+	ctmx-0375:1.1.1.2
+	ctmx-0373:1.1.1.2
+	ctm-0371:1.1.1.2
+	ctm-0370:1.1.1.2
+	MIRBSD_4:1.1.1.2
+	ctm-0363:1.1.1.2
+	ctm-0359:1.1.1.2
+	ctm-0349:1.1.1.1
+	openbsd:1.1.1;
+locks; strict;
+comment	@ * @;
+
+
+1.1
+date	2003.03.22.20.09.34;	author tg;	state Exp;
+branches
+	1.1.1.1
+	1.1.9.1;
+next	;
+
+1.1.1.1
+date	2003.03.22.20.09.34;	author tg;	state Exp;
+branches;
+next	1.1.1.2;
+
+1.1.1.2
+date	2003.04.08.18.38.13;	author tg;	state Exp;
+branches;
+next	1.1.1.3;
+
+1.1.1.3
+date	2004.03.02.18.29.59;	author tg;	state Stab;
+branches;
+next	;
+
+1.1.9.1
+date	2004.02.14.19.26.27;	author tg;	state Exp;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@/* $XFree86: xc/programs/Xserver/mfb/mfbzerarc.c,v 3.6 2001/12/14 20:00:13 dawes Exp $ */
+/************************************************************
+
+Copyright 1989, 1998  The Open Group
+
+Permission to use, copy, modify, distribute, and sell this software and its
+documentation for any purpose is hereby granted without fee, provided that
+the above copyright notice appear in all copies and that both that
+copyright notice and this permission notice appear in supporting
+documentation.
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
+OPEN GROUP BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN
+AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
+CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+Except as contained in this notice, the name of The Open Group shall not be
+used in advertising or otherwise to promote the sale, use or other dealings
+in this Software without prior written authorization from The Open Group.
+
+********************************************************/
+
+/* $Xorg: mfbzerarc.c,v 1.4 2001/02/09 02:05:19 xorgcvs Exp $ */
+
+/* Derived from:
+ * "Algorithm for drawing ellipses or hyperbolae with a digital plotter"
+ * by M. L. V. Pitteway
+ * The Computer Journal, November 1967, Volume 10, Number 3, pp. 282-289
+ */
+
+#include "X.h"
+#include "Xprotostr.h"
+#include "miscstruct.h"
+#include "gcstruct.h"
+#include "pixmapstr.h"
+#include "scrnintstr.h"
+#include "mfb.h"
+#include "maskbits.h"
+#include "mizerarc.h"
+#include "mi.h"
+
+/*
+ * Note: LEFTMOST must be the bit leftmost in the actual screen
+ * representation.  This depends also on the IMAGE_BYTE_ORDER.
+ * LONG2CHARS() takes care of the re-ordering as required. (DHD)
+ */
+#if (BITMAP_BIT_ORDER == MSBFirst)
+#define LEFTMOST	((PixelType) LONG2CHARS(((MfbBits)1 << PLST)))
+#else
+#define LEFTMOST	((PixelType) LONG2CHARS(1))
+#endif
+
+#define PixelateWhite(addr,yoff,xoff) \
+    *mfbScanlineOffset(addr, (yoff)+((xoff)>>PWSH)) |= \
+	SCRRIGHT (LEFTMOST, ((xoff) & PIM))
+#define PixelateBlack(addr,yoff,xoff) \
+    *mfbScanlineOffset(addr, (yoff)+((xoff)>>PWSH)) &= \
+	~(SCRRIGHT (LEFTMOST, ((xoff) & PIM)))
+
+#define Pixelate(base,yoff,xoff) \
+{ \
+    paddr = mfbScanlineOffset(base, (yoff) + ((xoff)>>PWSH)); \
+    pmask = SCRRIGHT(LEFTMOST, (xoff) & PIM); \
+    *paddr = (*paddr & ~pmask) | (pixel & pmask); \
+}
+
+#define DoPix(bit,base,yoff,xoff) if (mask & bit) Pixelate(base,yoff,xoff);
+
+static void
+mfbZeroArcSS(pDraw, pGC, arc)
+    DrawablePtr pDraw;
+    GCPtr pGC;
+    xArc *arc;
+{
+    miZeroArcRec info;
+    Bool do360;
+    register int x, y, a, b, d, mask;
+    register int k1, k3, dx, dy;
+    PixelType *addrl;
+    PixelType *yorgl, *yorgol;
+    PixelType pixel;
+    int nlwidth, yoffset, dyoffset;
+    PixelType pmask;
+    register PixelType *paddr;
+
+    if (((mfbPrivGC *)(pGC->devPrivates[mfbGCPrivateIndex].ptr))->rop ==
+	RROP_BLACK)
+	pixel = 0;
+    else
+	pixel = ~0;
+
+    mfbGetPixelWidthAndPointer(pDraw, nlwidth, addrl);
+    do360 = miZeroArcSetup(arc, &info, TRUE);
+    yorgl = addrl + ((info.yorg + pDraw->y) * nlwidth);
+    yorgol = addrl + ((info.yorgo + pDraw->y) * nlwidth);
+    info.xorg += pDraw->x;
+    info.xorgo += pDraw->x;
+    MIARCSETUP();
+    yoffset = y ? nlwidth : 0;
+    dyoffset = 0;
+    mask = info.initialMask;
+    if (!(arc->width & 1))
+    {
+	DoPix(2, yorgl, 0, info.xorgo);
+	DoPix(8, yorgol, 0, info.xorgo);
+    }
+    if (!info.end.x || !info.end.y)
+    {
+	mask = info.end.mask;
+	info.end = info.altend;
+    }
+    if (do360 && (arc->width == arc->height) && !(arc->width & 1))
+    {
+	int xoffset = nlwidth;
+	PixelType *yorghl = mfbScanlineDeltaNoBankSwitch(yorgl, info.h, nlwidth);
+	int xorghp = info.xorg + info.h;
+	int xorghn = info.xorg - info.h;
+
+	if (pixel)
+	{
+	    while (1)
+	    {
+		PixelateWhite(yorgl, yoffset, info.xorg + x);
+		PixelateWhite(yorgl, yoffset, info.xorg - x);
+		PixelateWhite(yorgol, -yoffset, info.xorg - x);
+		PixelateWhite(yorgol, -yoffset, info.xorg + x);
+		if (a < 0)
+		    break;
+		PixelateWhite(yorghl, -xoffset, xorghp - y);
+		PixelateWhite(yorghl, -xoffset, xorghn + y);
+		PixelateWhite(yorghl, xoffset, xorghn + y);
+		PixelateWhite(yorghl, xoffset, xorghp - y);
+		xoffset += nlwidth;
+		MIARCCIRCLESTEP(yoffset += nlwidth;);
+	    }
+	}
+	else
+	{
+	    while (1)
+	    {
+		PixelateBlack(yorgl, yoffset, info.xorg + x);
+		PixelateBlack(yorgl, yoffset, info.xorg - x);
+		PixelateBlack(yorgol, -yoffset, info.xorg - x);
+		PixelateBlack(yorgol, -yoffset, info.xorg + x);
+		if (a < 0)
+		    break;
+		PixelateBlack(yorghl, -xoffset, xorghp - y);
+		PixelateBlack(yorghl, -xoffset, xorghn + y);
+		PixelateBlack(yorghl, xoffset, xorghn + y);
+		PixelateBlack(yorghl, xoffset, xorghp - y);
+		xoffset += nlwidth;
+		MIARCCIRCLESTEP(yoffset += nlwidth;);
+	    }
+	}
+	x = info.w;
+	yoffset = info.h * nlwidth;
+    }
+    else if (do360)
+    {
+	while (y < info.h || x < info.w)
+	{
+	    MIARCOCTANTSHIFT(dyoffset = nlwidth;);
+	    Pixelate(yorgl, yoffset, info.xorg + x);
+	    Pixelate(yorgl, yoffset, info.xorgo - x);
+	    Pixelate(yorgol, -yoffset, info.xorgo - x);
+	    Pixelate(yorgol, -yoffset, info.xorg + x);
+	    MIARCSTEP(yoffset += dyoffset;, yoffset += nlwidth;);
+	}
+    }
+    else
+    {
+	while (y < info.h || x < info.w)
+	{
+	    MIARCOCTANTSHIFT(dyoffset = nlwidth;);
+	    if ((x == info.start.x) || (y == info.start.y))
+	    {
+		mask = info.start.mask;
+		info.start = info.altstart;
+	    }
+	    DoPix(1, yorgl, yoffset, info.xorg + x);
+	    DoPix(2, yorgl, yoffset, info.xorgo - x);
+	    DoPix(4, yorgol, -yoffset, info.xorgo - x);
+	    DoPix(8, yorgol, -yoffset, info.xorg + x);
+	    if ((x == info.end.x) || (y == info.end.y))
+	    {
+		mask = info.end.mask;
+		info.end = info.altend;
+	    }
+	    MIARCSTEP(yoffset += dyoffset;, yoffset += nlwidth;);
+	}
+    }
+    if ((x == info.start.x) || (y == info.start.y))
+	mask = info.start.mask;
+    DoPix(1, yorgl, yoffset, info.xorg + x);
+    DoPix(4, yorgol, -yoffset, info.xorgo - x);
+    if (arc->height & 1)
+    {
+	DoPix(2, yorgl, yoffset, info.xorgo - x);
+	DoPix(8, yorgol, -yoffset, info.xorg + x);
+    }
+}
+
+void
+mfbZeroPolyArcSS(pDraw, pGC, narcs, parcs)
+    DrawablePtr	pDraw;
+    GCPtr	pGC;
+    int		narcs;
+    xArc	*parcs;
+{
+    register xArc *arc;
+    register int i;
+    BoxRec box;
+    int x2, y2;
+    RegionPtr cclip;
+
+    if (!pGC->planemask & 1)
+	return;
+    cclip = pGC->pCompositeClip;
+    for (arc = parcs, i = narcs; --i >= 0; arc++)
+    {
+	if (miCanZeroArc(arc))
+	{
+	    box.x1 = arc->x + pDraw->x;
+	    box.y1 = arc->y + pDraw->y;
+ 	    /*
+ 	     * Because box.x2 and box.y2 get truncated to 16 bits, and the
+ 	     * RECT_IN_REGION test treats the resulting number as a signed
+ 	     * integer, the RECT_IN_REGION test alone can go the wrong way.
+ 	     * This can result in a server crash because the rendering
+ 	     * routines in this file deal directly with cpu addresses
+ 	     * of pixels to be stored, and do not clip or otherwise check
+ 	     * that all such addresses are within their respective pixmaps.
+ 	     * So we only allow the RECT_IN_REGION test to be used for
+ 	     * values that can be expressed correctly in a signed short.
+ 	     */
+ 	    x2 = box.x1 + (int)arc->width + 1;
+ 	    box.x2 = x2;
+ 	    y2 = box.y1 + (int)arc->height + 1;
+ 	    box.y2 = y2;
+ 	    if ( (x2 <= MAXSHORT) && (y2 <= MAXSHORT) &&
+ 		    (RECT_IN_REGION(pDraw->pScreen, cclip, &box) == rgnIN) )
+		mfbZeroArcSS(pDraw, pGC, arc);
+	    else
+		miZeroPolyArc(pDraw, pGC, 1, arc);
+	}
+	else
+	    miPolyArc(pDraw, pGC, 1, arc);
+    }
+}
+@
+
+
+1.1.9.1
+log
+@OpenBSD just has imported exactly this tree into their vendor branch,
+called the same tag, in XF4/xc
+This is, apparently, the last XFree86 snapshot before the licence change
+(ie, addition of the advertising clause)
+
+Since the developers don't see any problems with that, and we would like
+to integrate improvements done by the remaining one or two (or so) XFree86
+developers (j/k), this prepares enabling us to update X-Window in the future.
+@
+text
+@d1 1
+a1 1
+/* $XFree86: xc/programs/Xserver/mfb/mfbzerarc.c,v 3.8 2003/07/16 01:38:55 dawes Exp $ */
+d38 1
+a38 1
+#include "regionstr.h"
+d75 4
+a78 4
+mfbZeroArcSS(
+    DrawablePtr pDraw,
+    GCPtr pGC,
+    xArc *arc)
+d221 1
+a221 1
+    if (!(pGC->planemask & 1))
+@
+
+
+1.1.1.1
+log
+@Import OpenBSD 3.3 XF4 repository from CTM 3132 the first time
+This finalizes starting an OpenBSD-mirabile (aka MirBSD) repository.
+
+### MirBSD is:
+# Copyright (c) 1982-2003 by Thorsten "mirabile" Glaser <x86@@ePost.de>
+# Copyright © 1968-2003  The authors of And contributors to UNIX®, the
+#       C Language, BSD/Berkeley Unix; 386BSD, NetBSD 1.1 and OpenBSD.
+#
+# Anyone who obtained a copy of this work is hereby permitted to freely use,
+# distribute, modify, merge, sublicence, give away or sell it as long as the
+# authors are given due credit and the following notice is retained:
+#
+# This work is provided "as is", with no explicit or implicit warranty what-
+# soever. Use it only at your own risk. In no event may an author or contri-
+# butor be held liable for any damage, directly or indirectly, that origina-
+# ted through or is caused by creation or modification of this work.
+
+MirBSD is my private tree. MirBSD does not differ very much from OpenBSD
+and intentionally tracks OpenBSD. That's why it _is_ OpenBSD, just not the
+official one. It's like with DarrenBSD.
+
+At time of this writing, no advertising for MirBSD must be done,
+because the advertising clause has not yet been sorted out.
+
+http://templeofhate.com/tglaser/MirBSD/index.php
+@
+text
+@@
+
+
+1.1.1.2
+log
+@The X-Windowing System
+
+Import XFree86 4.3 from OpenBSD by CTM, in the hope it's stable
+@
+text
+@d1 1
+a1 1
+/* $XFree86: xc/programs/Xserver/mfb/mfbzerarc.c,v 3.7 2002/09/27 01:57:47 dawes Exp $ */
+d221 1
+a221 1
+    if (!(pGC->planemask & 1))
+@
+
+
+1.1.1.3
+log
+@That's what OpenBSD will, probably, ship as XF4 in 3.5
+their last sync against XFree86 4.3-current has been
+imported into our vendor branch, too
+@
+text
+@d1 1
+a1 1
+/* $XFree86: xc/programs/Xserver/mfb/mfbzerarc.c,v 3.8 2003/07/16 01:38:55 dawes Exp $ */
+d38 1
+a38 1
+#include "regionstr.h"
+d75 4
+a78 4
+mfbZeroArcSS(
+    DrawablePtr pDraw,
+    GCPtr pGC,
+    xArc *arc)
+@
+
+

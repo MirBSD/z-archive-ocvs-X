@@ -1,0 +1,412 @@
+head	1.7;
+access;
+symbols;
+locks; strict;
+comment	@# @;
+
+
+1.7
+date	2004.12.03.19.34.04;	author tg;	state Exp;
+branches;
+next	1.6;
+
+1.6
+date	2004.12.03.19.00.19;	author tg;	state Exp;
+branches;
+next	1.5;
+
+1.5
+date	2004.12.03.16.44.23;	author tg;	state Exp;
+branches;
+next	1.4;
+
+1.4
+date	2004.08.06.00.00.51;	author tg;	state Exp;
+branches;
+next	1.3;
+
+1.3
+date	2003.10.21.17.54.54;	author tg;	state Exp;
+branches;
+next	1.2;
+
+1.2
+date	2003.03.22.17.24.47;	author tg;	state Exp;
+branches;
+next	1.1;
+
+1.1
+date	2003.03.22.17.16.29;	author tg;	state Exp;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.7
+log
+@add cvs mails on tag operations, like with file operations
+cvs 1.12 only
+@
+text
+@#!/usr/bin/perl
+# $MirBSD: CVSROOT/commit_prep2,v 1.6 2004/12/03 19:00:19 tg Exp $
+#-
+# Copyright (c) 2004
+#	Thorsten "mirabile" Glaser <tg@@66h.42h.de>
+#
+# Licensee is hereby permitted to deal in this work without restric-
+# tion, including unlimited rights to use, publicly perform, modify,
+# merge, distribute, sell, give away or sublicence, provided all co-
+# pyright notices above, these terms and the disclaimer are retained
+# in all redistributions or reproduced in accompanying documentation
+# or other materials provided with binary redistributions.
+#
+# All advertising materials mentioning features or use of this soft-
+# ware must display the following acknowledgement:
+#	This product includes material provided by Thorsten Glaser.
+#
+# Licensor hereby provides this work "AS IS" and WITHOUT WARRANTY of
+# any kind, expressed or implied, to the maximum extent permitted by
+# applicable law, but with the warranty of being written without ma-
+# licious intent or gross negligence; in no event shall licensor, an
+# author or contributor be held liable for any damage, direct, indi-
+# rect or other, however caused, arising in any way out of the usage
+# of this work, even if advised of the possibility of such damage.
+#-
+# Original authors:
+#	Contributed by David Hampton <hampton@@cisco.com>
+#	Hacked on lots by Greg A. Woods <woods@@web.net>
+#-
+# Perl filter to handle pre-commit checking of files.  This program
+# records the last directory where commits will be taking place for
+# use by the log_accum.pl script.
+# If requested, for new files it forces the existence of a RCS "Id"
+# keyword in the first ten lines of the file; for existing files it
+# checks version number in the "Id" line to prevent losing changes,
+# eg. because an old version of a file was copied into the direcory.
+#
+# -r enabled the record directory mode
+# -c enables the check RCS Id mode
+# -d enables some sort of debugging mode
+
+
+#
+#	Configurable options
+#
+
+# Constants (remember to protect strings from RCS keyword substitution)
+#
+$LAST_FILE     = "/tmp/#cvs.lastdir";	# must match name in *_accum2
+$ENTRIES       = "CVS/Entries";
+
+# Patterns to find $Log keywords in files
+#
+$LogString1 = "\\\$\\Log: .* \\\$";
+$LogString2 = "\\\$\\Log\\\$";
+$NoLog = "%s - contains an RCS \$Log keyword.  It must not!\n";
+
+# pattern to match an RCS Id keyword line with an existing ID
+#
+$IDstring = "\"@@\\(#\\)[^:]*:.*\\\$\Id: .*\\\$\"";
+$NoId = "
+%s - Does not contain a properly formatted line with the keyword \"Id:\".
+	I.e. no lines match \"" . $IDstring . "\".
+	Please see the template files for an example.\n";
+
+# pattern to match an RCS Id keyword line for a new file (i.e. un-expanded)
+#
+$NewId = "\"@@(#)[^:]*:.*\\$\Id\\$\"";
+
+$NoName = "
+%s - The ID line should contain only \"@@(#)module/path:\$Name\$:\$\Id\$\"
+	for a newly created file.\n";
+
+$BadName = "
+%s - The file name '%s' in the ID line does not match
+	the actual filename.\n";
+
+$BadVersion = "
+%s - How dare you!!!  You replaced your copy of the file '%s',
+	which was based upon version %s, with an %s version based
+	upon %s.  Please move your '%s' out of the way, perform an
+	update to get the current version, and them merge your changes
+	into that file, then try the commit again.\n";
+
+#
+#	Subroutines
+#
+
+sub write_line {
+    local($filename, $line) = @@_;
+    open(FILE, ">$filename") || die("Cannot open $filename, stopped");
+    print(FILE $line, "\n");
+    close(FILE);
+}
+
+sub check_version {
+    local($i, $id, $rname, $version);
+    local($filename, $cvsversion) = @@_;
+
+    open(FILE, "<$filename") || return(0);
+
+    @@all_lines = ();
+    $idpos = -1;
+    $newidpos = -1;
+    for ($i = 0; <FILE>; $i++) {
+	chop;
+	push(@@all_lines, $_);
+	if ($_ =~ /$IDstring/) {
+	    $idpos = $i;
+	}
+	if ($_ =~ /$NewId/) {
+	    $newidpos = $i;
+	}
+    }
+
+    if (grep(/$LogString1/, @@all_lines) || grep(/$LogString2/, @@all_lines)) {
+	print STDERR sprintf($NoLog, $filename);
+	return(1);
+    }
+
+    if ($debug != 0) {
+	print STDERR sprintf("file = %s, version = %d.\n", $filename, $cvsversion{$filename});
+    }
+
+    if ($cvsversion{$filename} == 0) {
+	if ($newidpos != -1 && $all_lines[$newidpos] !~ /$NewId/) {
+	    print STDERR sprintf($NoName, $filename);
+	    return(1);
+	}
+	return(0);
+    }
+
+    if ($idpos == -1) {
+	print STDERR sprintf($NoId, $filename);
+	return(1);
+    }
+
+    $line = $all_lines[$idpos];
+    $pos = index($line, "Id: ");
+    if ($debug != 0) {
+	print STDERR sprintf("%d in '%s'.\n", $pos, $line);
+    }
+    ($id, $rname, $version) = split(' ', substr($line, $pos));
+    if ($rname ne "$filename,v") {
+	print STDERR sprintf($BadName, $filename, substr($rname, 0, length($rname)-2));
+	return(1);
+    }
+    if ($cvsversion{$filename} < $version) {
+	print STDERR sprintf($BadVersion, $filename, $filename, $cvsversion{$filename},
+			     "newer", $version, $filename);
+	return(1);
+    }
+    if ($cvsversion{$filename} > $version) {
+	print STDERR sprintf($BadVersion, $filename, $filename, $cvsversion{$filename},
+			     "older", $version, $filename);
+	return(1);
+    }
+    return(0);
+}
+
+#
+#	Main Body
+#
+
+$id = getpgrp();		# You *must* use a shell that does setpgrp()
+
+# Check each file (except dot files) for an RCS "Id" keyword.
+#
+$check_id = 0;
+
+# Record the directory for later use by the log_accumulate stript.
+#
+$record_directory = 0;
+
+# parse command line arguments
+#
+while (@@ARGV) {
+    $arg = shift @@ARGV;
+
+    if ($arg eq '-d') {
+	$debug = 1;
+	print STDERR "Debug turned on...\n";
+    } elsif ($arg eq '-c') {
+	$check_id = 1;
+    } elsif ($arg eq '-r') {
+	$record_directory = 1;
+    } else {
+	push(@@files, $arg);
+    }
+}
+
+$directory = shift @@files;
+
+if ($debug != 0) {
+    print STDERR "dir   - ", $directory, "\n";
+    print STDERR "files - ", join(":", @@files), "\n";
+    print STDERR "id    - ", $id, "\n";
+}
+
+if ($check_id != 0) {
+    # Suck in the CVS/Entries file
+    #
+    open(ENTRIES, $ENTRIES) || die("Cannot open $ENTRIES.\n");
+    while (<ENTRIES>) {
+	local($filename, $version) = split('/', substr($_, 1));
+	$cvsversion{$filename} = $version;
+    }
+
+    # Now check each file name passed in, except for dot files.  Dot files
+    # are considered to be administrative files by this script.
+    #
+    $failed = 0;
+    foreach $arg (@@files) {
+	if (index($arg, ".") == 0) {
+	    next;
+	}
+	$failed += &check_version($arg);
+    }
+    if ($failed) {
+	print STDERR "\n";
+	exit(1);
+    }
+}
+
+# Record this directory as the last one checked.  This will be used
+# by the log_accumulate script to determine when it is processing
+# the final directory of a multi-directory commit.
+#
+if ($record_directory != 0) {
+    &write_line("$LAST_FILE.$id", $directory);
+}
+exit(0);
+@
+
+
+1.6
+log
+@fix filename
+@
+text
+@d2 1
+a2 1
+# $MirBSD: CVSROOT/commit_prep2,v 1.5 2004/12/03 16:44:23 tg Exp $
+d49 1
+a49 1
+$LAST_FILE     = "/tmp/#cvs.lastdir";	# must match name in log_accum2
+@
+
+
+1.5
+log
+@update licence; clean up the *2 scripts; speed up commit_prep2
+@
+text
+@d2 1
+a2 1
+# $MirBSD: src/share/misc/licence.template,v 1.20 2004/12/03 16:18:37 tg Rel $
+d49 1
+a49 1
+$LAST_FILE     = "/tmp/#cvs.lastdir";	# must match name in log_accum.pl
+@
+
+
+1.4
+log
+@while here, use $MirBSD RCS IDs, not $Id ones, usually
+@
+text
+@d2 27
+a28 1
+# $MirBSD$
+d32 10
+a41 18
+# use by the log_accum.pl script.  For new files, it forces the
+# existence of a RCS "Id" keyword in the first ten lines of the file.
+# For existing files, it checks version number in the "Id" line to
+# prevent losing changes because an old version of a file was copied
+# into the direcory.
+#
+# Possible future enhancements:
+#
+#    Check for cruft left by unresolved conflicts.  Search for
+#    "^<<<<<<<$", "^-------$", and "^>>>>>>>$".
+#
+#    Look for a copyright and automagically update it to the
+#    current year.  [[ bad idea!  -- woods ]]
+#
+#
+# Contributed by David Hampton <hampton@@cisco.com>
+# Hacked on lots by Greg A. Woods <woods@@web.net>
+# Even more hacked by The MirOS Project <miros-discuss@@66h.42h.de>
+d49 1
+a49 1
+$LAST_FILE     = "/tmp/#cvs.lastdir"; # must match name in log_accum.pl
+d165 1
+a165 1
+$id = getpgrp();		# You *must* use a shell that does setpgrp()!
+d200 8
+a207 7
+# Suck in the CVS/Entries file
+#
+open(ENTRIES, $ENTRIES) || die("Cannot open $ENTRIES.\n");
+while (<ENTRIES>) {
+    local($filename, $version) = split('/', substr($_, 1));
+    $cvsversion{$filename} = $version;
+}
+d209 3
+a211 4
+# Now check each file name passed in, except for dot files.  Dot files
+# are considered to be administrative files by this script.
+#
+if ($check_id != 0) {
+@
+
+
+1.3
+log
+@whitespace and tag cleanup
+nuke unused comments
+@
+text
+@d2 2
+a3 2
+# $Id: commit_prep2,v 1.2 2003/03/22 17:24:47 tg Exp $
+#
+a21 1
+#
+d23 1
+@
+
+
+1.2
+log
+@Add RCSId
+@
+text
+@d2 2
+a3 2
+# -*-Perl-*-
+# $Id$
+d144 1
+a144 1
+#	Main Body	
+@
+
+
+1.1
+log
+@sync with openbsd
+create mailing lists
+@
+text
+@d3 1
+a3 3
+#
+#ident	"@@(#)cvs/contrib:$Name:  $:$Id: commit_prep,v 1.1 1995/10/07 06:34:12 tholo Exp $"
+#
+@
+

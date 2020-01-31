@@ -1,0 +1,267 @@
+head	1.2;
+access;
+symbols
+	ctm-3449:1.1.1.1
+	cvs-200307191610:1.1.1.1
+	ctm-3416:1.1.1.1
+	cvs-200307091500:1.1.1.1
+	ctm-3389:1.1.1.1
+	cvs-200306291800:1.1.1.1
+	ctm-3369:1.1.1.1
+	ctm-3341:1.1.1.1
+	MIRBSD_5:1.1.1.1
+	cvs-200306082100:1.1.1.1
+	ctm-3316:1.1.1.1
+	ctm-3272:1.1.1.1
+	ctm-3264:1.1.1.1
+	ctm-3258:1.1.1.1
+	MIRBSD_4:1.1.1.1
+	ctm-3200:1.1.1.1
+	ctm-3188:1.1.1.1
+	ctm-3155:1.1.1.1
+	ctm-3132:1.1.1.1
+	openbsd:1.1.1;
+locks; strict;
+comment	@# @;
+
+
+1.2
+date	2003.08.18.15.58.12;	author tg;	state dead;
+branches;
+next	1.1;
+
+1.1
+date	2003.03.22.19.52.50;	author tg;	state Exp;
+branches
+	1.1.1.1;
+next	;
+
+1.1.1.1
+date	2003.03.22.19.52.50;	author tg;	state Exp;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.2
+log
+@merge OpenBSD
+@
+text
+@$OpenBSD: patch-etcpapd-printcapc,v 1.1.1.1 2002/07/23 11:48:15 naddy Exp $
+--- etc/papd/printcap.c.orig	Sun Aug 17 09:20:28 1997
++++ etc/papd/printcap.c	Fri Mar 16 14:58:42 2001
+@@@@ -40,9 +40,15 @@@@
+ static char sccsid[] = "@@(#)printcap.c	5.7 (Berkeley) 3/4/91";
+ #endif /* not lint */
+ 
++#include <sys/types.h>
++#include <sys/uio.h>
+ #include <ctype.h>
++#include <curses.h>
++#include <fcntl.h>
+ #include <stdio.h>
+-#include <strings.h>
++#include <string.h>
++#include <term.h>
++#include <unistd.h>
+ #include <atalk/paths.h>
+ 
+ #ifndef BUFSIZ
+@@@@ -66,7 +72,6 @@@@ static char sccsid[] = "@@(#)printcap.c	5
+ 
+ #define PRINTCAP
+ 
+-#ifdef PRINTCAP
+ #define tgetent	pgetent
+ #define tskip	pskip
+ #define tgetstr	pgetstr
+@@@@ -77,7 +82,8 @@@@ static char sccsid[] = "@@(#)printcap.c	5
+ #define tnchktc	pnchktc
+ #define	tnamatch pnamatch
+ #define V6
+-#endif
++
++int	pnchktc(), pnamatch();
+ 
+ static	FILE *pfp = NULL;	/* printcap data base file pointer */
+ static	char *tbuf;
+@@@@ -94,6 +100,7 @@@@ char	*getenv();
+  * Added a "cap" parameter, so we can use these calls for printcap
+  * and papd.conf.
+  */
++int
+ getprent( cap, bp)
+ 	register char *cap;
+ 	register char *bp;
+@@@@ -136,6 +143,7 @@@@ getprent( cap, bp)
+ 	}
+ }
+ 
++void
+ endprent()
+ {
+ 	if (pfp != NULL)
+@@@@ -150,6 +158,7 @@@@ endprent()
+  * Added a "cap" parameter, so we can use these calls for printcap
+  * and papd.conf.
+  */
++int
+ tgetent( cap, bp, name)
+ 	char *cap, *bp, *name;
+ {
+@@@@ -157,8 +166,7 @@@@ tgetent( cap, bp, name)
+ 	register int c;
+ 	register int i = 0, cnt = 0;
+ 	char ibuf[BUFSIZ];
+-	char *cp2;
+-	int tf;
++	int tf, skip;
+ 
+ 	hopcount = 0;
+ 	tbuf = bp;
+@@@@ -176,8 +184,8 @@@@ tgetent( cap, bp, name)
+ 		if (*cp!='/') {
+ 			cp2 = getenv("TERM");
+ 			if (cp2==(char *) 0 || strcmp(name,cp2)==0) {
+-				strcpy(bp,cp);
+-				return(tnchktc());
++				(void)strlcpy(bp,cp, sizeof( bp ) );
++				return(tnchktc(cap));
+ 			} else {
+ 				tf = open(cap, 0);
+ 			}
+@@@@ -191,6 +199,7 @@@@ tgetent( cap, bp, name)
+ #endif
+ 	if (tf < 0)
+ 		return (-1);
++	skip = 0;
+ 	for (;;) {
+ 		cp = bp;
+ 		for (;;) {
+@@@@ -204,12 +213,20 @@@@ tgetent( cap, bp, name)
+ 			}
+ 			c = ibuf[i++];
+ 			if (c == '\n') {
+-				if (cp > bp && cp[-1] == '\\'){
++				if (!skip && cp > bp && cp[-1] == '\\'){
+ 					cp--;
+ 					continue;
+ 				}
+-				break;
++				skip = 0;
++				if (cp == bp)
++					continue;
++				else
++					break;
+ 			}
++			if (c == '#' && cp == bp)
++				skip++;
++			if (skip)
++				continue;
+ 			if (cp >= bp+BUFSIZ) {
+ 				write(2,"Termcap entry too long\n", 23);
+ 				break;
+@@@@ -223,7 +240,7 @@@@ tgetent( cap, bp, name)
+ 		 */
+ 		if (tnamatch(name)) {
+ 			close(tf);
+-			return(tnchktc());
++			return(tnchktc(cap));
+ 		}
+ 	}
+ }
+@@@@ -238,6 +255,7 @@@@ tgetent( cap, bp, name)
+  * Added a "cap" parameter, so we can use these calls for printcap
+  * and papd.conf.
+  */
++int
+ tnchktc( cap )
+     char *cap;
+ {
+@@@@ -257,7 +275,7 @@@@ tnchktc( cap )
+ 	/* p now points to beginning of last field */
+ 	if (p[0] != 't' || p[1] != 'c')
+ 		return(1);
+-	strcpy(tcname,p+3);
++	(void)strlcpy(tcname,p+3, sizeof ( tcname ) );
+ 	q = tcname;
+ 	while (q && *q != ':')
+ 		q++;
+@@@@ -275,7 +293,7 @@@@ tnchktc( cap )
+ 		write(2, "Termcap entry too long\n", 23);
+ 		q[BUFSIZ - (p-tbuf)] = 0;
+ 	}
+-	strcpy(p, q+1);
++	(void)strlcpy(p, q+1, sizeof( p ) );
+ 	tbuf = holdtbuf;
+ 	return(1);
+ }
+@@@@ -286,6 +304,7 @@@@ tnchktc( cap )
+  * against each such name.  The normal : terminator after the last
+  * name (before the first field) stops us.
+  */
++int
+ tnamatch(np)
+ 	char *np;
+ {
+@@@@ -332,6 +351,7 @@@@ tskip(bp)
+  * a # character.  If the option is not found we return -1.
+  * Note that we handle octal numbers beginning with 0.
+  */
++int
+ tgetnum(id)
+ 	char *id;
+ {
+@@@@ -365,6 +385,7 @@@@ tgetnum(id)
+  * of the buffer.  Return 1 if we find the option, or 0 if it is
+  * not given.
+  */
++int
+ tgetflag(id)
+ 	char *id;
+ {
+@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@@
+
+
+1.1.1.1
+log
+@Import OpenBSD 3.3 ports repository from CTM 3132 the first time
+This continues opening an OpenBSD-mirabile (aka MirBSD) repository.
+
+### MirBSD is:
+# Copyright (c) 1982-2003 by Thorsten "mirabile" Glaser <x86@@ePost.de>
+# Copyright © 1968-2003  The authors of And contributors to UNIX®, the
+#       C Language, BSD/Berkeley Unix; 386BSD, NetBSD 1.1 and OpenBSD.
+#
+# Anyone who obtained a copy of this work is hereby permitted to freely use,
+# distribute, modify, merge, sublicence, give away or sell it as long as the
+# authors are given due credit and the following notice is retained:
+#
+# This work is provided "as is", with no explicit or implicit warranty what-
+# soever. Use it only at your own risk. In no event may an author or contri-
+# butor be held liable for any damage, directly or indirectly, that origina-
+# ted through or is caused by creation or modification of this work.
+
+MirBSD is my private tree. MirBSD does not differ very much from OpenBSD
+and intentionally tracks OpenBSD. That's why it _is_ OpenBSD, just not the
+official one. It's like with DarrenBSD.
+
+At time of this writing, no advertising for MirBSD must be done,
+because the advertising clause has not yet been sorted out.
+
+http://templeofhate.com/tglaser/MirBSD/index.php
+@
+text
+@@

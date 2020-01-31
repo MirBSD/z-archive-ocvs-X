@@ -1,0 +1,4166 @@
+head	1.2;
+branch	1.1.1;
+access;
+symbols
+	tg-mergetmp-2:1.1.1.3
+	cvs-200410241530:1.1.1.3
+	cvs-200410012000:1.1.1.3
+	cvs-200407141120:1.1.1.3
+	cvs-200406231010:1.1.1.3
+	MIRBSD_7quater:1.1.1.2
+	cvs-200405271510:1.1.1.3
+	XFree86_4_4_0:1.1.9.1
+	cvs-200403021700:1.1.1.3
+	XFREE86_20040213:1.1.9.1
+	xc:1.1.9
+	cvs-200401291925:1.1.1.2
+	MIRBSD_7_ALPHA:1.1.1.2.0.4
+	MIRBSD_7:1.1.1.2.0.2
+	MIRBSD_7ter:1.1.1.2
+	cvs-20011091815:1.1.1.2
+	cvs-200309162130:1.1.1.2
+	cvs-200308302005:1.1.1.2
+	ctmx-0387:1.1.1.2
+	ctmx-0384:1.1.1.2
+	MIRBSD_5:1.1.1.2
+	ctmx-0375:1.1.1.2
+	ctmx-0373:1.1.1.2
+	ctm-0371:1.1.1.2
+	ctm-0370:1.1.1.2
+	MIRBSD_4:1.1.1.2
+	ctm-0363:1.1.1.2
+	ctm-0359:1.1.1.2
+	ctm-0349:1.1.1.1
+	openbsd:1.1.1;
+locks; strict;
+comment	@ * @;
+
+
+1.2
+date	2003.05.16.16.28.16;	author tg;	state dead;
+branches;
+next	1.1;
+
+1.1
+date	2003.03.22.20.00.58;	author tg;	state Exp;
+branches
+	1.1.1.1
+	1.1.9.1;
+next	;
+
+1.1.1.1
+date	2003.03.22.20.00.58;	author tg;	state Exp;
+branches;
+next	1.1.1.2;
+
+1.1.1.2
+date	2003.04.08.18.19.57;	author tg;	state Exp;
+branches;
+next	1.1.1.3;
+
+1.1.1.3
+date	2004.03.02.17.28.33;	author tg;	state Stab;
+branches;
+next	;
+
+1.1.9.1
+date	2004.02.14.19.04.38;	author tg;	state Exp;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.2
+log
+@remove a bunch of files not used in MirBSD - clean tree. People who want them got cvs.
+@
+text
+@
+/*
+ * Mesa 3-D graphics library
+ * Version:  3.4
+ * 
+ * Copyright (C) 1999-2000  Brian Paul   All Rights Reserved.
+ * 
+ * Permission is hereby granted, free of charge, to any person obtaining a
+ * copy of this software and associated documentation files (the "Software"),
+ * to deal in the Software without restriction, including without limitation
+ * the rights to use, copy, modify, merge, publish, distribute, sublicense,
+ * and/or sell copies of the Software, and to permit persons to whom the
+ * Software is furnished to do so, subject to the following conditions:
+ * 
+ * The above copyright notice and this permission notice shall be included
+ * in all copies or substantial portions of the Software.
+ * 
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
+ * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL
+ * BRIAN PAUL BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN
+ * AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
+ * CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+ */
+
+
+#ifdef PC_HEADER
+#include "all.h"
+#else
+#include "glheader.h"
+#include "context.h"
+#include "enable.h"
+#include "light.h"
+#include "macros.h"
+#include "matrix.h"
+#include "mmath.h"
+#include "simple_list.h"
+#include "types.h"
+#include "vbfill.h"
+#include "xform.h"
+#include "enums.h"
+#endif
+
+
+
+/*
+ * Perform glEnable and glDisable calls.
+ */
+void _mesa_set_enable( GLcontext *ctx, GLenum cap, GLboolean state )
+{
+   ASSERT_OUTSIDE_BEGIN_END_AND_FLUSH( ctx, state ? "glEnable" : "glDisable" );
+
+   if (MESA_VERBOSE & VERBOSE_API) 
+      fprintf(stderr, "%s %s (newstate is %x)\n", 
+	      state ? "glEnable" : "glDisable",
+	      gl_lookup_enum_by_nr(cap),
+	      ctx->NewState);
+
+   switch (cap) {
+      case GL_ALPHA_TEST:
+         if (ctx->Color.AlphaEnabled!=state) {
+            ctx->Color.AlphaEnabled = state;
+            ctx->NewState |= NEW_RASTER_OPS;
+         }
+	 break;
+      case GL_AUTO_NORMAL:
+	 ctx->Eval.AutoNormal = state;
+	 break;
+      case GL_BLEND:
+         if (ctx->Color.BlendEnabled!=state) {
+            ctx->Color.BlendEnabled = state;
+            /* The following needed to accomodate 1.0 RGB logic op blending */
+            if (ctx->Color.BlendEquation==GL_LOGIC_OP && state) {
+               ctx->Color.ColorLogicOpEnabled = GL_TRUE;
+            }
+            else {
+               ctx->Color.ColorLogicOpEnabled = GL_FALSE;
+            }
+            ctx->NewState |= NEW_RASTER_OPS;
+         }
+	 break;
+      case GL_CLIP_PLANE0:
+      case GL_CLIP_PLANE1:
+      case GL_CLIP_PLANE2:
+      case GL_CLIP_PLANE3:
+      case GL_CLIP_PLANE4:
+      case GL_CLIP_PLANE5:
+	 if (cap >= GL_CLIP_PLANE0 && 
+	     cap <= GL_CLIP_PLANE5 &&
+	     ctx->Transform.ClipEnabled[cap-GL_CLIP_PLANE0] != state) 
+	 {
+	    GLuint p = cap-GL_CLIP_PLANE0;
+
+	    ctx->Transform.ClipEnabled[p] = state;
+	    ctx->NewState |= NEW_USER_CLIP;
+
+	    if (state) {
+	       ctx->Enabled |= ENABLE_USERCLIP;
+	       ctx->Transform.AnyClip++;
+	       
+	       if (ctx->ProjectionMatrix.flags & MAT_DIRTY_ALL_OVER) {
+		  gl_matrix_analyze( &ctx->ProjectionMatrix );
+	       }
+	       
+	       gl_transform_vector( ctx->Transform.ClipUserPlane[p],
+				    ctx->Transform.EyeUserPlane[p],
+				    ctx->ProjectionMatrix.inv );
+	    } else {
+	       if (--ctx->Transform.AnyClip == 0)
+		  ctx->Enabled &= ~ENABLE_USERCLIP;	       
+	    }	    
+	 }
+	 break;
+      case GL_COLOR_MATERIAL:
+         if (ctx->Light.ColorMaterialEnabled!=state) {
+            ctx->Light.ColorMaterialEnabled = state;
+	    ctx->NewState |= NEW_LIGHTING;
+            if (state)
+               gl_update_color_material( ctx, ctx->Current.ByteColor );
+         }
+	 break;
+      case GL_CULL_FACE:
+         if (ctx->Polygon.CullFlag!=state) {
+            ctx->Polygon.CullFlag = state;
+	    ctx->TriangleCaps ^= DD_TRI_CULL;
+            ctx->NewState |= NEW_POLYGON;
+         }
+	 break;
+      case GL_DEPTH_TEST:
+         if (state && ctx->Visual->DepthBits==0) {
+            gl_warning(ctx,"glEnable(GL_DEPTH_TEST) but no depth buffer");
+            return;
+         }
+	 if (ctx->Depth.Test!=state) {
+            ctx->Depth.Test = state;
+            ctx->NewState |= NEW_RASTER_OPS;
+         }
+         break;
+      case GL_DITHER:
+         if (ctx->NoDither) {
+            /* MESA_NO_DITHER env var */
+            state = GL_FALSE;
+         }
+         if (ctx->Color.DitherFlag!=state) {
+            ctx->Color.DitherFlag = state;
+            ctx->NewState |= NEW_RASTER_OPS;
+         }
+	 break;
+      case GL_FOG:
+	 if (ctx->Fog.Enabled!=state) {
+            ctx->Fog.Enabled = state;
+	    ctx->Enabled ^= ENABLE_FOG;
+            ctx->NewState |= NEW_FOG|NEW_RASTER_OPS;
+         }
+	 break;
+      case GL_HISTOGRAM:
+         ctx->Pixel.HistogramEnabled = state;
+         break;
+      case GL_LIGHT0:
+      case GL_LIGHT1:
+      case GL_LIGHT2:
+      case GL_LIGHT3:
+      case GL_LIGHT4:
+      case GL_LIGHT5:
+      case GL_LIGHT6:
+      case GL_LIGHT7:
+	 if (ctx->Light.Light[cap-GL_LIGHT0].Enabled != state) 
+	 {
+	    ctx->Light.Light[cap-GL_LIGHT0].Enabled = state;
+
+	    if (state) {
+	       insert_at_tail(&ctx->Light.EnabledList, 
+			      &ctx->Light.Light[cap-GL_LIGHT0]);
+	       if (ctx->Light.Enabled)
+		  ctx->Enabled |= ENABLE_LIGHT;
+	    } else {
+	       remove_from_list(&ctx->Light.Light[cap-GL_LIGHT0]);
+	       if (is_empty_list(&ctx->Light.EnabledList))
+		  ctx->Enabled &= ~ENABLE_LIGHT;
+	    }
+
+	    ctx->NewState |= NEW_LIGHTING;
+	 }
+         break;
+      case GL_LIGHTING:
+         if (ctx->Light.Enabled!=state) {
+            ctx->Light.Enabled = state;
+	    ctx->Enabled &= ~ENABLE_LIGHT;
+            if (state)
+	       ctx->Enabled |= ENABLE_LIGHT;
+            ctx->NewState |= NEW_LIGHTING;
+         }
+         break;
+      case GL_LINE_SMOOTH:
+	 if (ctx->Line.SmoothFlag!=state) {
+            ctx->Line.SmoothFlag = state;
+	    ctx->TriangleCaps ^= DD_LINE_SMOOTH;
+            ctx->NewState |= NEW_RASTER_OPS;
+         }
+	 break;
+      case GL_LINE_STIPPLE:
+	 if (ctx->Line.StippleFlag!=state) {
+            ctx->Line.StippleFlag = state;
+	    ctx->TriangleCaps ^= DD_LINE_STIPPLE;
+            ctx->NewState |= NEW_RASTER_OPS;
+         }
+	 break;
+      case GL_INDEX_LOGIC_OP:
+         if (ctx->Color.IndexLogicOpEnabled!=state) {
+	    ctx->Color.IndexLogicOpEnabled = state;
+            ctx->NewState |= NEW_RASTER_OPS;
+         }
+	 break;
+      case GL_COLOR_LOGIC_OP:
+         if (ctx->Color.ColorLogicOpEnabled!=state) {
+	    ctx->Color.ColorLogicOpEnabled = state;
+            ctx->NewState |= NEW_RASTER_OPS;
+         }
+	 break;
+      case GL_MAP1_COLOR_4:
+	 ctx->Eval.Map1Color4 = state;
+	 break;
+      case GL_MAP1_INDEX:
+	 ctx->Eval.Map1Index = state;
+	 break;
+      case GL_MAP1_NORMAL:
+	 ctx->Eval.Map1Normal = state;
+	 break;
+      case GL_MAP1_TEXTURE_COORD_1:
+	 ctx->Eval.Map1TextureCoord1 = state;
+	 break;
+      case GL_MAP1_TEXTURE_COORD_2:
+	 ctx->Eval.Map1TextureCoord2 = state;
+	 break;
+      case GL_MAP1_TEXTURE_COORD_3:
+	 ctx->Eval.Map1TextureCoord3 = state;
+	 break;
+      case GL_MAP1_TEXTURE_COORD_4:
+	 ctx->Eval.Map1TextureCoord4 = state;
+	 break;
+      case GL_MAP1_VERTEX_3:
+	 ctx->Eval.Map1Vertex3 = state;
+	 break;
+      case GL_MAP1_VERTEX_4:
+	 ctx->Eval.Map1Vertex4 = state;
+	 break;
+      case GL_MAP2_COLOR_4:
+	 ctx->Eval.Map2Color4 = state;
+	 break;
+      case GL_MAP2_INDEX:
+	 ctx->Eval.Map2Index = state;
+	 break;
+      case GL_MAP2_NORMAL:
+	 ctx->Eval.Map2Normal = state;
+	 break;
+      case GL_MAP2_TEXTURE_COORD_1: 
+	 ctx->Eval.Map2TextureCoord1 = state;
+	 break;
+      case GL_MAP2_TEXTURE_COORD_2:
+	 ctx->Eval.Map2TextureCoord2 = state;
+	 break;
+      case GL_MAP2_TEXTURE_COORD_3:
+	 ctx->Eval.Map2TextureCoord3 = state;
+	 break;
+      case GL_MAP2_TEXTURE_COORD_4:
+	 ctx->Eval.Map2TextureCoord4 = state;
+	 break;
+      case GL_MAP2_VERTEX_3:
+	 ctx->Eval.Map2Vertex3 = state;
+	 break;
+      case GL_MAP2_VERTEX_4:
+	 ctx->Eval.Map2Vertex4 = state;
+	 break;
+      case GL_MINMAX:
+         ctx->Pixel.MinMaxEnabled = state;
+         break;
+      case GL_NORMALIZE:
+	 if (ctx->Transform.Normalize != state) {
+	    ctx->Transform.Normalize = state;
+	    ctx->NewState |= NEW_NORMAL_TRANSFORM|NEW_LIGHTING;
+	    ctx->Enabled ^= ENABLE_NORMALIZE;
+	 }
+	 break;
+      case GL_POINT_SMOOTH:
+	 if (ctx->Point.SmoothFlag!=state) {
+            ctx->Point.SmoothFlag = state;
+	    ctx->TriangleCaps ^= DD_POINT_SMOOTH;
+            ctx->NewState |= NEW_RASTER_OPS;
+         }
+	 break;
+      case GL_POLYGON_SMOOTH:
+	 if (ctx->Polygon.SmoothFlag!=state) {
+            ctx->Polygon.SmoothFlag = state;
+	    ctx->TriangleCaps ^= DD_TRI_SMOOTH;
+            ctx->NewState |= NEW_RASTER_OPS;
+         }
+	 break;
+      case GL_POLYGON_STIPPLE:
+	 if (ctx->Polygon.StippleFlag!=state) {
+            ctx->Polygon.StippleFlag = state;
+	    ctx->TriangleCaps ^= DD_TRI_STIPPLE;
+            ctx->NewState |= NEW_RASTER_OPS;
+         }
+	 break;
+      case GL_POLYGON_OFFSET_POINT:
+         if (ctx->Polygon.OffsetPoint!=state) {
+            ctx->Polygon.OffsetPoint = state;
+            ctx->NewState |= NEW_POLYGON;
+         }
+         break;
+      case GL_POLYGON_OFFSET_LINE:
+         if (ctx->Polygon.OffsetLine!=state) {
+            ctx->Polygon.OffsetLine = state;
+            ctx->NewState |= NEW_POLYGON;
+         }
+         break;
+      case GL_POLYGON_OFFSET_FILL:
+      /*case GL_POLYGON_OFFSET_EXT:*/
+         if (ctx->Polygon.OffsetFill!=state) {
+            ctx->Polygon.OffsetFill = state;
+            ctx->NewState |= NEW_POLYGON;
+         }
+         break;
+      case GL_RESCALE_NORMAL_EXT:
+	 if (ctx->Transform.RescaleNormals != state) {
+	    ctx->Transform.RescaleNormals = state;
+	    ctx->NewState |= NEW_NORMAL_TRANSFORM|NEW_LIGHTING;
+	    ctx->Enabled ^= ENABLE_RESCALE;
+	 }
+         break;
+      case GL_SCISSOR_TEST:
+         if (ctx->Scissor.Enabled!=state) {
+            ctx->Scissor.Enabled = state;
+            ctx->NewState |= NEW_RASTER_OPS;
+         }
+	 break;
+      case GL_SHARED_TEXTURE_PALETTE_EXT:
+         ctx->Texture.SharedPalette = state;
+         break;
+      case GL_STENCIL_TEST:
+	 if (state && ctx->Visual->StencilBits==0) {
+            gl_warning(ctx, "glEnable(GL_STENCIL_TEST) but no stencil buffer");
+            return;
+	 }
+	 if (ctx->Stencil.Enabled!=state) {
+            ctx->Stencil.Enabled = state;
+            ctx->NewState |= NEW_RASTER_OPS;
+	    ctx->TriangleCaps ^= DD_STENCIL;
+         }
+	 break;
+      case GL_TEXTURE_1D:
+         if (ctx->Visual->RGBAflag) {
+	    const GLuint curr = ctx->Texture.CurrentUnit;
+            struct gl_texture_unit *texUnit = &ctx->Texture.Unit[curr];
+	    ctx->NewState |= NEW_TEXTURE_ENABLE;
+            if (state) {
+	       texUnit->Enabled |= TEXTURE0_1D;
+	    }
+            else {
+               texUnit->Enabled &= ~TEXTURE0_1D;
+            }
+         }
+         break;
+      case GL_TEXTURE_2D:
+         if (ctx->Visual->RGBAflag) {
+	    const GLuint curr = ctx->Texture.CurrentUnit;
+            struct gl_texture_unit *texUnit = &ctx->Texture.Unit[curr];
+	    ctx->NewState |= NEW_TEXTURE_ENABLE;
+            if (state) {
+	       texUnit->Enabled |= TEXTURE0_2D;
+	    }
+            else {
+               texUnit->Enabled &= ~TEXTURE0_2D;
+            }
+         }
+	 break;
+      case GL_TEXTURE_3D:
+         if (ctx->Visual->RGBAflag) {
+	    const GLuint curr = ctx->Texture.CurrentUnit;
+            struct gl_texture_unit *texUnit = &ctx->Texture.Unit[curr];
+	    ctx->NewState |= NEW_TEXTURE_ENABLE;
+            if (state) {
+	       texUnit->Enabled |= TEXTURE0_3D;
+	    }
+            else {
+               texUnit->Enabled &= ~TEXTURE0_3D;
+            }
+         }
+         break;
+      case GL_TEXTURE_GEN_Q:
+         {
+            struct gl_texture_unit *texUnit = &ctx->Texture.Unit[ctx->Texture.CurrentUnit];
+            if (state)
+               texUnit->TexGenEnabled |= Q_BIT;
+            else
+               texUnit->TexGenEnabled &= ~Q_BIT;
+            ctx->NewState |= NEW_TEXTURING;
+         }
+	 break;
+      case GL_TEXTURE_GEN_R:
+         {
+            struct gl_texture_unit *texUnit = &ctx->Texture.Unit[ctx->Texture.CurrentUnit];
+            if (state)
+               texUnit->TexGenEnabled |= R_BIT;
+            else
+               texUnit->TexGenEnabled &= ~R_BIT;
+            ctx->NewState |= NEW_TEXTURING;
+         }
+	 break;
+      case GL_TEXTURE_GEN_S:
+         {
+            struct gl_texture_unit *texUnit = &ctx->Texture.Unit[ctx->Texture.CurrentUnit];
+            if (state)
+               texUnit->TexGenEnabled |= S_BIT;
+            else
+               texUnit->TexGenEnabled &= ~S_BIT;
+            ctx->NewState |= NEW_TEXTURING;
+         }
+	 break;
+      case GL_TEXTURE_GEN_T:
+         {
+            struct gl_texture_unit *texUnit = &ctx->Texture.Unit[ctx->Texture.CurrentUnit];
+            if (state)
+               texUnit->TexGenEnabled |= T_BIT;
+            else
+               texUnit->TexGenEnabled &= ~T_BIT;
+            ctx->NewState |= NEW_TEXTURING;
+         }
+	 break;
+
+      /*
+       * CLIENT STATE!!!
+       */
+      case GL_VERTEX_ARRAY:
+#ifdef VAO
+         ctx->Array.Current->Vertex.Enabled = state;
+#else
+         ctx->Array.Vertex.Enabled = state;
+#endif
+         break;
+      case GL_NORMAL_ARRAY:
+#ifdef VAO
+         ctx->Array.Current->Normal.Enabled = state;
+#else
+         ctx->Array.Normal.Enabled = state;
+#endif
+         break;
+      case GL_COLOR_ARRAY:
+#ifdef VAO
+         ctx->Array.Current->Color.Enabled = state;
+#else
+         ctx->Array.Color.Enabled = state;
+#endif
+         break;
+      case GL_INDEX_ARRAY:
+#ifdef VAO
+         ctx->Array.Current->Index.Enabled = state;
+#else
+         ctx->Array.Index.Enabled = state;
+#endif
+         break;
+      case GL_TEXTURE_COORD_ARRAY:
+#ifdef VAO
+         ctx->Array.Current->TexCoord[ctx->Array.ActiveTexture].Enabled = state;
+#else
+         ctx->Array.TexCoord[ctx->Array.ActiveTexture].Enabled = state;
+#endif
+         break;
+      case GL_EDGE_FLAG_ARRAY:
+#ifdef VAO
+         ctx->Array.Current->EdgeFlag.Enabled = state;
+#else
+         ctx->Array.EdgeFlag.Enabled = state;
+#endif
+         break;
+
+      /* GL_HP_occlusion_test */
+      case GL_OCCLUSION_TEST_HP:
+         if (ctx->Extensions.HaveHpOcclusionTest) {
+            ctx->Depth.OcclusionTest = state;
+            if (state)
+               ctx->OcclusionResult = ctx->OcclusionResultSaved;
+            else
+               ctx->OcclusionResultSaved = ctx->OcclusionResult;
+            ctx->NewState |= NEW_RASTER_OPS;
+         }
+         else {
+            gl_error( ctx, GL_INVALID_ENUM, state ? "glEnable": "glDisable" );
+            return;
+         }
+         break;
+
+      /* GL_SGIS_pixel_texture */
+      case GL_PIXEL_TEXTURE_SGIS:
+         ctx->Pixel.PixelTextureEnabled = state;
+         break;
+
+      /* GL_SGIX_pixel_texture */
+      case GL_PIXEL_TEX_GEN_SGIX:
+         ctx->Pixel.PixelTextureEnabled = state;
+         break;
+
+      /* GL_SGI_color_table */
+      case GL_COLOR_TABLE_SGI:
+         ctx->Pixel.ColorTableEnabled = state;
+         break;
+      case GL_POST_CONVOLUTION_COLOR_TABLE_SGI:
+         ctx->Pixel.PostConvolutionColorTableEnabled = state;
+         break;
+      case GL_POST_COLOR_MATRIX_COLOR_TABLE_SGI:
+         ctx->Pixel.PostColorMatrixColorTableEnabled = state;
+         break;
+
+      /* GL_EXT_convolution */
+      case GL_CONVOLUTION_1D:
+         ctx->Pixel.Convolution1DEnabled = state;
+         break;
+      case GL_CONVOLUTION_2D:
+         ctx->Pixel.Convolution2DEnabled = state;
+         break;
+      case GL_SEPARABLE_2D:
+         ctx->Pixel.Separable2DEnabled = state;
+         break;
+
+      /* GL_ARB_texture_cube_map */
+      case GL_TEXTURE_CUBE_MAP_ARB:
+         if (ctx->Extensions.HaveTextureCubeMap) {
+            if (ctx->Visual->RGBAflag) {
+               const GLuint curr = ctx->Texture.CurrentUnit;
+               struct gl_texture_unit *texUnit = &ctx->Texture.Unit[curr];
+               ctx->NewState |= NEW_TEXTURE_ENABLE;
+               if (state) {
+                  texUnit->Enabled |= TEXTURE0_CUBE;
+               }
+               else {
+                  texUnit->Enabled &= ~TEXTURE0_CUBE;
+               }
+            }
+         }
+         else {
+            gl_error(ctx, GL_INVALID_ENUM, state ? "glEnable" : "glDisable");
+            return;
+         }
+	 break;
+
+      default:
+         gl_error(ctx, GL_INVALID_ENUM, state ? "glEnable" : "glDisable");
+         return;
+   }
+
+   if (ctx->Driver.Enable) {
+      (*ctx->Driver.Enable)( ctx, cap, state );
+   }
+}
+
+
+
+
+void
+_mesa_Enable( GLenum cap )
+{
+   GET_CURRENT_CONTEXT(ctx);
+   _mesa_set_enable( ctx, cap, GL_TRUE );
+}
+
+
+
+void
+_mesa_Disable( GLenum cap )
+{
+   GET_CURRENT_CONTEXT(ctx);
+   _mesa_set_enable( ctx, cap, GL_FALSE );
+}
+
+
+
+GLboolean
+_mesa_IsEnabled( GLenum cap )
+{
+   GET_CURRENT_CONTEXT(ctx);
+   switch (cap) {
+      case GL_ALPHA_TEST:
+         return ctx->Color.AlphaEnabled;
+      case GL_AUTO_NORMAL:
+	 return ctx->Eval.AutoNormal;
+      case GL_BLEND:
+         return ctx->Color.BlendEnabled;
+      case GL_CLIP_PLANE0:
+      case GL_CLIP_PLANE1:
+      case GL_CLIP_PLANE2:
+      case GL_CLIP_PLANE3:
+      case GL_CLIP_PLANE4:
+      case GL_CLIP_PLANE5:
+	 return ctx->Transform.ClipEnabled[cap-GL_CLIP_PLANE0];
+      case GL_COLOR_MATERIAL:
+	 return ctx->Light.ColorMaterialEnabled;
+      case GL_CULL_FACE:
+         return ctx->Polygon.CullFlag;
+      case GL_DEPTH_TEST:
+         return ctx->Depth.Test;
+      case GL_DITHER:
+	 return ctx->Color.DitherFlag;
+      case GL_FOG:
+	 return ctx->Fog.Enabled;
+      case GL_HISTOGRAM:
+         return ctx->Pixel.HistogramEnabled;
+      case GL_LIGHTING:
+         return ctx->Light.Enabled;
+      case GL_LIGHT0:
+      case GL_LIGHT1:
+      case GL_LIGHT2:
+      case GL_LIGHT3:
+      case GL_LIGHT4:
+      case GL_LIGHT5:
+      case GL_LIGHT6:
+      case GL_LIGHT7:
+         return ctx->Light.Light[cap-GL_LIGHT0].Enabled;
+      case GL_LINE_SMOOTH:
+	 return ctx->Line.SmoothFlag;
+      case GL_LINE_STIPPLE:
+	 return ctx->Line.StippleFlag;
+      case GL_INDEX_LOGIC_OP:
+	 return ctx->Color.IndexLogicOpEnabled;
+      case GL_COLOR_LOGIC_OP:
+	 return ctx->Color.ColorLogicOpEnabled;
+      case GL_MAP1_COLOR_4:
+	 return ctx->Eval.Map1Color4;
+      case GL_MAP1_INDEX:
+	 return ctx->Eval.Map1Index;
+      case GL_MAP1_NORMAL:
+	 return ctx->Eval.Map1Normal;
+      case GL_MAP1_TEXTURE_COORD_1:
+	 return ctx->Eval.Map1TextureCoord1;
+      case GL_MAP1_TEXTURE_COORD_2:
+	 return ctx->Eval.Map1TextureCoord2;
+      case GL_MAP1_TEXTURE_COORD_3:
+	 return ctx->Eval.Map1TextureCoord3;
+      case GL_MAP1_TEXTURE_COORD_4:
+	 return ctx->Eval.Map1TextureCoord4;
+      case GL_MAP1_VERTEX_3:
+	 return ctx->Eval.Map1Vertex3;
+      case GL_MAP1_VERTEX_4:
+	 return ctx->Eval.Map1Vertex4;
+      case GL_MAP2_COLOR_4:
+	 return ctx->Eval.Map2Color4;
+      case GL_MAP2_INDEX:
+	 return ctx->Eval.Map2Index;
+      case GL_MAP2_NORMAL:
+	 return ctx->Eval.Map2Normal;
+      case GL_MAP2_TEXTURE_COORD_1: 
+	 return ctx->Eval.Map2TextureCoord1;
+      case GL_MAP2_TEXTURE_COORD_2:
+	 return ctx->Eval.Map2TextureCoord2;
+      case GL_MAP2_TEXTURE_COORD_3:
+	 return ctx->Eval.Map2TextureCoord3;
+      case GL_MAP2_TEXTURE_COORD_4:
+	 return ctx->Eval.Map2TextureCoord4;
+      case GL_MAP2_VERTEX_3:
+	 return ctx->Eval.Map2Vertex3;
+      case GL_MAP2_VERTEX_4:
+	 return ctx->Eval.Map2Vertex4;
+      case GL_MINMAX:
+         return ctx->Pixel.MinMaxEnabled;
+      case GL_NORMALIZE:
+	 return ctx->Transform.Normalize;
+      case GL_POINT_SMOOTH:
+	 return ctx->Point.SmoothFlag;
+      case GL_POLYGON_SMOOTH:
+	 return ctx->Polygon.SmoothFlag;
+      case GL_POLYGON_STIPPLE:
+	 return ctx->Polygon.StippleFlag;
+      case GL_POLYGON_OFFSET_POINT:
+	 return ctx->Polygon.OffsetPoint;
+      case GL_POLYGON_OFFSET_LINE:
+	 return ctx->Polygon.OffsetLine;
+      case GL_POLYGON_OFFSET_FILL:
+      /*case GL_POLYGON_OFFSET_EXT:*/
+	 return ctx->Polygon.OffsetFill;
+      case GL_RESCALE_NORMAL_EXT:
+         return ctx->Transform.RescaleNormals;
+      case GL_SCISSOR_TEST:
+	 return ctx->Scissor.Enabled;
+      case GL_SHARED_TEXTURE_PALETTE_EXT:
+         return ctx->Texture.SharedPalette;
+      case GL_STENCIL_TEST:
+	 return ctx->Stencil.Enabled;
+      case GL_TEXTURE_1D:
+         {
+            const struct gl_texture_unit *texUnit = &ctx->Texture.Unit[ctx->Texture.CurrentUnit];
+            return (texUnit->Enabled & TEXTURE0_1D) ? GL_TRUE : GL_FALSE;
+         }
+      case GL_TEXTURE_2D:
+         {
+            const struct gl_texture_unit *texUnit = &ctx->Texture.Unit[ctx->Texture.CurrentUnit];
+            return (texUnit->Enabled & TEXTURE0_2D) ? GL_TRUE : GL_FALSE;
+         }
+      case GL_TEXTURE_3D:
+         {
+            const struct gl_texture_unit *texUnit = &ctx->Texture.Unit[ctx->Texture.CurrentUnit];
+            return (texUnit->Enabled & TEXTURE0_3D) ? GL_TRUE : GL_FALSE;
+         }
+      case GL_TEXTURE_GEN_Q:
+         {
+            const struct gl_texture_unit *texUnit = &ctx->Texture.Unit[ctx->Texture.CurrentUnit];
+            return (texUnit->TexGenEnabled & Q_BIT) ? GL_TRUE : GL_FALSE;
+         }
+      case GL_TEXTURE_GEN_R:
+         {
+            const struct gl_texture_unit *texUnit = &ctx->Texture.Unit[ctx->Texture.CurrentUnit];
+            return (texUnit->TexGenEnabled & R_BIT) ? GL_TRUE : GL_FALSE;
+         }
+      case GL_TEXTURE_GEN_S:
+         {
+            const struct gl_texture_unit *texUnit = &ctx->Texture.Unit[ctx->Texture.CurrentUnit];
+            return (texUnit->TexGenEnabled & S_BIT) ? GL_TRUE : GL_FALSE;
+         }
+      case GL_TEXTURE_GEN_T:
+         {
+            const struct gl_texture_unit *texUnit = &ctx->Texture.Unit[ctx->Texture.CurrentUnit];
+            return (texUnit->TexGenEnabled & T_BIT) ? GL_TRUE : GL_FALSE;
+         }
+
+      /*
+       * CLIENT STATE!!!
+       */
+      case GL_VERTEX_ARRAY:
+#ifdef VAO
+         return ctx->Array.Current->Vertex.Enabled;
+#else
+         return ctx->Array.Vertex.Enabled;
+#endif
+      case GL_NORMAL_ARRAY:
+#ifdef VAO
+         return ctx->Array.Current->Normal.Enabled;
+#else
+         return ctx->Array.Normal.Enabled;
+#endif
+      case GL_COLOR_ARRAY:
+#ifdef VAO
+         return ctx->Array.Current->Color.Enabled;
+#else
+         return ctx->Array.Color.Enabled;
+#endif
+      case GL_INDEX_ARRAY:
+#ifdef VAO
+         return ctx->Array.Current->Index.Enabled;
+#else
+         return ctx->Array.Index.Enabled;
+#endif
+      case GL_TEXTURE_COORD_ARRAY:
+#ifdef VAO
+         return ctx->Array.Current->TexCoord[ctx->Array.ActiveTexture].Enabled;
+#else
+         return ctx->Array.TexCoord[ctx->Array.ActiveTexture].Enabled;
+#endif
+      case GL_EDGE_FLAG_ARRAY:
+#ifdef VAO
+         return ctx->Array.Current->EdgeFlag.Enabled;
+#else
+         return ctx->Array.EdgeFlag.Enabled;
+#endif
+
+      /* GL_HP_occlusion_test */
+      case GL_OCCLUSION_TEST_HP:
+         if (ctx->Extensions.HaveHpOcclusionTest) {
+            return ctx->Depth.OcclusionTest;
+         }
+         else {
+            gl_error( ctx, GL_INVALID_ENUM, "glIsEnabled" );
+            return GL_FALSE;
+         }
+
+      /* GL_SGIS_pixel_texture */
+      case GL_PIXEL_TEXTURE_SGIS:
+         return ctx->Pixel.PixelTextureEnabled;
+
+      /* GL_SGIX_pixel_texture */
+      case GL_PIXEL_TEX_GEN_SGIX:
+         return ctx->Pixel.PixelTextureEnabled;
+
+      /* GL_SGI_color_table */
+      case GL_COLOR_TABLE_SGI:
+         return ctx->Pixel.ColorTableEnabled;
+      case GL_POST_CONVOLUTION_COLOR_TABLE_SGI:
+         return ctx->Pixel.PostConvolutionColorTableEnabled;
+      case GL_POST_COLOR_MATRIX_COLOR_TABLE_SGI:
+         return ctx->Pixel.PostColorMatrixColorTableEnabled;
+
+      /* GL_EXT_convolution */
+      case GL_CONVOLUTION_1D:
+         return ctx->Pixel.Convolution1DEnabled;
+      case GL_CONVOLUTION_2D:
+         return ctx->Pixel.Convolution2DEnabled;
+      case GL_SEPARABLE_2D:
+         return ctx->Pixel.Separable2DEnabled;
+
+      /* GL_ARB_texture_cube_map */
+      case GL_TEXTURE_CUBE_MAP_ARB:
+         if (ctx->Extensions.HaveTextureCubeMap) {
+            const struct gl_texture_unit *texUnit = &ctx->Texture.Unit[ctx->Texture.CurrentUnit];
+            return (texUnit->Enabled & TEXTURE0_CUBE) ? GL_TRUE : GL_FALSE;
+         }
+         else {
+            gl_error(ctx, GL_INVALID_ENUM, "glIsEnabled");
+            return GL_FALSE;
+         }
+
+      default:
+	 gl_error( ctx, GL_INVALID_ENUM, "glIsEnabled" );
+	 return GL_FALSE;
+   }
+}
+
+
+
+
+static void
+client_state( GLcontext *ctx, GLenum cap, GLboolean state )
+{
+   ASSERT_OUTSIDE_BEGIN_END_AND_FLUSH( ctx, 
+				       (state 
+					? "glEnableClientState" 
+					: "glDisableClientState") );
+
+   switch (cap) {
+      case GL_VERTEX_ARRAY:
+#ifdef VAO
+         ctx->Array.Current->Vertex.Enabled = state;
+#else
+         ctx->Array.Vertex.Enabled = state;
+#endif
+         break;
+      case GL_NORMAL_ARRAY:
+#ifdef VAO
+         ctx->Array.Current->Normal.Enabled = state;
+#else
+         ctx->Array.Normal.Enabled = state;
+#endif
+         break;
+      case GL_COLOR_ARRAY:
+#ifdef VAO
+         ctx->Array.Current->Color.Enabled = state;
+#else
+         ctx->Array.Color.Enabled = state;
+#endif
+         break;
+      case GL_INDEX_ARRAY:
+#ifdef VAO
+         ctx->Array.Current->Index.Enabled = state;
+#else
+         ctx->Array.Index.Enabled = state;
+#endif
+         break;
+      case GL_TEXTURE_COORD_ARRAY:
+#ifdef VAO
+         ctx->Array.Current->TexCoord[ctx->Array.ActiveTexture].Enabled = state;
+#else
+         ctx->Array.TexCoord[ctx->Array.ActiveTexture].Enabled = state;
+#endif
+         break;
+      case GL_EDGE_FLAG_ARRAY:
+#ifdef VAO
+         ctx->Array.Current->EdgeFlag.Enabled = state;
+#else
+         ctx->Array.EdgeFlag.Enabled = state;
+#endif
+         break;
+      default:
+         gl_error( ctx, GL_INVALID_ENUM, "glEnable/DisableClientState" );
+   }
+
+   ctx->NewState |= NEW_CLIENT_STATE;
+}
+
+
+
+void
+_mesa_EnableClientState( GLenum cap )
+{
+   GET_CURRENT_CONTEXT(ctx);
+   client_state( ctx, cap, GL_TRUE );
+}
+
+
+
+void
+_mesa_DisableClientState( GLenum cap )
+{
+   GET_CURRENT_CONTEXT(ctx);
+   client_state( ctx, cap, GL_FALSE );
+}
+
+@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@@
+
+
+1.1.9.1
+log
+@OpenBSD just has imported exactly this tree into their vendor branch,
+called the same tag, in XF4/xc
+This is, apparently, the last XFree86 snapshot before the licence change
+(ie, addition of the advertising clause)
+
+Since the developers don't see any problems with that, and we would like
+to integrate improvements done by the remaining one or two (or so) XFree86
+developers (j/k), this prepares enabling us to update X-Window in the future.
+@
+text
+@d4 4
+a7 4
+ * Version:  5.0.1
+ *
+ * Copyright (C) 1999-2003  Brian Paul   All Rights Reserved.
+ *
+d14 1
+a14 1
+ *
+d17 1
+a17 1
+ *
+d27 3
+d35 1
+d38 3
+a40 1
+#include "mtypes.h"
+d42 1
+a42 2
+#include "math/m_matrix.h"
+#include "math/m_xform.h"
+a45 128
+#define CHECK_EXTENSION(EXTNAME, CAP)					\
+   if (!ctx->Extensions.EXTNAME) {					\
+      _mesa_error(ctx, GL_INVALID_ENUM, "gl%sClientState(0x%x)",	\
+                  state ? "Enable" : "Disable", CAP);			\
+      return;								\
+   }
+
+
+
+static void
+client_state( GLcontext *ctx, GLenum cap, GLboolean state )
+{
+   GLuint flag;
+   GLuint *var;
+
+   switch (cap) {
+      case GL_VERTEX_ARRAY:
+         var = &ctx->Array.Vertex.Enabled;
+         flag = _NEW_ARRAY_VERTEX;
+         break;
+      case GL_NORMAL_ARRAY:
+         var = &ctx->Array.Normal.Enabled;
+         flag = _NEW_ARRAY_NORMAL;
+         break;
+      case GL_COLOR_ARRAY:
+         var = &ctx->Array.Color.Enabled;
+         flag = _NEW_ARRAY_COLOR0;
+         break;
+      case GL_INDEX_ARRAY:
+         var = &ctx->Array.Index.Enabled;
+         flag = _NEW_ARRAY_INDEX;
+         break;
+      case GL_TEXTURE_COORD_ARRAY:
+         var = &ctx->Array.TexCoord[ctx->Array.ActiveTexture].Enabled;
+         flag = _NEW_ARRAY_TEXCOORD(ctx->Array.ActiveTexture);
+         break;
+      case GL_EDGE_FLAG_ARRAY:
+         var = &ctx->Array.EdgeFlag.Enabled;
+         flag = _NEW_ARRAY_EDGEFLAG;
+         break;
+      case GL_FOG_COORDINATE_ARRAY_EXT:
+         var = &ctx->Array.FogCoord.Enabled;
+         flag = _NEW_ARRAY_FOGCOORD;
+         break;
+      case GL_SECONDARY_COLOR_ARRAY_EXT:
+         var = &ctx->Array.SecondaryColor.Enabled;
+         flag = _NEW_ARRAY_COLOR1;
+         break;
+
+#if FEATURE_NV_vertex_program
+      case GL_VERTEX_ATTRIB_ARRAY0_NV:
+      case GL_VERTEX_ATTRIB_ARRAY1_NV:
+      case GL_VERTEX_ATTRIB_ARRAY2_NV:
+      case GL_VERTEX_ATTRIB_ARRAY3_NV:
+      case GL_VERTEX_ATTRIB_ARRAY4_NV:
+      case GL_VERTEX_ATTRIB_ARRAY5_NV:
+      case GL_VERTEX_ATTRIB_ARRAY6_NV:
+      case GL_VERTEX_ATTRIB_ARRAY7_NV:
+      case GL_VERTEX_ATTRIB_ARRAY8_NV:
+      case GL_VERTEX_ATTRIB_ARRAY9_NV:
+      case GL_VERTEX_ATTRIB_ARRAY10_NV:
+      case GL_VERTEX_ATTRIB_ARRAY11_NV:
+      case GL_VERTEX_ATTRIB_ARRAY12_NV:
+      case GL_VERTEX_ATTRIB_ARRAY13_NV:
+      case GL_VERTEX_ATTRIB_ARRAY14_NV:
+      case GL_VERTEX_ATTRIB_ARRAY15_NV:
+         CHECK_EXTENSION(NV_vertex_program, cap);
+         {
+            GLint n = (GLint) cap - GL_VERTEX_ATTRIB_ARRAY0_NV;
+            var = &ctx->Array.VertexAttrib[n].Enabled;
+            flag = _NEW_ARRAY_ATTRIB(n);
+         }
+         break;
+#endif /* FEATURE_NV_vertex_program */
+
+      default:
+         _mesa_error( ctx, GL_INVALID_ENUM,
+                      "glEnable/DisableClientState(0x%x)", cap);
+         return;
+   }
+
+   if (*var == state)
+      return;
+
+   FLUSH_VERTICES(ctx, _NEW_ARRAY);
+   ctx->Array.NewState |= flag;
+   *var = state;
+
+   if (state)
+      ctx->Array._Enabled |= flag;
+   else
+      ctx->Array._Enabled &= ~flag;
+
+   if (ctx->Driver.Enable) {
+      (*ctx->Driver.Enable)( ctx, cap, state );
+   }
+}
+
+
+
+void
+_mesa_EnableClientState( GLenum cap )
+{
+   GET_CURRENT_CONTEXT(ctx);
+   ASSERT_OUTSIDE_BEGIN_END(ctx);
+   client_state( ctx, cap, GL_TRUE );
+}
+
+
+
+void
+_mesa_DisableClientState( GLenum cap )
+{
+   GET_CURRENT_CONTEXT(ctx);
+   ASSERT_OUTSIDE_BEGIN_END(ctx);
+   client_state( ctx, cap, GL_FALSE );
+}
+
+
+#undef CHECK_EXTENSION
+#define CHECK_EXTENSION(EXTNAME, CAP)					\
+   if (!ctx->Extensions.EXTNAME) {					\
+      _mesa_error(ctx, GL_INVALID_ENUM, "gl%s(0x%x)",			\
+                  state ? "Enable" : "Disable", CAP);			\
+      return;								\
+   }
+
+
+d51 7
+a57 5
+   if (MESA_VERBOSE & VERBOSE_API)
+      _mesa_debug(ctx, "%s %s (newstate is %x)\n",
+                  state ? "glEnable" : "glDisable",
+                  _mesa_lookup_enum_by_nr(cap),
+                  ctx->NewState);
+d61 5
+a65 5
+         if (ctx->Color.AlphaEnabled == state)
+            return;
+         FLUSH_VERTICES(ctx, _NEW_COLOR);
+         ctx->Color.AlphaEnabled = state;
+         break;
+d67 2
+a68 5
+         if (ctx->Eval.AutoNormal == state)
+            return;
+         FLUSH_VERTICES(ctx, _NEW_EVAL);
+         ctx->Eval.AutoNormal = state;
+         break;
+d70 12
+a81 11
+         if (ctx->Color.BlendEnabled == state)
+            return;
+         FLUSH_VERTICES(ctx, _NEW_COLOR);
+         ctx->Color.BlendEnabled = state;
+         /* This is needed to support 1.1's RGB logic ops AND
+          * 1.0's blending logicops.
+          */
+         ctx->Color._LogicOpEnabled =
+            (ctx->Color.ColorLogicOpEnabled ||
+             (state && ctx->Color.BlendEquation == GL_LOGIC_OP));
+         break;
+d88 26
+a113 27
+         {
+            const GLuint p = cap - GL_CLIP_PLANE0;
+
+            if ((ctx->Transform.ClipPlanesEnabled & (1 << p)) == ((GLuint) state << p))
+               return;
+
+            FLUSH_VERTICES(ctx, _NEW_TRANSFORM);
+
+            if (state) {
+               ctx->Transform.ClipPlanesEnabled |= (1 << p);
+
+               if (ctx->ProjectionMatrixStack.Top->flags & MAT_DIRTY)
+                  _math_matrix_analyse( ctx->ProjectionMatrixStack.Top );
+
+               /* This derived state also calculated in clip.c and
+                * from _mesa_update_state() on changes to EyeUserPlane
+                * and ctx->ProjectionMatrix respectively.
+                */
+               _mesa_transform_vector( ctx->Transform._ClipUserPlane[p],
+                                    ctx->Transform.EyeUserPlane[p],
+                                    ctx->ProjectionMatrixStack.Top->inv );
+            }
+            else {
+               ctx->Transform.ClipPlanesEnabled &= ~(1 << p);
+            }               
+         }
+         break;
+d115 5
+a119 8
+         if (ctx->Light.ColorMaterialEnabled == state)
+            return;
+         FLUSH_VERTICES(ctx, _NEW_LIGHT);
+         FLUSH_CURRENT(ctx, 0);
+         ctx->Light.ColorMaterialEnabled = state;
+         if (state) {
+            _mesa_update_color_material( ctx,
+                                  ctx->Current.Attrib[VERT_ATTRIB_COLOR0] );
+d121 1
+a121 1
+         break;
+d123 6
+a128 5
+         if (ctx->Polygon.CullFlag == state)
+            return;
+         FLUSH_VERTICES(ctx, _NEW_POLYGON);
+         ctx->Polygon.CullFlag = state;
+         break;
+d130 2
+a131 2
+         if (state && ctx->Visual.depthBits==0) {
+            _mesa_warning(ctx,"glEnable(GL_DEPTH_TEST) but no depth buffer");
+d134 4
+a137 4
+         if (ctx->Depth.Test==state)
+            return;
+         FLUSH_VERTICES(ctx, _NEW_DEPTH);
+         ctx->Depth.Test = state;
+d141 2
+a142 1
+            state = GL_FALSE; /* MESA_NO_DITHER env var */
+d144 5
+a148 5
+         if (ctx->Color.DitherFlag==state)
+            return;
+         FLUSH_VERTICES(ctx, _NEW_COLOR);
+         ctx->Color.DitherFlag = state;
+         break;
+d150 6
+a155 5
+         if (ctx->Fog.Enabled==state)
+            return;
+         FLUSH_VERTICES(ctx, _NEW_FOG);
+         ctx->Fog.Enabled = state;
+         break;
+a156 4
+         CHECK_EXTENSION(EXT_histogram, cap);
+         if (ctx->Pixel.HistogramEnabled == state)
+            return;
+         FLUSH_VERTICES(ctx, _NEW_PIXEL);
+d167 17
+a183 11
+         if (ctx->Light.Light[cap-GL_LIGHT0].Enabled == state)
+            return;
+         FLUSH_VERTICES(ctx, _NEW_LIGHT);
+         ctx->Light.Light[cap-GL_LIGHT0].Enabled = state;
+         if (state) {
+            insert_at_tail(&ctx->Light.EnabledList,
+                           &ctx->Light.Light[cap-GL_LIGHT0]);
+         }
+         else {
+            remove_from_list(&ctx->Light.Light[cap-GL_LIGHT0]);
+         }
+d186 7
+a192 17
+         if (ctx->Light.Enabled == state)
+            return;
+         FLUSH_VERTICES(ctx, _NEW_LIGHT);
+         ctx->Light.Enabled = state;
+
+         if (ctx->Light.Enabled && ctx->Light.Model.TwoSide)
+   	   ctx->_TriangleCaps |= DD_TRI_LIGHT_TWOSIDE;
+         else
+ 	   ctx->_TriangleCaps &= ~DD_TRI_LIGHT_TWOSIDE;
+ 
+         if ((ctx->Light.Enabled &&
+              ctx->Light.Model.ColorControl==GL_SEPARATE_SPECULAR_COLOR)
+             || ctx->Fog.ColorSumEnabled)
+            ctx->_TriangleCaps |= DD_SEPARATE_SPECULAR;
+         else
+            ctx->_TriangleCaps &= ~DD_SEPARATE_SPECULAR;
+
+d195 6
+a200 6
+         if (ctx->Line.SmoothFlag == state)
+            return;
+         FLUSH_VERTICES(ctx, _NEW_LINE);
+         ctx->Line.SmoothFlag = state;
+         ctx->_TriangleCaps ^= DD_LINE_SMOOTH;
+         break;
+d202 6
+a207 6
+         if (ctx->Line.StippleFlag == state)
+            return;
+         FLUSH_VERTICES(ctx, _NEW_LINE);
+         ctx->Line.StippleFlag = state;
+         ctx->_TriangleCaps ^= DD_LINE_STIPPLE;
+         break;
+d209 5
+a213 5
+         if (ctx->Color.IndexLogicOpEnabled == state)
+            return;
+         FLUSH_VERTICES(ctx, _NEW_COLOR);
+         ctx->Color.IndexLogicOpEnabled = state;
+         break;
+d215 5
+a219 11
+         if (ctx->Color.ColorLogicOpEnabled == state)
+            return;
+         FLUSH_VERTICES(ctx, _NEW_COLOR);
+         ctx->Color.ColorLogicOpEnabled = state;
+         /* This is needed to support 1.1's RGB logic ops AND
+          * 1.0's blending logicops.
+          */
+         ctx->Color._LogicOpEnabled =
+            (state || (ctx->Color.BlendEnabled &&
+                       ctx->Color.BlendEquation == GL_LOGIC_OP));
+         break;
+d221 2
+a222 5
+         if (ctx->Eval.Map1Color4 == state)
+            return;
+         FLUSH_VERTICES(ctx, _NEW_EVAL);
+         ctx->Eval.Map1Color4 = state;
+         break;
+d224 2
+a225 5
+         if (ctx->Eval.Map1Index == state)
+            return;
+         FLUSH_VERTICES(ctx, _NEW_EVAL);
+         ctx->Eval.Map1Index = state;
+         break;
+d227 2
+a228 5
+         if (ctx->Eval.Map1Normal == state)
+            return;
+         FLUSH_VERTICES(ctx, _NEW_EVAL);
+         ctx->Eval.Map1Normal = state;
+         break;
+d230 2
+a231 5
+         if (ctx->Eval.Map1TextureCoord1 == state)
+            return;
+         FLUSH_VERTICES(ctx, _NEW_EVAL);
+         ctx->Eval.Map1TextureCoord1 = state;
+         break;
+d233 2
+a234 5
+         if (ctx->Eval.Map1TextureCoord2 == state)
+            return;
+         FLUSH_VERTICES(ctx, _NEW_EVAL);
+         ctx->Eval.Map1TextureCoord2 = state;
+         break;
+d236 2
+a237 5
+         if (ctx->Eval.Map1TextureCoord3 == state)
+            return;
+         FLUSH_VERTICES(ctx, _NEW_EVAL);
+         ctx->Eval.Map1TextureCoord3 = state;
+         break;
+d239 2
+a240 5
+         if (ctx->Eval.Map1TextureCoord4 == state)
+            return;
+         FLUSH_VERTICES(ctx, _NEW_EVAL);
+         ctx->Eval.Map1TextureCoord4 = state;
+         break;
+d242 2
+a243 5
+         if (ctx->Eval.Map1Vertex3 == state)
+            return;
+         FLUSH_VERTICES(ctx, _NEW_EVAL);
+         ctx->Eval.Map1Vertex3 = state;
+         break;
+d245 2
+a246 5
+         if (ctx->Eval.Map1Vertex4 == state)
+            return;
+         FLUSH_VERTICES(ctx, _NEW_EVAL);
+         ctx->Eval.Map1Vertex4 = state;
+         break;
+d248 2
+a249 5
+         if (ctx->Eval.Map2Color4 == state)
+            return;
+         FLUSH_VERTICES(ctx, _NEW_EVAL);
+         ctx->Eval.Map2Color4 = state;
+         break;
+d251 2
+a252 5
+         if (ctx->Eval.Map2Index == state)
+            return;
+         FLUSH_VERTICES(ctx, _NEW_EVAL);
+         ctx->Eval.Map2Index = state;
+         break;
+d254 5
+a258 11
+         if (ctx->Eval.Map2Normal == state)
+            return;
+         FLUSH_VERTICES(ctx, _NEW_EVAL);
+         ctx->Eval.Map2Normal = state;
+         break;
+      case GL_MAP2_TEXTURE_COORD_1:
+         if (ctx->Eval.Map2TextureCoord1 == state)
+            return;
+         FLUSH_VERTICES(ctx, _NEW_EVAL);
+         ctx->Eval.Map2TextureCoord1 = state;
+         break;
+d260 2
+a261 5
+         if (ctx->Eval.Map2TextureCoord2 == state)
+            return;
+         FLUSH_VERTICES(ctx, _NEW_EVAL);
+         ctx->Eval.Map2TextureCoord2 = state;
+         break;
+d263 2
+a264 5
+         if (ctx->Eval.Map2TextureCoord3 == state)
+            return;
+         FLUSH_VERTICES(ctx, _NEW_EVAL);
+         ctx->Eval.Map2TextureCoord3 = state;
+         break;
+d266 2
+a267 5
+         if (ctx->Eval.Map2TextureCoord4 == state)
+            return;
+         FLUSH_VERTICES(ctx, _NEW_EVAL);
+         ctx->Eval.Map2TextureCoord4 = state;
+         break;
+d269 2
+a270 5
+         if (ctx->Eval.Map2Vertex3 == state)
+            return;
+         FLUSH_VERTICES(ctx, _NEW_EVAL);
+         ctx->Eval.Map2Vertex3 = state;
+         break;
+d272 2
+a273 5
+         if (ctx->Eval.Map2Vertex4 == state)
+            return;
+         FLUSH_VERTICES(ctx, _NEW_EVAL);
+         ctx->Eval.Map2Vertex4 = state;
+         break;
+a274 3
+         if (ctx->Pixel.MinMaxEnabled == state)
+            return;
+         FLUSH_VERTICES(ctx, _NEW_PIXEL);
+d278 6
+a283 5
+         if (ctx->Transform.Normalize == state)
+            return;
+         FLUSH_VERTICES(ctx, _NEW_TRANSFORM);
+         ctx->Transform.Normalize = state;
+         break;
+d285 6
+a290 6
+         if (ctx->Point.SmoothFlag==state)
+            return;
+         FLUSH_VERTICES(ctx, _NEW_POINT);
+         ctx->Point.SmoothFlag = state;
+         ctx->_TriangleCaps ^= DD_POINT_SMOOTH;
+         break;
+d292 6
+a297 6
+         if (ctx->Polygon.SmoothFlag==state)
+            return;
+         FLUSH_VERTICES(ctx, _NEW_POLYGON);
+         ctx->Polygon.SmoothFlag = state;
+         ctx->_TriangleCaps ^= DD_TRI_SMOOTH;
+         break;
+d299 6
+a304 6
+         if (ctx->Polygon.StippleFlag==state)
+            return;
+         FLUSH_VERTICES(ctx, _NEW_POLYGON);
+         ctx->Polygon.StippleFlag = state;
+         ctx->_TriangleCaps ^= DD_TRI_STIPPLE;
+         break;
+d306 4
+a309 4
+         if (ctx->Polygon.OffsetPoint==state)
+            return;
+         FLUSH_VERTICES(ctx, _NEW_POLYGON);
+         ctx->Polygon.OffsetPoint = state;
+d312 4
+a315 4
+         if (ctx->Polygon.OffsetLine==state)
+            return;
+         FLUSH_VERTICES(ctx, _NEW_POLYGON);
+         ctx->Polygon.OffsetLine = state;
+d318 5
+a322 5
+         /*case GL_POLYGON_OFFSET_EXT:*/
+         if (ctx->Polygon.OffsetFill==state)
+            return;
+         FLUSH_VERTICES(ctx, _NEW_POLYGON);
+         ctx->Polygon.OffsetFill = state;
+d325 5
+a329 4
+         if (ctx->Transform.RescaleNormals == state)
+            return;
+         FLUSH_VERTICES(ctx, _NEW_TRANSFORM);
+         ctx->Transform.RescaleNormals = state;
+d332 5
+a336 5
+         if (ctx->Scissor.Enabled==state)
+            return;
+         FLUSH_VERTICES(ctx, _NEW_SCISSOR);
+         ctx->Scissor.Enabled = state;
+         break;
+a337 3
+         if (ctx->Texture.SharedPalette == state)
+            return;
+         FLUSH_VERTICES(ctx, _NEW_TEXTURE);
+d341 2
+a342 3
+         if (state && ctx->Visual.stencilBits==0) {
+            _mesa_warning(ctx,
+                          "glEnable(GL_STENCIL_TEST) but no stencil buffer");
+d344 18
+a362 4
+         if (ctx->Stencil.Enabled==state)
+            return;
+         FLUSH_VERTICES(ctx, _NEW_STENCIL);
+         ctx->Stencil.Enabled = state;
+d364 25
+a388 10
+      case GL_TEXTURE_1D: {
+         const GLuint curr = ctx->Texture.CurrentUnit;
+         struct gl_texture_unit *texUnit = &ctx->Texture.Unit[curr];
+         GLuint newenabled = texUnit->Enabled & ~TEXTURE_1D_BIT;
+         if (state)
+            newenabled |= TEXTURE_1D_BIT;
+         if (!ctx->Visual.rgbMode || texUnit->Enabled == newenabled)
+            return;
+         FLUSH_VERTICES(ctx, _NEW_TEXTURE);
+         texUnit->Enabled = newenabled;
+d390 40
+a429 76
+      }
+      case GL_TEXTURE_2D: {
+         const GLuint curr = ctx->Texture.CurrentUnit;
+         struct gl_texture_unit *texUnit = &ctx->Texture.Unit[curr];
+         GLuint newenabled = texUnit->Enabled & ~TEXTURE_2D_BIT;
+         if (state)
+            newenabled |= TEXTURE_2D_BIT;
+         if (!ctx->Visual.rgbMode || texUnit->Enabled == newenabled)
+            return;
+         FLUSH_VERTICES(ctx, _NEW_TEXTURE);
+         texUnit->Enabled = newenabled;
+         break;
+      }
+      case GL_TEXTURE_3D: {
+         const GLuint curr = ctx->Texture.CurrentUnit;
+         struct gl_texture_unit *texUnit = &ctx->Texture.Unit[curr];
+         GLuint newenabled = texUnit->Enabled & ~TEXTURE_3D_BIT;
+         if (state)
+            newenabled |= TEXTURE_3D_BIT;
+         if (!ctx->Visual.rgbMode || texUnit->Enabled == newenabled)
+            return;
+         FLUSH_VERTICES(ctx, _NEW_TEXTURE);
+         texUnit->Enabled = newenabled;
+         break;
+      }
+      case GL_TEXTURE_GEN_Q: {
+         GLuint unit = ctx->Texture.CurrentUnit;
+         struct gl_texture_unit *texUnit = &ctx->Texture.Unit[unit];
+         GLuint newenabled = texUnit->TexGenEnabled & ~Q_BIT;
+         if (state)
+            newenabled |= Q_BIT;
+         if (texUnit->TexGenEnabled == newenabled)
+            return;
+         FLUSH_VERTICES(ctx, _NEW_TEXTURE);
+         texUnit->TexGenEnabled = newenabled;
+         break;
+      }
+      case GL_TEXTURE_GEN_R: {
+         GLuint unit = ctx->Texture.CurrentUnit;
+         struct gl_texture_unit *texUnit = &ctx->Texture.Unit[unit];
+         GLuint newenabled = texUnit->TexGenEnabled & ~R_BIT;
+         if (state)
+            newenabled |= R_BIT;
+         if (texUnit->TexGenEnabled == newenabled)
+            return;
+         FLUSH_VERTICES(ctx, _NEW_TEXTURE);
+         texUnit->TexGenEnabled = newenabled;
+         break;
+      }
+      break;
+      case GL_TEXTURE_GEN_S: {
+         GLuint unit = ctx->Texture.CurrentUnit;
+         struct gl_texture_unit *texUnit = &ctx->Texture.Unit[unit];
+         GLuint newenabled = texUnit->TexGenEnabled & ~S_BIT;
+         if (state)
+            newenabled |= S_BIT;
+         if (texUnit->TexGenEnabled == newenabled)
+            return;
+         FLUSH_VERTICES(ctx, _NEW_TEXTURE);
+         texUnit->TexGenEnabled = newenabled;
+         break;
+      }
+      break;
+      case GL_TEXTURE_GEN_T: {
+         GLuint unit = ctx->Texture.CurrentUnit;
+         struct gl_texture_unit *texUnit = &ctx->Texture.Unit[unit];
+         GLuint newenabled = texUnit->TexGenEnabled & ~T_BIT;
+         if (state)
+            newenabled |= T_BIT;
+         if (texUnit->TexGenEnabled == newenabled)
+            return;
+         FLUSH_VERTICES(ctx, _NEW_TEXTURE);
+         texUnit->TexGenEnabled = newenabled;
+         break;
+      }
+      break;
+d435 6
+d442 6
+d449 6
+d456 6
+d463 6
+d470 6
+a475 4
+      case GL_FOG_COORDINATE_ARRAY_EXT:
+      case GL_SECONDARY_COLOR_ARRAY_EXT:
+         client_state( ctx, cap, state );
+         return;
+d479 10
+a488 2
+         CHECK_EXTENSION(HP_occlusion_test, cap);
+         if (ctx->Depth.OcclusionTest == state)
+d490 1
+a490 6
+         FLUSH_VERTICES(ctx, _NEW_DEPTH);
+         ctx->Depth.OcclusionTest = state;
+         if (state)
+            ctx->OcclusionResult = ctx->OcclusionResultSaved;
+         else
+            ctx->OcclusionResultSaved = ctx->OcclusionResult;
+a494 4
+         CHECK_EXTENSION(SGIS_pixel_texture, cap);
+         if (ctx->Pixel.PixelTextureEnabled == state)
+            return;
+         FLUSH_VERTICES(ctx, _NEW_PIXEL);
+a499 4
+         CHECK_EXTENSION(SGIX_pixel_texture, cap);
+         if (ctx->Pixel.PixelTextureEnabled == state)
+            return;
+         FLUSH_VERTICES(ctx, _NEW_PIXEL);
+a504 4
+         CHECK_EXTENSION(SGI_color_table, cap);
+         if (ctx->Pixel.ColorTableEnabled == state)
+            return;
+         FLUSH_VERTICES(ctx, _NEW_PIXEL);
+a507 4
+         CHECK_EXTENSION(SGI_color_table, cap);
+         if (ctx->Pixel.PostConvolutionColorTableEnabled == state)
+            return;
+         FLUSH_VERTICES(ctx, _NEW_PIXEL);
+a510 4
+         CHECK_EXTENSION(SGI_color_table, cap);
+         if (ctx->Pixel.PostColorMatrixColorTableEnabled == state)
+            return;
+         FLUSH_VERTICES(ctx, _NEW_PIXEL);
+a515 4
+         CHECK_EXTENSION(EXT_convolution, cap);
+         if (ctx->Pixel.Convolution1DEnabled == state)
+            return;
+         FLUSH_VERTICES(ctx, _NEW_PIXEL);
+a518 4
+         CHECK_EXTENSION(EXT_convolution, cap);
+         if (ctx->Pixel.Convolution2DEnabled == state)
+            return;
+         FLUSH_VERTICES(ctx, _NEW_PIXEL);
+a521 4
+         CHECK_EXTENSION(EXT_convolution, cap);
+         if (ctx->Pixel.Separable2DEnabled == state)
+            return;
+         FLUSH_VERTICES(ctx, _NEW_PIXEL);
+d527 12
+a538 11
+         {
+            const GLuint curr = ctx->Texture.CurrentUnit;
+            struct gl_texture_unit *texUnit = &ctx->Texture.Unit[curr];
+            GLuint newenabled = texUnit->Enabled & ~TEXTURE_CUBE_BIT;
+            CHECK_EXTENSION(ARB_texture_cube_map, cap);
+            if (state)
+               newenabled |= TEXTURE_CUBE_BIT;
+            if (!ctx->Visual.rgbMode || texUnit->Enabled == newenabled)
+               return;
+            FLUSH_VERTICES(ctx, _NEW_TEXTURE);
+            texUnit->Enabled = newenabled;
+d540 2
+a541 37
+         break;
+
+      /* GL_EXT_secondary_color */
+      case GL_COLOR_SUM_EXT:
+         CHECK_EXTENSION(EXT_secondary_color, cap);
+         if (ctx->Fog.ColorSumEnabled == state)
+            return;
+         FLUSH_VERTICES(ctx, _NEW_FOG);
+         ctx->Fog.ColorSumEnabled = state;
+
+         if ((ctx->Light.Enabled &&
+              ctx->Light.Model.ColorControl==GL_SEPARATE_SPECULAR_COLOR)
+             || ctx->Fog.ColorSumEnabled)
+            ctx->_TriangleCaps |= DD_SEPARATE_SPECULAR;
+         else
+            ctx->_TriangleCaps &= ~DD_SEPARATE_SPECULAR;
+
+         break;
+
+      /* GL_ARB_multisample */
+      case GL_MULTISAMPLE_ARB:
+         CHECK_EXTENSION(ARB_multisample, cap);
+         if (ctx->Multisample.Enabled == state)
+            return;
+         FLUSH_VERTICES(ctx, _NEW_MULTISAMPLE);
+         ctx->Multisample.Enabled = state;
+         break;
+      case GL_SAMPLE_ALPHA_TO_COVERAGE_ARB:
+         CHECK_EXTENSION(ARB_multisample, cap);
+         if (ctx->Multisample.SampleAlphaToCoverage == state)
+            return;
+         FLUSH_VERTICES(ctx, _NEW_MULTISAMPLE);
+         ctx->Multisample.SampleAlphaToCoverage = state;
+         break;
+      case GL_SAMPLE_ALPHA_TO_ONE_ARB:
+         CHECK_EXTENSION(ARB_multisample, cap);
+         if (ctx->Multisample.SampleAlphaToOne == state)
+a542 102
+         FLUSH_VERTICES(ctx, _NEW_MULTISAMPLE);
+         ctx->Multisample.SampleAlphaToOne = state;
+         break;
+      case GL_SAMPLE_COVERAGE_ARB:
+         CHECK_EXTENSION(ARB_multisample, cap);
+         if (ctx->Multisample.SampleCoverage == state)
+            return;
+         FLUSH_VERTICES(ctx, _NEW_MULTISAMPLE);
+         ctx->Multisample.SampleCoverage = state;
+         break;
+      case GL_SAMPLE_COVERAGE_INVERT_ARB:
+         CHECK_EXTENSION(ARB_multisample, cap);
+         if (ctx->Multisample.SampleCoverageInvert == state)
+            return;
+         FLUSH_VERTICES(ctx, _NEW_MULTISAMPLE);
+         ctx->Multisample.SampleCoverageInvert = state;
+         break;
+
+      /* GL_IBM_rasterpos_clip */
+      case GL_RASTER_POSITION_UNCLIPPED_IBM:
+         CHECK_EXTENSION(IBM_rasterpos_clip, cap);
+         if (ctx->Transform.RasterPositionUnclipped == state)
+            return;
+         FLUSH_VERTICES(ctx, _NEW_TRANSFORM);
+         ctx->Transform.RasterPositionUnclipped = state;
+         break;
+
+      /* GL_NV_point_sprite */
+      case GL_POINT_SPRITE_NV:
+         CHECK_EXTENSION(NV_point_sprite, cap);
+         if (ctx->Point.PointSprite == state)
+            return;
+         FLUSH_VERTICES(ctx, _NEW_POINT);
+         ctx->Point.PointSprite = state;
+         break;
+
+#if FEATURE_NV_vertex_program
+      case GL_VERTEX_PROGRAM_NV:
+         CHECK_EXTENSION(NV_vertex_program, cap);
+         if (ctx->VertexProgram.Enabled == state)
+            return;
+         FLUSH_VERTICES(ctx, _NEW_TRANSFORM | _NEW_PROGRAM);  /* XXX OK? */
+         ctx->VertexProgram.Enabled = state;
+         break;
+      case GL_VERTEX_PROGRAM_POINT_SIZE_NV:
+         CHECK_EXTENSION(NV_vertex_program, cap);
+         if (ctx->VertexProgram.PointSizeEnabled == state)
+            return;
+         FLUSH_VERTICES(ctx, _NEW_POINT | _NEW_PROGRAM);
+         ctx->VertexProgram.PointSizeEnabled = state;
+         break;
+      case GL_VERTEX_PROGRAM_TWO_SIDE_NV:
+         CHECK_EXTENSION(NV_vertex_program, cap);
+         if (ctx->VertexProgram.TwoSideEnabled == state)
+            return;
+         FLUSH_VERTICES(ctx, _NEW_PROGRAM);  /* XXX OK? */
+         ctx->VertexProgram.TwoSideEnabled = state;
+         break;
+      case GL_MAP1_VERTEX_ATTRIB0_4_NV:
+      case GL_MAP1_VERTEX_ATTRIB1_4_NV:
+      case GL_MAP1_VERTEX_ATTRIB2_4_NV:
+      case GL_MAP1_VERTEX_ATTRIB3_4_NV:
+      case GL_MAP1_VERTEX_ATTRIB4_4_NV:
+      case GL_MAP1_VERTEX_ATTRIB5_4_NV:
+      case GL_MAP1_VERTEX_ATTRIB6_4_NV:
+      case GL_MAP1_VERTEX_ATTRIB7_4_NV:
+      case GL_MAP1_VERTEX_ATTRIB8_4_NV:
+      case GL_MAP1_VERTEX_ATTRIB9_4_NV:
+      case GL_MAP1_VERTEX_ATTRIB10_4_NV:
+      case GL_MAP1_VERTEX_ATTRIB11_4_NV:
+      case GL_MAP1_VERTEX_ATTRIB12_4_NV:
+      case GL_MAP1_VERTEX_ATTRIB13_4_NV:
+      case GL_MAP1_VERTEX_ATTRIB14_4_NV:
+      case GL_MAP1_VERTEX_ATTRIB15_4_NV:
+         CHECK_EXTENSION(NV_vertex_program, cap);
+         {
+            const GLuint map = (GLuint) (cap - GL_MAP1_VERTEX_ATTRIB0_4_NV);
+            FLUSH_VERTICES(ctx, _NEW_EVAL);
+            ctx->Eval.Map1Attrib[map] = state;
+         }
+         break;
+      case GL_MAP2_VERTEX_ATTRIB0_4_NV:
+      case GL_MAP2_VERTEX_ATTRIB1_4_NV:
+      case GL_MAP2_VERTEX_ATTRIB2_4_NV:
+      case GL_MAP2_VERTEX_ATTRIB3_4_NV:
+      case GL_MAP2_VERTEX_ATTRIB4_4_NV:
+      case GL_MAP2_VERTEX_ATTRIB5_4_NV:
+      case GL_MAP2_VERTEX_ATTRIB6_4_NV:
+      case GL_MAP2_VERTEX_ATTRIB7_4_NV:
+      case GL_MAP2_VERTEX_ATTRIB8_4_NV:
+      case GL_MAP2_VERTEX_ATTRIB9_4_NV:
+      case GL_MAP2_VERTEX_ATTRIB10_4_NV:
+      case GL_MAP2_VERTEX_ATTRIB11_4_NV:
+      case GL_MAP2_VERTEX_ATTRIB12_4_NV:
+      case GL_MAP2_VERTEX_ATTRIB13_4_NV:
+      case GL_MAP2_VERTEX_ATTRIB14_4_NV:
+      case GL_MAP2_VERTEX_ATTRIB15_4_NV:
+         CHECK_EXTENSION(NV_vertex_program, cap);
+         {
+            const GLuint map = (GLuint) (cap - GL_MAP2_VERTEX_ATTRIB0_4_NV);
+            FLUSH_VERTICES(ctx, _NEW_EVAL);
+            ctx->Eval.Map2Attrib[map] = state;
+d544 1
+a544 28
+         break;
+#endif /* FEATURE_NV_vertex_program */
+
+      /* GL_NV_texture_rectangle */
+      case GL_TEXTURE_RECTANGLE_NV:
+         CHECK_EXTENSION(NV_texture_rectangle, cap);
+         {
+            const GLuint curr = ctx->Texture.CurrentUnit;
+            struct gl_texture_unit *texUnit = &ctx->Texture.Unit[curr];
+            GLuint newenabled = texUnit->Enabled & ~TEXTURE_RECT_BIT;
+            CHECK_EXTENSION(NV_texture_rectangle, cap);
+            if (state)
+               newenabled |= TEXTURE_RECT_BIT;
+            if (!ctx->Visual.rgbMode || texUnit->Enabled == newenabled)
+               return;
+            FLUSH_VERTICES(ctx, _NEW_TEXTURE);
+            texUnit->Enabled = newenabled;
+         }
+         break;
+
+      /* GL_EXT_stencil_two_side */
+      case GL_STENCIL_TEST_TWO_SIDE_EXT:
+         CHECK_EXTENSION(EXT_stencil_two_side, cap);
+         if (ctx->Stencil.TestTwoSide == state)
+            return;
+         FLUSH_VERTICES(ctx, _NEW_STENCIL);
+         ctx->Stencil.TestTwoSide = state;
+         break;
+d547 1
+a547 2
+         _mesa_error(ctx, GL_INVALID_ENUM,
+                     "%s(0x%x)", state ? "glEnable" : "glDisable", cap);
+d557 2
+a562 2
+   ASSERT_OUTSIDE_BEGIN_END(ctx);
+
+d567 1
+a571 2
+   ASSERT_OUTSIDE_BEGIN_END(ctx);
+
+a575 7
+#undef CHECK_EXTENSION
+#define CHECK_EXTENSION(EXTNAME)			\
+   if (!ctx->Extensions.EXTNAME) {			\
+      _mesa_error(ctx, GL_INVALID_ENUM, "glIsEnabled");	\
+      return GL_FALSE;					\
+   }
+
+d594 1
+a594 1
+	 return (ctx->Transform.ClipPlanesEnabled >> (cap - GL_CLIP_PLANE0)) & 1;
+d605 2
+d650 1
+a650 1
+      case GL_MAP2_TEXTURE_COORD_1:
+d662 2
+d689 2
+a690 3
+            const struct gl_texture_unit *texUnit;
+            texUnit = &ctx->Texture.Unit[ctx->Texture.CurrentUnit];
+            return (texUnit->Enabled & TEXTURE_1D_BIT) ? GL_TRUE : GL_FALSE;
+d694 2
+a695 3
+            const struct gl_texture_unit *texUnit;
+            texUnit = &ctx->Texture.Unit[ctx->Texture.CurrentUnit];
+            return (texUnit->Enabled & TEXTURE_2D_BIT) ? GL_TRUE : GL_FALSE;
+d699 2
+a700 3
+            const struct gl_texture_unit *texUnit;
+            texUnit = &ctx->Texture.Unit[ctx->Texture.CurrentUnit];
+            return (texUnit->Enabled & TEXTURE_3D_BIT) ? GL_TRUE : GL_FALSE;
+d704 1
+a704 2
+            const struct gl_texture_unit *texUnit;
+            texUnit = &ctx->Texture.Unit[ctx->Texture.CurrentUnit];
+d709 1
+a709 2
+            const struct gl_texture_unit *texUnit;
+            texUnit = &ctx->Texture.Unit[ctx->Texture.CurrentUnit];
+d714 1
+a714 2
+            const struct gl_texture_unit *texUnit;
+            texUnit = &ctx->Texture.Unit[ctx->Texture.CurrentUnit];
+d719 1
+a719 2
+            const struct gl_texture_unit *texUnit;
+            texUnit = &ctx->Texture.Unit[ctx->Texture.CurrentUnit];
+d727 5
+a731 1
+         return (ctx->Array.Vertex.Enabled != 0);
+d733 5
+a737 1
+         return (ctx->Array.Normal.Enabled != 0);
+d739 5
+a743 1
+         return (ctx->Array.Color.Enabled != 0);
+d745 5
+a749 1
+         return (ctx->Array.Index.Enabled != 0);
+d751 5
+a755 1
+         return (ctx->Array.TexCoord[ctx->Array.ActiveTexture].Enabled != 0);
+d757 5
+a761 15
+         return (ctx->Array.EdgeFlag.Enabled != 0);
+      case GL_FOG_COORDINATE_ARRAY_EXT:
+         CHECK_EXTENSION(EXT_fog_coord);
+         return (ctx->Array.FogCoord.Enabled != 0);
+      case GL_SECONDARY_COLOR_ARRAY_EXT:
+         CHECK_EXTENSION(EXT_secondary_color);
+         return (ctx->Array.SecondaryColor.Enabled != 0);
+
+      /* GL_EXT_histogram */
+      case GL_HISTOGRAM:
+         CHECK_EXTENSION(EXT_histogram);
+         return ctx->Pixel.HistogramEnabled;
+      case GL_MINMAX:
+         CHECK_EXTENSION(EXT_histogram);
+         return ctx->Pixel.MinMaxEnabled;
+d765 7
+a771 2
+         CHECK_EXTENSION(HP_occlusion_test);
+         return ctx->Depth.OcclusionTest;
+a774 1
+         CHECK_EXTENSION(SGIS_pixel_texture);
+a778 1
+         CHECK_EXTENSION(SGIX_pixel_texture);
+a782 1
+         CHECK_EXTENSION(SGI_color_table);
+a784 1
+         CHECK_EXTENSION(SGI_color_table);
+a786 1
+         CHECK_EXTENSION(SGI_color_table);
+a790 1
+         CHECK_EXTENSION(EXT_convolution);
+a792 1
+         CHECK_EXTENSION(EXT_convolution);
+a794 1
+         CHECK_EXTENSION(EXT_convolution);
+d799 3
+a801 63
+         CHECK_EXTENSION(ARB_texture_cube_map);
+         {
+            const struct gl_texture_unit *texUnit;
+            texUnit = &ctx->Texture.Unit[ctx->Texture.CurrentUnit];
+            return (texUnit->Enabled & TEXTURE_CUBE_BIT) ? GL_TRUE : GL_FALSE;
+         }
+
+      /* GL_ARB_multisample */
+      case GL_MULTISAMPLE_ARB:
+         CHECK_EXTENSION(ARB_multisample);
+         return ctx->Multisample.Enabled;
+      case GL_SAMPLE_ALPHA_TO_COVERAGE_ARB:
+         CHECK_EXTENSION(ARB_multisample);
+         return ctx->Multisample.SampleAlphaToCoverage;
+      case GL_SAMPLE_ALPHA_TO_ONE_ARB:
+         CHECK_EXTENSION(ARB_multisample);
+         return ctx->Multisample.SampleAlphaToOne;
+      case GL_SAMPLE_COVERAGE_ARB:
+         CHECK_EXTENSION(ARB_multisample);
+         return ctx->Multisample.SampleCoverage;
+      case GL_SAMPLE_COVERAGE_INVERT_ARB:
+         CHECK_EXTENSION(ARB_multisample);
+         return ctx->Multisample.SampleCoverageInvert;
+
+      /* GL_IBM_rasterpos_clip */
+      case GL_RASTER_POSITION_UNCLIPPED_IBM:
+         CHECK_EXTENSION(IBM_rasterpos_clip);
+         return ctx->Transform.RasterPositionUnclipped;
+
+      /* GL_NV_point_sprite */
+      case GL_POINT_SPRITE_NV:
+         return ctx->Point.PointSprite;
+
+#if FEATURE_NV_vertex_program
+      case GL_VERTEX_PROGRAM_NV:
+         CHECK_EXTENSION(NV_vertex_program);
+         return ctx->VertexProgram.Enabled;
+      case GL_VERTEX_PROGRAM_POINT_SIZE_NV:
+         CHECK_EXTENSION(NV_vertex_program);
+         return ctx->VertexProgram.PointSizeEnabled;
+      case GL_VERTEX_PROGRAM_TWO_SIDE_NV:
+         CHECK_EXTENSION(NV_vertex_program);
+         return ctx->VertexProgram.TwoSideEnabled;
+      case GL_VERTEX_ATTRIB_ARRAY0_NV:
+      case GL_VERTEX_ATTRIB_ARRAY1_NV:
+      case GL_VERTEX_ATTRIB_ARRAY2_NV:
+      case GL_VERTEX_ATTRIB_ARRAY3_NV:
+      case GL_VERTEX_ATTRIB_ARRAY4_NV:
+      case GL_VERTEX_ATTRIB_ARRAY5_NV:
+      case GL_VERTEX_ATTRIB_ARRAY6_NV:
+      case GL_VERTEX_ATTRIB_ARRAY7_NV:
+      case GL_VERTEX_ATTRIB_ARRAY8_NV:
+      case GL_VERTEX_ATTRIB_ARRAY9_NV:
+      case GL_VERTEX_ATTRIB_ARRAY10_NV:
+      case GL_VERTEX_ATTRIB_ARRAY11_NV:
+      case GL_VERTEX_ATTRIB_ARRAY12_NV:
+      case GL_VERTEX_ATTRIB_ARRAY13_NV:
+      case GL_VERTEX_ATTRIB_ARRAY14_NV:
+      case GL_VERTEX_ATTRIB_ARRAY15_NV:
+         CHECK_EXTENSION(NV_vertex_program);
+         {
+            GLint n = (GLint) cap - GL_VERTEX_ATTRIB_ARRAY0_NV;
+            return (ctx->Array.VertexAttrib[n].Enabled != 0);
+d803 3
+a805 20
+      case GL_MAP1_VERTEX_ATTRIB0_4_NV:
+      case GL_MAP1_VERTEX_ATTRIB1_4_NV:
+      case GL_MAP1_VERTEX_ATTRIB2_4_NV:
+      case GL_MAP1_VERTEX_ATTRIB3_4_NV:
+      case GL_MAP1_VERTEX_ATTRIB4_4_NV:
+      case GL_MAP1_VERTEX_ATTRIB5_4_NV:
+      case GL_MAP1_VERTEX_ATTRIB6_4_NV:
+      case GL_MAP1_VERTEX_ATTRIB7_4_NV:
+      case GL_MAP1_VERTEX_ATTRIB8_4_NV:
+      case GL_MAP1_VERTEX_ATTRIB9_4_NV:
+      case GL_MAP1_VERTEX_ATTRIB10_4_NV:
+      case GL_MAP1_VERTEX_ATTRIB11_4_NV:
+      case GL_MAP1_VERTEX_ATTRIB12_4_NV:
+      case GL_MAP1_VERTEX_ATTRIB13_4_NV:
+      case GL_MAP1_VERTEX_ATTRIB14_4_NV:
+      case GL_MAP1_VERTEX_ATTRIB15_4_NV:
+         CHECK_EXTENSION(NV_vertex_program);
+         {
+            const GLuint map = (GLuint) (cap - GL_MAP1_VERTEX_ATTRIB0_4_NV);
+            return ctx->Eval.Map1Attrib[map];
+a806 22
+      case GL_MAP2_VERTEX_ATTRIB0_4_NV:
+      case GL_MAP2_VERTEX_ATTRIB1_4_NV:
+      case GL_MAP2_VERTEX_ATTRIB2_4_NV:
+      case GL_MAP2_VERTEX_ATTRIB3_4_NV:
+      case GL_MAP2_VERTEX_ATTRIB4_4_NV:
+      case GL_MAP2_VERTEX_ATTRIB5_4_NV:
+      case GL_MAP2_VERTEX_ATTRIB6_4_NV:
+      case GL_MAP2_VERTEX_ATTRIB7_4_NV:
+      case GL_MAP2_VERTEX_ATTRIB8_4_NV:
+      case GL_MAP2_VERTEX_ATTRIB9_4_NV:
+      case GL_MAP2_VERTEX_ATTRIB10_4_NV:
+      case GL_MAP2_VERTEX_ATTRIB11_4_NV:
+      case GL_MAP2_VERTEX_ATTRIB12_4_NV:
+      case GL_MAP2_VERTEX_ATTRIB13_4_NV:
+      case GL_MAP2_VERTEX_ATTRIB14_4_NV:
+      case GL_MAP2_VERTEX_ATTRIB15_4_NV:
+         CHECK_EXTENSION(NV_vertex_program);
+         {
+            const GLuint map = (GLuint) (cap - GL_MAP2_VERTEX_ATTRIB0_4_NV);
+            return ctx->Eval.Map2Attrib[map];
+         }
+#endif /* FEATURE_NV_vertex_program */
+d808 8
+a815 8
+      /* GL_NV_texture_rectangle */
+      case GL_TEXTURE_RECTANGLE_NV:
+         CHECK_EXTENSION(NV_texture_rectangle);
+         {
+            const struct gl_texture_unit *texUnit;
+            texUnit = &ctx->Texture.Unit[ctx->Texture.CurrentUnit];
+            return (texUnit->Enabled & TEXTURE_RECT_BIT) ? GL_TRUE : GL_FALSE;
+         }
+d817 7
+a823 4
+      /* GL_EXT_stencil_two_side */
+      case GL_STENCIL_TEST_TWO_SIDE_EXT:
+         CHECK_EXTENSION(EXT_stencil_two_side);
+         return ctx->Stencil.TestTwoSide;
+d825 43
+d869 1
+a869 2
+         _mesa_error(ctx, GL_INVALID_ENUM, "glIsEnabled(0x%x)", (int) cap);
+	 return GL_FALSE;
+d871 11
+d883 10
+@
+
+
+1.1.1.1
+log
+@Import OpenBSD 3.3 XF4 repository from CTM 3132 the first time
+This finalizes starting an OpenBSD-mirabile (aka MirBSD) repository.
+
+### MirBSD is:
+# Copyright (c) 1982-2003 by Thorsten "mirabile" Glaser <x86@@ePost.de>
+# Copyright © 1968-2003  The authors of And contributors to UNIX®, the
+#       C Language, BSD/Berkeley Unix; 386BSD, NetBSD 1.1 and OpenBSD.
+#
+# Anyone who obtained a copy of this work is hereby permitted to freely use,
+# distribute, modify, merge, sublicence, give away or sell it as long as the
+# authors are given due credit and the following notice is retained:
+#
+# This work is provided "as is", with no explicit or implicit warranty what-
+# soever. Use it only at your own risk. In no event may an author or contri-
+# butor be held liable for any damage, directly or indirectly, that origina-
+# ted through or is caused by creation or modification of this work.
+
+MirBSD is my private tree. MirBSD does not differ very much from OpenBSD
+and intentionally tracks OpenBSD. That's why it _is_ OpenBSD, just not the
+official one. It's like with DarrenBSD.
+
+At time of this writing, no advertising for MirBSD must be done,
+because the advertising clause has not yet been sorted out.
+
+http://templeofhate.com/tglaser/MirBSD/index.php
+@
+text
+@@
+
+
+1.1.1.2
+log
+@The X-Windowing System
+
+Import XFree86 4.3 from OpenBSD by CTM, in the hope it's stable
+@
+text
+@d4 4
+a7 4
+ * Version:  4.0.4
+ *
+ * Copyright (C) 1999-2002  Brian Paul   All Rights Reserved.
+ *
+d14 1
+a14 1
+ *
+d17 1
+a17 1
+ *
+d35 1
+d38 3
+a40 1
+#include "mtypes.h"
+a41 4
+
+#include "math/m_matrix.h"
+#include "math/m_xform.h"
+
+a44 81
+static void
+client_state( GLcontext *ctx, GLenum cap, GLboolean state )
+{
+   GLuint flag;
+   GLboolean *var;
+
+   switch (cap) {
+   case GL_VERTEX_ARRAY:
+      var = &ctx->Array.Vertex.Enabled;
+      flag = _NEW_ARRAY_VERTEX;
+      break;
+   case GL_NORMAL_ARRAY:
+      var = &ctx->Array.Normal.Enabled;
+      flag = _NEW_ARRAY_NORMAL;
+      break;
+   case GL_COLOR_ARRAY:
+      var = &ctx->Array.Color.Enabled;
+      flag = _NEW_ARRAY_COLOR;
+      break;
+   case GL_INDEX_ARRAY:
+      var = &ctx->Array.Index.Enabled;
+      flag = _NEW_ARRAY_INDEX;
+      break;
+   case GL_TEXTURE_COORD_ARRAY:
+      var = &ctx->Array.TexCoord[ctx->Array.ActiveTexture].Enabled;
+      flag = _NEW_ARRAY_TEXCOORD(ctx->Array.ActiveTexture);
+      break;
+   case GL_EDGE_FLAG_ARRAY:
+      var = &ctx->Array.EdgeFlag.Enabled;
+      flag = _NEW_ARRAY_EDGEFLAG;
+      break;
+   case GL_FOG_COORDINATE_ARRAY_EXT:
+      var = &ctx->Array.FogCoord.Enabled;
+      flag = _NEW_ARRAY_FOGCOORD;
+      break;
+   case GL_SECONDARY_COLOR_ARRAY_EXT:
+      var = &ctx->Array.SecondaryColor.Enabled;
+      flag = _NEW_ARRAY_SECONDARYCOLOR;
+      break;
+   default:
+      _mesa_error( ctx, GL_INVALID_ENUM, "glEnable/DisableClientState" );
+      return;
+   }
+
+   if (*var == state)
+      return;
+
+   FLUSH_VERTICES(ctx, _NEW_ARRAY);
+   ctx->Array.NewState |= flag;
+   *var = state;
+
+   if (state)
+      ctx->Array._Enabled |= flag;
+   else
+      ctx->Array._Enabled &= ~flag;
+
+   if (ctx->Driver.Enable) {
+      (*ctx->Driver.Enable)( ctx, cap, state );
+   }
+}
+
+
+
+void
+_mesa_EnableClientState( GLenum cap )
+{
+   GET_CURRENT_CONTEXT(ctx);
+   ASSERT_OUTSIDE_BEGIN_END(ctx);
+   client_state( ctx, cap, GL_TRUE );
+}
+
+
+
+void
+_mesa_DisableClientState( GLenum cap )
+{
+   GET_CURRENT_CONTEXT(ctx);
+   ASSERT_OUTSIDE_BEGIN_END(ctx);
+   client_state( ctx, cap, GL_FALSE );
+}
+
+d51 4
+a54 2
+   if (MESA_VERBOSE & VERBOSE_API)
+      fprintf(stderr, "%s %s (newstate is %x)\n",
+d56 1
+a56 1
+	      _mesa_lookup_enum_by_nr(cap),
+d60 121
+a180 32
+   case GL_ALPHA_TEST:
+      if (ctx->Color.AlphaEnabled == state)
+	 return;
+      FLUSH_VERTICES(ctx, _NEW_COLOR);
+      ctx->Color.AlphaEnabled = state;
+      break;
+   case GL_AUTO_NORMAL:
+      if (ctx->Eval.AutoNormal == state)
+	 return;
+      FLUSH_VERTICES(ctx, _NEW_EVAL);
+      ctx->Eval.AutoNormal = state;
+      break;
+   case GL_BLEND:
+      if (ctx->Color.BlendEnabled == state)
+	 return;
+
+      FLUSH_VERTICES(ctx, _NEW_COLOR);
+      ctx->Color.BlendEnabled = state;
+      /* The following needed to accomodate 1.0 RGB logic op blending */
+      ctx->Color.ColorLogicOpEnabled =
+	 (ctx->Color.BlendEquation == GL_LOGIC_OP && state);
+      break;
+   case GL_CLIP_PLANE0:
+   case GL_CLIP_PLANE1:
+   case GL_CLIP_PLANE2:
+   case GL_CLIP_PLANE3:
+   case GL_CLIP_PLANE4:
+   case GL_CLIP_PLANE5: {
+      GLuint p = cap-GL_CLIP_PLANE0;
+
+      if (ctx->Transform.ClipEnabled[p] == state)
+	 return;
+d182 100
+a281 8
+      FLUSH_VERTICES(ctx, _NEW_TRANSFORM);
+      ctx->Transform.ClipEnabled[p] = state;
+
+      if (state) {
+	 ctx->Transform._AnyClip++;
+
+	 if (ctx->ProjectionMatrix.flags & MAT_DIRTY) {
+	    _math_matrix_analyse( &ctx->ProjectionMatrix );
+d283 35
+a317 284
+
+	 /* This derived state also calculated in clip.c and
+	  * from _mesa_update_state() on changes to EyeUserPlane
+	  * and ctx->ProjectionMatrix respectively.
+	  */
+	 _mesa_transform_vector( ctx->Transform._ClipUserPlane[p],
+			      ctx->Transform.EyeUserPlane[p],
+			      ctx->ProjectionMatrix.inv );
+      }
+      else {
+	 ctx->Transform._AnyClip--;
+      }
+   }
+   break;
+   case GL_COLOR_MATERIAL:
+      if (ctx->Light.ColorMaterialEnabled == state)
+	 return;
+      FLUSH_VERTICES(ctx, _NEW_LIGHT);
+      ctx->Light.ColorMaterialEnabled = state;
+      if (state) {
+	 FLUSH_CURRENT(ctx, 0);
+	 _mesa_update_color_material( ctx, ctx->Current.Color );
+      }
+      break;
+   case GL_CULL_FACE:
+      if (ctx->Polygon.CullFlag == state)
+	 return;
+      FLUSH_VERTICES(ctx, _NEW_POLYGON);
+      ctx->Polygon.CullFlag = state;
+      break;
+   case GL_DEPTH_TEST:
+      if (state && ctx->Visual.depthBits==0) {
+	 _mesa_warning(ctx,"glEnable(GL_DEPTH_TEST) but no depth buffer");
+	 return;
+      }
+      if (ctx->Depth.Test==state)
+	 return;
+      FLUSH_VERTICES(ctx, _NEW_DEPTH);
+      ctx->Depth.Test = state;
+      break;
+   case GL_DITHER:
+      if (ctx->NoDither) {
+	 state = GL_FALSE; /* MESA_NO_DITHER env var */
+      }
+      if (ctx->Color.DitherFlag==state)
+	 return;
+      FLUSH_VERTICES(ctx, _NEW_COLOR);
+      ctx->Color.DitherFlag = state;
+      break;
+   case GL_FOG:
+      if (ctx->Fog.Enabled==state)
+	 return;
+      FLUSH_VERTICES(ctx, _NEW_FOG);
+      ctx->Fog.Enabled = state;
+      break;
+   case GL_HISTOGRAM:
+      if (!ctx->Extensions.EXT_histogram && !ctx->Extensions.ARB_imaging) {
+	 _mesa_error(ctx, GL_INVALID_ENUM, "glEnable(GL_HISTOGRAM)");
+	 return;
+      }
+      if (ctx->Pixel.HistogramEnabled == state)
+	 return;
+      FLUSH_VERTICES(ctx, _NEW_PIXEL);
+      ctx->Pixel.HistogramEnabled = state;
+      break;
+   case GL_LIGHT0:
+   case GL_LIGHT1:
+   case GL_LIGHT2:
+   case GL_LIGHT3:
+   case GL_LIGHT4:
+   case GL_LIGHT5:
+   case GL_LIGHT6:
+   case GL_LIGHT7:
+      if (ctx->Light.Light[cap-GL_LIGHT0].Enabled == state)
+	 return;
+      FLUSH_VERTICES(ctx, _NEW_LIGHT);
+      ctx->Light.Light[cap-GL_LIGHT0].Enabled = state;
+      if (state) {
+	 insert_at_tail(&ctx->Light.EnabledList,
+			&ctx->Light.Light[cap-GL_LIGHT0]);
+      }
+      else {
+	 remove_from_list(&ctx->Light.Light[cap-GL_LIGHT0]);
+      }
+      break;
+   case GL_LIGHTING:
+      if (ctx->Light.Enabled == state)
+	 return;
+      FLUSH_VERTICES(ctx, _NEW_LIGHT);
+      ctx->Light.Enabled = state;
+
+      if (ctx->Light.Enabled && ctx->Light.Model.TwoSide)
+	 ctx->_TriangleCaps |= DD_TRI_LIGHT_TWOSIDE;
+      else
+	 ctx->_TriangleCaps &= ~DD_TRI_LIGHT_TWOSIDE;
+
+      if ((ctx->Light.Enabled &&
+	   ctx->Light.Model.ColorControl==GL_SEPARATE_SPECULAR_COLOR)
+	  || ctx->Fog.ColorSumEnabled)
+	 ctx->_TriangleCaps |= DD_SEPARATE_SPECULAR;
+      else
+	 ctx->_TriangleCaps &= ~DD_SEPARATE_SPECULAR;
+
+      break;
+   case GL_LINE_SMOOTH:
+      if (ctx->Line.SmoothFlag == state)
+	 return;
+      FLUSH_VERTICES(ctx, _NEW_LINE);
+      ctx->Line.SmoothFlag = state;
+      ctx->_TriangleCaps ^= DD_LINE_SMOOTH;
+      break;
+   case GL_LINE_STIPPLE:
+      if (ctx->Line.StippleFlag == state)
+	 return;
+      FLUSH_VERTICES(ctx, _NEW_LINE);
+      ctx->Line.StippleFlag = state;
+      ctx->_TriangleCaps ^= DD_LINE_STIPPLE;
+      break;
+   case GL_INDEX_LOGIC_OP:
+      if (ctx->Color.IndexLogicOpEnabled == state)
+	 return;
+      FLUSH_VERTICES(ctx, _NEW_COLOR);
+      ctx->Color.IndexLogicOpEnabled = state;
+      break;
+   case GL_COLOR_LOGIC_OP:
+      if (ctx->Color.ColorLogicOpEnabled == state)
+	 return;
+      FLUSH_VERTICES(ctx, _NEW_COLOR);
+      ctx->Color.ColorLogicOpEnabled = state;
+      break;
+   case GL_MAP1_COLOR_4:
+      if (ctx->Eval.Map1Color4 == state)
+	 return;
+      FLUSH_VERTICES(ctx, _NEW_EVAL);
+      ctx->Eval.Map1Color4 = state;
+      break;
+   case GL_MAP1_INDEX:
+      if (ctx->Eval.Map1Index == state)
+	 return;
+      FLUSH_VERTICES(ctx, _NEW_EVAL);
+      ctx->Eval.Map1Index = state;
+      break;
+   case GL_MAP1_NORMAL:
+      if (ctx->Eval.Map1Normal == state)
+	 return;
+      FLUSH_VERTICES(ctx, _NEW_EVAL);
+      ctx->Eval.Map1Normal = state;
+      break;
+   case GL_MAP1_TEXTURE_COORD_1:
+      if (ctx->Eval.Map1TextureCoord1 == state)
+	 return;
+      FLUSH_VERTICES(ctx, _NEW_EVAL);
+      ctx->Eval.Map1TextureCoord1 = state;
+      break;
+   case GL_MAP1_TEXTURE_COORD_2:
+      if (ctx->Eval.Map1TextureCoord2 == state)
+	 return;
+      FLUSH_VERTICES(ctx, _NEW_EVAL);
+      ctx->Eval.Map1TextureCoord2 = state;
+      break;
+   case GL_MAP1_TEXTURE_COORD_3:
+      if (ctx->Eval.Map1TextureCoord3 == state)
+	 return;
+      FLUSH_VERTICES(ctx, _NEW_EVAL);
+      ctx->Eval.Map1TextureCoord3 = state;
+      break;
+   case GL_MAP1_TEXTURE_COORD_4:
+      if (ctx->Eval.Map1TextureCoord4 == state)
+	 return;
+      FLUSH_VERTICES(ctx, _NEW_EVAL);
+      ctx->Eval.Map1TextureCoord4 = state;
+      break;
+   case GL_MAP1_VERTEX_3:
+      if (ctx->Eval.Map1Vertex3 == state)
+	 return;
+      FLUSH_VERTICES(ctx, _NEW_EVAL);
+      ctx->Eval.Map1Vertex3 = state;
+      break;
+   case GL_MAP1_VERTEX_4:
+      if (ctx->Eval.Map1Vertex4 == state)
+	 return;
+      FLUSH_VERTICES(ctx, _NEW_EVAL);
+      ctx->Eval.Map1Vertex4 = state;
+      break;
+   case GL_MAP2_COLOR_4:
+      if (ctx->Eval.Map2Color4 == state)
+	 return;
+      FLUSH_VERTICES(ctx, _NEW_EVAL);
+      ctx->Eval.Map2Color4 = state;
+      break;
+   case GL_MAP2_INDEX:
+      if (ctx->Eval.Map2Index == state)
+	 return;
+      FLUSH_VERTICES(ctx, _NEW_EVAL);
+      ctx->Eval.Map2Index = state;
+      break;
+   case GL_MAP2_NORMAL:
+      if (ctx->Eval.Map2Normal == state)
+	 return;
+      FLUSH_VERTICES(ctx, _NEW_EVAL);
+      ctx->Eval.Map2Normal = state;
+      break;
+   case GL_MAP2_TEXTURE_COORD_1:
+      if (ctx->Eval.Map2TextureCoord1 == state)
+	 return;
+      FLUSH_VERTICES(ctx, _NEW_EVAL);
+      ctx->Eval.Map2TextureCoord1 = state;
+      break;
+   case GL_MAP2_TEXTURE_COORD_2:
+      if (ctx->Eval.Map2TextureCoord2 == state)
+	 return;
+      FLUSH_VERTICES(ctx, _NEW_EVAL);
+      ctx->Eval.Map2TextureCoord2 = state;
+      break;
+   case GL_MAP2_TEXTURE_COORD_3:
+      if (ctx->Eval.Map2TextureCoord3 == state)
+	 return;
+      FLUSH_VERTICES(ctx, _NEW_EVAL);
+      ctx->Eval.Map2TextureCoord3 = state;
+      break;
+   case GL_MAP2_TEXTURE_COORD_4:
+      if (ctx->Eval.Map2TextureCoord4 == state)
+	 return;
+      FLUSH_VERTICES(ctx, _NEW_EVAL);
+      ctx->Eval.Map2TextureCoord4 = state;
+      break;
+   case GL_MAP2_VERTEX_3:
+      if (ctx->Eval.Map2Vertex3 == state)
+	 return;
+      FLUSH_VERTICES(ctx, _NEW_EVAL);
+      ctx->Eval.Map2Vertex3 = state;
+      break;
+   case GL_MAP2_VERTEX_4:
+      if (ctx->Eval.Map2Vertex4 == state)
+	 return;
+      FLUSH_VERTICES(ctx, _NEW_EVAL);
+      ctx->Eval.Map2Vertex4 = state;
+      break;
+   case GL_MINMAX:
+      if (ctx->Pixel.MinMaxEnabled == state)
+	 return;
+      FLUSH_VERTICES(ctx, _NEW_PIXEL);
+      ctx->Pixel.MinMaxEnabled = state;
+      break;
+   case GL_NORMALIZE:
+      if (ctx->Transform.Normalize == state)
+	 return;
+      FLUSH_VERTICES(ctx, _NEW_TRANSFORM);
+      ctx->Transform.Normalize = state;
+      break;
+   case GL_POINT_SMOOTH:
+      if (ctx->Point.SmoothFlag==state)
+	 return;
+      FLUSH_VERTICES(ctx, _NEW_POINT);
+      ctx->Point.SmoothFlag = state;
+      ctx->_TriangleCaps ^= DD_POINT_SMOOTH;
+      break;
+   case GL_POLYGON_SMOOTH:
+      if (ctx->Polygon.SmoothFlag==state)
+	 return;
+      FLUSH_VERTICES(ctx, _NEW_POLYGON);
+      ctx->Polygon.SmoothFlag = state;
+      ctx->_TriangleCaps ^= DD_TRI_SMOOTH;
+      break;
+   case GL_POLYGON_STIPPLE:
+      if (ctx->Polygon.StippleFlag==state)
+	 return;
+      FLUSH_VERTICES(ctx, _NEW_POLYGON);
+      ctx->Polygon.StippleFlag = state;
+      ctx->_TriangleCaps ^= DD_TRI_STIPPLE;
+      break;
+   case GL_POLYGON_OFFSET_POINT:
+      if (ctx->Polygon.OffsetPoint==state)
+	 return;
+      FLUSH_VERTICES(ctx, _NEW_POLYGON);
+      ctx->Polygon.OffsetPoint = state;
+      break;
+   case GL_POLYGON_OFFSET_LINE:
+      if (ctx->Polygon.OffsetLine==state)
+	 return;
+      FLUSH_VERTICES(ctx, _NEW_POLYGON);
+      ctx->Polygon.OffsetLine = state;
+      break;
+   case GL_POLYGON_OFFSET_FILL:
+d319 111
+a429 120
+      if (ctx->Polygon.OffsetFill==state)
+	 return;
+      FLUSH_VERTICES(ctx, _NEW_POLYGON);
+      ctx->Polygon.OffsetFill = state;
+      break;
+   case GL_RESCALE_NORMAL_EXT:
+      if (ctx->Transform.RescaleNormals == state)
+	 return;
+      FLUSH_VERTICES(ctx, _NEW_TRANSFORM);
+      ctx->Transform.RescaleNormals = state;
+      break;
+   case GL_SCISSOR_TEST:
+      if (ctx->Scissor.Enabled==state)
+	 return;
+      FLUSH_VERTICES(ctx, _NEW_SCISSOR);
+      ctx->Scissor.Enabled = state;
+      break;
+   case GL_SHARED_TEXTURE_PALETTE_EXT:
+      if (ctx->Texture.SharedPalette == state)
+	 return;
+      FLUSH_VERTICES(ctx, _NEW_TEXTURE);
+      ctx->Texture.SharedPalette = state;
+      break;
+   case GL_STENCIL_TEST:
+      if (state && ctx->Visual.stencilBits==0) {
+	 _mesa_warning(ctx, "glEnable(GL_STENCIL_TEST) but no stencil buffer");
+	 return;
+      }
+      if (ctx->Stencil.Enabled==state)
+	 return;
+      FLUSH_VERTICES(ctx, _NEW_STENCIL);
+      ctx->Stencil.Enabled = state;
+      break;
+   case GL_TEXTURE_1D: {
+      const GLuint curr = ctx->Texture.CurrentUnit;
+      struct gl_texture_unit *texUnit = &ctx->Texture.Unit[curr];
+      GLuint newenabled = texUnit->Enabled & ~TEXTURE0_1D;
+      if (state)
+	 newenabled |= TEXTURE0_1D;
+      if (!ctx->Visual.rgbMode || texUnit->Enabled == newenabled)
+	 return;
+      FLUSH_VERTICES(ctx, _NEW_TEXTURE);
+      texUnit->Enabled = newenabled;
+      break;
+   }
+   case GL_TEXTURE_2D: {
+      const GLuint curr = ctx->Texture.CurrentUnit;
+      struct gl_texture_unit *texUnit = &ctx->Texture.Unit[curr];
+      GLuint newenabled = texUnit->Enabled & ~TEXTURE0_2D;
+      if (state)
+	 newenabled |= TEXTURE0_2D;
+      if (!ctx->Visual.rgbMode || texUnit->Enabled == newenabled)
+	 return;
+      FLUSH_VERTICES(ctx, _NEW_TEXTURE);
+      texUnit->Enabled = newenabled;
+      break;
+   }
+   case GL_TEXTURE_3D: {
+      const GLuint curr = ctx->Texture.CurrentUnit;
+      struct gl_texture_unit *texUnit = &ctx->Texture.Unit[curr];
+      GLuint newenabled = texUnit->Enabled & ~TEXTURE0_3D;
+      if (state)
+	 newenabled |= TEXTURE0_3D;
+      if (!ctx->Visual.rgbMode || texUnit->Enabled == newenabled)
+	 return;
+      FLUSH_VERTICES(ctx, _NEW_TEXTURE);
+      texUnit->Enabled = newenabled;
+      break;
+   }
+   case GL_TEXTURE_GEN_Q: {
+      GLuint unit = ctx->Texture.CurrentUnit;
+      struct gl_texture_unit *texUnit = &ctx->Texture.Unit[unit];
+      GLuint newenabled = texUnit->TexGenEnabled & ~Q_BIT;
+      if (state)
+	 newenabled |= Q_BIT;
+      if (texUnit->TexGenEnabled == newenabled)
+	 return;
+      FLUSH_VERTICES(ctx, _NEW_TEXTURE);
+      texUnit->TexGenEnabled = newenabled;
+      break;
+   }
+   case GL_TEXTURE_GEN_R: {
+      GLuint unit = ctx->Texture.CurrentUnit;
+      struct gl_texture_unit *texUnit = &ctx->Texture.Unit[unit];
+      GLuint newenabled = texUnit->TexGenEnabled & ~R_BIT;
+      if (state)
+	 newenabled |= R_BIT;
+      if (texUnit->TexGenEnabled == newenabled)
+	 return;
+      FLUSH_VERTICES(ctx, _NEW_TEXTURE);
+      texUnit->TexGenEnabled = newenabled;
+      break;
+   }
+   break;
+   case GL_TEXTURE_GEN_S: {
+      GLuint unit = ctx->Texture.CurrentUnit;
+      struct gl_texture_unit *texUnit = &ctx->Texture.Unit[unit];
+      GLuint newenabled = texUnit->TexGenEnabled & ~S_BIT;
+      if (state)
+	 newenabled |= S_BIT;
+      if (texUnit->TexGenEnabled == newenabled)
+	 return;
+      FLUSH_VERTICES(ctx, _NEW_TEXTURE);
+      texUnit->TexGenEnabled = newenabled;
+      break;
+   }
+   break;
+   case GL_TEXTURE_GEN_T: {
+      GLuint unit = ctx->Texture.CurrentUnit;
+      struct gl_texture_unit *texUnit = &ctx->Texture.Unit[unit];
+      GLuint newenabled = texUnit->TexGenEnabled & ~T_BIT;
+      if (state)
+	 newenabled |= T_BIT;
+      if (texUnit->TexGenEnabled == newenabled)
+	 return;
+      FLUSH_VERTICES(ctx, _NEW_TEXTURE);
+      texUnit->TexGenEnabled = newenabled;
+      break;
+   }
+   break;
+d431 45
+a475 13
+   /*
+    * CLIENT STATE!!!
+    */
+   case GL_VERTEX_ARRAY:
+   case GL_NORMAL_ARRAY:
+   case GL_COLOR_ARRAY:
+   case GL_INDEX_ARRAY:
+   case GL_TEXTURE_COORD_ARRAY:
+   case GL_EDGE_FLAG_ARRAY:
+   case GL_FOG_COORDINATE_ARRAY_EXT:
+   case GL_SECONDARY_COLOR_ARRAY_EXT:
+      client_state( ctx, cap, state );
+      return;
+d478 14
+a491 14
+   case GL_OCCLUSION_TEST_HP:
+      if (!ctx->Extensions.HP_occlusion_test) {
+	 _mesa_error( ctx, GL_INVALID_ENUM, state ? "glEnable": "glDisable" );
+	 return;
+      }
+      if (ctx->Depth.OcclusionTest == state)
+	 return;
+      FLUSH_VERTICES(ctx, _NEW_DEPTH);
+      ctx->Depth.OcclusionTest = state;
+      if (state)
+	 ctx->OcclusionResult = ctx->OcclusionResultSaved;
+      else
+	 ctx->OcclusionResultSaved = ctx->OcclusionResult;
+      break;
+d494 3
+a496 10
+   case GL_PIXEL_TEXTURE_SGIS:
+      if (!ctx->Extensions.SGIS_pixel_texture) {
+	 _mesa_error( ctx, GL_INVALID_ENUM, state ? "glEnable": "glDisable" );
+	 return;
+      }
+      if (ctx->Pixel.PixelTextureEnabled == state)
+	 return;
+      FLUSH_VERTICES(ctx, _NEW_PIXEL);
+      ctx->Pixel.PixelTextureEnabled = state;
+      break;
+d499 3
+a501 10
+   case GL_PIXEL_TEX_GEN_SGIX:
+      if (!ctx->Extensions.SGIX_pixel_texture) {
+	 _mesa_error( ctx, GL_INVALID_ENUM, state ? "glEnable": "glDisable" );
+	 return;
+      }
+      if (ctx->Pixel.PixelTextureEnabled == state)
+	 return;
+      FLUSH_VERTICES(ctx, _NEW_PIXEL);
+      ctx->Pixel.PixelTextureEnabled = state;
+      break;
+d504 9
+a512 30
+   case GL_COLOR_TABLE_SGI:
+      if (!ctx->Extensions.SGI_color_table && !ctx->Extensions.ARB_imaging) {
+	 _mesa_error( ctx, GL_INVALID_ENUM, state ? "glEnable": "glDisable" );
+	 return;
+      }
+      if (ctx->Pixel.ColorTableEnabled == state)
+	 return;
+      FLUSH_VERTICES(ctx, _NEW_PIXEL);
+      ctx->Pixel.ColorTableEnabled = state;
+      break;
+   case GL_POST_CONVOLUTION_COLOR_TABLE_SGI:
+      if (!ctx->Extensions.SGI_color_table && !ctx->Extensions.ARB_imaging) {
+	 _mesa_error( ctx, GL_INVALID_ENUM, state ? "glEnable": "glDisable" );
+	 return;
+      }
+      if (ctx->Pixel.PostConvolutionColorTableEnabled == state)
+	 return;
+      FLUSH_VERTICES(ctx, _NEW_PIXEL);
+      ctx->Pixel.PostConvolutionColorTableEnabled = state;
+      break;
+   case GL_POST_COLOR_MATRIX_COLOR_TABLE_SGI:
+      if (!ctx->Extensions.SGI_color_table && !ctx->Extensions.ARB_imaging) {
+	 _mesa_error( ctx, GL_INVALID_ENUM, state ? "glEnable": "glDisable" );
+	 return;
+      }
+      if (ctx->Pixel.PostColorMatrixColorTableEnabled == state)
+	 return;
+      FLUSH_VERTICES(ctx, _NEW_PIXEL);
+      ctx->Pixel.PostColorMatrixColorTableEnabled = state;
+      break;
+d515 9
+a523 30
+   case GL_CONVOLUTION_1D:
+      if (!ctx->Extensions.EXT_convolution && !ctx->Extensions.ARB_imaging) {
+	 _mesa_error(ctx, GL_INVALID_ENUM, state ? "glEnable" : "glDisable");
+	 return;
+      }
+      if (ctx->Pixel.Convolution1DEnabled == state)
+	 return;
+      FLUSH_VERTICES(ctx, _NEW_PIXEL);
+      ctx->Pixel.Convolution1DEnabled = state;
+      break;
+   case GL_CONVOLUTION_2D:
+      if (!ctx->Extensions.EXT_convolution && !ctx->Extensions.ARB_imaging) {
+	 _mesa_error(ctx, GL_INVALID_ENUM, state ? "glEnable" : "glDisable");
+	 return;
+      }
+      if (ctx->Pixel.Convolution2DEnabled == state)
+	 return;
+      FLUSH_VERTICES(ctx, _NEW_PIXEL);
+      ctx->Pixel.Convolution2DEnabled = state;
+      break;
+   case GL_SEPARABLE_2D:
+      if (!ctx->Extensions.EXT_convolution && !ctx->Extensions.ARB_imaging) {
+	 _mesa_error(ctx, GL_INVALID_ENUM, state ? "glEnable" : "glDisable");
+	 return;
+      }
+      if (ctx->Pixel.Separable2DEnabled == state)
+	 return;
+      FLUSH_VERTICES(ctx, _NEW_PIXEL);
+      ctx->Pixel.Separable2DEnabled = state;
+      break;
+d526 16
+a541 108
+   case GL_TEXTURE_CUBE_MAP_ARB: {
+      const GLuint curr = ctx->Texture.CurrentUnit;
+      struct gl_texture_unit *texUnit = &ctx->Texture.Unit[curr];
+      GLuint newenabled = texUnit->Enabled & ~TEXTURE0_CUBE;
+      if (state)
+	 newenabled |= TEXTURE0_CUBE;
+      if (!ctx->Extensions.ARB_texture_cube_map) {
+	 _mesa_error(ctx, GL_INVALID_ENUM, state ? "glEnable" : "glDisable");
+	 return;
+      }
+      if (!ctx->Visual.rgbMode || texUnit->Enabled == newenabled)
+	 return;
+      FLUSH_VERTICES(ctx, _NEW_TEXTURE);
+      texUnit->Enabled = newenabled;
+      break;
+   }
+      /* GL_EXT_secondary_color */
+   case GL_COLOR_SUM_EXT:
+      if (!ctx->Extensions.EXT_secondary_color) {
+	 _mesa_error(ctx, GL_INVALID_ENUM, state ? "glEnable" : "glDisable");
+	 return;
+      }
+      if (ctx->Fog.ColorSumEnabled == state)
+	 return;
+      FLUSH_VERTICES(ctx, _NEW_FOG);
+      ctx->Fog.ColorSumEnabled = state;
+
+      if ((ctx->Light.Enabled &&
+	   ctx->Light.Model.ColorControl==GL_SEPARATE_SPECULAR_COLOR)
+	  || ctx->Fog.ColorSumEnabled)
+	 ctx->_TriangleCaps |= DD_SEPARATE_SPECULAR;
+      else
+	 ctx->_TriangleCaps &= ~DD_SEPARATE_SPECULAR;
+
+      break;
+
+      /* GL_ARB_multisample */
+   case GL_MULTISAMPLE_ARB:
+      if (!ctx->Extensions.ARB_multisample) {
+         _mesa_error(ctx, GL_INVALID_ENUM, state ? "glEnable" : "glDisable");
+         return;
+      }
+      if (ctx->Multisample.Enabled == state)
+         return;
+      FLUSH_VERTICES(ctx, _NEW_MULTISAMPLE);
+      ctx->Multisample.Enabled = state;
+      break;
+   case GL_SAMPLE_ALPHA_TO_COVERAGE_ARB:
+      if (!ctx->Extensions.ARB_multisample) {
+         _mesa_error(ctx, GL_INVALID_ENUM, state ? "glEnable" : "glDisable");
+         return;
+      }
+      if (ctx->Multisample.SampleAlphaToCoverage == state)
+         return;
+      FLUSH_VERTICES(ctx, _NEW_MULTISAMPLE);
+      ctx->Multisample.SampleAlphaToCoverage = state;
+      break;
+   case GL_SAMPLE_ALPHA_TO_ONE_ARB:
+      if (!ctx->Extensions.ARB_multisample) {
+         _mesa_error(ctx, GL_INVALID_ENUM, state ? "glEnable" : "glDisable");
+         return;
+      }
+      if (ctx->Multisample.SampleAlphaToOne == state)
+         return;
+      FLUSH_VERTICES(ctx, _NEW_MULTISAMPLE);
+      ctx->Multisample.SampleAlphaToOne = state;
+      break;
+   case GL_SAMPLE_COVERAGE_ARB:
+      if (!ctx->Extensions.ARB_multisample) {
+         _mesa_error(ctx, GL_INVALID_ENUM, state ? "glEnable" : "glDisable");
+         return;
+      }
+      if (ctx->Multisample.SampleCoverage == state)
+         return;
+      FLUSH_VERTICES(ctx, _NEW_MULTISAMPLE);
+      ctx->Multisample.SampleCoverage = state;
+      break;
+   case GL_SAMPLE_COVERAGE_INVERT_ARB:
+      if (!ctx->Extensions.ARB_multisample) {
+         _mesa_error(ctx, GL_INVALID_ENUM, state ? "glEnable" : "glDisable");
+         return;
+      }
+      if (ctx->Multisample.SampleCoverageInvert == state)
+         return;
+      FLUSH_VERTICES(ctx, _NEW_MULTISAMPLE);
+      ctx->Multisample.SampleCoverageInvert = state;
+      break;
+
+   /* GL_IBM_rasterpos_clip */
+   case GL_RASTER_POSITION_UNCLIPPED_IBM:
+      if (!ctx->Extensions.IBM_rasterpos_clip) {
+         _mesa_error(ctx, GL_INVALID_ENUM, state ? "glEnable" : "glDisable");
+         return;
+      }
+      if (ctx->Transform.RasterPositionUnclipped == state)
+         return;
+      FLUSH_VERTICES(ctx, _NEW_TRANSFORM);
+      ctx->Transform.RasterPositionUnclipped = state;
+      break;
+
+   /* GL_NV_texture_rectangle */
+   case GL_TEXTURE_RECTANGLE_NV:
+      {
+         const GLuint curr = ctx->Texture.CurrentUnit;
+         struct gl_texture_unit *texUnit = &ctx->Texture.Unit[curr];
+         GLuint newenabled = texUnit->Enabled & ~TEXTURE0_RECT;
+         if (!ctx->Extensions.NV_texture_rectangle) {
+            _mesa_error(ctx, GL_INVALID_ENUM, state ? "glEnable" : "glDisable");
+d544 1
+a544 8
+         if (state)
+            newenabled |= TEXTURE0_RECT;
+         if (!ctx->Visual.rgbMode || texUnit->Enabled == newenabled)
+            return;
+         FLUSH_VERTICES(ctx, _NEW_TEXTURE);
+         texUnit->Enabled = newenabled;
+      }
+      break;
+d547 1
+a547 1
+         _mesa_error(ctx, GL_INVALID_ENUM, state ? "glEnable" : "glDisable");
+a562 2
+   ASSERT_OUTSIDE_BEGIN_END(ctx);
+
+a571 2
+   ASSERT_OUTSIDE_BEGIN_END(ctx);
+
+d606 1
+a606 7
+         if (ctx->Extensions.EXT_histogram || ctx->Extensions.ARB_imaging) {
+            return ctx->Pixel.HistogramEnabled;
+         }
+         else {
+            _mesa_error(ctx, GL_INVALID_ENUM, "glIsEnabled");
+            return GL_FALSE;
+         }
+d650 1
+a650 1
+      case GL_MAP2_TEXTURE_COORD_1:
+d727 3
+d731 1
+d733 3
+d737 1
+d739 3
+d743 1
+d745 3
+d749 1
+d751 3
+d755 1
+d757 3
+d761 1
+d765 1
+a765 1
+         if (ctx->Extensions.HP_occlusion_test) {
+d769 1
+a769 1
+            _mesa_error( ctx, GL_INVALID_ENUM, "glIsEnabled" );
+d799 1
+a799 1
+         if (ctx->Extensions.ARB_texture_cube_map) {
+d804 1
+a804 1
+            _mesa_error(ctx, GL_INVALID_ENUM, "glIsEnabled");
+d808 7
+a814 41
+      /* GL_ARB_multisample */
+      case GL_MULTISAMPLE_ARB:
+         if (ctx->Extensions.ARB_multisample) {
+            return ctx->Multisample.Enabled;
+         }
+         else {
+            _mesa_error(ctx, GL_INVALID_ENUM, "glIsEnabled");
+            return GL_FALSE;
+         }
+      case GL_SAMPLE_ALPHA_TO_COVERAGE_ARB:
+         if (ctx->Extensions.ARB_multisample) {
+            return ctx->Multisample.SampleAlphaToCoverage;
+         }
+         else {
+            _mesa_error(ctx, GL_INVALID_ENUM, "glIsEnabled");
+            return GL_FALSE;
+         }
+      case GL_SAMPLE_ALPHA_TO_ONE_ARB:
+         if (ctx->Extensions.ARB_multisample) {
+            return ctx->Multisample.SampleAlphaToOne;
+         }
+         else {
+            _mesa_error(ctx, GL_INVALID_ENUM, "glIsEnabled");
+            return GL_FALSE;
+         }
+      case GL_SAMPLE_COVERAGE_ARB:
+         if (ctx->Extensions.ARB_multisample) {
+            return ctx->Multisample.SampleCoverage;
+         }
+         else {
+            _mesa_error(ctx, GL_INVALID_ENUM, "glIsEnabled");
+            return GL_FALSE;
+         }
+      case GL_SAMPLE_COVERAGE_INVERT_ARB:
+         if (ctx->Extensions.ARB_multisample) {
+            return ctx->Multisample.SampleCoverageInvert;
+         }
+         else {
+            _mesa_error(ctx, GL_INVALID_ENUM, "glIsEnabled");
+            return GL_FALSE;
+         }
+a815 9
+      /* GL_IBM_rasterpos_clip */
+      case GL_RASTER_POSITION_UNCLIPPED_IBM:
+         if (ctx->Extensions.IBM_rasterpos_clip) {
+            return ctx->Transform.RasterPositionUnclipped;
+         }
+         else {
+            _mesa_error(ctx, GL_INVALID_ENUM, "glIsEnabled");
+            return GL_FALSE;
+         }
+d817 7
+a823 11
+      /* GL_NV_texture_rectangle */
+      case GL_TEXTURE_RECTANGLE_NV:
+         if (ctx->Extensions.NV_texture_rectangle) {
+            const struct gl_texture_unit *texUnit;
+            texUnit = &ctx->Texture.Unit[ctx->Texture.CurrentUnit];
+            return (texUnit->Enabled & TEXTURE0_RECT) ? GL_TRUE : GL_FALSE;
+         }
+         else {
+            _mesa_error(ctx, GL_INVALID_ENUM, "glIsEnabled");
+            return GL_FALSE;
+         }
+d825 43
+d869 1
+a869 2
+	 _mesa_error( ctx, GL_INVALID_ENUM, "glIsEnabled" );
+	 return GL_FALSE;
+d871 20
+d892 1
+@
+
+
+1.1.1.3
+log
+@That's what OpenBSD will, probably, ship as XF4 in 3.5
+their last sync against XFree86 4.3-current has been
+imported into our vendor branch, too
+@
+text
+@d4 1
+a4 1
+ * Version:  5.0.1
+d6 1
+a6 1
+ * Copyright (C) 1999-2003  Brian Paul   All Rights Reserved.
+d27 3
+d39 1
+d43 1
+a43 9
+
+
+#define CHECK_EXTENSION(EXTNAME, CAP)					\
+   if (!ctx->Extensions.EXTNAME) {					\
+      _mesa_error(ctx, GL_INVALID_ENUM, "gl%sClientState(0x%x)",	\
+                  state ? "Enable" : "Disable", CAP);			\
+      return;								\
+   }
+
+d50 1
+a50 1
+   GLuint *var;
+d53 35
+a87 63
+      case GL_VERTEX_ARRAY:
+         var = &ctx->Array.Vertex.Enabled;
+         flag = _NEW_ARRAY_VERTEX;
+         break;
+      case GL_NORMAL_ARRAY:
+         var = &ctx->Array.Normal.Enabled;
+         flag = _NEW_ARRAY_NORMAL;
+         break;
+      case GL_COLOR_ARRAY:
+         var = &ctx->Array.Color.Enabled;
+         flag = _NEW_ARRAY_COLOR0;
+         break;
+      case GL_INDEX_ARRAY:
+         var = &ctx->Array.Index.Enabled;
+         flag = _NEW_ARRAY_INDEX;
+         break;
+      case GL_TEXTURE_COORD_ARRAY:
+         var = &ctx->Array.TexCoord[ctx->Array.ActiveTexture].Enabled;
+         flag = _NEW_ARRAY_TEXCOORD(ctx->Array.ActiveTexture);
+         break;
+      case GL_EDGE_FLAG_ARRAY:
+         var = &ctx->Array.EdgeFlag.Enabled;
+         flag = _NEW_ARRAY_EDGEFLAG;
+         break;
+      case GL_FOG_COORDINATE_ARRAY_EXT:
+         var = &ctx->Array.FogCoord.Enabled;
+         flag = _NEW_ARRAY_FOGCOORD;
+         break;
+      case GL_SECONDARY_COLOR_ARRAY_EXT:
+         var = &ctx->Array.SecondaryColor.Enabled;
+         flag = _NEW_ARRAY_COLOR1;
+         break;
+
+#if FEATURE_NV_vertex_program
+      case GL_VERTEX_ATTRIB_ARRAY0_NV:
+      case GL_VERTEX_ATTRIB_ARRAY1_NV:
+      case GL_VERTEX_ATTRIB_ARRAY2_NV:
+      case GL_VERTEX_ATTRIB_ARRAY3_NV:
+      case GL_VERTEX_ATTRIB_ARRAY4_NV:
+      case GL_VERTEX_ATTRIB_ARRAY5_NV:
+      case GL_VERTEX_ATTRIB_ARRAY6_NV:
+      case GL_VERTEX_ATTRIB_ARRAY7_NV:
+      case GL_VERTEX_ATTRIB_ARRAY8_NV:
+      case GL_VERTEX_ATTRIB_ARRAY9_NV:
+      case GL_VERTEX_ATTRIB_ARRAY10_NV:
+      case GL_VERTEX_ATTRIB_ARRAY11_NV:
+      case GL_VERTEX_ATTRIB_ARRAY12_NV:
+      case GL_VERTEX_ATTRIB_ARRAY13_NV:
+      case GL_VERTEX_ATTRIB_ARRAY14_NV:
+      case GL_VERTEX_ATTRIB_ARRAY15_NV:
+         CHECK_EXTENSION(NV_vertex_program, cap);
+         {
+            GLint n = (GLint) cap - GL_VERTEX_ATTRIB_ARRAY0_NV;
+            var = &ctx->Array.VertexAttrib[n].Enabled;
+            flag = _NEW_ARRAY_ATTRIB(n);
+         }
+         break;
+#endif /* FEATURE_NV_vertex_program */
+
+      default:
+         _mesa_error( ctx, GL_INVALID_ENUM,
+                      "glEnable/DisableClientState(0x%x)", cap);
+         return;
+a127 9
+#undef CHECK_EXTENSION
+#define CHECK_EXTENSION(EXTNAME, CAP)					\
+   if (!ctx->Extensions.EXTNAME) {					\
+      _mesa_error(ctx, GL_INVALID_ENUM, "gl%s(0x%x)",			\
+                  state ? "Enable" : "Disable", CAP);			\
+      return;								\
+   }
+
+
+d134 4
+a137 4
+      _mesa_debug(ctx, "%s %s (newstate is %x)\n",
+                  state ? "glEnable" : "glDisable",
+                  _mesa_lookup_enum_by_nr(cap),
+                  ctx->NewState);
+d140 53
+a192 377
+      case GL_ALPHA_TEST:
+         if (ctx->Color.AlphaEnabled == state)
+            return;
+         FLUSH_VERTICES(ctx, _NEW_COLOR);
+         ctx->Color.AlphaEnabled = state;
+         break;
+      case GL_AUTO_NORMAL:
+         if (ctx->Eval.AutoNormal == state)
+            return;
+         FLUSH_VERTICES(ctx, _NEW_EVAL);
+         ctx->Eval.AutoNormal = state;
+         break;
+      case GL_BLEND:
+         if (ctx->Color.BlendEnabled == state)
+            return;
+         FLUSH_VERTICES(ctx, _NEW_COLOR);
+         ctx->Color.BlendEnabled = state;
+         /* This is needed to support 1.1's RGB logic ops AND
+          * 1.0's blending logicops.
+          */
+         ctx->Color._LogicOpEnabled =
+            (ctx->Color.ColorLogicOpEnabled ||
+             (state && ctx->Color.BlendEquation == GL_LOGIC_OP));
+         break;
+      case GL_CLIP_PLANE0:
+      case GL_CLIP_PLANE1:
+      case GL_CLIP_PLANE2:
+      case GL_CLIP_PLANE3:
+      case GL_CLIP_PLANE4:
+      case GL_CLIP_PLANE5:
+         {
+            const GLuint p = cap - GL_CLIP_PLANE0;
+
+            if ((ctx->Transform.ClipPlanesEnabled & (1 << p)) == ((GLuint) state << p))
+               return;
+
+            FLUSH_VERTICES(ctx, _NEW_TRANSFORM);
+
+            if (state) {
+               ctx->Transform.ClipPlanesEnabled |= (1 << p);
+
+               if (ctx->ProjectionMatrixStack.Top->flags & MAT_DIRTY)
+                  _math_matrix_analyse( ctx->ProjectionMatrixStack.Top );
+
+               /* This derived state also calculated in clip.c and
+                * from _mesa_update_state() on changes to EyeUserPlane
+                * and ctx->ProjectionMatrix respectively.
+                */
+               _mesa_transform_vector( ctx->Transform._ClipUserPlane[p],
+                                    ctx->Transform.EyeUserPlane[p],
+                                    ctx->ProjectionMatrixStack.Top->inv );
+            }
+            else {
+               ctx->Transform.ClipPlanesEnabled &= ~(1 << p);
+            }               
+         }
+         break;
+      case GL_COLOR_MATERIAL:
+         if (ctx->Light.ColorMaterialEnabled == state)
+            return;
+         FLUSH_VERTICES(ctx, _NEW_LIGHT);
+         FLUSH_CURRENT(ctx, 0);
+         ctx->Light.ColorMaterialEnabled = state;
+         if (state) {
+            _mesa_update_color_material( ctx,
+                                  ctx->Current.Attrib[VERT_ATTRIB_COLOR0] );
+         }
+         break;
+      case GL_CULL_FACE:
+         if (ctx->Polygon.CullFlag == state)
+            return;
+         FLUSH_VERTICES(ctx, _NEW_POLYGON);
+         ctx->Polygon.CullFlag = state;
+         break;
+      case GL_DEPTH_TEST:
+         if (state && ctx->Visual.depthBits==0) {
+            _mesa_warning(ctx,"glEnable(GL_DEPTH_TEST) but no depth buffer");
+            return;
+         }
+         if (ctx->Depth.Test==state)
+            return;
+         FLUSH_VERTICES(ctx, _NEW_DEPTH);
+         ctx->Depth.Test = state;
+         break;
+      case GL_DITHER:
+         if (ctx->NoDither) {
+            state = GL_FALSE; /* MESA_NO_DITHER env var */
+         }
+         if (ctx->Color.DitherFlag==state)
+            return;
+         FLUSH_VERTICES(ctx, _NEW_COLOR);
+         ctx->Color.DitherFlag = state;
+         break;
+      case GL_FOG:
+         if (ctx->Fog.Enabled==state)
+            return;
+         FLUSH_VERTICES(ctx, _NEW_FOG);
+         ctx->Fog.Enabled = state;
+         break;
+      case GL_HISTOGRAM:
+         CHECK_EXTENSION(EXT_histogram, cap);
+         if (ctx->Pixel.HistogramEnabled == state)
+            return;
+         FLUSH_VERTICES(ctx, _NEW_PIXEL);
+         ctx->Pixel.HistogramEnabled = state;
+         break;
+      case GL_LIGHT0:
+      case GL_LIGHT1:
+      case GL_LIGHT2:
+      case GL_LIGHT3:
+      case GL_LIGHT4:
+      case GL_LIGHT5:
+      case GL_LIGHT6:
+      case GL_LIGHT7:
+         if (ctx->Light.Light[cap-GL_LIGHT0].Enabled == state)
+            return;
+         FLUSH_VERTICES(ctx, _NEW_LIGHT);
+         ctx->Light.Light[cap-GL_LIGHT0].Enabled = state;
+         if (state) {
+            insert_at_tail(&ctx->Light.EnabledList,
+                           &ctx->Light.Light[cap-GL_LIGHT0]);
+         }
+         else {
+            remove_from_list(&ctx->Light.Light[cap-GL_LIGHT0]);
+         }
+         break;
+      case GL_LIGHTING:
+         if (ctx->Light.Enabled == state)
+            return;
+         FLUSH_VERTICES(ctx, _NEW_LIGHT);
+         ctx->Light.Enabled = state;
+
+         if (ctx->Light.Enabled && ctx->Light.Model.TwoSide)
+   	   ctx->_TriangleCaps |= DD_TRI_LIGHT_TWOSIDE;
+         else
+ 	   ctx->_TriangleCaps &= ~DD_TRI_LIGHT_TWOSIDE;
+ 
+         if ((ctx->Light.Enabled &&
+              ctx->Light.Model.ColorControl==GL_SEPARATE_SPECULAR_COLOR)
+             || ctx->Fog.ColorSumEnabled)
+            ctx->_TriangleCaps |= DD_SEPARATE_SPECULAR;
+         else
+            ctx->_TriangleCaps &= ~DD_SEPARATE_SPECULAR;
+
+         break;
+      case GL_LINE_SMOOTH:
+         if (ctx->Line.SmoothFlag == state)
+            return;
+         FLUSH_VERTICES(ctx, _NEW_LINE);
+         ctx->Line.SmoothFlag = state;
+         ctx->_TriangleCaps ^= DD_LINE_SMOOTH;
+         break;
+      case GL_LINE_STIPPLE:
+         if (ctx->Line.StippleFlag == state)
+            return;
+         FLUSH_VERTICES(ctx, _NEW_LINE);
+         ctx->Line.StippleFlag = state;
+         ctx->_TriangleCaps ^= DD_LINE_STIPPLE;
+         break;
+      case GL_INDEX_LOGIC_OP:
+         if (ctx->Color.IndexLogicOpEnabled == state)
+            return;
+         FLUSH_VERTICES(ctx, _NEW_COLOR);
+         ctx->Color.IndexLogicOpEnabled = state;
+         break;
+      case GL_COLOR_LOGIC_OP:
+         if (ctx->Color.ColorLogicOpEnabled == state)
+            return;
+         FLUSH_VERTICES(ctx, _NEW_COLOR);
+         ctx->Color.ColorLogicOpEnabled = state;
+         /* This is needed to support 1.1's RGB logic ops AND
+          * 1.0's blending logicops.
+          */
+         ctx->Color._LogicOpEnabled =
+            (state || (ctx->Color.BlendEnabled &&
+                       ctx->Color.BlendEquation == GL_LOGIC_OP));
+         break;
+      case GL_MAP1_COLOR_4:
+         if (ctx->Eval.Map1Color4 == state)
+            return;
+         FLUSH_VERTICES(ctx, _NEW_EVAL);
+         ctx->Eval.Map1Color4 = state;
+         break;
+      case GL_MAP1_INDEX:
+         if (ctx->Eval.Map1Index == state)
+            return;
+         FLUSH_VERTICES(ctx, _NEW_EVAL);
+         ctx->Eval.Map1Index = state;
+         break;
+      case GL_MAP1_NORMAL:
+         if (ctx->Eval.Map1Normal == state)
+            return;
+         FLUSH_VERTICES(ctx, _NEW_EVAL);
+         ctx->Eval.Map1Normal = state;
+         break;
+      case GL_MAP1_TEXTURE_COORD_1:
+         if (ctx->Eval.Map1TextureCoord1 == state)
+            return;
+         FLUSH_VERTICES(ctx, _NEW_EVAL);
+         ctx->Eval.Map1TextureCoord1 = state;
+         break;
+      case GL_MAP1_TEXTURE_COORD_2:
+         if (ctx->Eval.Map1TextureCoord2 == state)
+            return;
+         FLUSH_VERTICES(ctx, _NEW_EVAL);
+         ctx->Eval.Map1TextureCoord2 = state;
+         break;
+      case GL_MAP1_TEXTURE_COORD_3:
+         if (ctx->Eval.Map1TextureCoord3 == state)
+            return;
+         FLUSH_VERTICES(ctx, _NEW_EVAL);
+         ctx->Eval.Map1TextureCoord3 = state;
+         break;
+      case GL_MAP1_TEXTURE_COORD_4:
+         if (ctx->Eval.Map1TextureCoord4 == state)
+            return;
+         FLUSH_VERTICES(ctx, _NEW_EVAL);
+         ctx->Eval.Map1TextureCoord4 = state;
+         break;
+      case GL_MAP1_VERTEX_3:
+         if (ctx->Eval.Map1Vertex3 == state)
+            return;
+         FLUSH_VERTICES(ctx, _NEW_EVAL);
+         ctx->Eval.Map1Vertex3 = state;
+         break;
+      case GL_MAP1_VERTEX_4:
+         if (ctx->Eval.Map1Vertex4 == state)
+            return;
+         FLUSH_VERTICES(ctx, _NEW_EVAL);
+         ctx->Eval.Map1Vertex4 = state;
+         break;
+      case GL_MAP2_COLOR_4:
+         if (ctx->Eval.Map2Color4 == state)
+            return;
+         FLUSH_VERTICES(ctx, _NEW_EVAL);
+         ctx->Eval.Map2Color4 = state;
+         break;
+      case GL_MAP2_INDEX:
+         if (ctx->Eval.Map2Index == state)
+            return;
+         FLUSH_VERTICES(ctx, _NEW_EVAL);
+         ctx->Eval.Map2Index = state;
+         break;
+      case GL_MAP2_NORMAL:
+         if (ctx->Eval.Map2Normal == state)
+            return;
+         FLUSH_VERTICES(ctx, _NEW_EVAL);
+         ctx->Eval.Map2Normal = state;
+         break;
+      case GL_MAP2_TEXTURE_COORD_1:
+         if (ctx->Eval.Map2TextureCoord1 == state)
+            return;
+         FLUSH_VERTICES(ctx, _NEW_EVAL);
+         ctx->Eval.Map2TextureCoord1 = state;
+         break;
+      case GL_MAP2_TEXTURE_COORD_2:
+         if (ctx->Eval.Map2TextureCoord2 == state)
+            return;
+         FLUSH_VERTICES(ctx, _NEW_EVAL);
+         ctx->Eval.Map2TextureCoord2 = state;
+         break;
+      case GL_MAP2_TEXTURE_COORD_3:
+         if (ctx->Eval.Map2TextureCoord3 == state)
+            return;
+         FLUSH_VERTICES(ctx, _NEW_EVAL);
+         ctx->Eval.Map2TextureCoord3 = state;
+         break;
+      case GL_MAP2_TEXTURE_COORD_4:
+         if (ctx->Eval.Map2TextureCoord4 == state)
+            return;
+         FLUSH_VERTICES(ctx, _NEW_EVAL);
+         ctx->Eval.Map2TextureCoord4 = state;
+         break;
+      case GL_MAP2_VERTEX_3:
+         if (ctx->Eval.Map2Vertex3 == state)
+            return;
+         FLUSH_VERTICES(ctx, _NEW_EVAL);
+         ctx->Eval.Map2Vertex3 = state;
+         break;
+      case GL_MAP2_VERTEX_4:
+         if (ctx->Eval.Map2Vertex4 == state)
+            return;
+         FLUSH_VERTICES(ctx, _NEW_EVAL);
+         ctx->Eval.Map2Vertex4 = state;
+         break;
+      case GL_MINMAX:
+         if (ctx->Pixel.MinMaxEnabled == state)
+            return;
+         FLUSH_VERTICES(ctx, _NEW_PIXEL);
+         ctx->Pixel.MinMaxEnabled = state;
+         break;
+      case GL_NORMALIZE:
+         if (ctx->Transform.Normalize == state)
+            return;
+         FLUSH_VERTICES(ctx, _NEW_TRANSFORM);
+         ctx->Transform.Normalize = state;
+         break;
+      case GL_POINT_SMOOTH:
+         if (ctx->Point.SmoothFlag==state)
+            return;
+         FLUSH_VERTICES(ctx, _NEW_POINT);
+         ctx->Point.SmoothFlag = state;
+         ctx->_TriangleCaps ^= DD_POINT_SMOOTH;
+         break;
+      case GL_POLYGON_SMOOTH:
+         if (ctx->Polygon.SmoothFlag==state)
+            return;
+         FLUSH_VERTICES(ctx, _NEW_POLYGON);
+         ctx->Polygon.SmoothFlag = state;
+         ctx->_TriangleCaps ^= DD_TRI_SMOOTH;
+         break;
+      case GL_POLYGON_STIPPLE:
+         if (ctx->Polygon.StippleFlag==state)
+            return;
+         FLUSH_VERTICES(ctx, _NEW_POLYGON);
+         ctx->Polygon.StippleFlag = state;
+         ctx->_TriangleCaps ^= DD_TRI_STIPPLE;
+         break;
+      case GL_POLYGON_OFFSET_POINT:
+         if (ctx->Polygon.OffsetPoint==state)
+            return;
+         FLUSH_VERTICES(ctx, _NEW_POLYGON);
+         ctx->Polygon.OffsetPoint = state;
+         break;
+      case GL_POLYGON_OFFSET_LINE:
+         if (ctx->Polygon.OffsetLine==state)
+            return;
+         FLUSH_VERTICES(ctx, _NEW_POLYGON);
+         ctx->Polygon.OffsetLine = state;
+         break;
+      case GL_POLYGON_OFFSET_FILL:
+         /*case GL_POLYGON_OFFSET_EXT:*/
+         if (ctx->Polygon.OffsetFill==state)
+            return;
+         FLUSH_VERTICES(ctx, _NEW_POLYGON);
+         ctx->Polygon.OffsetFill = state;
+         break;
+      case GL_RESCALE_NORMAL_EXT:
+         if (ctx->Transform.RescaleNormals == state)
+            return;
+         FLUSH_VERTICES(ctx, _NEW_TRANSFORM);
+         ctx->Transform.RescaleNormals = state;
+         break;
+      case GL_SCISSOR_TEST:
+         if (ctx->Scissor.Enabled==state)
+            return;
+         FLUSH_VERTICES(ctx, _NEW_SCISSOR);
+         ctx->Scissor.Enabled = state;
+         break;
+      case GL_SHARED_TEXTURE_PALETTE_EXT:
+         if (ctx->Texture.SharedPalette == state)
+            return;
+         FLUSH_VERTICES(ctx, _NEW_TEXTURE);
+         ctx->Texture.SharedPalette = state;
+         break;
+      case GL_STENCIL_TEST:
+         if (state && ctx->Visual.stencilBits==0) {
+            _mesa_warning(ctx,
+                          "glEnable(GL_STENCIL_TEST) but no stencil buffer");
+            return;
+         }
+         if (ctx->Stencil.Enabled==state)
+            return;
+         FLUSH_VERTICES(ctx, _NEW_STENCIL);
+         ctx->Stencil.Enabled = state;
+         break;
+      case GL_TEXTURE_1D: {
+         const GLuint curr = ctx->Texture.CurrentUnit;
+         struct gl_texture_unit *texUnit = &ctx->Texture.Unit[curr];
+         GLuint newenabled = texUnit->Enabled & ~TEXTURE_1D_BIT;
+         if (state)
+            newenabled |= TEXTURE_1D_BIT;
+         if (!ctx->Visual.rgbMode || texUnit->Enabled == newenabled)
+            return;
+         FLUSH_VERTICES(ctx, _NEW_TEXTURE);
+         texUnit->Enabled = newenabled;
+         break;
+d194 10
+a203 11
+      case GL_TEXTURE_2D: {
+         const GLuint curr = ctx->Texture.CurrentUnit;
+         struct gl_texture_unit *texUnit = &ctx->Texture.Unit[curr];
+         GLuint newenabled = texUnit->Enabled & ~TEXTURE_2D_BIT;
+         if (state)
+            newenabled |= TEXTURE_2D_BIT;
+         if (!ctx->Visual.rgbMode || texUnit->Enabled == newenabled)
+            return;
+         FLUSH_VERTICES(ctx, _NEW_TEXTURE);
+         texUnit->Enabled = newenabled;
+         break;
+d205 11
+a215 11
+      case GL_TEXTURE_3D: {
+         const GLuint curr = ctx->Texture.CurrentUnit;
+         struct gl_texture_unit *texUnit = &ctx->Texture.Unit[curr];
+         GLuint newenabled = texUnit->Enabled & ~TEXTURE_3D_BIT;
+         if (state)
+            newenabled |= TEXTURE_3D_BIT;
+         if (!ctx->Visual.rgbMode || texUnit->Enabled == newenabled)
+            return;
+         FLUSH_VERTICES(ctx, _NEW_TEXTURE);
+         texUnit->Enabled = newenabled;
+         break;
+d217 8
+a224 11
+      case GL_TEXTURE_GEN_Q: {
+         GLuint unit = ctx->Texture.CurrentUnit;
+         struct gl_texture_unit *texUnit = &ctx->Texture.Unit[unit];
+         GLuint newenabled = texUnit->TexGenEnabled & ~Q_BIT;
+         if (state)
+            newenabled |= Q_BIT;
+         if (texUnit->TexGenEnabled == newenabled)
+            return;
+         FLUSH_VERTICES(ctx, _NEW_TEXTURE);
+         texUnit->TexGenEnabled = newenabled;
+         break;
+d226 15
+a240 11
+      case GL_TEXTURE_GEN_R: {
+         GLuint unit = ctx->Texture.CurrentUnit;
+         struct gl_texture_unit *texUnit = &ctx->Texture.Unit[unit];
+         GLuint newenabled = texUnit->TexGenEnabled & ~R_BIT;
+         if (state)
+            newenabled |= R_BIT;
+         if (texUnit->TexGenEnabled == newenabled)
+            return;
+         FLUSH_VERTICES(ctx, _NEW_TEXTURE);
+         texUnit->TexGenEnabled = newenabled;
+         break;
+d242 4
+d247 18
+a264 11
+      case GL_TEXTURE_GEN_S: {
+         GLuint unit = ctx->Texture.CurrentUnit;
+         struct gl_texture_unit *texUnit = &ctx->Texture.Unit[unit];
+         GLuint newenabled = texUnit->TexGenEnabled & ~S_BIT;
+         if (state)
+            newenabled |= S_BIT;
+         if (texUnit->TexGenEnabled == newenabled)
+            return;
+         FLUSH_VERTICES(ctx, _NEW_TEXTURE);
+         texUnit->TexGenEnabled = newenabled;
+         break;
+d267 227
+a493 11
+      case GL_TEXTURE_GEN_T: {
+         GLuint unit = ctx->Texture.CurrentUnit;
+         struct gl_texture_unit *texUnit = &ctx->Texture.Unit[unit];
+         GLuint newenabled = texUnit->TexGenEnabled & ~T_BIT;
+         if (state)
+            newenabled |= T_BIT;
+         if (texUnit->TexGenEnabled == newenabled)
+            return;
+         FLUSH_VERTICES(ctx, _NEW_TEXTURE);
+         texUnit->TexGenEnabled = newenabled;
+         break;
+d495 15
+d511 76
+d588 13
+a600 13
+      /*
+       * CLIENT STATE!!!
+       */
+      case GL_VERTEX_ARRAY:
+      case GL_NORMAL_ARRAY:
+      case GL_COLOR_ARRAY:
+      case GL_INDEX_ARRAY:
+      case GL_TEXTURE_COORD_ARRAY:
+      case GL_EDGE_FLAG_ARRAY:
+      case GL_FOG_COORDINATE_ARRAY_EXT:
+      case GL_SECONDARY_COLOR_ARRAY_EXT:
+         client_state( ctx, cap, state );
+         return;
+d603 14
+a616 11
+      case GL_OCCLUSION_TEST_HP:
+         CHECK_EXTENSION(HP_occlusion_test, cap);
+         if (ctx->Depth.OcclusionTest == state)
+            return;
+         FLUSH_VERTICES(ctx, _NEW_DEPTH);
+         ctx->Depth.OcclusionTest = state;
+         if (state)
+            ctx->OcclusionResult = ctx->OcclusionResultSaved;
+         else
+            ctx->OcclusionResultSaved = ctx->OcclusionResult;
+         break;
+d619 10
+a628 7
+      case GL_PIXEL_TEXTURE_SGIS:
+         CHECK_EXTENSION(SGIS_pixel_texture, cap);
+         if (ctx->Pixel.PixelTextureEnabled == state)
+            return;
+         FLUSH_VERTICES(ctx, _NEW_PIXEL);
+         ctx->Pixel.PixelTextureEnabled = state;
+         break;
+d631 10
+a640 7
+      case GL_PIXEL_TEX_GEN_SGIX:
+         CHECK_EXTENSION(SGIX_pixel_texture, cap);
+         if (ctx->Pixel.PixelTextureEnabled == state)
+            return;
+         FLUSH_VERTICES(ctx, _NEW_PIXEL);
+         ctx->Pixel.PixelTextureEnabled = state;
+         break;
+d643 30
+a672 21
+      case GL_COLOR_TABLE_SGI:
+         CHECK_EXTENSION(SGI_color_table, cap);
+         if (ctx->Pixel.ColorTableEnabled == state)
+            return;
+         FLUSH_VERTICES(ctx, _NEW_PIXEL);
+         ctx->Pixel.ColorTableEnabled = state;
+         break;
+      case GL_POST_CONVOLUTION_COLOR_TABLE_SGI:
+         CHECK_EXTENSION(SGI_color_table, cap);
+         if (ctx->Pixel.PostConvolutionColorTableEnabled == state)
+            return;
+         FLUSH_VERTICES(ctx, _NEW_PIXEL);
+         ctx->Pixel.PostConvolutionColorTableEnabled = state;
+         break;
+      case GL_POST_COLOR_MATRIX_COLOR_TABLE_SGI:
+         CHECK_EXTENSION(SGI_color_table, cap);
+         if (ctx->Pixel.PostColorMatrixColorTableEnabled == state)
+            return;
+         FLUSH_VERTICES(ctx, _NEW_PIXEL);
+         ctx->Pixel.PostColorMatrixColorTableEnabled = state;
+         break;
+d675 30
+a704 21
+      case GL_CONVOLUTION_1D:
+         CHECK_EXTENSION(EXT_convolution, cap);
+         if (ctx->Pixel.Convolution1DEnabled == state)
+            return;
+         FLUSH_VERTICES(ctx, _NEW_PIXEL);
+         ctx->Pixel.Convolution1DEnabled = state;
+         break;
+      case GL_CONVOLUTION_2D:
+         CHECK_EXTENSION(EXT_convolution, cap);
+         if (ctx->Pixel.Convolution2DEnabled == state)
+            return;
+         FLUSH_VERTICES(ctx, _NEW_PIXEL);
+         ctx->Pixel.Convolution2DEnabled = state;
+         break;
+      case GL_SEPARABLE_2D:
+         CHECK_EXTENSION(EXT_convolution, cap);
+         if (ctx->Pixel.Separable2DEnabled == state)
+            return;
+         FLUSH_VERTICES(ctx, _NEW_PIXEL);
+         ctx->Pixel.Separable2DEnabled = state;
+         break;
+d707 16
+a722 15
+      case GL_TEXTURE_CUBE_MAP_ARB:
+         {
+            const GLuint curr = ctx->Texture.CurrentUnit;
+            struct gl_texture_unit *texUnit = &ctx->Texture.Unit[curr];
+            GLuint newenabled = texUnit->Enabled & ~TEXTURE_CUBE_BIT;
+            CHECK_EXTENSION(ARB_texture_cube_map, cap);
+            if (state)
+               newenabled |= TEXTURE_CUBE_BIT;
+            if (!ctx->Visual.rgbMode || texUnit->Enabled == newenabled)
+               return;
+            FLUSH_VERTICES(ctx, _NEW_TEXTURE);
+            texUnit->Enabled = newenabled;
+         }
+         break;
+
+d724 16
+a739 6
+      case GL_COLOR_SUM_EXT:
+         CHECK_EXTENSION(EXT_secondary_color, cap);
+         if (ctx->Fog.ColorSumEnabled == state)
+            return;
+         FLUSH_VERTICES(ctx, _NEW_FOG);
+         ctx->Fog.ColorSumEnabled = state;
+d741 1
+a741 6
+         if ((ctx->Light.Enabled &&
+              ctx->Light.Model.ColorControl==GL_SEPARATE_SPECULAR_COLOR)
+             || ctx->Fog.ColorSumEnabled)
+            ctx->_TriangleCaps |= DD_SEPARATE_SPECULAR;
+         else
+            ctx->_TriangleCaps &= ~DD_SEPARATE_SPECULAR;
+d743 51
+a793 1
+         break;
+d795 11
+a805 36
+      /* GL_ARB_multisample */
+      case GL_MULTISAMPLE_ARB:
+         CHECK_EXTENSION(ARB_multisample, cap);
+         if (ctx->Multisample.Enabled == state)
+            return;
+         FLUSH_VERTICES(ctx, _NEW_MULTISAMPLE);
+         ctx->Multisample.Enabled = state;
+         break;
+      case GL_SAMPLE_ALPHA_TO_COVERAGE_ARB:
+         CHECK_EXTENSION(ARB_multisample, cap);
+         if (ctx->Multisample.SampleAlphaToCoverage == state)
+            return;
+         FLUSH_VERTICES(ctx, _NEW_MULTISAMPLE);
+         ctx->Multisample.SampleAlphaToCoverage = state;
+         break;
+      case GL_SAMPLE_ALPHA_TO_ONE_ARB:
+         CHECK_EXTENSION(ARB_multisample, cap);
+         if (ctx->Multisample.SampleAlphaToOne == state)
+            return;
+         FLUSH_VERTICES(ctx, _NEW_MULTISAMPLE);
+         ctx->Multisample.SampleAlphaToOne = state;
+         break;
+      case GL_SAMPLE_COVERAGE_ARB:
+         CHECK_EXTENSION(ARB_multisample, cap);
+         if (ctx->Multisample.SampleCoverage == state)
+            return;
+         FLUSH_VERTICES(ctx, _NEW_MULTISAMPLE);
+         ctx->Multisample.SampleCoverage = state;
+         break;
+      case GL_SAMPLE_COVERAGE_INVERT_ARB:
+         CHECK_EXTENSION(ARB_multisample, cap);
+         if (ctx->Multisample.SampleCoverageInvert == state)
+            return;
+         FLUSH_VERTICES(ctx, _NEW_MULTISAMPLE);
+         ctx->Multisample.SampleCoverageInvert = state;
+         break;
+d807 8
+a814 4
+      /* GL_IBM_rasterpos_clip */
+      case GL_RASTER_POSITION_UNCLIPPED_IBM:
+         CHECK_EXTENSION(IBM_rasterpos_clip, cap);
+         if (ctx->Transform.RasterPositionUnclipped == state)
+a815 79
+         FLUSH_VERTICES(ctx, _NEW_TRANSFORM);
+         ctx->Transform.RasterPositionUnclipped = state;
+         break;
+
+      /* GL_NV_point_sprite */
+      case GL_POINT_SPRITE_NV:
+         CHECK_EXTENSION(NV_point_sprite, cap);
+         if (ctx->Point.PointSprite == state)
+            return;
+         FLUSH_VERTICES(ctx, _NEW_POINT);
+         ctx->Point.PointSprite = state;
+         break;
+
+#if FEATURE_NV_vertex_program
+      case GL_VERTEX_PROGRAM_NV:
+         CHECK_EXTENSION(NV_vertex_program, cap);
+         if (ctx->VertexProgram.Enabled == state)
+            return;
+         FLUSH_VERTICES(ctx, _NEW_TRANSFORM | _NEW_PROGRAM);  /* XXX OK? */
+         ctx->VertexProgram.Enabled = state;
+         break;
+      case GL_VERTEX_PROGRAM_POINT_SIZE_NV:
+         CHECK_EXTENSION(NV_vertex_program, cap);
+         if (ctx->VertexProgram.PointSizeEnabled == state)
+            return;
+         FLUSH_VERTICES(ctx, _NEW_POINT | _NEW_PROGRAM);
+         ctx->VertexProgram.PointSizeEnabled = state;
+         break;
+      case GL_VERTEX_PROGRAM_TWO_SIDE_NV:
+         CHECK_EXTENSION(NV_vertex_program, cap);
+         if (ctx->VertexProgram.TwoSideEnabled == state)
+            return;
+         FLUSH_VERTICES(ctx, _NEW_PROGRAM);  /* XXX OK? */
+         ctx->VertexProgram.TwoSideEnabled = state;
+         break;
+      case GL_MAP1_VERTEX_ATTRIB0_4_NV:
+      case GL_MAP1_VERTEX_ATTRIB1_4_NV:
+      case GL_MAP1_VERTEX_ATTRIB2_4_NV:
+      case GL_MAP1_VERTEX_ATTRIB3_4_NV:
+      case GL_MAP1_VERTEX_ATTRIB4_4_NV:
+      case GL_MAP1_VERTEX_ATTRIB5_4_NV:
+      case GL_MAP1_VERTEX_ATTRIB6_4_NV:
+      case GL_MAP1_VERTEX_ATTRIB7_4_NV:
+      case GL_MAP1_VERTEX_ATTRIB8_4_NV:
+      case GL_MAP1_VERTEX_ATTRIB9_4_NV:
+      case GL_MAP1_VERTEX_ATTRIB10_4_NV:
+      case GL_MAP1_VERTEX_ATTRIB11_4_NV:
+      case GL_MAP1_VERTEX_ATTRIB12_4_NV:
+      case GL_MAP1_VERTEX_ATTRIB13_4_NV:
+      case GL_MAP1_VERTEX_ATTRIB14_4_NV:
+      case GL_MAP1_VERTEX_ATTRIB15_4_NV:
+         CHECK_EXTENSION(NV_vertex_program, cap);
+         {
+            const GLuint map = (GLuint) (cap - GL_MAP1_VERTEX_ATTRIB0_4_NV);
+            FLUSH_VERTICES(ctx, _NEW_EVAL);
+            ctx->Eval.Map1Attrib[map] = state;
+         }
+         break;
+      case GL_MAP2_VERTEX_ATTRIB0_4_NV:
+      case GL_MAP2_VERTEX_ATTRIB1_4_NV:
+      case GL_MAP2_VERTEX_ATTRIB2_4_NV:
+      case GL_MAP2_VERTEX_ATTRIB3_4_NV:
+      case GL_MAP2_VERTEX_ATTRIB4_4_NV:
+      case GL_MAP2_VERTEX_ATTRIB5_4_NV:
+      case GL_MAP2_VERTEX_ATTRIB6_4_NV:
+      case GL_MAP2_VERTEX_ATTRIB7_4_NV:
+      case GL_MAP2_VERTEX_ATTRIB8_4_NV:
+      case GL_MAP2_VERTEX_ATTRIB9_4_NV:
+      case GL_MAP2_VERTEX_ATTRIB10_4_NV:
+      case GL_MAP2_VERTEX_ATTRIB11_4_NV:
+      case GL_MAP2_VERTEX_ATTRIB12_4_NV:
+      case GL_MAP2_VERTEX_ATTRIB13_4_NV:
+      case GL_MAP2_VERTEX_ATTRIB14_4_NV:
+      case GL_MAP2_VERTEX_ATTRIB15_4_NV:
+         CHECK_EXTENSION(NV_vertex_program, cap);
+         {
+            const GLuint map = (GLuint) (cap - GL_MAP2_VERTEX_ATTRIB0_4_NV);
+            FLUSH_VERTICES(ctx, _NEW_EVAL);
+            ctx->Eval.Map2Attrib[map] = state;
+d817 3
+a819 24
+         break;
+#endif /* FEATURE_NV_vertex_program */
+
+      /* GL_NV_texture_rectangle */
+      case GL_TEXTURE_RECTANGLE_NV:
+         CHECK_EXTENSION(NV_texture_rectangle, cap);
+         {
+            const GLuint curr = ctx->Texture.CurrentUnit;
+            struct gl_texture_unit *texUnit = &ctx->Texture.Unit[curr];
+            GLuint newenabled = texUnit->Enabled & ~TEXTURE_RECT_BIT;
+            CHECK_EXTENSION(NV_texture_rectangle, cap);
+            if (state)
+               newenabled |= TEXTURE_RECT_BIT;
+            if (!ctx->Visual.rgbMode || texUnit->Enabled == newenabled)
+               return;
+            FLUSH_VERTICES(ctx, _NEW_TEXTURE);
+            texUnit->Enabled = newenabled;
+         }
+         break;
+
+      /* GL_EXT_stencil_two_side */
+      case GL_STENCIL_TEST_TWO_SIDE_EXT:
+         CHECK_EXTENSION(EXT_stencil_two_side, cap);
+         if (ctx->Stencil.TestTwoSide == state)
+d821 4
+a824 3
+         FLUSH_VERTICES(ctx, _NEW_STENCIL);
+         ctx->Stencil.TestTwoSide = state;
+         break;
+d827 1
+a827 2
+         _mesa_error(ctx, GL_INVALID_ENUM,
+                     "%s(0x%x)", state ? "glEnable" : "glDisable", cap);
+d837 2
+d849 1
+a859 7
+#undef CHECK_EXTENSION
+#define CHECK_EXTENSION(EXTNAME)			\
+   if (!ctx->Extensions.EXTNAME) {			\
+      _mesa_error(ctx, GL_INVALID_ENUM, "glIsEnabled");	\
+      return GL_FALSE;					\
+   }
+
+d878 1
+a878 1
+	 return (ctx->Transform.ClipPlanesEnabled >> (cap - GL_CLIP_PLANE0)) & 1;
+d889 8
+d952 2
+d979 2
+a980 3
+            const struct gl_texture_unit *texUnit;
+            texUnit = &ctx->Texture.Unit[ctx->Texture.CurrentUnit];
+            return (texUnit->Enabled & TEXTURE_1D_BIT) ? GL_TRUE : GL_FALSE;
+d984 2
+a985 3
+            const struct gl_texture_unit *texUnit;
+            texUnit = &ctx->Texture.Unit[ctx->Texture.CurrentUnit];
+            return (texUnit->Enabled & TEXTURE_2D_BIT) ? GL_TRUE : GL_FALSE;
+d989 2
+a990 3
+            const struct gl_texture_unit *texUnit;
+            texUnit = &ctx->Texture.Unit[ctx->Texture.CurrentUnit];
+            return (texUnit->Enabled & TEXTURE_3D_BIT) ? GL_TRUE : GL_FALSE;
+d994 1
+a994 2
+            const struct gl_texture_unit *texUnit;
+            texUnit = &ctx->Texture.Unit[ctx->Texture.CurrentUnit];
+d999 1
+a999 2
+            const struct gl_texture_unit *texUnit;
+            texUnit = &ctx->Texture.Unit[ctx->Texture.CurrentUnit];
+d1004 1
+a1004 2
+            const struct gl_texture_unit *texUnit;
+            texUnit = &ctx->Texture.Unit[ctx->Texture.CurrentUnit];
+d1009 1
+a1009 2
+            const struct gl_texture_unit *texUnit;
+            texUnit = &ctx->Texture.Unit[ctx->Texture.CurrentUnit];
+d1017 1
+a1017 1
+         return (ctx->Array.Vertex.Enabled != 0);
+d1019 1
+a1019 1
+         return (ctx->Array.Normal.Enabled != 0);
+d1021 1
+a1021 1
+         return (ctx->Array.Color.Enabled != 0);
+d1023 1
+a1023 1
+         return (ctx->Array.Index.Enabled != 0);
+d1025 1
+a1025 1
+         return (ctx->Array.TexCoord[ctx->Array.ActiveTexture].Enabled != 0);
+d1027 1
+a1027 15
+         return (ctx->Array.EdgeFlag.Enabled != 0);
+      case GL_FOG_COORDINATE_ARRAY_EXT:
+         CHECK_EXTENSION(EXT_fog_coord);
+         return (ctx->Array.FogCoord.Enabled != 0);
+      case GL_SECONDARY_COLOR_ARRAY_EXT:
+         CHECK_EXTENSION(EXT_secondary_color);
+         return (ctx->Array.SecondaryColor.Enabled != 0);
+
+      /* GL_EXT_histogram */
+      case GL_HISTOGRAM:
+         CHECK_EXTENSION(EXT_histogram);
+         return ctx->Pixel.HistogramEnabled;
+      case GL_MINMAX:
+         CHECK_EXTENSION(EXT_histogram);
+         return ctx->Pixel.MinMaxEnabled;
+d1031 7
+a1037 2
+         CHECK_EXTENSION(HP_occlusion_test);
+         return ctx->Depth.OcclusionTest;
+a1040 1
+         CHECK_EXTENSION(SGIS_pixel_texture);
+a1044 1
+         CHECK_EXTENSION(SGIX_pixel_texture);
+a1048 1
+         CHECK_EXTENSION(SGI_color_table);
+a1050 1
+         CHECK_EXTENSION(SGI_color_table);
+a1052 1
+         CHECK_EXTENSION(SGI_color_table);
+a1056 1
+         CHECK_EXTENSION(EXT_convolution);
+a1058 1
+         CHECK_EXTENSION(EXT_convolution);
+a1060 1
+         CHECK_EXTENSION(EXT_convolution);
+d1065 7
+a1071 5
+         CHECK_EXTENSION(ARB_texture_cube_map);
+         {
+            const struct gl_texture_unit *texUnit;
+            texUnit = &ctx->Texture.Unit[ctx->Texture.CurrentUnit];
+            return (texUnit->Enabled & TEXTURE_CUBE_BIT) ? GL_TRUE : GL_FALSE;
+d1076 7
+a1082 2
+         CHECK_EXTENSION(ARB_multisample);
+         return ctx->Multisample.Enabled;
+d1084 7
+a1090 2
+         CHECK_EXTENSION(ARB_multisample);
+         return ctx->Multisample.SampleAlphaToCoverage;
+d1092 7
+a1098 2
+         CHECK_EXTENSION(ARB_multisample);
+         return ctx->Multisample.SampleAlphaToOne;
+d1100 7
+a1106 2
+         CHECK_EXTENSION(ARB_multisample);
+         return ctx->Multisample.SampleCoverage;
+d1108 7
+a1114 2
+         CHECK_EXTENSION(ARB_multisample);
+         return ctx->Multisample.SampleCoverageInvert;
+d1118 2
+a1119 37
+         CHECK_EXTENSION(IBM_rasterpos_clip);
+         return ctx->Transform.RasterPositionUnclipped;
+
+      /* GL_NV_point_sprite */
+      case GL_POINT_SPRITE_NV:
+         return ctx->Point.PointSprite;
+
+#if FEATURE_NV_vertex_program
+      case GL_VERTEX_PROGRAM_NV:
+         CHECK_EXTENSION(NV_vertex_program);
+         return ctx->VertexProgram.Enabled;
+      case GL_VERTEX_PROGRAM_POINT_SIZE_NV:
+         CHECK_EXTENSION(NV_vertex_program);
+         return ctx->VertexProgram.PointSizeEnabled;
+      case GL_VERTEX_PROGRAM_TWO_SIDE_NV:
+         CHECK_EXTENSION(NV_vertex_program);
+         return ctx->VertexProgram.TwoSideEnabled;
+      case GL_VERTEX_ATTRIB_ARRAY0_NV:
+      case GL_VERTEX_ATTRIB_ARRAY1_NV:
+      case GL_VERTEX_ATTRIB_ARRAY2_NV:
+      case GL_VERTEX_ATTRIB_ARRAY3_NV:
+      case GL_VERTEX_ATTRIB_ARRAY4_NV:
+      case GL_VERTEX_ATTRIB_ARRAY5_NV:
+      case GL_VERTEX_ATTRIB_ARRAY6_NV:
+      case GL_VERTEX_ATTRIB_ARRAY7_NV:
+      case GL_VERTEX_ATTRIB_ARRAY8_NV:
+      case GL_VERTEX_ATTRIB_ARRAY9_NV:
+      case GL_VERTEX_ATTRIB_ARRAY10_NV:
+      case GL_VERTEX_ATTRIB_ARRAY11_NV:
+      case GL_VERTEX_ATTRIB_ARRAY12_NV:
+      case GL_VERTEX_ATTRIB_ARRAY13_NV:
+      case GL_VERTEX_ATTRIB_ARRAY14_NV:
+      case GL_VERTEX_ATTRIB_ARRAY15_NV:
+         CHECK_EXTENSION(NV_vertex_program);
+         {
+            GLint n = (GLint) cap - GL_VERTEX_ATTRIB_ARRAY0_NV;
+            return (ctx->Array.VertexAttrib[n].Enabled != 0);
+d1121 3
+a1123 20
+      case GL_MAP1_VERTEX_ATTRIB0_4_NV:
+      case GL_MAP1_VERTEX_ATTRIB1_4_NV:
+      case GL_MAP1_VERTEX_ATTRIB2_4_NV:
+      case GL_MAP1_VERTEX_ATTRIB3_4_NV:
+      case GL_MAP1_VERTEX_ATTRIB4_4_NV:
+      case GL_MAP1_VERTEX_ATTRIB5_4_NV:
+      case GL_MAP1_VERTEX_ATTRIB6_4_NV:
+      case GL_MAP1_VERTEX_ATTRIB7_4_NV:
+      case GL_MAP1_VERTEX_ATTRIB8_4_NV:
+      case GL_MAP1_VERTEX_ATTRIB9_4_NV:
+      case GL_MAP1_VERTEX_ATTRIB10_4_NV:
+      case GL_MAP1_VERTEX_ATTRIB11_4_NV:
+      case GL_MAP1_VERTEX_ATTRIB12_4_NV:
+      case GL_MAP1_VERTEX_ATTRIB13_4_NV:
+      case GL_MAP1_VERTEX_ATTRIB14_4_NV:
+      case GL_MAP1_VERTEX_ATTRIB15_4_NV:
+         CHECK_EXTENSION(NV_vertex_program);
+         {
+            const GLuint map = (GLuint) (cap - GL_MAP1_VERTEX_ATTRIB0_4_NV);
+            return ctx->Eval.Map1Attrib[map];
+a1124 22
+      case GL_MAP2_VERTEX_ATTRIB0_4_NV:
+      case GL_MAP2_VERTEX_ATTRIB1_4_NV:
+      case GL_MAP2_VERTEX_ATTRIB2_4_NV:
+      case GL_MAP2_VERTEX_ATTRIB3_4_NV:
+      case GL_MAP2_VERTEX_ATTRIB4_4_NV:
+      case GL_MAP2_VERTEX_ATTRIB5_4_NV:
+      case GL_MAP2_VERTEX_ATTRIB6_4_NV:
+      case GL_MAP2_VERTEX_ATTRIB7_4_NV:
+      case GL_MAP2_VERTEX_ATTRIB8_4_NV:
+      case GL_MAP2_VERTEX_ATTRIB9_4_NV:
+      case GL_MAP2_VERTEX_ATTRIB10_4_NV:
+      case GL_MAP2_VERTEX_ATTRIB11_4_NV:
+      case GL_MAP2_VERTEX_ATTRIB12_4_NV:
+      case GL_MAP2_VERTEX_ATTRIB13_4_NV:
+      case GL_MAP2_VERTEX_ATTRIB14_4_NV:
+      case GL_MAP2_VERTEX_ATTRIB15_4_NV:
+         CHECK_EXTENSION(NV_vertex_program);
+         {
+            const GLuint map = (GLuint) (cap - GL_MAP2_VERTEX_ATTRIB0_4_NV);
+            return ctx->Eval.Map2Attrib[map];
+         }
+#endif /* FEATURE_NV_vertex_program */
+d1128 1
+a1128 2
+         CHECK_EXTENSION(NV_texture_rectangle);
+         {
+d1131 5
+a1135 1
+            return (texUnit->Enabled & TEXTURE_RECT_BIT) ? GL_TRUE : GL_FALSE;
+a1137 5
+      /* GL_EXT_stencil_two_side */
+      case GL_STENCIL_TEST_TWO_SIDE_EXT:
+         CHECK_EXTENSION(EXT_stencil_two_side);
+         return ctx->Stencil.TestTwoSide;
+
+d1139 1
+a1139 1
+         _mesa_error(ctx, GL_INVALID_ENUM, "glIsEnabled(0x%x)", (int) cap);
+@
+
+

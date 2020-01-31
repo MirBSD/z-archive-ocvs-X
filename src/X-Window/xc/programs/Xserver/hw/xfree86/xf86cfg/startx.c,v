@@ -1,0 +1,293 @@
+head	1.1;
+branch	1.1.1;
+access;
+symbols
+	tg-mergetmp-2:1.1.1.2
+	cvs-200410241530:1.1.1.2
+	cvs-200410012000:1.1.1.2
+	cvs-200407221130:1.1.1.2
+	cvs-200407141120:1.1.1.2
+	cvs-200406231010:1.1.1.2
+	MIRBSD_7quater:1.1.1.2
+	cvs-200405271510:1.1.1.2
+	XFree86_4_4_0:1.1.9.1
+	cvs-200403021700:1.1.1.2
+	XFREE86_20040213:1.1.9.1
+	xc:1.1.9
+	cvs-200401291925:1.1.1.2
+	MIRBSD_7_ALPHA:1.1.1.2.0.4
+	MIRBSD_7:1.1.1.2.0.2
+	MIRBSD_7ter:1.1.1.2
+	cvs-20011091815:1.1.1.2
+	cvs-200309162130:1.1.1.2
+	cvs-200308302005:1.1.1.2
+	ctmx-0387:1.1.1.2
+	ctmx-0384:1.1.1.2
+	MIRBSD_5:1.1.1.2
+	ctmx-0375:1.1.1.2
+	ctmx-0373:1.1.1.2
+	ctm-0371:1.1.1.2
+	ctm-0370:1.1.1.2
+	MIRBSD_4:1.1.1.2
+	ctm-0363:1.1.1.2
+	ctm-0359:1.1.1.2
+	ctm-0349:1.1.1.1
+	openbsd:1.1.1;
+locks; strict;
+comment	@ * @;
+
+
+1.1
+date	2003.03.22.20.09.13;	author tg;	state Exp;
+branches
+	1.1.1.1
+	1.1.9.1;
+next	;
+
+1.1.1.1
+date	2003.03.22.20.09.13;	author tg;	state Exp;
+branches;
+next	1.1.1.2;
+
+1.1.1.2
+date	2003.04.08.18.37.55;	author tg;	state Stab;
+branches;
+next	;
+
+1.1.9.1
+date	2004.02.14.19.25.57;	author tg;	state Exp;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@/*
+ * Copyright (c) 2000 by Conectiva S.A. (http://www.conectiva.com)
+ * 
+ * Permission is hereby granted, free of charge, to any person obtaining a
+ * copy of this software and associated documentation files (the "Software"),
+ * to deal in the Software without restriction, including without limitation
+ * the rights to use, copy, modify, merge, publish, distribute, sublicense,
+ * and/or sell copies of the Software, and to permit persons to whom the
+ * Software is furnished to do so, subject to the following conditions:
+ * 
+ * The above copyright notice and this permission notice shall be included in
+ * all copies or substantial portions of the Software.
+ *  
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL
+ * CONECTIVA LINUX BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY,
+ * WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF
+ * OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+ * SOFTWARE.
+ * 
+ * Except as contained in this notice, the name of Conectiva Linux shall
+ * not be used in advertising or otherwise to promote the sale, use or other
+ * dealings in this Software without prior written authorization from
+ * Conectiva Linux.
+ *
+ * Author: Paulo César Pereira de Andrade <pcpa@@conectiva.com.br>
+ *
+ * $XFree86: xc/programs/Xserver/hw/xfree86/xf86cfg/startx.c,v 1.7 2002/01/07 20:38:29 dawes Exp $
+ */
+
+#include "config.h"
+#include <sys/types.h>
+#include <sys/wait.h>
+#include <signal.h>
+
+/*
+ * Initialization
+ */
+static int xpid;
+Display *DPY;
+
+/*
+ * Implementation
+ */
+Bool
+startx(void)
+{
+    int timeout = 8;
+
+    if (getenv("DISPLAY") != NULL)
+	/* already running Xserver */
+	return (False);
+
+    if (XF86Config_path == NULL) {
+	char *home, filename[PATH_MAX];
+	char commandline[PATH_MAX * 4];
+	int c_pos;
+	int len;
+	/* 
+	 * The name of the 4.0 binary is XFree86. X might also
+	 * be the name of the 3.3 binary. Therefore don't change
+	 * name to 'X'.
+	 */
+	if (XFree86_path)
+	    c_pos = XmuSnprintf(commandline, sizeof(commandline),
+				"%s/XFree86 :8 -configure ",XFree86_path);
+	else
+	    c_pos = XmuSnprintf(commandline, sizeof(commandline), 
+				"%s/bin/XFree86 :8 -configure ", XFree86Dir);
+	if (XF86Module_path && ((len = sizeof(commandline) - c_pos) > 0))
+	    c_pos += XmuSnprintf(commandline + c_pos,len,
+				 " -modulepath %s",XF86Module_path);
+	if (XF86Font_path && ((len = sizeof(commandline) - c_pos) > 0))
+	    c_pos += XmuSnprintf(commandline + c_pos,len,
+				 " -fontpath %s",XF86Font_path);
+	if (XF86RGB_path && ((len = sizeof(commandline) - c_pos) > 0))
+	    c_pos += XmuSnprintf(commandline + c_pos,len,
+				 " -rgbpath %s",XF86RGB_path);
+	
+	if (system(commandline) != 0) {
+	    fprintf(stderr, "Failed to run \"X -configure\".\n");
+	    exit(1);
+	}
+
+	if ((home = getenv("HOME")) == NULL)
+	    home = "/";
+
+#ifndef QNX4
+	XmuSnprintf(filename, sizeof(filename), "%s/XF86Config.new", home);
+#else
+	XmuSnprintf(filename, sizeof(filename), "//%d%s/XF86Config.new",
+		    getnid(), home);
+#endif
+
+	/* this memory is never released, even if the value of XF86Config_path is
+	 * changed.
+	 */
+	XF86Config_path = XtNewString(filename);
+    }
+
+    putenv("DISPLAY=:8");
+
+    switch (xpid = fork()) {
+	case 0: {
+	    char path[PATH_MAX];
+	    /* Don't change to X! see above */
+	    if (XFree86_path)
+	        XmuSnprintf(path, sizeof(path), "%s/XFree86", XFree86_path);
+	    else
+	        XmuSnprintf(path, sizeof(path), "%s/bin/XFree86", XFree86Dir);
+	    execl(path, "X", ":8", /*"+xinerama",*/ "+accessx",
+		  "-allowMouseOpenFail", "-keepPriv", "-nolisten", "tcp",
+		  "-xf86config", XF86Config_path, (void *)NULL);
+	    exit(-127);
+	}   break;
+	case -1:
+	    fprintf(stderr, "Cannot fork.\n");
+	    exit(1);
+	    break;
+	default:
+	    break;
+    }
+
+    while (timeout > 0) {
+	int status;
+
+	sleep(timeout -= 2);
+	if (waitpid(xpid, &status, WNOHANG | WUNTRACED) == xpid)
+	    break;
+	else {
+	    DPY = XOpenDisplay(NULL);
+	    if (DPY != NULL)
+		break;
+	}
+    }
+
+    if (DPY == NULL) {
+	fprintf(stderr, "Cannot connect to X server.\n");
+	exit(1);
+    }
+
+    return (True);
+}
+
+void
+endx(void)
+{
+    if (xpid != 0)
+	kill(xpid, SIGTERM);
+}
+@
+
+
+1.1.9.1
+log
+@OpenBSD just has imported exactly this tree into their vendor branch,
+called the same tag, in XF4/xc
+This is, apparently, the last XFree86 snapshot before the licence change
+(ie, addition of the advertising clause)
+
+Since the developers don't see any problems with that, and we would like
+to integrate improvements done by the remaining one or two (or so) XFree86
+developers (j/k), this prepares enabling us to update X-Window in the future.
+@
+text
+@d29 1
+a29 1
+ * $XFree86: xc/programs/Xserver/hw/xfree86/xf86cfg/startx.c,v 1.8 2002/10/19 20:04:21 herrb Exp $
+d112 2
+a113 1
+	    execl(path, "X", ":8", /*"+xinerama",*/ "+accessx","-allowMouseOpenFail",
+@
+
+
+1.1.1.1
+log
+@Import OpenBSD 3.3 XF4 repository from CTM 3132 the first time
+This finalizes starting an OpenBSD-mirabile (aka MirBSD) repository.
+
+### MirBSD is:
+# Copyright (c) 1982-2003 by Thorsten "mirabile" Glaser <x86@@ePost.de>
+# Copyright © 1968-2003  The authors of And contributors to UNIX®, the
+#       C Language, BSD/Berkeley Unix; 386BSD, NetBSD 1.1 and OpenBSD.
+#
+# Anyone who obtained a copy of this work is hereby permitted to freely use,
+# distribute, modify, merge, sublicence, give away or sell it as long as the
+# authors are given due credit and the following notice is retained:
+#
+# This work is provided "as is", with no explicit or implicit warranty what-
+# soever. Use it only at your own risk. In no event may an author or contri-
+# butor be held liable for any damage, directly or indirectly, that origina-
+# ted through or is caused by creation or modification of this work.
+
+MirBSD is my private tree. MirBSD does not differ very much from OpenBSD
+and intentionally tracks OpenBSD. That's why it _is_ OpenBSD, just not the
+official one. It's like with DarrenBSD.
+
+At time of this writing, no advertising for MirBSD must be done,
+because the advertising clause has not yet been sorted out.
+
+http://templeofhate.com/tglaser/MirBSD/index.php
+@
+text
+@@
+
+
+1.1.1.2
+log
+@The X-Windowing System
+
+Import XFree86 4.3 from OpenBSD by CTM, in the hope it's stable
+@
+text
+@d29 1
+a29 1
+ * $XFree86: xc/programs/Xserver/hw/xfree86/xf86cfg/startx.c,v 1.8 2002/10/19 20:04:21 herrb Exp $
+d113 1
+a113 1
+		"-allowMouseOpenFail", "-keepPriv", "-nolisten", "tcp",
+@
+

@@ -1,0 +1,366 @@
+head	1.2;
+branch	1.1.1;
+access;
+symbols
+	tg-mergetmp-2:1.1.1.2
+	cvs-200410241530:1.1.1.2
+	cvs-200410012000:1.1.1.2
+	cvs-200407141120:1.1.1.2
+	cvs-200406231010:1.1.1.2
+	MIRBSD_7quater:1.1.1.1
+	cvs-200405271510:1.1.1.2
+	XFree86_4_4_0:1.1.9.1
+	cvs-200403021700:1.1.1.2
+	XFREE86_20040213:1.1.9.1
+	xc:1.1.9
+	cvs-200401291925:1.1.1.1
+	MIRBSD_7_ALPHA:1.1.1.1.0.4
+	MIRBSD_7:1.1.1.1.0.2
+	MIRBSD_7ter:1.1.1.1
+	cvs-20011091815:1.1.1.1
+	cvs-200309162130:1.1.1.1
+	cvs-200308302005:1.1.1.1
+	ctmx-0387:1.1.1.1
+	ctmx-0384:1.1.1.1
+	MIRBSD_5:1.1.1.1
+	ctmx-0375:1.1.1.1
+	ctmx-0373:1.1.1.1
+	ctm-0371:1.1.1.1
+	ctm-0370:1.1.1.1
+	MIRBSD_4:1.1.1.1
+	ctm-0363:1.1.1.1
+	ctm-0359:1.1.1.1
+	openbsd:1.1.1;
+locks; strict;
+comment	@ * @;
+
+
+1.2
+date	2003.05.16.16.29.33;	author tg;	state dead;
+branches;
+next	1.1;
+
+1.1
+date	2003.04.08.18.20.47;	author tg;	state Exp;
+branches
+	1.1.1.1
+	1.1.9.1;
+next	;
+
+1.1.1.1
+date	2003.04.08.18.20.47;	author tg;	state Exp;
+branches;
+next	1.1.1.2;
+
+1.1.1.2
+date	2004.03.02.17.37.24;	author tg;	state Stab;
+branches;
+next	;
+
+1.1.9.1
+date	2004.02.14.19.08.40;	author tg;	state Exp;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.2
+log
+@remove a bunch of files not used in MirBSD - clean tree. People who want them got cvs.
+@
+text
+@/***************************************************************************/
+/*                                                                         */
+/*  ftdebug.c                                                              */
+/*                                                                         */
+/*    Debugging and logging component for Win32 (body).                    */
+/*                                                                         */
+/*  Copyright 1996-2001, 2002 by                                           */
+/*  David Turner, Robert Wilhelm, and Werner Lemberg.                      */
+/*                                                                         */
+/*  This file is part of the FreeType project, and may only be used,       */
+/*  modified, and distributed under the terms of the FreeType project      */
+/*  license, LICENSE.TXT.  By continuing to use, modify, or distribute     */
+/*  this file you indicate that you have read the license and              */
+/*  understand and accept it fully.                                        */
+/*                                                                         */
+/***************************************************************************/
+
+
+  /*************************************************************************/
+  /*                                                                       */
+  /* This component contains various macros and functions used to ease the */
+  /* debugging of the FreeType engine.  Its main purpose is in assertion   */
+  /* checking, tracing, and error detection.                               */
+  /*                                                                       */
+  /* There are now three debugging modes:                                  */
+  /*                                                                       */
+  /* - trace mode                                                          */
+  /*                                                                       */
+  /*   Error and trace messages are sent to the log file (which can be the */
+  /*   standard error output).                                             */
+  /*                                                                       */
+  /* - error mode                                                          */
+  /*                                                                       */
+  /*   Only error messages are generated.                                  */
+  /*                                                                       */
+  /* - release mode:                                                       */
+  /*                                                                       */
+  /*   No error message is sent or generated.  The code is free from any   */
+  /*   debugging parts.                                                    */
+  /*                                                                       */
+  /*************************************************************************/
+
+
+#include <ft2build.h>
+#include FT_INTERNAL_DEBUG_H
+
+
+#ifdef FT_DEBUG_LEVEL_ERROR
+
+
+#  include <stdarg.h>
+#  include <stdlib.h>
+#  include <string.h>
+
+#  include <windows.h>
+
+
+  FT_EXPORT_DEF( void )
+  FT_Message( const char*  fmt, ... )
+  {
+    static char buf[8192];
+    va_list     ap;
+
+
+    va_start( ap, fmt );
+    vsprintf( buf, fmt, ap );
+    OutputDebugStringA( buf );
+    va_end( ap );
+  }
+
+
+  FT_EXPORT_DEF( void )
+  FT_Panic( const char*  fmt, ... )
+  {
+    static char buf[8192];
+    va_list     ap;
+
+
+    va_start( ap, fmt );
+    vsprintf( buf, fmt, ap );
+    OutputDebugStringA( buf );
+    va_end( ap );
+
+    exit( EXIT_FAILURE );
+  }
+
+
+#  ifdef FT_DEBUG_LEVEL_TRACE
+
+
+  /* array of trace levels, initialized to 0 */
+  int  ft_trace_levels[trace_count];
+
+  /* define array of trace toggle names */
+#    define FT_TRACE_DEF( x )  #x ,
+
+  static const char*  ft_trace_toggles[trace_count + 1] =
+  {
+#    include FT_INTERNAL_TRACE_H
+    NULL
+  };
+
+#    undef FT_TRACE_DEF
+
+
+  /*************************************************************************/
+  /*                                                                       */
+  /* Initialize the tracing sub-system.  This is done by retrieving the    */
+  /* value of the "FT2_DEBUG" environment variable.  It must be a list of  */
+  /* toggles, separated by spaces, `;' or `:'.  Example:                   */
+  /*                                                                       */
+  /*    "any=3 memory=6 stream=5"                                          */
+  /*                                                                       */
+  /* This will request that all levels be set to 3, except the trace level */
+  /* for the memory and stream components which are set to 6 and 5,        */
+  /* respectively.                                                         */
+  /*                                                                       */
+  /* See the file <freetype/internal/fttrace.h> for details of the         */
+  /* available toggle names.                                               */
+  /*                                                                       */
+  /* The level must be between 0 and 6; 0 means quiet (except for serious  */
+  /* runtime errors), and 6 means _very_ verbose.                          */
+  /*                                                                       */
+  FT_BASE_DEF( void )
+  ft_debug_init( void )
+  {
+    const char*  ft2_debug = getenv( "FT2_DEBUG" );
+
+
+    if ( ft2_debug )
+    {
+      const char*  p = ft2_debug;
+      const char*  q;
+
+
+      for ( ; *p; p++ )
+      {
+        /* skip leading whitespace and separators */
+        if ( *p == ' ' || *p == '\t' || *p == ':' || *p == ';' || *p == '=' )
+          continue;
+
+        /* read toggle name, followed by '=' */
+        q = p;
+        while ( *p && *p != '=' )
+          p++;
+
+        if ( *p == '=' && p > q )
+        {
+          int  n, i, len = p - q;
+          int  level = -1, found = -1;
+
+
+          for ( n = 0; n < trace_count; n++ )
+          {
+            const char*  toggle = ft_trace_toggles[n];
+
+
+            for ( i = 0; i < len; i++ )
+            {
+              if ( toggle[i] != q[i] )
+                break;
+            }
+
+            if ( i == len && toggle[i] == 0 )
+            {
+              found = n;
+              break;
+            }
+          }
+
+          /* read level */
+          p++;
+          if ( *p )
+          {
+            level = *p++ - '0';
+            if ( level < 0 || level > 6 )
+              level = -1;
+          }
+
+          if ( found >= 0 && level >= 0 )
+          {
+            if ( found == trace_any )
+            {
+              /* special case for "any" */
+              for ( n = 0; n < trace_count; n++ )
+                ft_trace_levels[n] = level;
+            }
+            else
+              ft_trace_levels[found] = level;
+          }
+        }
+      }
+    }
+  }
+
+
+#  else  /* !FT_DEBUG_LEVEL_TRACE */
+
+
+  FT_BASE_DEF( void )
+  ft_debug_init( void )
+  {
+    /* nothing */
+  }
+
+
+#  endif /* !FT_DEBUG_LEVEL_TRACE */
+
+#endif /* FT_DEBUG_LEVEL_ERROR */
+
+/* END */
+@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@@
+
+
+1.1.9.1
+log
+@OpenBSD just has imported exactly this tree into their vendor branch,
+called the same tag, in XF4/xc
+This is, apparently, the last XFree86 snapshot before the licence change
+(ie, addition of the advertising clause)
+
+Since the developers don't see any problems with that, and we would like
+to integrate improvements done by the remaining one or two (or so) XFree86
+developers (j/k), this prepares enabling us to update X-Window in the future.
+@
+text
+@d110 1
+a110 1
+  /* toggles, separated by spaces, `;' or `,'.  Example:                   */
+d112 1
+a112 1
+  /*    "any:3 memory:6 stream:5"                                          */
+d139 1
+a139 1
+        if ( *p == ' ' || *p == '\t' || *p == ',' || *p == ';' || *p == '=' )
+d142 1
+a142 1
+        /* read toggle name, followed by ':' */
+d144 1
+a144 1
+        while ( *p && *p != ':' )
+d147 1
+a147 1
+        if ( *p == ':' && p > q )
+@
+
+
+1.1.1.1
+log
+@The X-Windowing System
+
+Import XFree86 4.3 from OpenBSD by CTM, in the hope it's stable
+@
+text
+@@
+
+
+1.1.1.2
+log
+@That's what OpenBSD will, probably, ship as XF4 in 3.5
+their last sync against XFree86 4.3-current has been
+imported into our vendor branch, too
+@
+text
+@d110 1
+a110 1
+  /* toggles, separated by spaces, `;' or `,'.  Example:                   */
+d112 1
+a112 1
+  /*    "any:3 memory:6 stream:5"                                          */
+d139 1
+a139 1
+        if ( *p == ' ' || *p == '\t' || *p == ',' || *p == ';' || *p == '=' )
+d142 1
+a142 1
+        /* read toggle name, followed by ':' */
+d144 1
+a144 1
+        while ( *p && *p != ':' )
+d147 1
+a147 1
+        if ( *p == ':' && p > q )
+@
+

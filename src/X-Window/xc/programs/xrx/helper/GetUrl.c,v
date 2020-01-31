@@ -1,0 +1,471 @@
+head	1.1;
+branch	1.1.1;
+access;
+symbols
+	tg-mergetmp-2:1.1.1.2
+	cvs-200410241530:1.1.1.2
+	cvs-200410012000:1.1.1.2
+	cvs-200407141120:1.1.1.2
+	cvs-200406231010:1.1.1.2
+	MIRBSD_7quater:1.1.1.1
+	cvs-200405271510:1.1.1.2
+	XFree86_4_4_0:1.1.9.1
+	cvs-200403021700:1.1.1.2
+	XFREE86_20040213:1.1.9.1
+	xc:1.1.9
+	cvs-200401291925:1.1.1.1
+	MIRBSD_7_ALPHA:1.1.1.1.0.4
+	MIRBSD_7:1.1.1.1.0.2
+	MIRBSD_7ter:1.1.1.1
+	cvs-20011091815:1.1.1.1
+	cvs-200309162130:1.1.1.1
+	cvs-200308302005:1.1.1.1
+	ctmx-0387:1.1.1.1
+	ctmx-0384:1.1.1.1
+	MIRBSD_5:1.1.1.1
+	ctmx-0375:1.1.1.1
+	ctmx-0373:1.1.1.1
+	ctm-0371:1.1.1.1
+	ctm-0370:1.1.1.1
+	MIRBSD_4:1.1.1.1
+	ctm-0363:1.1.1.1
+	ctm-0359:1.1.1.1
+	ctm-0349:1.1.1.1
+	openbsd:1.1.1;
+locks; strict;
+comment	@ * @;
+
+
+1.1
+date	2003.03.22.20.11.02;	author tg;	state Exp;
+branches
+	1.1.1.1
+	1.1.9.1;
+next	;
+
+1.1.1.1
+date	2003.03.22.20.11.02;	author tg;	state Exp;
+branches;
+next	1.1.1.2;
+
+1.1.1.2
+date	2004.03.02.18.44.57;	author tg;	state Stab;
+branches;
+next	;
+
+1.1.9.1
+date	2004.02.14.19.29.27;	author tg;	state Exp;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@/* $Xorg: GetUrl.c,v 1.4 2001/02/09 02:05:57 xorgcvs Exp $ */
+/*
+
+Copyright 1996, 1998 The Open Group
+
+Permission to use, copy, modify, distribute, and sell this software and its
+documentation for any purpose is hereby granted without fee, provided that
+the above copyright notice appear in all copies and that both that
+copyright notice and this permission notice appear in supporting
+documentation.
+
+The above copyright notice and this permission notice shall be included
+in all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
+OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABIL-
+ITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT
+SHALL THE OPEN GROUP BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABIL-
+ITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
+IN THE SOFTWARE.
+
+Except as contained in this notice, the name of The Open Group shall
+not be used in advertising or otherwise to promote the sale, use or
+other dealings in this Software without prior written authorization from
+The Open Group.
+
+*/
+/* $XFree86: xc/programs/xrx/helper/GetUrl.c,v 1.4 2001/12/14 20:02:16 dawes Exp $ */
+
+/*
+ * This file is really split into two major parts where GetUrl is implemented
+ * in two completely different ways.
+ * The first one, which is used when XUSE_WWW is defined uses the standalone
+ * program "www" to perform the GET request.
+ * The second one, based on the xtrans layer, performs the GET request
+ * directly.
+ */
+
+#define Free(b) if (b) free(b)
+
+#ifdef XUSE_WWW
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <X11/Xos.h>		/* for strcmp() etc... */
+
+/*
+ * GetUrl first method, using www.
+ */
+
+int
+GetUrl(char *url, char **reply_ret, int *len_ret)
+{
+    char buf[BUFSIZ], *reply, *ptr;
+    FILE *fp;
+    int readbytes, size;
+
+    sprintf(buf, "www -source \"%s\"", url);
+    fp = popen(buf, "r");
+    if (fp == NULL)
+	return 1;
+
+    reply = NULL;
+    size = 0;
+    do {
+	readbytes = fread(buf, sizeof(char), BUFSIZ, fp);
+	if (readbytes != 0) {
+	    /* malloc enough memory */
+	    ptr = (char *) realloc(reply, sizeof(char) * size + readbytes);
+	    if (ptr == NULL) {	/* memory allocation failed */
+		Free(reply);
+		return 1;
+	    }
+	    reply = ptr;
+	    memcpy(reply + size, buf, readbytes);
+	    size += readbytes;
+	}
+    } while (readbytes == BUFSIZ);
+    pclose(fp);
+
+    *reply_ret = reply;
+    *len_ret = size;
+    return 0;
+}
+
+#else /* XUSE_WWW */
+
+/*
+ * GetUrl second method, using the xtrans layer.
+ */
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <ctype.h>
+
+/* get definitions for the HTTP protocol */
+#if !defined(UNIXCPP) || defined(ANSICPP)
+#define TRANS(func) _HttpTrans##func
+#else
+#define TRANS(func) _HttpTrans/**/func
+#endif
+#include <X11/Xtrans.h>
+
+#define HTTP_CONNECTION_RETRIES 5
+
+static XtransConnInfo
+OpenConnection(char *hostname, int port)
+{
+    int retry;				/* retry counter */
+    XtransConnInfo trans_conn = NULL;	/* transport connection object */
+    int connect_stat;
+    char address[128];		/* address passed to the transport layer */
+    char protocol[] = "tcp";	/* hardcoded transport */
+
+    /* make the address of the form: protocol/host:port */
+    sprintf(address,"%s/%s:%d",
+	protocol ? protocol : "",
+	hostname ? hostname : "",
+	port);
+
+    /*
+     * Make the connection. Do retries in case server host has hit its
+     * backlog (which, unfortunately, isn't distinguishable from there not
+     * being a server listening at all, which is why we have to not retry
+     * too many times).
+     */
+    for(retry = HTTP_CONNECTION_RETRIES; retry >= 0; retry--) {
+	if ((trans_conn = _HttpTransOpenCOTSClient(address)) == NULL)
+	    break;
+
+	if ((connect_stat = _HttpTransConnect(trans_conn, address)) < 0) {
+	    _HttpTransClose(trans_conn);
+	    trans_conn = NULL;
+
+	    if (connect_stat == TRANS_TRY_CONNECT_AGAIN) {
+		sleep(1);
+		continue;
+	    } else
+		break;
+	}
+    }
+
+    return trans_conn;
+}
+
+static void
+CloseConnection(XtransConnInfo trans_conn)
+{
+    _HttpTransDisconnect(trans_conn);
+    _HttpTransClose(trans_conn);
+}
+
+static void
+SendGetRequest(XtransConnInfo trans_conn, char *filename)
+{
+    char *request;
+    char request_format[] =
+	"GET %s HTTP/1.0\r\nUser-Agent: xrx\r\nAccept: */*\r\n\r\n";
+    int request_len = strlen(filename) + sizeof(request_format) + 1;
+
+    /* build request */
+    request = (char *)malloc(request_len);
+    sprintf(request, request_format, filename);
+    /* send it */
+    _HttpTransWrite(trans_conn, request, request_len);
+
+    Free(request);
+}
+
+static int
+ReadGetReply(XtransConnInfo trans_conn, char **reply_ret)
+{
+    char *reply = NULL;
+    char buf[BUFSIZ];
+    int len, nbytes;
+
+    len = 0;
+    do {
+	nbytes = _HttpTransRead(trans_conn, buf, BUFSIZ);
+	if (nbytes > 0) {
+	    reply = (char *)realloc(reply, len + nbytes);
+	    if (reply == NULL)
+		break;
+	    memcpy(reply + len, buf, nbytes);
+	    len += nbytes;
+	}
+    } while (nbytes != 0);
+
+    *reply_ret = reply;
+    return len;
+}
+
+/* per HTTP 1.0 spec */
+#define HTTP_DEFAULT_PORT 80
+
+/* Parse given http url and return hostname, port number and path.
+ * expected syntax: "http:" "//" host [ ":" port ] [ abs_path ]
+ * default port: 80
+ */
+static int
+ParseHttpUrl(char *url, char **hostname_ret, int *port_ret, char **path_ret)
+{
+    char HTTP[] = "http://";
+    char *hostname, *path;
+    int port;
+    char *ptr, *bos;
+    int status = 0;
+
+    /* check if it's an http url */
+    if (strncmp(HTTP, url, sizeof(HTTP) - 1))
+	return 1;		/* this is not an http url */
+
+    /* parse hostname */
+    bos = ptr = url + sizeof(HTTP) - 1;
+    while (*ptr && *ptr != ':' && *ptr != '/')
+	ptr++;
+    if (bos == ptr)
+	return 1;		/* doesn't have any hostname */
+
+    hostname = (char *)malloc(ptr - bos + 1);
+    if (hostname == NULL)
+	return 1;		/* not enouch memory */
+    memcpy(hostname, bos, ptr - bos);
+    hostname[ptr - bos] = '\0';
+
+    /* make sure path is initialized in case of error */
+    path = NULL;
+
+    /* parse port */
+    if (*ptr != ':' || ! ptr[1])
+	port = HTTP_DEFAULT_PORT;
+    else {
+	++ptr;			/* skip ':' */
+	port = 0;
+	while (*ptr && *ptr != '/') {
+	    if (isdigit((int) *ptr)) {
+		port *= 10;
+		port += *ptr - '0';
+	    } else {
+		status = 1;	/* bad port specification */
+		goto error;
+	    }
+	    ptr++;
+	}
+    }
+
+    /* the rest of the url is the path */
+    path = (char *)malloc(strlen(ptr) + 1);
+    if (path == NULL) {
+	status = 1;		/* not enouch memory */
+	goto error;
+    }
+    strcpy(path, ptr);
+
+    /* set returned value */
+    *hostname_ret = hostname;
+    *port_ret = port;
+    *path_ret = path;
+    return 0;
+
+error:
+    Free(hostname);
+    Free(path);
+    return status;
+}
+
+int
+GetUrl(char *url, char **reply_ret, int *len_ret)
+{
+    char *hostname, *path;
+    int port;
+    XtransConnInfo trans;
+    int status = 0;
+
+    if (ParseHttpUrl(url, &hostname, &port, &path) != 0)
+	return 1;		/* invalid URL */
+
+    trans = OpenConnection(hostname, port);
+    if (trans == NULL) {
+	status = 1;		/* connection failed */
+	goto end;
+    }
+
+    SendGetRequest(trans, path);
+
+    *len_ret = ReadGetReply(trans, reply_ret);
+
+    CloseConnection(trans);
+
+end:
+    Free(hostname);
+    Free(path);
+    return status;
+}
+
+
+#endif /* XUSE_WWW */
+@
+
+
+1.1.9.1
+log
+@OpenBSD just has imported exactly this tree into their vendor branch,
+called the same tag, in XF4/xc
+This is, apparently, the last XFree86 snapshot before the licence change
+(ie, addition of the advertising clause)
+
+Since the developers don't see any problems with that, and we would like
+to integrate improvements done by the remaining one or two (or so) XFree86
+developers (j/k), this prepares enabling us to update X-Window in the future.
+@
+text
+@d29 1
+a29 1
+/* $XFree86: xc/programs/xrx/helper/GetUrl.c,v 1.5 2003/07/20 16:12:20 tsi Exp $ */
+a208 1
+    int bracketed = 0;
+d216 2
+a217 11
+    /* Check for RFC 2732 bracketed IPv6 numeric address */
+    if (*ptr == '[') {
+	bos++;
+	while (*ptr && (*ptr != ']')) {
+	    ptr++;
+	}
+	bracketed = 1;
+    } else {
+	while (*ptr && *ptr != ':' && *ptr != '/')
+	    ptr++;
+    }
+a228 3
+
+    if (bracketed)
+	ptr++;
+@
+
+
+1.1.1.1
+log
+@Import OpenBSD 3.3 XF4 repository from CTM 3132 the first time
+This finalizes starting an OpenBSD-mirabile (aka MirBSD) repository.
+
+### MirBSD is:
+# Copyright (c) 1982-2003 by Thorsten "mirabile" Glaser <x86@@ePost.de>
+# Copyright © 1968-2003  The authors of And contributors to UNIX®, the
+#       C Language, BSD/Berkeley Unix; 386BSD, NetBSD 1.1 and OpenBSD.
+#
+# Anyone who obtained a copy of this work is hereby permitted to freely use,
+# distribute, modify, merge, sublicence, give away or sell it as long as the
+# authors are given due credit and the following notice is retained:
+#
+# This work is provided "as is", with no explicit or implicit warranty what-
+# soever. Use it only at your own risk. In no event may an author or contri-
+# butor be held liable for any damage, directly or indirectly, that origina-
+# ted through or is caused by creation or modification of this work.
+
+MirBSD is my private tree. MirBSD does not differ very much from OpenBSD
+and intentionally tracks OpenBSD. That's why it _is_ OpenBSD, just not the
+official one. It's like with DarrenBSD.
+
+At time of this writing, no advertising for MirBSD must be done,
+because the advertising clause has not yet been sorted out.
+
+http://templeofhate.com/tglaser/MirBSD/index.php
+@
+text
+@@
+
+
+1.1.1.2
+log
+@That's what OpenBSD will, probably, ship as XF4 in 3.5
+their last sync against XFree86 4.3-current has been
+imported into our vendor branch, too
+@
+text
+@d29 1
+a29 1
+/* $XFree86: xc/programs/xrx/helper/GetUrl.c,v 1.5 2003/07/20 16:12:20 tsi Exp $ */
+a208 1
+    int bracketed = 0;
+d216 2
+a217 11
+    /* Check for RFC 2732 bracketed IPv6 numeric address */
+    if (*ptr == '[') {
+	bos++;
+	while (*ptr && (*ptr != ']')) {
+	    ptr++;
+	}
+	bracketed = 1;
+    } else {
+	while (*ptr && *ptr != ':' && *ptr != '/')
+	    ptr++;
+    }
+a228 3
+
+    if (bracketed)
+	ptr++;
+@
+

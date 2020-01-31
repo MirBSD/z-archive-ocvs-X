@@ -1,0 +1,228 @@
+head	1.1;
+access;
+symbols;
+locks; strict;
+comment	@# @;
+
+
+1.1
+date	2004.11.14.16.36.38;	author tg;	state Exp;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.1
+log
+@spawnvt functionality is integrated into mirbsdksh, that's why it's
+not needed as a separate dir here
+make a shar'd snippet out of it for the good of all
+@
+text
+@#!/bin/sh
+# $MirBSD$
+#
+# This is a shell archive.  Save it in a file, remove anything before
+# this line, and then unpack it by entering "sh file".  Note, it may
+# create directories; files and directories will be owned by you and
+# have default permissions.
+#
+# This archive contains:
+#
+#	Makefile
+#	chvt.c
+#	spawnvt.c
+#
+echo x - Makefile
+sed 's/^X//' >Makefile << 'END-of-Makefile'
+X# $MirBSD: contrib/code/spawnvt/Makefile,v 1.1 2004/10/31 21:42:14 tg Exp $
+X
+XPROG=	spawnvt
+XSRCS=	spawnvt.c chvt.c
+XNOMAN=	yes
+X
+XCFLAGS+= -Wall -Werror -W -pedantic
+XBINDIR?= /sbin
+X
+X.include <bsd.prog.mk>
+END-of-Makefile
+echo x - chvt.c
+sed 's/^X//' >chvt.c << 'END-of-chvt.c'
+X/**	$MirBSD: contrib/code/spawnvt/chvt.c,v 1.1 2004/10/31 21:42:14 tg Exp $ */
+X
+X/*-
+X * Copyright (c) 2004
+X *	Thorsten "mirabile" Glaser <tg@@66h.42h.de>
+X *
+X * Licensee is hereby permitted to deal in this work without restric-
+X * tion, including unlimited rights to use, publically perform, modi-
+X * fy, merge, distribute, sell, give away or sublicence, provided the
+X * above copyright notices, these terms and the disclaimer are retai-
+X * ned in all redistributions, or reproduced in accompanying documen-
+X * tation or other materials provided with binary redistributions.
+X *
+X * Licensor hereby provides this work "AS IS" and WITHOUT WARRANTY of
+X * any kind, expressed or implied, to the maximum extent permitted by
+X * applicable law, but with the warranty of being written without ma-
+X * licious intent or gross negligence; in no event shall licensor, an
+X * author or contributor be held liable for any damage, direct, indi-
+X * rect or other, however caused, arising in any way out of the usage
+X * of covered work, even if advised of the possibility of such damage.
+X */
+X
+X#include <sys/param.h>
+X#include <sys/ioctl.h>
+X#include <sys/stat.h>
+X#include <fcntl.h>
+X#include <unistd.h>
+X
+X__RCSID("$MirBSD: contrib/code/spawnvt/chvt.c,v 1.1 2004/10/31 21:42:14 tg Exp $");
+X
+Xchar *chvt(char *);
+X
+Xchar *
+Xchvt(char *f)
+X{
+X	int fd;
+X
+X	if (chown(f, 0, 0))
+X		return "chown";
+X	if (chmod(f, 0600))
+X		return "chmod";
+X	if (revoke(f))
+X		return "revoke";
+X
+X	if ((fd = open(f, O_RDWR)) == -1) {
+X		sleep(5);
+X		if ((fd = open(f, O_RDWR)) == -1)
+X			return "open";
+X	}
+X	switch (fork()) {
+X	case -1:
+X		return "fork";
+X	case 0:
+X		break;
+X	default:
+X		_exit(0);
+X	}
+X	if (setsid() == -1)
+X		return "setsid";
+X	if (ioctl(fd, TIOCSCTTY, NULL) == -1)
+X		return "ioctl";
+X	dup2(fd, 0);
+X	dup2(fd, 1);
+X	dup2(fd, 2);
+X	if (fd > 2)
+X		close(fd);
+X
+X	return NULL;
+X}
+END-of-chvt.c
+echo x - spawnvt.c
+sed 's/^X//' >spawnvt.c << 'END-of-spawnvt.c'
+X/**	$MirBSD: contrib/code/spawnvt/spawnvt.c,v 1.1 2004/10/31 21:42:14 tg Exp $ */
+X
+X/*-
+X * Copyright (c) 2004
+X *	Thorsten "mirabile" Glaser <tg@@66h.42h.de>
+X *
+X * Licensee is hereby permitted to deal in this work without restric-
+X * tion, including unlimited rights to use, publically perform, modi-
+X * fy, merge, distribute, sell, give away or sublicence, provided the
+X * above copyright notices, these terms and the disclaimer are retai-
+X * ned in all redistributions, or reproduced in accompanying documen-
+X * tation or other materials provided with binary redistributions.
+X *
+X * All advertising materials mentioning features or use of this soft-
+X * ware must display the following acknowledgement:
+X *	This product includes material provided by Thorsten Glaser.
+X *
+X * Licensor hereby provides this work "AS IS" and WITHOUT WARRANTY of
+X * any kind, expressed or implied, to the maximum extent permitted by
+X * applicable law, but with the warranty of being written without ma-
+X * licious intent or gross negligence; in no event shall licensor, an
+X * author or contributor be held liable for any damage, direct, indi-
+X * rect or other, however caused, arising in any way out of the usage
+X * of covered work, even if advised of the possibility of such damage.
+X */
+X
+X#include <sys/param.h>
+X#include <sys/stat.h>
+X#include <err.h>
+X#include <errno.h>
+X#include <stdio.h>
+X#include <stdlib.h>
+X#include <string.h>
+X#include <unistd.h>
+X
+X__RCSID("$MirBSD: contrib/code/spawnvt/spawnvt.c,v 1.1 2004/10/31 21:42:14 tg Exp $");
+X
+Xchar *chvt(char *);
+X
+Xint main(int, char *[], char *[]);
+X__dead void spawntty(char *, char *[]);
+X__dead void usage(void);
+Xextern const char *__progname;
+X
+Xint
+Xmain(int argc, char *argv[], char *envp[])
+X{
+X	char dev[12];
+X	struct stat sb;
+X	int e;
+X
+X	if (argc != 2)
+X		usage();
+X
+X	if (stat(argv[1], &sb)) {
+X		e = errno;
+X		if (e != ENOENT) {
+X			fprintf(stderr, "%s: stat: %s\n",
+X			    __progname, strerror(e));
+X			return 1;
+X		}
+X		snprintf(dev, 12, "/dev/ttyC%s", argv[1]);
+X		if (stat(dev, &sb)) {
+X			e = errno;
+X			if (e != ENOENT) {
+X				fprintf(stderr, "%s: stat: %s\n",
+X				    __progname, strerror(e));
+X				return 1;
+X			}
+X			usage();
+X		}
+X		if (!(sb.st_mode & S_IFCHR))
+X			usage();
+X		spawntty(dev, envp);
+X	}
+X
+X	if (!(sb.st_mode & S_IFCHR))
+X		usage();
+X	spawntty(argv[1], envp);
+X}
+X
+X__dead void
+Xusage(void)
+X{
+X	fprintf(stderr, "Syntax: %s [/dev/ttyC]n\n", __progname);
+X	exit(1);
+X}
+X
+X__dead void
+Xspawntty(char *f, char *envp[])
+X{
+X	char *rv, *argv[] = { "-ksh", NULL };
+X
+X	if ((rv = chvt(f)) != NULL)
+X		err(2, "chvt: %s", rv);
+X	execve("/bin/ksh", argv, envp);
+X	err(4, "execve");
+X}
+END-of-spawnvt.c
+exit
+#
+# $Log$
+@

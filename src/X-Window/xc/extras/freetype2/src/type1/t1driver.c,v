@@ -1,0 +1,889 @@
+head	1.2;
+branch	1.1.1;
+access;
+symbols
+	tg-mergetmp-2:1.1.1.3
+	cvs-200410241530:1.1.1.3
+	cvs-200410012000:1.1.1.3
+	cvs-200407141120:1.1.1.3
+	cvs-200406231010:1.1.1.3
+	MIRBSD_7quater:1.1.1.2
+	cvs-200405271510:1.1.1.3
+	XFree86_4_4_0:1.1.9.1
+	cvs-200403021700:1.1.1.3
+	XFREE86_20040213:1.1.9.1
+	xc:1.1.9
+	cvs-200401291925:1.1.1.2
+	MIRBSD_7_ALPHA:1.1.1.2.0.4
+	MIRBSD_7:1.1.1.2.0.2
+	MIRBSD_7ter:1.1.1.2
+	cvs-20011091815:1.1.1.2
+	cvs-200309162130:1.1.1.2
+	cvs-200308302005:1.1.1.2
+	ctmx-0387:1.1.1.2
+	ctmx-0384:1.1.1.2
+	MIRBSD_5:1.1.1.2
+	ctmx-0375:1.1.1.2
+	ctmx-0373:1.1.1.2
+	ctm-0371:1.1.1.2
+	ctm-0370:1.1.1.2
+	MIRBSD_4:1.1.1.2
+	ctm-0363:1.1.1.2
+	ctm-0359:1.1.1.2
+	ctm-0349:1.1.1.1
+	openbsd:1.1.1;
+locks; strict;
+comment	@ * @;
+
+
+1.2
+date	2003.05.16.16.29.59;	author tg;	state dead;
+branches;
+next	1.1;
+
+1.1
+date	2003.03.22.20.01.27;	author tg;	state Exp;
+branches
+	1.1.1.1
+	1.1.9.1;
+next	;
+
+1.1.1.1
+date	2003.03.22.20.01.27;	author tg;	state Exp;
+branches;
+next	1.1.1.2;
+
+1.1.1.2
+date	2003.04.08.18.21.12;	author tg;	state Exp;
+branches;
+next	1.1.1.3;
+
+1.1.1.3
+date	2004.03.02.17.39.27;	author tg;	state Stab;
+branches;
+next	;
+
+1.1.9.1
+date	2004.02.14.19.09.17;	author tg;	state Exp;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.2
+log
+@remove a bunch of files not used in MirBSD - clean tree. People who want them got cvs.
+@
+text
+@/***************************************************************************/
+/*                                                                         */
+/*  t1driver.c                                                             */
+/*                                                                         */
+/*    Type 1 driver interface (body).                                      */
+/*                                                                         */
+/*  Copyright 1996-2001 by                                                 */
+/*  David Turner, Robert Wilhelm, and Werner Lemberg.                      */
+/*                                                                         */
+/*  This file is part of the FreeType project, and may only be used,       */
+/*  modified, and distributed under the terms of the FreeType project      */
+/*  license, LICENSE.TXT.  By continuing to use, modify, or distribute     */
+/*  this file you indicate that you have read the license and              */
+/*  understand and accept it fully.                                        */
+/*                                                                         */
+/***************************************************************************/
+
+
+#include <ft2build.h>
+#include "t1driver.h"
+#include "t1gload.h"
+#include "t1load.h"
+
+#include "t1errors.h"
+
+#ifndef T1_CONFIG_OPTION_NO_AFM
+#include "t1afm.h"
+#endif
+
+#include FT_INTERNAL_DEBUG_H
+#include FT_INTERNAL_STREAM_H
+#include FT_INTERNAL_POSTSCRIPT_NAMES_H
+
+#include <string.h>     /* for strcmp() */
+
+
+  /*************************************************************************/
+  /*                                                                       */
+  /* The macro FT_COMPONENT is used in trace mode.  It is an implicit      */
+  /* parameter of the FT_TRACE() and FT_ERROR() macros, used to print/log  */
+  /* messages during execution.                                            */
+  /*                                                                       */
+#undef  FT_COMPONENT
+#define FT_COMPONENT  trace_t1driver
+
+
+  static FT_Error
+  t1_get_glyph_name( T1_Face     face,
+                     FT_UInt     glyph_index,
+                     FT_Pointer  buffer,
+                     FT_UInt     buffer_max )
+  {
+    FT_String*  gname;
+
+
+    gname = face->type1.glyph_names[glyph_index];
+
+    if ( buffer_max > 0 )
+    {
+      FT_UInt  len = (FT_UInt)( strlen( gname ) );
+
+
+      if (len >= buffer_max)
+        len = buffer_max - 1;
+
+      MEM_Copy( buffer, gname, len );
+      ((FT_Byte*)buffer)[len] = 0;
+    }
+
+    return T1_Err_Ok;
+  }
+
+
+  /*************************************************************************/
+  /*                                                                       */
+  /* <Function>                                                            */
+  /*    t1_get_name_index                                                  */
+  /*                                                                       */
+  /* <Description>                                                         */
+  /*    Uses the Type 1 font's `glyph_names' table to find a given glyph   */
+  /*    name's glyph index.                                                */
+  /*                                                                       */
+  /* <Input>                                                               */
+  /*    face       :: A handle to the source face object.                  */
+  /*                                                                       */
+  /*    glyph_name :: The glyph name.                                      */
+  /*                                                                       */
+  /* <Return>                                                              */
+  /*    Glyph index.  0 means `undefined character code'.                  */
+  /*                                                                       */
+  static FT_UInt
+  t1_get_name_index( T1_Face     face,
+                     FT_String*  glyph_name )
+  {
+    FT_Int      i;
+    FT_String*  gname;
+
+
+    for ( i = 0; i < face->type1.num_glyphs; i++ )
+    {
+      gname = face->type1.glyph_names[i];
+
+      if ( !strcmp( glyph_name, gname ) )
+        return (FT_UInt)i;
+    }
+
+    return 0;
+  }
+
+
+  static const char*
+  t1_get_ps_name( T1_Face    face )
+  {
+    return (const char*) face->type1.font_name;
+  }
+
+
+  /*************************************************************************/
+  /*                                                                       */
+  /* <Function>                                                            */
+  /*    Get_Interface                                                      */
+  /*                                                                       */
+  /* <Description>                                                         */
+  /*    Each driver can provide one or more extensions to the base         */
+  /*    FreeType API.  These can be used to access format specific         */
+  /*    features (e.g., all TrueType/OpenType resources share a common     */
+  /*    file structure and common tables which can be accessed through the */
+  /*    `sfnt' interface), or more simply generic ones (e.g., the          */
+  /*    `postscript names' interface which can be used to retrieve the     */
+  /*     PostScript name of a given glyph index).                          */
+  /*                                                                       */
+  /* <InOut>                                                               */
+  /*    driver    :: A handle to a driver object.                          */
+  /*                                                                       */
+  /* <Input>                                                               */
+  /*    interface :: A string designing the interface.  Examples are       */
+  /*                 `sfnt', `post_names', `charmaps', etc.                */
+  /*                                                                       */
+  /* <Return>                                                              */
+  /*    A typeless pointer to the extension's interface (normally a table  */
+  /*    of function pointers).  Returns NULL if the requested extension    */
+  /*    isn't available (i.e., wasn't compiled in the driver at build      */
+  /*    time).                                                             */
+  /*                                                                       */
+  static FT_Module_Interface
+  Get_Interface( FT_Driver         driver,
+                 const FT_String*  interface )
+  {
+    FT_UNUSED( driver );
+    FT_UNUSED( interface );
+
+    if ( strcmp( (const char*)interface, "glyph_name" ) == 0 )
+      return (FT_Module_Interface)t1_get_glyph_name;
+
+    if ( strcmp( (const char*)interface, "name_index" ) == 0 )
+      return (FT_Module_Interface)t1_get_name_index;
+
+    if ( strcmp( (const char*)interface, "postscript_name" ) == 0 )
+      return (FT_Module_Interface)t1_get_ps_name;
+
+#ifndef T1_CONFIG_OPTION_NO_MM_SUPPORT
+    if ( strcmp( (const char*)interface, "get_mm" ) == 0 )
+      return (FT_Module_Interface)T1_Get_Multi_Master;
+
+    if ( strcmp( (const char*)interface, "set_mm_design") == 0 )
+      return (FT_Module_Interface)T1_Set_MM_Design;
+
+    if ( strcmp( (const char*)interface, "set_mm_blend") == 0 )
+      return (FT_Module_Interface)T1_Set_MM_Blend;
+#endif
+    return 0;
+  }
+
+
+#ifndef T1_CONFIG_OPTION_NO_AFM
+
+  /*************************************************************************/
+  /*                                                                       */
+  /* <Function>                                                            */
+  /*    Get_Kerning                                                        */
+  /*                                                                       */
+  /* <Description>                                                         */
+  /*    A driver method used to return the kerning vector between two      */
+  /*    glyphs of the same face.                                           */
+  /*                                                                       */
+  /* <Input>                                                               */
+  /*    face        :: A handle to the source face object.                 */
+  /*                                                                       */
+  /*    left_glyph  :: The index of the left glyph in the kern pair.       */
+  /*                                                                       */
+  /*    right_glyph :: The index of the right glyph in the kern pair.      */
+  /*                                                                       */
+  /* <Output>                                                              */
+  /*    kerning     :: The kerning vector.  This is in font units for      */
+  /*                   scalable formats, and in pixels for fixed-sizes     */
+  /*                   formats.                                            */
+  /*                                                                       */
+  /* <Return>                                                              */
+  /*    FreeType error code.  0 means success.                             */
+  /*                                                                       */
+  /* <Note>                                                                */
+  /*    Only horizontal layouts (left-to-right & right-to-left) are        */
+  /*    supported by this function.  Other layouts, or more sophisticated  */
+  /*    kernings are out of scope of this method (the basic driver         */
+  /*    interface is meant to be simple).                                  */
+  /*                                                                       */
+  /*    They can be implemented by format-specific interfaces.             */
+  /*                                                                       */
+  static FT_Error
+  Get_Kerning( T1_Face     face,
+               FT_UInt     left_glyph,
+               FT_UInt     right_glyph,
+               FT_Vector*  kerning )
+  {
+    T1_AFM*  afm;
+
+
+    kerning->x = 0;
+    kerning->y = 0;
+
+    afm = (T1_AFM*)face->afm_data;
+    if ( afm )
+      T1_Get_Kerning( afm, left_glyph, right_glyph, kerning );
+
+    return T1_Err_Ok;
+  }
+
+
+#endif /* T1_CONFIG_OPTION_NO_AFM */
+
+
+  /*************************************************************************/
+  /*                                                                       */
+  /* <Function>                                                            */
+  /*    Get_Char_Index                                                     */
+  /*                                                                       */
+  /* <Description>                                                         */
+  /*    Uses a charmap to return a given character code's glyph index.     */
+  /*                                                                       */
+  /* <Input>                                                               */
+  /*    charmap  :: A handle to the source charmap object.                 */
+  /*    charcode :: The character code.                                    */
+  /*                                                                       */
+  /* <Return>                                                              */
+  /*    Glyph index.  0 means `undefined character code'.                  */
+  /*                                                                       */
+  static FT_UInt
+  Get_Char_Index( FT_CharMap  charmap,
+                  FT_Long     charcode )
+  {
+    T1_Face             face;
+    FT_UInt             result = 0;
+    PSNames_Interface*  psnames;
+
+
+    face    = (T1_Face)charmap->face;
+    psnames = (PSNames_Interface*)face->psnames;
+    if ( psnames )
+      switch ( charmap->encoding )
+      {
+        /*******************************************************************/
+        /*                                                                 */
+        /* Unicode encoding support                                        */
+        /*                                                                 */
+      case ft_encoding_unicode:
+        /* use the `PSNames' module to synthetize the Unicode charmap */
+        result = psnames->lookup_unicode( &face->unicode_map,
+                                          (FT_ULong)charcode );
+
+        /* the function returns 0xFFFF if the Unicode charcode has */
+        /* no corresponding glyph                                  */
+        if ( result == 0xFFFF )
+          result = 0;
+        goto Exit;
+
+        /*******************************************************************/
+        /*                                                                 */
+        /* Custom Type 1 encoding                                          */
+        /*                                                                 */
+      case ft_encoding_adobe_custom:
+        {
+          T1_Encoding*  encoding = &face->type1.encoding;
+
+
+          if ( charcode >= encoding->code_first &&
+               charcode <= encoding->code_last  )
+            result = encoding->char_index[charcode];
+          goto Exit;
+        }
+
+        /*******************************************************************/
+        /*                                                                 */
+        /* Adobe Standard & Expert encoding support                        */
+        /*                                                                 */
+      default:
+        if ( charcode < 256 )
+        {
+          FT_UInt      code;
+          FT_Int       n;
+          const char*  glyph_name;
+
+
+          code = psnames->adobe_std_encoding[charcode];
+          if ( charmap->encoding == ft_encoding_adobe_expert )
+            code = psnames->adobe_expert_encoding[charcode];
+
+          glyph_name = psnames->adobe_std_strings( code );
+          if ( !glyph_name )
+            break;
+
+          for ( n = 0; n < face->type1.num_glyphs; n++ )
+          {
+            const char*  gname = face->type1.glyph_names[n];
+
+
+            if ( gname && gname[0] == glyph_name[0] &&
+                 strcmp( gname, glyph_name ) == 0   )
+            {
+              result = n;
+              break;
+            }
+          }
+        }
+      }
+  Exit:
+    return result;
+  }
+
+
+  FT_CALLBACK_TABLE_DEF
+  const FT_Driver_Class  t1_driver_class =
+  {
+    {
+      ft_module_font_driver      |
+      ft_module_driver_scalable  | 
+      ft_module_driver_has_hinter,
+      
+      sizeof( FT_DriverRec ),
+
+      "type1",
+      0x10000L,
+      0x20000L,
+
+      0,   /* format interface */
+
+      (FT_Module_Constructor)T1_Driver_Init,
+      (FT_Module_Destructor) T1_Driver_Done,
+      (FT_Module_Requester)  Get_Interface,
+    },
+
+    sizeof( T1_FaceRec ),
+    sizeof( T1_SizeRec ),
+    sizeof( T1_GlyphSlotRec ),
+
+    (FTDriver_initFace)     T1_Face_Init,
+    (FTDriver_doneFace)     T1_Face_Done,
+    (FTDriver_initSize)     T1_Size_Init,
+    (FTDriver_doneSize)     T1_Size_Done,
+    (FTDriver_initGlyphSlot)T1_GlyphSlot_Init,
+    (FTDriver_doneGlyphSlot)T1_GlyphSlot_Done,
+
+    (FTDriver_setCharSizes) T1_Size_Reset,
+    (FTDriver_setPixelSizes)T1_Size_Reset,
+    (FTDriver_loadGlyph)    T1_Load_Glyph,
+    (FTDriver_getCharIndex) Get_Char_Index,
+
+#ifdef T1_CONFIG_OPTION_NO_AFM
+    (FTDriver_getKerning)   0,
+    (FTDriver_attachFile)   0,
+#else
+    (FTDriver_getKerning)   Get_Kerning,
+    (FTDriver_attachFile)   T1_Read_AFM,
+#endif
+    (FTDriver_getAdvances)  0
+  };
+
+
+#ifdef FT_CONFIG_OPTION_DYNAMIC_DRIVERS
+
+
+  /*************************************************************************/
+  /*                                                                       */
+  /* <Function>                                                            */
+  /*    getDriverClass                                                     */
+  /*                                                                       */
+  /* <Description>                                                         */
+  /*    This function is used when compiling the TrueType driver as a      */
+  /*    shared library (`.DLL' or `.so').  It will be used by the          */
+  /*    high-level library of FreeType to retrieve the address of the      */
+  /*    driver's generic interface.                                        */
+  /*                                                                       */
+  /*    It shouldn't be implemented in a static build, as each driver must */
+  /*    have the same function as an exported entry point.                 */
+  /*                                                                       */
+  /* <Return>                                                              */
+  /*    The address of the TrueType's driver generic interface.  The       */
+  /*    format-specific interface can then be retrieved through the method */
+  /*    interface->get_format_interface.                                   */
+  /*                                                                       */
+  FT_EXPORT_DEF( const FT_Driver_Class* )
+  getDriverClass( void )
+  {
+    return &t1_driver_class;
+  }
+
+
+#endif /* FT_CONFIG_OPTION_DYNAMIC_DRIVERS */
+
+
+/* END */
+@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@@
+
+
+1.1.9.1
+log
+@OpenBSD just has imported exactly this tree into their vendor branch,
+called the same tag, in XF4/xc
+This is, apparently, the last XFree86 snapshot before the licence change
+(ie, addition of the advertising clause)
+
+Since the developers don't see any problems with that, and we would like
+to integrate improvements done by the remaining one or two (or so) XFree86
+developers (j/k), this prepares enabling us to update X-Window in the future.
+@
+text
+@d7 1
+a7 1
+/*  Copyright 1996-2001, 2002 by                                           */
+d34 2
+d60 1
+a60 1
+      FT_UInt  len = (FT_UInt)( ft_strlen( gname ) );
+d66 1
+a66 1
+      FT_MEM_COPY( buffer, gname, len );
+d103 1
+a103 1
+      if ( !ft_strcmp( glyph_name, gname ) )
+d112 1
+a112 1
+  t1_get_ps_name( T1_Face  face )
+d133 1
+a133 1
+  /*    driver       :: A handle to a driver object.                       */
+d136 2
+a137 2
+  /*    t1_interface :: A string designing the interface.  Examples are    */
+  /*                    `sfnt', `post_names', `charmaps', etc.             */
+d147 1
+a147 1
+                 const FT_String*  t1_interface )
+d150 1
+a150 1
+    FT_UNUSED( t1_interface );
+d152 1
+a152 1
+    if ( ft_strcmp( (const char*)t1_interface, "glyph_name" ) == 0 )
+d155 1
+a155 1
+    if ( ft_strcmp( (const char*)t1_interface, "name_index" ) == 0 )
+d158 1
+a158 1
+    if ( ft_strcmp( (const char*)t1_interface, "postscript_name" ) == 0 )
+d162 1
+a162 1
+    if ( ft_strcmp( (const char*)t1_interface, "get_mm" ) == 0 )
+d165 1
+a165 1
+    if ( ft_strcmp( (const char*)t1_interface, "set_mm_design") == 0 )
+d168 1
+a168 1
+    if ( ft_strcmp( (const char*)t1_interface, "set_mm_blend") == 0 )
+d232 96
+d331 1
+a331 1
+  const FT_Driver_ClassRec  t1_driver_class =
+d335 1
+a335 1
+      ft_module_driver_scalable  |
+d337 1
+a337 1
+
+d355 11
+a365 10
+    (FT_Face_InitFunc)        T1_Face_Init,
+    (FT_Face_DoneFunc)        T1_Face_Done,
+    (FT_Size_InitFunc)        T1_Size_Init,
+    (FT_Size_DoneFunc)        T1_Size_Done,
+    (FT_Slot_InitFunc)        T1_GlyphSlot_Init,
+    (FT_Slot_DoneFunc)        T1_GlyphSlot_Done,
+
+    (FT_Size_ResetPointsFunc) T1_Size_Reset,
+    (FT_Size_ResetPixelsFunc) T1_Size_Reset,
+    (FT_Slot_LoadFunc)        T1_Load_Glyph,
+d368 2
+a369 2
+    (FT_Face_GetKerningFunc)  0,
+    (FT_Face_AttachFunc)      0,
+d371 2
+a372 2
+    (FT_Face_GetKerningFunc)  Get_Kerning,
+    (FT_Face_AttachFunc)      T1_Read_AFM,
+d374 1
+a374 1
+    (FT_Face_GetAdvancesFunc) 0
+d376 32
+@
+
+
+1.1.1.1
+log
+@Import OpenBSD 3.3 XF4 repository from CTM 3132 the first time
+This finalizes starting an OpenBSD-mirabile (aka MirBSD) repository.
+
+### MirBSD is:
+# Copyright (c) 1982-2003 by Thorsten "mirabile" Glaser <x86@@ePost.de>
+# Copyright © 1968-2003  The authors of And contributors to UNIX®, the
+#       C Language, BSD/Berkeley Unix; 386BSD, NetBSD 1.1 and OpenBSD.
+#
+# Anyone who obtained a copy of this work is hereby permitted to freely use,
+# distribute, modify, merge, sublicence, give away or sell it as long as the
+# authors are given due credit and the following notice is retained:
+#
+# This work is provided "as is", with no explicit or implicit warranty what-
+# soever. Use it only at your own risk. In no event may an author or contri-
+# butor be held liable for any damage, directly or indirectly, that origina-
+# ted through or is caused by creation or modification of this work.
+
+MirBSD is my private tree. MirBSD does not differ very much from OpenBSD
+and intentionally tracks OpenBSD. That's why it _is_ OpenBSD, just not the
+official one. It's like with DarrenBSD.
+
+At time of this writing, no advertising for MirBSD must be done,
+because the advertising clause has not yet been sorted out.
+
+http://templeofhate.com/tglaser/MirBSD/index.php
+@
+text
+@@
+
+
+1.1.1.2
+log
+@The X-Windowing System
+
+Import XFree86 4.3 from OpenBSD by CTM, in the hope it's stable
+@
+text
+@d7 1
+a7 1
+/*  Copyright 1996-2001, 2002 by                                           */
+d34 2
+d60 1
+a60 1
+      FT_UInt  len = (FT_UInt)( ft_strlen( gname ) );
+d66 1
+a66 1
+      FT_MEM_COPY( buffer, gname, len );
+d103 1
+a103 1
+      if ( !ft_strcmp( glyph_name, gname ) )
+d112 1
+a112 1
+  t1_get_ps_name( T1_Face  face )
+d133 1
+a133 1
+  /*    driver       :: A handle to a driver object.                       */
+d136 2
+a137 2
+  /*    t1_interface :: A string designing the interface.  Examples are    */
+  /*                    `sfnt', `post_names', `charmaps', etc.             */
+d147 1
+a147 1
+                 const FT_String*  t1_interface )
+d150 1
+a150 1
+    FT_UNUSED( t1_interface );
+d152 1
+a152 1
+    if ( ft_strcmp( (const char*)t1_interface, "glyph_name" ) == 0 )
+d155 1
+a155 1
+    if ( ft_strcmp( (const char*)t1_interface, "name_index" ) == 0 )
+d158 1
+a158 1
+    if ( ft_strcmp( (const char*)t1_interface, "postscript_name" ) == 0 )
+d162 1
+a162 1
+    if ( ft_strcmp( (const char*)t1_interface, "get_mm" ) == 0 )
+d165 1
+a165 1
+    if ( ft_strcmp( (const char*)t1_interface, "set_mm_design") == 0 )
+d168 1
+a168 1
+    if ( ft_strcmp( (const char*)t1_interface, "set_mm_blend") == 0 )
+a241 1
+  /*                                                                       */
+d251 3
+a253 3
+    T1_Face          face;
+    FT_UInt          result = 0;
+    PSNames_Service  psnames;
+d257 1
+a257 1
+    psnames = (PSNames_Service)face->psnames;
+d272 1
+a272 1
+        if ( result == 0xFFFFU )
+a277 18
+        /* ISOLatin1 encoding support                                      */
+        /*                                                                 */
+      case ft_encoding_latin_1:
+        /* ISOLatin1 is the first page of Unicode */
+        if ( charcode < 256 && psnames->unicode_value )
+        {
+          result = psnames->lookup_unicode( &face->unicode_map,
+                                            (FT_ULong)charcode );
+
+          /* the function returns 0xFFFF if the Unicode charcode has */
+          /* no corresponding glyph                                  */
+          if ( result == 0xFFFFU )
+            result = 0;
+        }
+        goto Exit;
+
+        /*******************************************************************/
+        /*                                                                 */
+d282 1
+a282 1
+          T1_Encoding  encoding = &face->type1.encoding;
+d317 1
+a317 1
+                 ft_strcmp( gname, glyph_name ) == 0   )
+a329 112
+  /*************************************************************************/
+  /*                                                                       */
+  /* <Function>                                                            */
+  /*    Get_Next_Char                                                      */
+  /*                                                                       */
+  /* <Description>                                                         */
+  /*    Uses a charmap to return the next encoded char.                    */
+  /*                                                                       */
+  /* <Input>                                                               */
+  /*    charmap  :: A handle to the source charmap object.                 */
+  /*                                                                       */
+  /*    charcode :: The character code.                                    */
+  /*                                                                       */
+  /* <Return>                                                              */
+  /*    Next char code.  0 means `no more char codes'.                     */
+  /*                                                                       */
+  static FT_Long
+  Get_Next_Char( FT_CharMap  charmap,
+                 FT_Long     charcode )
+  {
+    T1_Face          face;
+    PSNames_Service  psnames;
+
+
+    face    = (T1_Face)charmap->face;
+    psnames = (PSNames_Service)face->psnames;
+
+    if ( psnames )
+      switch ( charmap->encoding )
+      {
+        /*******************************************************************/
+        /*                                                                 */
+        /* Unicode encoding support                                        */
+        /*                                                                 */
+      case ft_encoding_unicode:
+        /* use the `PSNames' module to synthetize the Unicode charmap */
+        return psnames->next_unicode( &face->unicode_map,
+                                      (FT_ULong)charcode );
+
+        /*******************************************************************/
+        /*                                                                 */
+        /* ISOLatin1 encoding support                                      */
+        /*                                                                 */
+      case ft_encoding_latin_1:
+        {
+          FT_Long  code;
+
+
+          /* use the `PSNames' module to synthetize the Unicode charmap */
+          code = psnames->next_unicode( &face->unicode_map,
+                                        (FT_ULong)charcode );
+          if ( code < 256 )
+            return code;
+          break;
+        }
+
+        /*******************************************************************/
+        /*                                                                 */
+        /* Custom Type 1 encoding                                          */
+        /*                                                                 */
+      case ft_encoding_adobe_custom:
+        {
+          T1_Encoding  encoding = &face->type1.encoding;
+
+
+          charcode++;
+          if ( charcode < encoding->code_first )
+            charcode = encoding->code_first;
+          while ( charcode <= encoding->code_last  )
+          {
+            if ( encoding->char_index[charcode] )
+              return charcode;
+            charcode++;
+          }
+        }
+
+        /*******************************************************************/
+        /*                                                                 */
+        /* Adobe Standard & Expert encoding support                        */
+        /*                                                                 */
+      default:
+        while ( ++charcode < 256 )
+        {
+          FT_UInt      code;
+          FT_Int       n;
+          const char*  glyph_name;
+
+
+          code = psnames->adobe_std_encoding[charcode];
+          if ( charmap->encoding == ft_encoding_adobe_expert )
+            code = psnames->adobe_expert_encoding[charcode];
+
+          glyph_name = psnames->adobe_std_strings( code );
+          if ( !glyph_name )
+            continue;
+
+          for ( n = 0; n < face->type1.num_glyphs; n++ )
+          {
+            const char*  gname = face->type1.glyph_names[n];
+
+
+            if ( gname && gname[0] == glyph_name[0]  &&
+                 ft_strcmp( gname, glyph_name ) == 0 )
+              return charcode;
+          }
+        }
+      }
+
+    return 0;
+  }
+
+
+d331 1
+a331 1
+  const FT_Driver_ClassRec  t1_driver_class =
+d335 1
+a335 1
+      ft_module_driver_scalable  |
+d337 1
+a337 1
+
+d355 11
+a365 11
+    (FT_Face_InitFunc)        T1_Face_Init,
+    (FT_Face_DoneFunc)        T1_Face_Done,
+    (FT_Size_InitFunc)        T1_Size_Init,
+    (FT_Size_DoneFunc)        T1_Size_Done,
+    (FT_Slot_InitFunc)        T1_GlyphSlot_Init,
+    (FT_Slot_DoneFunc)        T1_GlyphSlot_Done,
+
+    (FT_Size_ResetPointsFunc) T1_Size_Reset,
+    (FT_Size_ResetPixelsFunc) T1_Size_Reset,
+    (FT_Slot_LoadFunc)        T1_Load_Glyph,
+    (FT_CharMap_CharIndexFunc)Get_Char_Index,
+d368 2
+a369 2
+    (FT_Face_GetKerningFunc)  0,
+    (FT_Face_AttachFunc)      0,
+d371 2
+a372 2
+    (FT_Face_GetKerningFunc)  Get_Kerning,
+    (FT_Face_AttachFunc)      T1_Read_AFM,
+d374 3
+a376 1
+    (FT_Face_GetAdvancesFunc) 0,
+d378 30
+a407 2
+    (FT_CharMap_CharNextFunc) Get_Next_Char
+  };
+@
+
+
+1.1.1.3
+log
+@That's what OpenBSD will, probably, ship as XF4 in 3.5
+their last sync against XFree86 4.3-current has been
+imported into our vendor branch, too
+@
+text
+@d230 227
+d494 1
+d503 3
+a505 1
+    (FT_Face_GetAdvancesFunc) 0
+@
+
+

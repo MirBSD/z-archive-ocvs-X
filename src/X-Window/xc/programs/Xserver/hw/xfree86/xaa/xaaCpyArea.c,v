@@ -1,0 +1,499 @@
+head	1.1;
+branch	1.1.1;
+access;
+symbols
+	tg-mergetmp-2:1.1.1.1
+	cvs-200410241530:1.1.1.1
+	cvs-200410012000:1.1.1.1
+	cvs-200407221130:1.1.1.1
+	cvs-200407141120:1.1.1.1
+	cvs-200406231010:1.1.1.1
+	MIRBSD_7quater:1.1.1.1
+	cvs-200405271510:1.1.1.1
+	XFree86_4_4_0:1.1.9.1
+	cvs-200403021700:1.1.1.1
+	XFREE86_20040213:1.1.9.1
+	xc:1.1.9
+	cvs-200401291925:1.1.1.1
+	MIRBSD_7_ALPHA:1.1.1.1.0.4
+	MIRBSD_7:1.1.1.1.0.2
+	MIRBSD_7ter:1.1.1.1
+	cvs-20011091815:1.1.1.1
+	cvs-200309162130:1.1.1.1
+	cvs-200308302005:1.1.1.1
+	ctmx-0387:1.1.1.1
+	ctmx-0384:1.1.1.1
+	MIRBSD_5:1.1.1.1
+	ctmx-0375:1.1.1.1
+	ctmx-0373:1.1.1.1
+	ctm-0371:1.1.1.1
+	ctm-0370:1.1.1.1
+	MIRBSD_4:1.1.1.1
+	ctm-0363:1.1.1.1
+	ctm-0359:1.1.1.1
+	ctm-0349:1.1.1.1
+	openbsd:1.1.1;
+locks; strict;
+comment	@ * @;
+
+
+1.1
+date	2003.03.22.20.09.03;	author tg;	state Exp;
+branches
+	1.1.1.1
+	1.1.9.1;
+next	;
+
+1.1.1.1
+date	2003.03.22.20.09.03;	author tg;	state Stab;
+branches;
+next	;
+
+1.1.9.1
+date	2004.02.14.19.25.43;	author tg;	state Exp;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@/* $XFree86: xc/programs/Xserver/hw/xfree86/xaa/xaaCpyArea.c,v 1.13 2001/02/19 22:19:49 mvojkovi Exp $ */
+
+#include "misc.h"
+#include "xf86.h"
+#include "xf86_ansic.h"
+#include "xf86_OSproc.h"
+
+#include "X.h"
+#include "scrnintstr.h"
+#include "xf86str.h"
+#include "xaa.h"
+#include "xaalocal.h"
+#include "migc.h"
+#include "gcstruct.h"
+#include "pixmapstr.h"
+
+/*
+  Written mostly by Harm Hanemaayer (H.Hanemaayer@@inter.nl.net).
+ */
+
+
+RegionPtr
+XAACopyArea(
+    DrawablePtr pSrcDrawable,
+    DrawablePtr pDstDrawable,
+    GC *pGC,
+    int srcx, int srcy,
+    int width, int height,
+    int dstx, int dsty )
+{
+    XAAInfoRecPtr infoRec = GET_XAAINFORECPTR_FROM_GC(pGC);
+
+    if(pDstDrawable->type == DRAWABLE_WINDOW) {
+	if((pSrcDrawable->type == DRAWABLE_WINDOW) ||
+		IS_OFFSCREEN_PIXMAP(pSrcDrawable)){
+	    if(infoRec->ScreenToScreenBitBlt &&
+	     CHECK_ROP(pGC,infoRec->ScreenToScreenBitBltFlags) &&
+	     CHECK_ROPSRC(pGC,infoRec->ScreenToScreenBitBltFlags) &&
+	     CHECK_PLANEMASK(pGC,infoRec->ScreenToScreenBitBltFlags))
+            return (XAABitBlt( pSrcDrawable, pDstDrawable,
+		pGC, srcx, srcy, width, height, dstx, dsty,
+		XAADoBitBlt, 0L));
+	} else {
+	    if(infoRec->WritePixmap &&
+	     ((pDstDrawable->bitsPerPixel == pSrcDrawable->bitsPerPixel) ||
+		((pDstDrawable->bitsPerPixel == 24) &&  
+		(pSrcDrawable->bitsPerPixel == 32) &&
+		(infoRec->WritePixmapFlags & CONVERT_32BPP_TO_24BPP))) &&
+	     CHECK_ROP(pGC,infoRec->WritePixmapFlags) &&
+	     CHECK_ROPSRC(pGC,infoRec->WritePixmapFlags) &&
+	     CHECK_PLANEMASK(pGC,infoRec->WritePixmapFlags) &&
+	     CHECK_NO_GXCOPY(pGC,infoRec->WritePixmapFlags)) 
+            return (XAABitBlt( pSrcDrawable, pDstDrawable,
+		pGC, srcx, srcy, width, height, dstx, dsty,
+		XAADoImageWrite, 0L));
+	}
+    } else if(IS_OFFSCREEN_PIXMAP(pDstDrawable)){
+	if((pSrcDrawable->type == DRAWABLE_WINDOW) ||
+		IS_OFFSCREEN_PIXMAP(pSrcDrawable)){
+	    if(infoRec->ScreenToScreenBitBlt &&
+	     CHECK_ROP(pGC,infoRec->ScreenToScreenBitBltFlags) &&
+	     CHECK_ROPSRC(pGC,infoRec->ScreenToScreenBitBltFlags) &&
+	     CHECK_PLANEMASK(pGC,infoRec->ScreenToScreenBitBltFlags))
+            return (XAABitBlt( pSrcDrawable, pDstDrawable,
+		pGC, srcx, srcy, width, height, dstx, dsty,
+		XAADoBitBlt, 0L));
+	}
+    }
+
+    return (XAAFallbackOps.CopyArea(pSrcDrawable, pDstDrawable, pGC,
+   	    srcx, srcy, width, height, dstx, dsty));
+}
+
+
+void
+XAADoBitBlt(
+    DrawablePtr	    pSrc, 
+    DrawablePtr	    pDst,
+    GC		    *pGC,
+    RegionPtr	    prgnDst,
+    DDXPointPtr	    pptSrc )
+{
+    int nbox, careful;
+    BoxPtr pbox, pboxTmp, pboxNext, pboxBase, pboxNew1, pboxNew2;
+    DDXPointPtr pptTmp, pptNew1, pptNew2;
+    int xdir, ydir;
+    XAAInfoRecPtr infoRec = GET_XAAINFORECPTR_FROM_GC(pGC);
+
+    /* XXX we have to err on the side of safety when both are windows,
+     * because we don't know if IncludeInferiors is being used.
+     */
+    careful = ((pSrc == pDst) ||
+               ((pSrc->type == DRAWABLE_WINDOW) &&
+                (pDst->type == DRAWABLE_WINDOW)));
+
+    pbox = REGION_RECTS(prgnDst);
+    nbox = REGION_NUM_RECTS(prgnDst);
+
+    pboxNew1 = NULL;
+    pptNew1 = NULL;
+    pboxNew2 = NULL;
+    pptNew2 = NULL;
+    if (careful && (pptSrc->y < pbox->y1)) {
+        /* walk source botttom to top */
+	ydir = -1;
+
+	if (nbox > 1) {
+	    /* keep ordering in each band, reverse order of bands */
+	    pboxNew1 = (BoxPtr)ALLOCATE_LOCAL(sizeof(BoxRec) * nbox);
+	    if(!pboxNew1)
+		return;
+	    pptNew1 = (DDXPointPtr)ALLOCATE_LOCAL(sizeof(DDXPointRec) * nbox);
+	    if(!pptNew1) {
+	        DEALLOCATE_LOCAL(pboxNew1);
+	        return;
+	    }
+	    pboxBase = pboxNext = pbox+nbox-1;
+	    while (pboxBase >= pbox) {
+	        while ((pboxNext >= pbox) &&
+		       (pboxBase->y1 == pboxNext->y1))
+		    pboxNext--;
+	        pboxTmp = pboxNext+1;
+	        pptTmp = pptSrc + (pboxTmp - pbox);
+	        while (pboxTmp <= pboxBase) {
+		    *pboxNew1++ = *pboxTmp++;
+		    *pptNew1++ = *pptTmp++;
+	        }
+	        pboxBase = pboxNext;
+	    }
+	    pboxNew1 -= nbox;
+	    pbox = pboxNew1;
+	    pptNew1 -= nbox;
+	    pptSrc = pptNew1;
+        }
+    } else {
+	/* walk source top to bottom */
+	ydir = 1;
+    }
+
+    if (careful && (pptSrc->x < pbox->x1)) {
+	/* walk source right to left */
+        xdir = -1;
+
+	if (nbox > 1) {
+	    /* reverse order of rects in each band */
+	    pboxNew2 = (BoxPtr)ALLOCATE_LOCAL(sizeof(BoxRec) * nbox);
+	    pptNew2 = (DDXPointPtr)ALLOCATE_LOCAL(sizeof(DDXPointRec) * nbox);
+	    if(!pboxNew2 || !pptNew2) {
+		if (pptNew2) DEALLOCATE_LOCAL(pptNew2);
+		if (pboxNew2) DEALLOCATE_LOCAL(pboxNew2);
+		if (pboxNew1) {
+		    DEALLOCATE_LOCAL(pptNew1);
+		    DEALLOCATE_LOCAL(pboxNew1);
+		}
+	        return;
+	    }
+	    pboxBase = pboxNext = pbox;
+	    while (pboxBase < pbox+nbox) {
+	        while ((pboxNext < pbox+nbox) &&
+		       (pboxNext->y1 == pboxBase->y1))
+		    pboxNext++;
+	        pboxTmp = pboxNext;
+	        pptTmp = pptSrc + (pboxTmp - pbox);
+	        while (pboxTmp != pboxBase) {
+		    *pboxNew2++ = *--pboxTmp;
+		    *pptNew2++ = *--pptTmp;
+	        }
+	        pboxBase = pboxNext;
+	    }
+	    pboxNew2 -= nbox;
+	    pbox = pboxNew2;
+	    pptNew2 -= nbox;
+	    pptSrc = pptNew2;
+	}
+    } else {
+	/* walk source left to right */
+        xdir = 1;
+    }
+
+    (*infoRec->ScreenToScreenBitBlt)(infoRec->pScrn, nbox, pptSrc, pbox, 
+	xdir, ydir, pGC->alu, pGC->planemask);
+ 
+    if (pboxNew2) {
+	DEALLOCATE_LOCAL(pptNew2);
+	DEALLOCATE_LOCAL(pboxNew2);
+    }
+    if (pboxNew1) {
+	DEALLOCATE_LOCAL(pptNew1);
+	DEALLOCATE_LOCAL(pboxNew1);
+    }
+
+}
+
+void
+XAADoImageWrite(
+    DrawablePtr	    pSrc, 
+    DrawablePtr	    pDst,
+    GC		    *pGC,
+    RegionPtr	    prgnDst,
+    DDXPointPtr	    pptSrc )
+{
+    int srcwidth;
+    unsigned char* psrcBase;			/* start of image */
+    unsigned char* srcPntr;			/* index into the image */
+    BoxPtr pbox = REGION_RECTS(prgnDst);
+    int nbox = REGION_NUM_RECTS(prgnDst);
+    XAAInfoRecPtr infoRec = GET_XAAINFORECPTR_FROM_GC(pGC);
+    int Bpp = pSrc->bitsPerPixel >> 3; 
+
+    psrcBase = (unsigned char *)((PixmapPtr)pSrc)->devPrivate.ptr;
+    srcwidth = (int)((PixmapPtr)pSrc)->devKind;
+
+    for(; nbox; pbox++, pptSrc++, nbox--) {
+        srcPntr = psrcBase + (pptSrc->y * srcwidth) + (pptSrc->x * Bpp);
+
+	(*infoRec->WritePixmap)(infoRec->pScrn, pbox->x1, pbox->y1, 
+		pbox->x2 - pbox->x1, pbox->y2 - pbox->y1, srcPntr, srcwidth,
+		pGC->alu, pGC->planemask, -1, pSrc->bitsPerPixel, pSrc->depth);
+    }
+}
+
+
+void
+XAADoImageRead(
+    DrawablePtr	    pSrc, 
+    DrawablePtr	    pDst,
+    GC		    *pGC,
+    RegionPtr	    prgnDst,
+    DDXPointPtr	    pptSrc )
+{
+    int dstwidth;
+    unsigned char* pdstBase;			/* start of image */
+    unsigned char* dstPntr;			/* index into the image */
+    BoxPtr pbox = REGION_RECTS(prgnDst);
+    int nbox = REGION_NUM_RECTS(prgnDst);
+    XAAInfoRecPtr infoRec = GET_XAAINFORECPTR_FROM_GC(pGC);
+    int Bpp = pSrc->bitsPerPixel >> 3;  /* wouldn't get here unless both
+                                           src and dst have same bpp */
+
+    pdstBase = (unsigned char *)((PixmapPtr)pDst)->devPrivate.ptr;
+    dstwidth = (int)((PixmapPtr)pDst)->devKind;
+
+    for(; nbox; pbox++, pptSrc++, nbox--) {
+        dstPntr = pdstBase + (pbox->y1 * dstwidth) + (pbox->x1 * Bpp);
+
+	(*infoRec->ReadPixmap)(infoRec->pScrn, pptSrc->x, pptSrc->y, 
+		pbox->x2 - pbox->x1, pbox->y2 - pbox->y1, dstPntr, dstwidth,
+		pSrc->bitsPerPixel, pSrc->depth);
+    }
+}
+
+
+void 
+XAAScreenToScreenBitBlt(
+    ScrnInfoPtr pScrn,
+    int nbox,
+    DDXPointPtr pptSrc,
+    BoxPtr pbox,
+    int xdir, int ydir,
+    int alu,
+    unsigned int planemask )
+{
+    XAAInfoRecPtr infoRec = GET_XAAINFORECPTR_FROM_SCRNINFOPTR(pScrn);
+    int dirsetup;
+
+    if ((!(infoRec->CopyAreaFlags & ONLY_TWO_BITBLT_DIRECTIONS)
+    || (xdir == ydir)) &&
+    (!(infoRec->CopyAreaFlags & ONLY_LEFT_TO_RIGHT_BITBLT)
+    || (xdir == 1))) {
+        (*infoRec->SetupForScreenToScreenCopy)(pScrn,
+            xdir, ydir, alu, planemask, -1);
+        for (; nbox; pbox++, pptSrc++, nbox--)
+            (*infoRec->SubsequentScreenToScreenCopy)(pScrn,pptSrc->x, pptSrc->y,
+                pbox->x1, pbox->y1, pbox->x2 - pbox->x1, pbox->y2 - pbox->y1);
+        SET_SYNC_FLAG(infoRec);
+        return;
+    }
+
+   if (infoRec->CopyAreaFlags & ONLY_LEFT_TO_RIGHT_BITBLT) {
+        /*
+         * This is the case of a chip that only supports xdir = 1,
+         * with ydir = 1 or ydir = -1, but we have xdir = -1.
+         */
+        (*infoRec->SetupForScreenToScreenCopy)(pScrn,
+            1, ydir, alu, planemask, -1);
+        for (; nbox; pbox++, pptSrc++, nbox--)
+            if (pptSrc->y != pbox->y1 || pptSrc->x >= pbox->x1)
+                /* No problem. Do a xdir = 1 blit instead. */
+                (*infoRec->SubsequentScreenToScreenCopy)(pScrn,
+                    pptSrc->x, pptSrc->y, pbox->x1, pbox->y1,
+                    pbox->x2 - pbox->x1, pbox->y2 - pbox->y1);
+            else 
+            {
+                /*
+                 * This is the difficult case. Needs striping into
+                 * non-overlapping horizontal chunks.
+                 */
+                int stripeWidth, w, fullStripes, extra, i;
+                stripeWidth = 16;
+                w = pbox->x2 - pbox->x1;
+                if (pbox->x1 - pptSrc->x < stripeWidth)
+                    stripeWidth = pbox->x1 - pptSrc->x;
+                fullStripes = w / stripeWidth;
+                extra = w % stripeWidth;
+
+                /* First, take care of the little bit on the far right */
+                if (extra)
+                    (*infoRec->SubsequentScreenToScreenCopy)(pScrn,
+                        pptSrc->x + fullStripes * stripeWidth, pptSrc->y,
+                        pbox->x1 + fullStripes * stripeWidth, pbox->y1,
+                        extra, pbox->y2 - pbox->y1);
+
+                /* Now, take care of the rest of the blit */
+                for (i = fullStripes - 1; i >= 0; i--)
+                    (*infoRec->SubsequentScreenToScreenCopy)(pScrn,
+                        pptSrc->x + i * stripeWidth, pptSrc->y,
+                        pbox->x1 + i * stripeWidth, pbox->y1,
+                        stripeWidth, pbox->y2 - pbox->y1);
+            }
+        SET_SYNC_FLAG(infoRec);
+        return;
+    }
+
+    /*
+     * Now the case of a chip that only supports xdir = ydir = 1 or
+     * xdir = ydir = -1, but we have xdir != ydir.
+     */
+    dirsetup = 0;	/* No direction set up yet. */
+    for (; nbox; pbox++, pptSrc++, nbox--) {
+        if (xdir == 1 && pptSrc->y != pbox->y1) {
+            /* Do a xdir = ydir = -1 blit instead. */
+            if (dirsetup != -1) {
+                (*infoRec->SetupForScreenToScreenCopy)(pScrn,
+                    -1, -1, alu, planemask, -1);
+                dirsetup = -1;
+            }
+            (*infoRec->SubsequentScreenToScreenCopy)(pScrn,pptSrc->x, pptSrc->y,
+                pbox->x1, pbox->y1, pbox->x2 - pbox->x1, pbox->y2 - pbox->y1);
+        }
+        else if (xdir == -1 && pptSrc->y != pbox->y1) {
+            /* Do a xdir = ydir = 1 blit instead. */
+            if (dirsetup != 1) {
+                (*infoRec->SetupForScreenToScreenCopy)(pScrn,
+                    1, 1, alu, planemask, -1);
+                dirsetup = 1;
+            }
+            (*infoRec->SubsequentScreenToScreenCopy)(pScrn,pptSrc->x, pptSrc->y,
+                pbox->x1, pbox->y1, pbox->x2 - pbox->x1, pbox->y2 - pbox->y1);
+        }
+        else
+            if (xdir == 1) {
+                /*
+                 * xdir = 1, ydir = -1.
+                 * Perform line-by-line xdir = ydir = 1 blits, going up.
+                 */
+                int i;
+                if (dirsetup != 1) {
+                    (*infoRec->SetupForScreenToScreenCopy)(pScrn,
+                        1, 1, alu, planemask, -1);
+                    dirsetup = 1;
+                }
+                for (i = pbox->y2 - pbox->y1 - 1; i >= 0; i--)
+                    (*infoRec->SubsequentScreenToScreenCopy)(pScrn,
+                        pptSrc->x, pptSrc->y + i, pbox->x1, pbox->y1 + i,
+                        pbox->x2 - pbox->x1, 1);
+            }
+            else {
+                /*
+                 * xdir = -1, ydir = 1.
+                 * Perform line-by-line xdir = ydir = -1 blits, going down.
+                 */
+                int i;
+                if (dirsetup != -1) {
+                    (*infoRec->SetupForScreenToScreenCopy)(pScrn,
+                        -1, -1, alu, planemask, -1);
+                    dirsetup = -1;
+                }
+                for (i = 0; i < pbox->y2 - pbox->y1; i++)
+                    (*infoRec->SubsequentScreenToScreenCopy)(pScrn,
+                        pptSrc->x, pptSrc->y + i, pbox->x1, pbox->y1 + i,
+                        pbox->x2 - pbox->x1, 1);
+            }
+    } /* next box */
+    SET_SYNC_FLAG(infoRec);
+}
+@
+
+
+1.1.9.1
+log
+@OpenBSD just has imported exactly this tree into their vendor branch,
+called the same tag, in XF4/xc
+This is, apparently, the last XFree86 snapshot before the licence change
+(ie, addition of the advertising clause)
+
+Since the developers don't see any problems with that, and we would like
+to integrate improvements done by the remaining one or two (or so) XFree86
+developers (j/k), this prepares enabling us to update X-Window in the future.
+@
+text
+@@
+
+
+1.1.1.1
+log
+@Import OpenBSD 3.3 XF4 repository from CTM 3132 the first time
+This finalizes starting an OpenBSD-mirabile (aka MirBSD) repository.
+
+### MirBSD is:
+# Copyright (c) 1982-2003 by Thorsten "mirabile" Glaser <x86@@ePost.de>
+# Copyright © 1968-2003  The authors of And contributors to UNIX®, the
+#       C Language, BSD/Berkeley Unix; 386BSD, NetBSD 1.1 and OpenBSD.
+#
+# Anyone who obtained a copy of this work is hereby permitted to freely use,
+# distribute, modify, merge, sublicence, give away or sell it as long as the
+# authors are given due credit and the following notice is retained:
+#
+# This work is provided "as is", with no explicit or implicit warranty what-
+# soever. Use it only at your own risk. In no event may an author or contri-
+# butor be held liable for any damage, directly or indirectly, that origina-
+# ted through or is caused by creation or modification of this work.
+
+MirBSD is my private tree. MirBSD does not differ very much from OpenBSD
+and intentionally tracks OpenBSD. That's why it _is_ OpenBSD, just not the
+official one. It's like with DarrenBSD.
+
+At time of this writing, no advertising for MirBSD must be done,
+because the advertising clause has not yet been sorted out.
+
+http://templeofhate.com/tglaser/MirBSD/index.php
+@
+text
+@@

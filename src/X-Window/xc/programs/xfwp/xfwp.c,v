@@ -1,0 +1,264 @@
+head	1.1;
+branch	1.1.1;
+access;
+symbols
+	tg-mergetmp-2:1.1.1.1
+	cvs-200410241530:1.1.1.1
+	cvs-200410012000:1.1.1.1
+	cvs-200407141120:1.1.1.1
+	cvs-200406231010:1.1.1.1
+	MIRBSD_7quater:1.1.1.1
+	cvs-200405271510:1.1.1.1
+	XFree86_4_4_0:1.1.9.1
+	cvs-200403021700:1.1.1.1
+	XFREE86_20040213:1.1.9.1
+	xc:1.1.9
+	cvs-200401291925:1.1.1.1
+	MIRBSD_7_ALPHA:1.1.1.1.0.4
+	MIRBSD_7:1.1.1.1.0.2
+	MIRBSD_7ter:1.1.1.1
+	cvs-20011091815:1.1.1.1
+	cvs-200309162130:1.1.1.1
+	cvs-200308302005:1.1.1.1
+	ctmx-0387:1.1.1.1
+	ctmx-0384:1.1.1.1
+	MIRBSD_5:1.1.1.1
+	ctmx-0375:1.1.1.1
+	ctmx-0373:1.1.1.1
+	ctm-0371:1.1.1.1
+	ctm-0370:1.1.1.1
+	MIRBSD_4:1.1.1.1
+	ctm-0363:1.1.1.1
+	ctm-0359:1.1.1.1
+	ctm-0349:1.1.1.1
+	openbsd:1.1.1;
+locks; strict;
+comment	@ * @;
+
+
+1.1
+date	2003.03.22.20.10.22;	author tg;	state Exp;
+branches
+	1.1.1.1
+	1.1.9.1;
+next	;
+
+1.1.1.1
+date	2003.03.22.20.10.22;	author tg;	state Stab;
+branches;
+next	;
+
+1.1.9.1
+date	2004.02.14.19.28.45;	author tg;	state Exp;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@/* $Xorg: xfwp.c,v 1.4 2001/02/09 02:05:45 xorgcvs Exp $ */
+
+/*
+Copyright 1996, 1998  The Open Group
+
+Permission to use, copy, modify, distribute, and sell this software and its
+documentation for any purpose is hereby granted without fee, provided that
+the above copyright notice appear in all copies and that both that
+copyright notice and this permission notice appear in supporting
+documentation.
+
+The above copyright notice and this permission notice shall be included
+in all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
+OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
+IN NO EVENT SHALL THE OPEN GROUP BE LIABLE FOR ANY CLAIM, DAMAGES OR
+OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE,
+ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR
+OTHER DEALINGS IN THE SOFTWARE.
+
+Except as contained in this notice, the name of The Open Group shall
+not be used in advertising or otherwise to promote the sale, use or
+other dealings in this Software without prior written authorization
+from The Open Group.
+*/
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <X11/Xos.h>		
+#include <netinet/in.h>
+
+#include <X11/ICE/ICElib.h>
+
+#include "xfwp.h"
+#include "io.h"
+#include "misc.h"
+#include "pm.h"
+#include "transport.h"
+
+/*
+ * Global variables
+ */
+struct clientDataStruct 	global_data;  	/* for ICE callbacks */
+
+struct pm_conn_buf 		** pm_conn_array;
+struct server_list 		** server_array;
+struct client_conn_buf 		** client_conn_array;
+
+char **SitePolicies    = NULL;	/* list of site security policy strings */
+
+int    SitePolicyCount = 0;	/* count of elements in SitePolicies */
+
+Bool   SitePolicyPermit = 0;	/* True  := permit iff server supports 
+				 *      at least one listed policy,
+			         *  False := deny if server has any of 
+				 *      the listed policies.
+			         */
+
+int 
+main (
+    int 			argc, 
+    char 			* argv[])
+{
+    int 			* pm_listen_array;
+    fd_set 			readable, writable, rinit, winit;
+    int				nfds = 0;
+    int 			nready = 0;
+    struct ICE_setup_info 	pm_conn_setup;
+    IceListenObj *		listen_objects;
+    struct config *		config_info;
+
+    /*
+     * setup the global client data struct; we need to do this in order
+     * to access program data in the ICE FWPprocessMessages() callback 
+     * without making everything global!  See FWPprotocolSetupProc() for
+     * the rest of what we are doing
+     */
+    config_info = (struct config *) Malloc(sizeof(struct config));
+
+    global_data.config_info = config_info;
+    global_data.nfds =  &nfds;
+    global_data.rinit = &rinit;
+    global_data.winit = &winit;
+
+    /*
+     * complete the setup
+     */
+    doProcessInputArgs(config_info, argc, argv);
+
+    if ((doHandleConfigFile(config_info)) == FAILURE)
+	exit(1);
+
+    if ((doInitDataStructs(config_info, 
+			   &pm_conn_setup)) == FAILURE)
+	exit(1);
+
+    /*
+     * install the ICE i/o error handler
+     */
+    doInstallIOErrorHandler();
+
+    /*
+     * zero the select() read/write masks
+     */
+    FD_ZERO(&readable);
+    FD_ZERO(&writable);
+    FD_ZERO(&rinit);
+    FD_ZERO(&winit);
+
+    /*
+     * create listener socket(s) for PM connections
+     */
+    if (!doSetupPMListen(config_info->pm_listen_port, 
+			 &config_info->num_pm_listen_ports,
+			 &pm_listen_array, 
+			 &listen_objects, 
+			 &nfds, 
+			 &rinit))
+	exit(1);
+
+    while(1)
+    {
+	readable = rinit;
+	writable = winit;
+
+	doSelect (config_info, 
+		  &nfds, 
+		  &nready, 
+		  &readable, 
+		  &writable);
+
+	doCheckTimeouts (config_info, 
+			 &nready, 
+			 &rinit, 
+			 &winit, 
+			 &readable, 
+			 &writable);
+
+	doProcessSelect (&nfds, 
+			 &nready, 
+			 &readable, 
+			 &writable, 
+			 &rinit, 
+			 &winit, 
+			 pm_listen_array, 
+			 config_info, 
+			 &listen_objects);
+    } 
+}
+@
+
+
+1.1.9.1
+log
+@OpenBSD just has imported exactly this tree into their vendor branch,
+called the same tag, in XF4/xc
+This is, apparently, the last XFree86 snapshot before the licence change
+(ie, addition of the advertising clause)
+
+Since the developers don't see any problems with that, and we would like
+to integrate improvements done by the remaining one or two (or so) XFree86
+developers (j/k), this prepares enabling us to update X-Window in the future.
+@
+text
+@@
+
+
+1.1.1.1
+log
+@Import OpenBSD 3.3 XF4 repository from CTM 3132 the first time
+This finalizes starting an OpenBSD-mirabile (aka MirBSD) repository.
+
+### MirBSD is:
+# Copyright (c) 1982-2003 by Thorsten "mirabile" Glaser <x86@@ePost.de>
+# Copyright © 1968-2003  The authors of And contributors to UNIX®, the
+#       C Language, BSD/Berkeley Unix; 386BSD, NetBSD 1.1 and OpenBSD.
+#
+# Anyone who obtained a copy of this work is hereby permitted to freely use,
+# distribute, modify, merge, sublicence, give away or sell it as long as the
+# authors are given due credit and the following notice is retained:
+#
+# This work is provided "as is", with no explicit or implicit warranty what-
+# soever. Use it only at your own risk. In no event may an author or contri-
+# butor be held liable for any damage, directly or indirectly, that origina-
+# ted through or is caused by creation or modification of this work.
+
+MirBSD is my private tree. MirBSD does not differ very much from OpenBSD
+and intentionally tracks OpenBSD. That's why it _is_ OpenBSD, just not the
+official one. It's like with DarrenBSD.
+
+At time of this writing, no advertising for MirBSD must be done,
+because the advertising clause has not yet been sorted out.
+
+http://templeofhate.com/tglaser/MirBSD/index.php
+@
+text
+@@

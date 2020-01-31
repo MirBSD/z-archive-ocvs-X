@@ -1,0 +1,461 @@
+head	1.1;
+branch	1.1.1;
+access;
+symbols
+	tg-mergetmp-2:1.1.1.2
+	cvs-200410241530:1.1.1.2
+	cvs-200410012000:1.1.1.2
+	cvs-200407141120:1.1.1.2
+	cvs-200406231010:1.1.1.2
+	MIRBSD_7quater:1.1.1.1
+	cvs-200405271510:1.1.1.2
+	XFree86_4_4_0:1.1.9.1
+	cvs-200403021700:1.1.1.2
+	XFREE86_20040213:1.1.9.1
+	xc:1.1.9
+	cvs-200401291925:1.1.1.1
+	MIRBSD_7_ALPHA:1.1.1.1.0.4
+	MIRBSD_7:1.1.1.1.0.2
+	MIRBSD_7ter:1.1.1.1
+	cvs-20011091815:1.1.1.1
+	cvs-200309162130:1.1.1.1
+	cvs-200308302005:1.1.1.1
+	ctmx-0387:1.1.1.1
+	ctmx-0384:1.1.1.1
+	MIRBSD_5:1.1.1.1
+	ctmx-0375:1.1.1.1
+	ctmx-0373:1.1.1.1
+	ctm-0371:1.1.1.1
+	ctm-0370:1.1.1.1
+	MIRBSD_4:1.1.1.1
+	ctm-0363:1.1.1.1
+	ctm-0359:1.1.1.1
+	ctm-0349:1.1.1.1
+	openbsd:1.1.1;
+locks; strict;
+comment	@ * @;
+
+
+1.1
+date	2003.03.22.20.09.41;	author tg;	state Exp;
+branches
+	1.1.1.1
+	1.1.9.1;
+next	;
+
+1.1.1.1
+date	2003.03.22.20.09.41;	author tg;	state Exp;
+branches;
+next	1.1.1.2;
+
+1.1.1.2
+date	2004.03.02.18.30.58;	author tg;	state Stab;
+branches;
+next	;
+
+1.1.9.1
+date	2004.02.14.19.26.41;	author tg;	state Exp;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@/* $Xorg: ddxList.c,v 1.3 2000/08/17 19:53:46 cpqbld Exp $ */
+/************************************************************
+Copyright (c) 1995 by Silicon Graphics Computer Systems, Inc.
+
+Permission to use, copy, modify, and distribute this
+software and its documentation for any purpose and without
+fee is hereby granted, provided that the above copyright
+notice appear in all copies and that both that copyright
+notice and this permission notice appear in supporting
+documentation, and that the name of Silicon Graphics not be 
+used in advertising or publicity pertaining to distribution 
+of the software without specific prior written permission.
+Silicon Graphics makes no representation about the suitability 
+of this software for any purpose. It is provided "as is"
+without any express or implied warranty.
+
+SILICON GRAPHICS DISCLAIMS ALL WARRANTIES WITH REGARD TO THIS 
+SOFTWARE, INCLUDING ALL IMPLIED WARRANTIES OF MERCHANTABILITY 
+AND FITNESS FOR A PARTICULAR PURPOSE. IN NO EVENT SHALL SILICON
+GRAPHICS BE LIABLE FOR ANY SPECIAL, INDIRECT OR CONSEQUENTIAL 
+DAMAGES OR ANY DAMAGES WHATSOEVER RESULTING FROM LOSS OF USE, 
+DATA OR PROFITS, WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE 
+OR OTHER TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION  WITH
+THE USE OR PERFORMANCE OF THIS SOFTWARE.
+
+********************************************************/
+/* $XFree86: xc/programs/Xserver/xkb/ddxList.c,v 3.7 2001/10/28 03:34:19 tsi Exp $ */
+
+#include <stdio.h>
+#include <ctype.h>
+#define	NEED_EVENTS 1
+#include <X11/X.h>
+#include <X11/Xos.h>
+#include <X11/Xproto.h>
+#include <X11/keysym.h>
+#include <X11/extensions/XKM.h>
+#include "inputstr.h"
+#include "scrnintstr.h"
+#include "windowstr.h"
+#define	XKBSRV_NEED_FILE_FUNCS
+#include "XKBsrv.h"
+#include "XI.h"
+
+#ifndef PATH_MAX
+#ifdef MAXPATHLEN
+#define	PATH_MAX MAXPATHLEN
+#else
+#define	PATH_MAX 1024
+#endif
+#endif
+
+/***====================================================================***/
+
+static char *componentDirs[_XkbListNumComponents] = {
+	"keymap", "keycodes", "types", "compat", "symbols", "geometry"
+};
+
+/***====================================================================***/
+
+Status
+#if NeedFunctionPrototypes
+_AddListComponent(	XkbSrvListInfoPtr	list,
+			int			what,
+			unsigned		flags,
+			char *			str,
+			ClientPtr		client)
+#else
+_AddListComponent(list,what,flags,str,client)
+    XkbSrvListInfoPtr	list;
+    int			what;
+    unsigned		flags;
+    char *		str;
+    ClientPtr		client;
+#endif
+{
+int		slen,wlen;
+unsigned char *	wire8;
+unsigned short *wire16;
+char *		tmp;
+
+    if (list->nTotal>=list->maxRtrn) {
+	list->nTotal++;
+	return Success;
+    }
+    tmp= strchr(str,')');
+    if ((tmp==NULL)&&((tmp=strchr(str,'('))==NULL)) {
+	slen= strlen(str);
+	while ((slen>0) && isspace(str[slen-1])) {
+	    slen--;
+	}
+    }
+    else {
+	slen= (tmp-str+1);
+    }
+    wlen= (((slen+1)/2)*2)+4;	/* four bytes for flags and length, pad to */
+				/* 2-byte boundary */
+    if ((list->szPool-list->nPool)<wlen) {
+	if (wlen>1024)	list->szPool+= XkbPaddedSize(wlen*2);
+	else		list->szPool+= 1024;
+	list->pool= _XkbTypedRealloc(list->pool,list->szPool,char);
+	if (!list->pool)
+	    return BadAlloc;
+    }
+    wire16= (unsigned short *)&list->pool[list->nPool];
+    wire8= (unsigned char *)&wire16[2];
+    wire16[0]= flags;
+    wire16[1]= slen;
+    memcpy(wire8,str,slen);
+    if (client->swapped) {
+	register int n;
+	swaps(&wire16[0],n);
+	swaps(&wire16[1],n);
+    }
+    list->nPool+= wlen;
+    list->nFound[what]++;
+    list->nTotal++;
+    return Success;
+}
+
+/***====================================================================***/
+static Status
+#if NeedFunctionPrototypes
+XkbDDXListComponent(	DeviceIntPtr 		dev,
+			int			what,
+			XkbSrvListInfoPtr	list,
+			ClientPtr		client)
+#else
+XkbDDXListComponent(dev,what,list,client)
+    DeviceIntPtr	dev;
+    int			what;
+    XkbSrvListInfoPtr	list;
+    ClientPtr		client;
+#endif
+{
+char 	*file,*map,*tmp,buf[PATH_MAX];
+FILE 	*in;
+Status	status;
+int	rval;
+Bool	haveDir;
+#ifdef WIN32
+char tmpname[32];
+#endif    
+
+    if ((list->pattern[what]==NULL)||(list->pattern[what][0]=='\0'))
+	return Success;
+    file= list->pattern[what];
+    map= strrchr(file,'(');
+    if (map!=NULL) {
+	char *tmp;
+	map++;
+	tmp= strrchr(map,')');
+	if ((tmp==NULL)||(tmp[1]!='\0')) {
+	    /* illegal pattern.  No error, but no match */
+	    return Success;
+	}
+    }
+
+    in= NULL;
+    haveDir= True;
+#ifdef WIN32
+    strcpy(tmpname, "\\temp\\xkb_XXXXXX");
+    (void) mktemp(tmpname);
+#endif
+    if (XkbBaseDirectory!=NULL) {
+	if (strlen(XkbBaseDirectory)+strlen(componentDirs[what])+6 > PATH_MAX)
+	    return BadImplementation;
+	if ((list->pattern[what][0]=='*')&&(list->pattern[what][1]=='\0')) {
+	    sprintf(buf,"%s/%s.dir",XkbBaseDirectory,componentDirs[what]);
+	    in= fopen(buf,"r");
+	}
+	if (!in) {
+	    haveDir= False;
+	    if (strlen(XkbBaseDirectory)*2+strlen(componentDirs[what])
+		    +(xkbDebugFlags>9?2:1)+strlen(file)+31 > PATH_MAX)
+		return BadImplementation;
+#ifndef WIN32
+	    sprintf(buf,"%s/xkbcomp -R%s/%s -w %ld -l -vlfhpR '%s'",
+		XkbBaseDirectory,XkbBaseDirectory,componentDirs[what],(long)
+		((xkbDebugFlags<2)?1:((xkbDebugFlags>10)?10:xkbDebugFlags)),
+		file);
+#else
+	    sprintf(buf,"%s/xkbcomp -R%s/%s -w %ld -l -vlfhpR '%s' %s",
+		XkbBaseDirectory,XkbBaseDirectory,componentDirs[what],(long)
+		((xkbDebugFlags<2)?1:((xkbDebugFlags>10)?10:xkbDebugFlags)),
+		file, tmpname);
+#endif
+	}
+    }
+    else {
+	if (strlen(XkbBaseDirectory)+strlen(componentDirs[what])+6 > PATH_MAX)
+	    return BadImplementation;
+	if ((list->pattern[what][0]=='*')&&(list->pattern[what][1]=='\0')) {
+	    sprintf(buf,"%s.dir",componentDirs[what]);
+	    in= fopen(buf,"r");
+	}
+	if (!in) {
+	    haveDir= False;
+	    if (strlen(componentDirs[what])
+		    +(xkbDebugFlags>9?2:1)+strlen(file)+29 > PATH_MAX)
+		return BadImplementation;
+#ifndef WIN32
+	    sprintf(buf,"xkbcomp -R%s -w %ld -l -vlfhpR '%s'",
+		componentDirs[what],(long)
+		((xkbDebugFlags<2)?1:((xkbDebugFlags>10)?10:xkbDebugFlags)),
+		file);
+#else
+	    sprintf(buf,"xkbcomp -R%s -w %ld -l -vlfhpR '%s' %s",
+		componentDirs[what],(long)
+		((xkbDebugFlags<2)?1:((xkbDebugFlags>10)?10:xkbDebugFlags)),
+		file, tmpname);
+#endif
+	}
+    }
+    status= Success;
+    if (!haveDir)
+#ifndef WIN32
+	in= Popen(buf,"r");
+#else
+    {
+	if (System(buf) < 0)
+	    ErrorF("Could not invoke keymap compiler\n");
+	else
+	    in= fopen(tmpname, "r");
+    }
+#endif
+    if (!in)
+	return BadImplementation;
+    list->nFound[what]= 0;
+    while ((status==Success)&&((tmp=fgets(buf,PATH_MAX,in))!=NULL)) {
+	unsigned flags;
+	register unsigned int i;
+	if (*tmp=='#') /* comment, skip it */
+	    continue;
+	if (!strncmp(tmp, "Warning:", 8) || !strncmp(tmp, "        ", 8))
+	    /* skip warnings too */
+	    continue;
+	flags= 0;
+	/* each line in the listing is supposed to start with two */
+	/* groups of eight characters, which specify the general  */
+	/* flags and the flags that are specific to the component */
+	/* if they're missing, fail with BadImplementation	  */
+	for (i=0;(i<8)&&(status==Success);i++) { /* read the general flags */
+	   if (isalpha(*tmp))	flags|= (1L<<i);
+	   else if (*tmp!='-')	status= BadImplementation;
+	   tmp++;
+	}
+	if (status != Success)  break;
+	if (!isspace(*tmp)) {
+	     status= BadImplementation;
+	     break;
+	}
+	else tmp++;
+	for (i=0;(i<8)&&(status==Success);i++) { /* read the component flags */
+	   if (isalpha(*tmp))	flags|= (1L<<(i+8));
+	   else if (*tmp!='-')	status= BadImplementation;
+	   tmp++;
+	}
+	if (status != Success)  break;
+	if (isspace(*tmp)) {
+	    while (isspace(*tmp)) {
+		tmp++;
+	    }
+	}
+	else {
+	    status= BadImplementation;
+	    break;
+	}
+	status= _AddListComponent(list,what,flags,tmp,client);
+    }
+#ifndef WIN32
+    if (haveDir)
+	fclose(in);
+    else if ((rval=pclose(in))!=0) {
+	if (xkbDebugFlags)
+	    ErrorF("xkbcomp returned exit code %d\n",rval);
+    }
+#else
+    fclose(in);
+#endif
+    return status;
+}
+
+/***====================================================================***/
+
+/* ARGSUSED */
+Status
+#if NeedFunctionPrototypes
+XkbDDXList(DeviceIntPtr	dev,XkbSrvListInfoPtr list,ClientPtr client)
+#else
+XkbDDXList(dev,list,client)
+    DeviceIntPtr		dev;
+    XkbSrvListInfoPtr		list;
+    ClientPtr			client;
+#endif
+{
+Status	status;
+
+    status= XkbDDXListComponent(dev,_XkbListKeymaps,list,client);
+    if (status==Success)
+	status= XkbDDXListComponent(dev,_XkbListKeycodes,list,client);
+    if (status==Success)
+	status= XkbDDXListComponent(dev,_XkbListTypes,list,client);
+    if (status==Success)
+	status= XkbDDXListComponent(dev,_XkbListCompat,list,client);
+    if (status==Success)
+	status= XkbDDXListComponent(dev,_XkbListSymbols,list,client);
+    if (status==Success)
+	status= XkbDDXListComponent(dev,_XkbListGeometry,list,client);
+    return status;
+}
+@
+
+
+1.1.9.1
+log
+@OpenBSD just has imported exactly this tree into their vendor branch,
+called the same tag, in XF4/xc
+This is, apparently, the last XFree86 snapshot before the licence change
+(ie, addition of the advertising clause)
+
+Since the developers don't see any problems with that, and we would like
+to integrate improvements done by the remaining one or two (or so) XFree86
+developers (j/k), this prepares enabling us to update X-Window in the future.
+@
+text
+@d27 1
+a27 1
+/* $XFree86: xc/programs/Xserver/xkb/ddxList.c,v 3.9 2003/11/17 22:20:45 dawes Exp $ */
+d60 2
+a61 1
+static Status
+d67 8
+d122 1
+d127 7
+d287 1
+d289 6
+@
+
+
+1.1.1.1
+log
+@Import OpenBSD 3.3 XF4 repository from CTM 3132 the first time
+This finalizes starting an OpenBSD-mirabile (aka MirBSD) repository.
+
+### MirBSD is:
+# Copyright (c) 1982-2003 by Thorsten "mirabile" Glaser <x86@@ePost.de>
+# Copyright © 1968-2003  The authors of And contributors to UNIX®, the
+#       C Language, BSD/Berkeley Unix; 386BSD, NetBSD 1.1 and OpenBSD.
+#
+# Anyone who obtained a copy of this work is hereby permitted to freely use,
+# distribute, modify, merge, sublicence, give away or sell it as long as the
+# authors are given due credit and the following notice is retained:
+#
+# This work is provided "as is", with no explicit or implicit warranty what-
+# soever. Use it only at your own risk. In no event may an author or contri-
+# butor be held liable for any damage, directly or indirectly, that origina-
+# ted through or is caused by creation or modification of this work.
+
+MirBSD is my private tree. MirBSD does not differ very much from OpenBSD
+and intentionally tracks OpenBSD. That's why it _is_ OpenBSD, just not the
+official one. It's like with DarrenBSD.
+
+At time of this writing, no advertising for MirBSD must be done,
+because the advertising clause has not yet been sorted out.
+
+http://templeofhate.com/tglaser/MirBSD/index.php
+@
+text
+@@
+
+
+1.1.1.2
+log
+@That's what OpenBSD will, probably, ship as XF4 in 3.5
+their last sync against XFree86 4.3-current has been
+imported into our vendor branch, too
+@
+text
+@d27 1
+a27 1
+/* $XFree86: xc/programs/Xserver/xkb/ddxList.c,v 3.9 2003/11/17 22:20:45 dawes Exp $ */
+d60 2
+a61 1
+static Status
+d67 8
+d122 1
+d127 7
+d287 1
+d289 6
+@
+

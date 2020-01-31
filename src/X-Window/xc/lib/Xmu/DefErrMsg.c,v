@@ -1,0 +1,283 @@
+head	1.1;
+branch	1.1.1;
+access;
+symbols
+	tg-mergetmp-2:1.1.1.1
+	cvs-200410241530:1.1.1.1
+	cvs-200410012000:1.1.1.1
+	cvs-200407141120:1.1.1.1
+	cvs-200406231010:1.1.1.1
+	MIRBSD_7quater:1.1.1.1
+	cvs-200405271510:1.1.1.1
+	XFree86_4_4_0:1.1.9.1
+	cvs-200403021700:1.1.1.1
+	XFREE86_20040213:1.1.9.1
+	xc:1.1.9
+	cvs-200401291925:1.1.1.1
+	MIRBSD_7_ALPHA:1.1.1.1.0.4
+	MIRBSD_7:1.1.1.1.0.2
+	MIRBSD_7ter:1.1.1.1
+	cvs-20011091815:1.1.1.1
+	cvs-200309162130:1.1.1.1
+	cvs-200308302005:1.1.1.1
+	ctmx-0387:1.1.1.1
+	ctmx-0384:1.1.1.1
+	MIRBSD_5:1.1.1.1
+	ctmx-0375:1.1.1.1
+	ctmx-0373:1.1.1.1
+	ctm-0371:1.1.1.1
+	ctm-0370:1.1.1.1
+	MIRBSD_4:1.1.1.1
+	ctm-0363:1.1.1.1
+	ctm-0359:1.1.1.1
+	ctm-0349:1.1.1.1
+	openbsd:1.1.1;
+locks; strict;
+comment	@ * @;
+
+
+1.1
+date	2003.03.22.20.04.53;	author tg;	state Exp;
+branches
+	1.1.1.1
+	1.1.9.1;
+next	;
+
+1.1.1.1
+date	2003.03.22.20.04.53;	author tg;	state Stab;
+branches;
+next	;
+
+1.1.9.1
+date	2004.02.14.19.19.27;	author tg;	state Exp;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@/* $Xorg: DefErrMsg.c,v 1.4 2001/02/09 02:03:52 xorgcvs Exp $ */
+
+/*
+
+Copyright 1988, 1998  The Open Group
+
+Permission to use, copy, modify, distribute, and sell this software and its
+documentation for any purpose is hereby granted without fee, provided that
+the above copyright notice appear in all copies and that both that
+copyright notice and this permission notice appear in supporting
+documentation.
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
+OPEN GROUP BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN
+AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
+CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+Except as contained in this notice, the name of The Open Group shall not be
+used in advertising or otherwise to promote the sale, use or other dealings
+in this Software without prior written authorization from The Open Group.
+
+*/
+/* $XFree86: xc/lib/Xmu/DefErrMsg.c,v 1.8 2001/12/14 19:55:39 dawes Exp $ */
+
+#include <stdio.h>
+#define NEED_EVENTS
+#include <X11/Xlibint.h>
+#include <X11/Xproto.h>
+#include <X11/Xmu/Error.h>
+#include <X11/Xmu/SysUtil.h>
+
+/*
+ * XmuPrintDefaultErrorMessage - print a nice error that looks like the usual 
+ * message.  Returns 1 if the caller should consider exitting else 0.
+ */
+int
+XmuPrintDefaultErrorMessage(Display *dpy, XErrorEvent *event, FILE *fp)
+{
+    char buffer[BUFSIZ];
+    char mesg[BUFSIZ];
+    char number[32];
+    char *mtype = "XlibMessage";
+    register _XExtension *ext = (_XExtension *)NULL;
+    _XExtension *bext = (_XExtension *)NULL;
+    XGetErrorText(dpy, event->error_code, buffer, BUFSIZ);
+    XGetErrorDatabaseText(dpy, mtype, "XError", "X Error", mesg, BUFSIZ);
+    (void) fprintf(fp, "%s:  %s\n  ", mesg, buffer);
+    XGetErrorDatabaseText(dpy, mtype, "MajorCode", "Request Major code %d", 
+	mesg, BUFSIZ);
+    (void) fprintf(fp, mesg, event->request_code);
+    if (event->request_code < 128) {
+	XmuSnprintf(number, sizeof(number), "%d", event->request_code);
+	XGetErrorDatabaseText(dpy, "XRequest", number, "", buffer, BUFSIZ);
+    } else {
+	/* XXX this is non-portable */
+	for (ext = dpy->ext_procs;
+	     ext && (ext->codes.major_opcode != event->request_code);
+	     ext = ext->next)
+	  ;
+	if (ext)
+	  XmuSnprintf(buffer, sizeof(buffer), "%s", ext->name);
+	else
+	    buffer[0] = '\0';
+    }
+    (void) fprintf(fp, " (%s)", buffer);
+    fputs("\n  ", fp);
+    if (event->request_code >= 128) {
+	XGetErrorDatabaseText(dpy, mtype, "MinorCode", "Request Minor code %d",
+			      mesg, BUFSIZ);
+	(void) fprintf(fp, mesg, event->minor_code);
+	if (ext) {
+	    XmuSnprintf(mesg, sizeof(mesg),
+			"%s.%d", ext->name, event->minor_code);
+	    XGetErrorDatabaseText(dpy, "XRequest", mesg, "", buffer, BUFSIZ);
+	    (void) fprintf(fp, " (%s)", buffer);
+	}
+	fputs("\n  ", fp);
+    }
+    if (event->error_code >= 128) {
+	/* kludge, try to find the extension that caused it */
+	buffer[0] = '\0';
+	for (ext = dpy->ext_procs; ext; ext = ext->next) {
+	    if (ext->error_string) 
+		(*ext->error_string)(dpy, event->error_code, &ext->codes,
+				     buffer, BUFSIZ);
+	    if (buffer[0]) {
+		bext = ext;
+		break;
+	    }
+	    if (ext->codes.first_error &&
+		ext->codes.first_error < event->error_code &&
+		(!bext || ext->codes.first_error > bext->codes.first_error))
+		bext = ext;
+	}    
+	if (bext)
+	    XmuSnprintf(buffer, sizeof(buffer), "%s.%d", bext->name,
+			event->error_code - bext->codes.first_error);
+	else
+	    strcpy(buffer, "Value");
+	XGetErrorDatabaseText(dpy, mtype, buffer, "", mesg, BUFSIZ);
+	if (mesg[0]) {
+	    fputs("  ", fp);
+	    (void) fprintf(fp, mesg, event->resourceid);
+	    fputs("\n", fp);
+	}
+	/* let extensions try to print the values */
+	for (ext = dpy->ext_procs; ext; ext = ext->next) {
+	    if (ext->error_values)
+		(*ext->error_values)(dpy, event, fp);
+	}
+    } else if ((event->error_code == BadWindow) ||
+	       (event->error_code == BadPixmap) ||
+	       (event->error_code == BadCursor) ||
+	       (event->error_code == BadFont) ||
+	       (event->error_code == BadDrawable) ||
+	       (event->error_code == BadColor) ||
+	       (event->error_code == BadGC) ||
+	       (event->error_code == BadIDChoice) ||
+	       (event->error_code == BadValue) ||
+	       (event->error_code == BadAtom)) {
+	if (event->error_code == BadValue)
+	    XGetErrorDatabaseText(dpy, mtype, "Value", "Value 0x%x",
+				  mesg, BUFSIZ);
+	else if (event->error_code == BadAtom)
+	    XGetErrorDatabaseText(dpy, mtype, "AtomID", "AtomID 0x%x",
+				  mesg, BUFSIZ);
+	else
+	    XGetErrorDatabaseText(dpy, mtype, "ResourceID", "ResourceID 0x%x",
+				  mesg, BUFSIZ);
+	(void) fprintf(fp, mesg, event->resourceid);
+	fputs("\n  ", fp);
+    }
+    XGetErrorDatabaseText(dpy, mtype, "ErrorSerial", "Error Serial #%d", 
+	mesg, BUFSIZ);
+    (void) fprintf(fp, mesg, event->serial);
+    fputs("\n  ", fp);
+    XGetErrorDatabaseText(dpy, mtype, "CurrentSerial", "Current Serial #%d",
+	mesg, BUFSIZ);
+    (void) fprintf(fp, mesg, NextRequest(dpy)-1);
+    fputs("\n", fp);
+    if (event->error_code == BadImplementation) return 0;
+    return 1;
+}
+
+
+/*
+ * XmuSimpleErrorHandler - ignore errors for XQueryTree, XGetWindowAttributes,
+ * and XGetGeometry; print a message for everything else.  In all case, do
+ * not exit.
+ */
+int
+XmuSimpleErrorHandler(Display *dpy, XErrorEvent *errorp)
+{
+    switch (errorp->request_code) {
+      case X_QueryTree:
+      case X_GetWindowAttributes:
+        if (errorp->error_code == BadWindow) return 0;
+	break;
+      case X_GetGeometry:
+	if (errorp->error_code == BadDrawable) return 0;
+	break;
+    }
+    /* got a "real" X error */
+    return XmuPrintDefaultErrorMessage (dpy, errorp, stderr);
+}	
+@
+
+
+1.1.9.1
+log
+@OpenBSD just has imported exactly this tree into their vendor branch,
+called the same tag, in XF4/xc
+This is, apparently, the last XFree86 snapshot before the licence change
+(ie, addition of the advertising clause)
+
+Since the developers don't see any problems with that, and we would like
+to integrate improvements done by the remaining one or two (or so) XFree86
+developers (j/k), this prepares enabling us to update X-Window in the future.
+@
+text
+@@
+
+
+1.1.1.1
+log
+@Import OpenBSD 3.3 XF4 repository from CTM 3132 the first time
+This finalizes starting an OpenBSD-mirabile (aka MirBSD) repository.
+
+### MirBSD is:
+# Copyright (c) 1982-2003 by Thorsten "mirabile" Glaser <x86@@ePost.de>
+# Copyright © 1968-2003  The authors of And contributors to UNIX®, the
+#       C Language, BSD/Berkeley Unix; 386BSD, NetBSD 1.1 and OpenBSD.
+#
+# Anyone who obtained a copy of this work is hereby permitted to freely use,
+# distribute, modify, merge, sublicence, give away or sell it as long as the
+# authors are given due credit and the following notice is retained:
+#
+# This work is provided "as is", with no explicit or implicit warranty what-
+# soever. Use it only at your own risk. In no event may an author or contri-
+# butor be held liable for any damage, directly or indirectly, that origina-
+# ted through or is caused by creation or modification of this work.
+
+MirBSD is my private tree. MirBSD does not differ very much from OpenBSD
+and intentionally tracks OpenBSD. That's why it _is_ OpenBSD, just not the
+official one. It's like with DarrenBSD.
+
+At time of this writing, no advertising for MirBSD must be done,
+because the advertising clause has not yet been sorted out.
+
+http://templeofhate.com/tglaser/MirBSD/index.php
+@
+text
+@@

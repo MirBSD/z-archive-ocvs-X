@@ -1,0 +1,249 @@
+head	1.2;
+branch	1.1.1;
+access;
+symbols
+	tg-mergetmp-2:1.1.1.1
+	cvs-200410241530:1.1.1.1
+	cvs-200410012000:1.1.1.1
+	cvs-200407141120:1.1.1.1
+	cvs-200406231010:1.1.1.1
+	MIRBSD_7quater:1.1.1.1
+	cvs-200405271510:1.1.1.1
+	XFree86_4_4_0:1.1.9.1
+	cvs-200403021700:1.1.1.1
+	XFREE86_20040213:1.1.9.1
+	xc:1.1.9
+	cvs-200401291925:1.1.1.1
+	MIRBSD_7_ALPHA:1.1.1.1.0.4
+	MIRBSD_7:1.1.1.1.0.2
+	MIRBSD_7ter:1.1.1.1
+	cvs-20011091815:1.1.1.1
+	cvs-200309162130:1.1.1.1
+	cvs-200308302005:1.1.1.1
+	ctmx-0387:1.1.1.1
+	ctmx-0384:1.1.1.1
+	MIRBSD_5:1.1.1.1
+	ctmx-0375:1.1.1.1
+	ctmx-0373:1.1.1.1
+	ctm-0371:1.1.1.1
+	ctm-0370:1.1.1.1
+	MIRBSD_4:1.1.1.1
+	ctm-0363:1.1.1.1
+	ctm-0359:1.1.1.1
+	ctm-0349:1.1.1.1
+	openbsd:1.1.1;
+locks; strict;
+comment	@ * @;
+
+
+1.2
+date	2003.05.16.16.28.04;	author tg;	state dead;
+branches;
+next	1.1;
+
+1.1
+date	2003.03.22.20.00.54;	author tg;	state Exp;
+branches
+	1.1.1.1
+	1.1.9.1;
+next	;
+
+1.1.1.1
+date	2003.03.22.20.00.54;	author tg;	state Stab;
+branches;
+next	;
+
+1.1.9.1
+date	2004.02.14.19.04.22;	author tg;	state Exp;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.2
+log
+@remove a bunch of files not used in MirBSD - clean tree. People who want them got cvs.
+@
+text
+@(*******************************************************************
+ *
+ *  gdriver   : Graphics utility driver generic interface       1.1
+ *
+ *  Generic interface for all drivers of the graphics utility used
+ *  by the FreeType test programs.
+ *
+ *  Copyright 1996 David Turner, Robert Wilhelm and Werner Lemberg.
+ *
+ *  This file is part of the FreeType project, and may only be used
+ *  modified and distributed under the terms of the FreeType project
+ *  license, LICENSE.TXT. By continuing to use, modify or distribute
+ *  this file you indicate that you have read the license and
+ *  understand and accept it fully.
+ *
+ ******************************************************************)
+
+Unit GDriver;
+
+interface
+
+uses GEvents, GMain;
+
+  (* Note that we now support an event based model, even with  */
+  /* full-screen modes. It is the responsability of the driver */
+  /* to map its events to the TEvent structure when called     */
+  /* through Get_Event                                         *)
+
+type
+  Event = record
+            what  : GEvent; (* event class     *)
+            info  : Int;    (* event parameter *)
+          end;
+
+  (* the event classes are defined in the file 'gevents.h' included *)
+  (* by the test programs, not by the graphics utility              *)
+
+  procedure Get_Event( var ev : Event );
+  (* get last event. In full-screen modes, a key-stroke must be */
+  /* translated to an event class with a parameter.             *)
+
+  function  Driver_Set_Graphics( mode : Int ) : boolean;
+  (* A call to this function must set the graphics mode, the Vio    *)
+  (* variable, as well as the values vio_ScanLineWidth, vio_Width   *)
+  (* and vio_Height                                                 *)
+
+  function Driver_Restore_Mode : boolean;
+  (* Restore previous mode or release display buffer/window *)
+
+  procedure Driver_Display_Bitmap( var buff; line, col : Int );
+  (* Display bitmap on screen *)
+
+implementation
+
+{$IFDEF OS2}
+
+  uses Os2Base, CRT;
+  {$I GDRV_OS2.INC}
+
+{$ELSE}
+
+  uses CRT;
+  {$I GDRV_DOS.INC}
+
+{$ENDIF}
+
+type
+  Translator = record
+                 key      : char;
+                 ev_class : GEvent;
+                 ev_info  : Int;
+               end;
+
+const
+  Num_Translators = 15;
+
+  Translators : array[1..Num_Translators] of Translator
+              = (
+                  (key:#27; ev_class:event_Quit ;         ev_info:0),
+
+                  (key:'x'; ev_class: event_Rotate_Glyph; ev_info:  -1),
+                  (key:'c'; ev_class: event_Rotate_Glyph; ev_info:   1),
+                  (key:'v'; ev_class: event_Rotate_Glyph; ev_info: -16),
+                  (key:'b'; ev_class: event_Rotate_Glyph; ev_info:  16),
+
+                  (key:'9'; ev_class: event_Change_Glyph; ev_info:-100),
+                  (key:'0'; ev_class: event_Change_Glyph; ev_info: 100),
+                  (key:'i'; ev_class: event_Change_Glyph; ev_info: -10),
+                  (key:'o'; ev_class: event_Change_Glyph; ev_info:  10),
+                  (key:'k'; ev_class: event_Change_Glyph; ev_info:  -1),
+                  (key:'l'; ev_class: event_Change_Glyph; ev_info:   1),
+
+                  (key:'+'; ev_class: event_Scale_Glyph; ev_info:  10),
+                  (key:'-'; ev_class: event_Scale_Glyph; ev_info: -10),
+                  (key:'u'; ev_class: event_Scale_Glyph; ev_info:   1),
+                  (key:'j'; ev_class: event_Scale_Glyph; ev_info:  -1)
+                );
+
+  procedure Get_Event( var ev : Event );
+  var
+    i : Int;
+    c : char;
+  begin
+    c := ReadKey;
+
+    for i := 1 to Num_Translators do
+    begin
+      if c = translators[i].key then
+      begin
+        ev.what := translators[i].ev_class;
+        ev.info := translators[i].ev_info;
+        exit;
+      end;
+    end;
+
+    (* unrecognized keystroke *)
+
+    ev.what := event_Keyboard;
+    ev.info := Int(c);
+  end;
+
+end.
+
+@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@@
+
+
+1.1.9.1
+log
+@OpenBSD just has imported exactly this tree into their vendor branch,
+called the same tag, in XF4/xc
+This is, apparently, the last XFree86 snapshot before the licence change
+(ie, addition of the advertising clause)
+
+Since the developers don't see any problems with that, and we would like
+to integrate improvements done by the remaining one or two (or so) XFree86
+developers (j/k), this prepares enabling us to update X-Window in the future.
+@
+text
+@@
+
+
+1.1.1.1
+log
+@Import OpenBSD 3.3 XF4 repository from CTM 3132 the first time
+This finalizes starting an OpenBSD-mirabile (aka MirBSD) repository.
+
+### MirBSD is:
+# Copyright (c) 1982-2003 by Thorsten "mirabile" Glaser <x86@@ePost.de>
+# Copyright © 1968-2003  The authors of And contributors to UNIX®, the
+#       C Language, BSD/Berkeley Unix; 386BSD, NetBSD 1.1 and OpenBSD.
+#
+# Anyone who obtained a copy of this work is hereby permitted to freely use,
+# distribute, modify, merge, sublicence, give away or sell it as long as the
+# authors are given due credit and the following notice is retained:
+#
+# This work is provided "as is", with no explicit or implicit warranty what-
+# soever. Use it only at your own risk. In no event may an author or contri-
+# butor be held liable for any damage, directly or indirectly, that origina-
+# ted through or is caused by creation or modification of this work.
+
+MirBSD is my private tree. MirBSD does not differ very much from OpenBSD
+and intentionally tracks OpenBSD. That's why it _is_ OpenBSD, just not the
+official one. It's like with DarrenBSD.
+
+At time of this writing, no advertising for MirBSD must be done,
+because the advertising clause has not yet been sorted out.
+
+http://templeofhate.com/tglaser/MirBSD/index.php
+@
+text
+@@

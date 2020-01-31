@@ -1,0 +1,329 @@
+head	1.2;
+branch	1.1.1;
+access;
+symbols
+	tg-mergetmp-2:1.1.1.2
+	cvs-200410241530:1.1.1.2
+	cvs-200410012000:1.1.1.2
+	cvs-200407141120:1.1.1.2
+	cvs-200406231010:1.1.1.2
+	MIRBSD_7quater:1.1.1.1
+	cvs-200405271510:1.1.1.2
+	XFree86_4_4_0:1.1.9.1
+	cvs-200403021700:1.1.1.2
+	XFREE86_20040213:1.1.9.1
+	xc:1.1.9
+	cvs-200401291925:1.1.1.1
+	MIRBSD_7_ALPHA:1.1.1.1.0.4
+	MIRBSD_7:1.1.1.1.0.2
+	MIRBSD_7ter:1.1.1.1
+	cvs-20011091815:1.1.1.1
+	cvs-200309162130:1.1.1.1
+	cvs-200308302005:1.1.1.1
+	ctmx-0387:1.1.1.1
+	ctmx-0384:1.1.1.1
+	MIRBSD_5:1.1.1.1
+	ctmx-0375:1.1.1.1
+	ctmx-0373:1.1.1.1
+	ctm-0371:1.1.1.1
+	ctm-0370:1.1.1.1
+	MIRBSD_4:1.1.1.1
+	ctm-0363:1.1.1.1
+	ctm-0359:1.1.1.1
+	openbsd:1.1.1;
+locks; strict;
+comment	@ * @;
+
+
+1.2
+date	2003.05.16.16.29.03;	author tg;	state dead;
+branches;
+next	1.1;
+
+1.1
+date	2003.04.08.18.20.16;	author tg;	state Exp;
+branches
+	1.1.1.1
+	1.1.9.1;
+next	;
+
+1.1.1.1
+date	2003.04.08.18.20.16;	author tg;	state Exp;
+branches;
+next	1.1.1.2;
+
+1.1.1.2
+date	2004.03.02.17.30.40;	author tg;	state Stab;
+branches;
+next	;
+
+1.1.9.1
+date	2004.02.14.19.05.20;	author tg;	state Exp;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.2
+log
+@remove a bunch of files not used in MirBSD - clean tree. People who want them got cvs.
+@
+text
+@/* $Id: t_dd_imm_vb.c,v 1.1 2003/04/08 18:20:16 tg Exp $ */
+
+/*
+ * Mesa 3-D graphics library
+ * Version:  3.5
+ *
+ * Copyright (C) 1999-2001  Brian Paul   All Rights Reserved.
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a
+ * copy of this software and associated documentation files (the "Software"),
+ * to deal in the Software without restriction, including without limitation
+ * the rights to use, copy, modify, merge, publish, distribute, sublicense,
+ * and/or sell copies of the Software, and to permit persons to whom the
+ * Software is furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included
+ * in all copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
+ * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL
+ * BRIAN PAUL BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN
+ * AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
+ * CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+ *
+ * Authors:
+ *    Keith Whitwell <keith_whitwell@@yahoo.com>
+ */
+
+/* Template to build clipping routines to support t_dd_imm_primtmp.h.
+ *
+ * The TAG(draw_line) and TAG(draw_triangle) routines are called in
+ * clipping and fallback scenarios, and when the native hardware
+ * primitive (eg polygons) is unavailable.
+ */
+
+
+#define CLIP_DOTPROD(K, A, B, C, D)		\
+   (CLIP_X(K)*A + CLIP_Y(K)*B + 	\
+    CLIP_Z(K)*C + CLIP_W(K)*D)
+
+#define POLY_CLIP( PLANE, A, B, C, D )					\
+do {									\
+   if (mask & PLANE) {							\
+      TNL_VERTEX **indata = inlist[in];					\
+      TNL_VERTEX **outdata = inlist[in ^= 1];				\
+      TNL_VERTEX *J = indata[0];					\
+      GLfloat dpJ = CLIP_DOTPROD(J, A, B, C, D );			\
+      GLuint outcount = 0;						\
+      GLuint i;								\
+									\
+      indata[n] = indata[0]; /* prevent rotation of vertices */		\
+      for (i = 1; i <= n; i++) {					\
+	 TNL_VERTEX *I = indata[i];					\
+	 GLfloat dpI = CLIP_DOTPROD(idx, A, B, C, D );			\
+									\
+	 if (!NEGATIVE(dpPrev)) {					\
+	    outdata[outcount++] = J;					\
+	 }								\
+									\
+	 if (DIFFERENT_SIGNS(dpI, dpJ)) {				\
+            TNL_VERTEX *O = verts++;					\
+            outdata[outcount++] = O;					\
+	    if (NEGATIVE(dpI)) {					\
+	       /* Going out of bounds.  Avoid division by zero as we	\
+		* know dp != dpPrev from DIFFERENT_SIGNS, above.	\
+		*/							\
+	       GLfloat t = dpI / (dpI - dpJ);				\
+      	       INTERP( ctx, t, O, I, J );				\
+	    } else {							\
+	       /* Coming back in.					\
+		*/							\
+	       GLfloat t = dpJ / (dpJ - dpI);				\
+	       INTERP( ctx, t, O, J, I );				\
+	    }								\
+	 }								\
+									\
+	 J = I;								\
+	 dpJ = dpI;							\
+      }									\
+									\
+      if (outcount < 3)							\
+	 return;							\
+									\
+      nr = outcount;							\
+   }									\
+} while (0)
+
+
+#define LINE_CLIP(PLANE, A, B, C, D )			\
+do {							\
+   if (mask & PLANE) {					\
+      GLfloat dpI = CLIP_DOTPROD( I, A, B, C, D );	\
+      GLfloat dpJ = CLIP_DOTPROD( J, A, B, C, D );	\
+							\
+      if (DIFFERENT_SIGNS(dpI, dpJ)) {			\
+         TNL_VERTEX *O = verts++;			\
+	 if (NEGATIVE(dpJ)) {				\
+	    GLfloat t = dpI / (dpI - dpJ);		\
+	    INTERP( ctx, t, O, I, J );	\
+            J = O;					\
+	 } else {					\
+  	    GLfloat t = dpJ / (dpJ - dpI);		\
+	    INTERP( ctx, t, O, J, I );	\
+            I = O;					\
+	 }						\
+      }							\
+      else if (NEGATIVE(dpI))				\
+	 return;					\
+  }							\
+} while (0)
+
+
+
+/* Clip a line against the viewport and user clip planes.
+ */
+static void TAG(clip_draw_line)( GLcontext *ctx,
+				 TNL_VERTEX *I,
+				 TNL_VERTEX *J,
+				 GLuint mask )
+{
+   LOCAL_VARS;
+   GET_INTERP_FUNC;
+   TNL_VERTEX tmp[MAX_CLIPPED_VERTICES];
+   TNL_VERTEX *verts = tmp;
+   TNL_VERTEX *pv = J;
+
+   LINE_CLIP( CLIP_RIGHT_BIT,  -1,  0,  0, 1 );
+   LINE_CLIP( CLIP_LEFT_BIT,    1,  0,  0, 1 );
+   LINE_CLIP( CLIP_TOP_BIT,     0, -1,  0, 1 );
+   LINE_CLIP( CLIP_BOTTOM_BIT,  0,  1,  0, 1 );
+   LINE_CLIP( CLIP_FAR_BIT,     0,  0, -1, 1 );
+   LINE_CLIP( CLIP_NEAR_BIT,    0,  0,  1, 1 );
+
+   if ((ctx->_TriangleCaps & DD_FLATSHADE) && J != pv)
+      COPY_PV( ctx, J, pv );
+
+   DRAW_LINE( I, J );
+}
+
+
+/* Clip a triangle against the viewport and user clip planes.
+ */
+static void TAG(clip_draw_triangle)( GLcontext *ctx,
+				     TNL_VERTEX *v0,
+				     TNL_VERTEX *v1,
+				     TNL_VERTEX *v2,
+				     GLuint mask )
+{
+   LOCAL_VARS;
+   GET_INTERP_FUNC;
+   TNL_VERTEX tmp[MAX_CLIPPED_VERTICES];
+   TNL_VERTEX *verts = tmp;
+   TNL_VERTEX *(inlist[2][MAX_CLIPPED_VERTICES]);
+   TNL_VERTEX **out;
+   GLuint in = 0;
+   GLuint n = 3;
+   GLuint i;
+
+   ASSIGN_3V(inlist, v2, v0, v1 ); /* pv rotated to slot zero */
+
+   POLY_CLIP( CLIP_RIGHT_BIT,  -1,  0,  0, 1 );
+   POLY_CLIP( CLIP_LEFT_BIT,    1,  0,  0, 1 );
+   POLY_CLIP( CLIP_TOP_BIT,     0, -1,  0, 1 );
+   POLY_CLIP( CLIP_BOTTOM_BIT,  0,  1,  0, 1 );
+   POLY_CLIP( CLIP_FAR_BIT,     0,  0, -1, 1 );
+   POLY_CLIP( CLIP_NEAR_BIT,    0,  0,  1, 1 );
+
+   if ((ctx->_TriangleCaps & DD_FLATSHADE) && v2 != inlist[0]) 
+      COPY_PV( ctx, inlist[0], v2 );
+
+   out = inlist[in];
+   DRAW_POLYGON( out, n );
+}
+
+
+static __inline void TAG(draw_triangle)( GLcontext *ctx,
+					 TNL_VERTEX *v0,
+					 TNL_VERTEX *v1,
+					 TNL_VERTEX *v2 )
+{
+   LOCAL_VARS;
+   GLubyte ormask = (v0->mask | v1->mask | v2->mask);
+
+   if ( !ormask ) {
+      DRAW_TRI( v0, v1, v2 );
+   } else if ( !(v0->mask & v1->mask & v2->mask) ) {
+      TAG(clip_draw_triangle)( ctx, v0, v1, v2, ormask );
+   }
+}
+
+static __inline void TAG(draw_line)( GLcontext *ctx,
+				     TNL_VERTEX *v0,
+				     TNL_VERTEX *v1 )
+{
+   LOCAL_VARS;
+   GLubyte ormask = (v0->mask | v1->mask);
+
+   if ( !ormask ) {
+      DRAW_LINE( v0, v1 );
+   } else if ( !(v0->mask & v1->mask) ) {
+      TAG(clip_draw_line)( ctx, v0, v1, ormask );
+   }
+}
+
+@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@d1 1
+a1 1
+/* $Id: t_dd_imm_vb.c,v 1.2 2003/04/01 22:36:10 matthieu Exp $ */
+@
+
+
+1.1.9.1
+log
+@OpenBSD just has imported exactly this tree into their vendor branch,
+called the same tag, in XF4/xc
+This is, apparently, the last XFree86 snapshot before the licence change
+(ie, addition of the advertising clause)
+
+Since the developers don't see any problems with that, and we would like
+to integrate improvements done by the remaining one or two (or so) XFree86
+developers (j/k), this prepares enabling us to update X-Window in the future.
+@
+text
+@d1 1
+@
+
+
+1.1.1.1
+log
+@The X-Windowing System
+
+Import XFree86 4.3 from OpenBSD by CTM, in the hope it's stable
+@
+text
+@@
+
+
+1.1.1.2
+log
+@That's what OpenBSD will, probably, ship as XF4 in 3.5
+their last sync against XFree86 4.3-current has been
+imported into our vendor branch, too
+@
+text
+@d1 1
+@
+

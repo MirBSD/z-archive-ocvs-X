@@ -1,0 +1,1170 @@
+head	1.9;
+access;
+symbols
+	tg-mergetmp-2:1.9
+	MIRBSD_7quater:1.6
+	evilwm_0_99_17:1.1.3.1
+	MIRBSD_7_ALPHA:1.6.0.4
+	MIRBSD_7:1.6.0.2
+	MIRBSD_7ter:1.6
+	evilwm_0_99_16:1.1.1.2
+	evilwm_0_99_14:1.1.1.1
+	tg:1.1.3
+	MIRBSD_5:1.2
+	MIRBSD_4:1.2;
+locks; strict;
+comment	@ * @;
+
+
+1.9
+date	2004.08.21.16.19.36;	author tg;	state Stab;
+branches;
+next	1.8;
+
+1.8
+date	2004.07.29.11.19.33;	author tg;	state Exp;
+branches;
+next	1.7;
+
+1.7
+date	2004.01.31.02.17.20;	author tg;	state Exp;
+branches;
+next	1.6;
+
+1.6
+date	2003.09.18.19.20.21;	author tg;	state Exp;
+branches;
+next	1.5;
+
+1.5
+date	2003.07.07.22.13.21;	author tg;	state Exp;
+branches;
+next	1.4;
+
+1.4
+date	2003.07.07.22.12.38;	author tg;	state Exp;
+branches;
+next	1.3;
+
+1.3
+date	2003.07.07.22.03.17;	author tg;	state Exp;
+branches;
+next	1.2;
+
+1.2
+date	2003.04.15.09.56.02;	author tg;	state Exp;
+branches;
+next	1.1;
+
+1.1
+date	2003.04.10.14.50.35;	author tg;	state Exp;
+branches
+	1.1.1.1
+	1.1.3.1;
+next	;
+
+1.1.1.1
+date	2003.09.18.18.43.44;	author tg;	state Exp;
+branches;
+next	1.1.1.2;
+
+1.1.1.2
+date	2003.09.18.19.11.36;	author tg;	state Exp;
+branches;
+next	;
+
+1.1.3.1
+date	2004.01.29.19.07.54;	author tg;	state Exp;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.9
+log
+@update to new-style licence template
+@
+text
+@/**	$MirBSD: src/share/misc/licence.template,v 1.14 2004/08/15 15:29:11 tg Rel $ */
+
+/*-
+ * Copyright (c) 2003, 2004
+ *	Thorsten "mirabile" Glaser <tg@@66h.42h.de>
+ *
+ * Licensee is hereby permitted to deal in this work without restric-
+ * tion, including unlimited rights to use, publically perform, modi-
+ * fy, merge, distribute, sell, give away or sublicence, provided the
+ * above copyright notices, these terms and the disclaimer are retai-
+ * ned in all redistributions, or reproduced in accompanying documen-
+ * tation or other materials provided with binary redistributions.
+ *
+ * Licensor hereby provides this work "AS IS" and WITHOUT WARRANTY of
+ * any kind, expressed or implied, to the maximum extent permitted by
+ * applicable law, but with the warranty of being written without ma-
+ * licious intent or gross negligence; in no event shall licensor, an
+ * author or contributor be held liable for any damage, direct, indi-
+ * rect or other, however caused, arising in any way out of the usage
+ * of covered work, even if advised of the possibility of such damage.
+ */
+
+/* evilwm - Minimalist Window Manager for X
+ * Copyright (C) 1999-2002 Ciaran Anscomb <evilwm@@6809.org.uk>
+ * see README for license and other details. */
+
+#include "evilwm.h"
+#include <stdlib.h>
+#include <string.h>
+#include <signal.h>
+#include <X11/cursorfont.h>
+#include <stdio.h>
+#ifdef SHAPE
+#include <X11/extensions/shape.h>
+#endif
+
+Display		*dpy;
+int 		num_screens;
+ScreenInfo	*screens;
+ScreenInfo	*current_screen;
+Client		*current = NULL;
+Window		initialising = None;
+XFontStruct	*font;
+Client		*head_client;
+Atom		xa_wm_state;
+Atom		xa_wm_change_state;
+Atom		xa_wm_protos;
+Atom		xa_wm_delete;
+Atom		xa_wm_cmapwins;
+Cursor		move_curs;
+Cursor		resize_curs;
+const char	*opt_display = "";
+const char	*opt_font = DEF_FONT;
+const char	*opt_fg = DEF_FG;
+const char	*opt_bg = DEF_BG;
+const char	**opt_term = NULL;
+int		opt_bw = DEF_BW;
+#ifdef VWM
+const char	*opt_fc = DEF_FC;
+int		vdesk = KEY_TO_VDESK(XK_1);
+#endif
+#ifdef SNAP
+int		opt_snap = 0;
+#endif
+#ifdef SHAPE
+int		have_shape, shape_event;
+#endif
+int		quitting = 0;
+#ifdef MWM_HINTS
+Atom		mwm_hints;
+#endif
+unsigned int numlockmask = 0;
+
+static void *xmalloc(size_t size);
+
+static void *xmalloc(size_t size) {
+	void *ptr = malloc(size);
+	if (!ptr) {
+#ifdef STDIO
+		fprintf(stderr,"out of memory, looking for %d bytes\n",size);
+#endif
+		exit(1);
+	}
+	return ptr;
+}
+
+int main(int argc, char *argv[]) {
+	struct sigaction act;
+	int i;
+	XEvent ev;
+
+	for (i = 1; i < argc; i++) {
+		if (!strcmp(argv[i], "-fn") && i+1<argc)
+			opt_font = argv[++i];
+		else if (!strcmp(argv[i], "-display") && i+1<argc) {
+			opt_display = argv[++i];
+		}
+		else if (!strcmp(argv[i], "-fg") && i+1<argc)
+			opt_fg = argv[++i];
+		else if (!strcmp(argv[i], "-bg") && i+1<argc)
+			opt_bg = argv[++i];
+#ifdef VWM
+		else if (!strcmp(argv[i], "-fc") && i+1<argc)
+			opt_fc = argv[++i];
+#endif
+		else if (!strcmp(argv[i], "-bw") && i+1<argc)
+			opt_bw = atoi(argv[++i]);
+		else if (!strcmp(argv[i], "-term") && i+1<argc) {
+			opt_term = (const char **)xmalloc(3 * sizeof(const char *));
+			opt_term[0] = argv[++i];
+			opt_term[1] = opt_term[0];
+			opt_term[2] = NULL;
+		} else if (!strcmp(argv[i], "-snap") && i+1<argc) {
+			opt_snap = atoi(argv[++i]);
+#ifdef STDIO
+		} else if (!strcmp(argv[i], "-V")) {
+			printf("evilwm version " VERSION " $MirBSD: src/X-Window/extras/evilwm/main.c,v 1.8 2004/07/29 11:19:33 tg Exp $\n");
+			exit(0);
+#endif
+		} else {
+#ifdef STDIO
+			printf("usage: evilwm [-display display] [-term termprog] [-fg foreground]\n");
+			printf("\t[-bg background] [-bw borderwidth] [-snap num] [-V]\n");
+#endif
+			exit(2);
+		}
+	}
+	if (!opt_term) {
+		opt_term = (const char **)xmalloc(3 * sizeof(const char *));
+		opt_term[0] = DEF_TERM;
+		opt_term[1] = opt_term[0];
+		opt_term[2] = NULL;
+	}
+
+	act.sa_handler = handle_signal;
+	sigemptyset(&act.sa_mask);
+	act.sa_flags = 0;
+	sigaction(SIGTERM, &act, NULL);
+	sigaction(SIGINT, &act, NULL);
+	sigaction(SIGHUP, &act, NULL);
+
+	setup_display();
+
+#ifdef SHAPE
+	have_shape = XShapeQueryExtension(dpy, &shape_event, &i);
+#endif
+
+	/* main event loop here */
+	for (;;) {
+		XNextEvent(dpy, &ev);
+		switch (ev.type) {
+			case KeyPress:
+				handle_key_event(&ev.xkey); break;
+#ifdef MOUSE
+			case ButtonPress:
+				handle_button_event(&ev.xbutton); break;
+#endif
+			case ConfigureRequest:
+				handle_configure_request(&ev.xconfigurerequest); break;
+			case MapRequest:
+				handle_map_request(&ev.xmaprequest); break;
+#ifdef VDESK
+			case ClientMessage:
+				handle_client_message(&ev.xclient); break;
+#endif
+#ifdef COLOURMAP
+			case ColormapNotify:
+				handle_colormap_change(&ev.xcolormap); break;
+#endif
+			case EnterNotify:
+				handle_enter_event(&ev.xcrossing); break;
+			case LeaveNotify:
+				handle_leave_event(&ev.xcrossing); break;
+			case PropertyNotify:
+				handle_property_change(&ev.xproperty); break;
+			case UnmapNotify:
+				handle_unmap_event(&ev.xunmap); break;
+			default:
+#ifdef SHAPE
+				if (have_shape && ev.type == shape_event) {
+					handle_shape_event((XShapeEvent *)&ev);
+				}
+#endif
+		}
+	}
+	return 1;
+}
+
+void setup_display() {
+	XGCValues gv;
+	XSetWindowAttributes attr;
+	XColor dummy;
+	XModifierKeymap *modmap;
+	KeySym *keysym;
+	KeySym keys_to_grab[] = {
+		KEY_NEW, KEY_KILL,
+		KEY_TOPLEFT, KEY_TOPRIGHT, KEY_BOTTOMLEFT, KEY_BOTTOMRIGHT,
+		KEY_LEFT, KEY_RIGHT, KEY_DOWN, KEY_UP,
+		KEY_SLEFT, KEY_SRIGHT, KEY_SDOWN, KEY_SUP,
+		KEY_LOWER, KEY_ALTLOWER, KEY_INFO, KEY_MAXVERT, KEY_MAX,
+#ifdef VWM
+		KEY_FIX, KEY_PREVDESK, KEY_NEXTDESK,
+		XK_1, XK_2, XK_3, XK_4, XK_5, XK_6, XK_7, XK_8,
+#endif
+		KEY_EXITF, KEY_ALTEXITF,
+		0
+	};
+	/* used in scanning windows (XQueryTree) */
+	unsigned int i, j, nwins;
+	Window dw1, dw2, *wins;
+	XWindowAttributes winattr;
+
+	dpy = XOpenDisplay(opt_display);
+	if (!dpy) {
+#ifdef STDIO
+		fprintf(stderr, "can't open display %s\n", opt_display);
+#endif
+		exit(1);
+	}
+	XSetErrorHandler(handle_xerror);
+
+	xa_wm_state = XInternAtom(dpy, "WM_STATE", False);
+	xa_wm_change_state = XInternAtom(dpy, "WM_CHANGE_STATE", False);
+	xa_wm_protos = XInternAtom(dpy, "WM_PROTOCOLS", False);
+	xa_wm_delete = XInternAtom(dpy, "WM_DELETE_WINDOW", False);
+#ifdef COLOURMAP
+	xa_wm_cmapwins = XInternAtom(dpy, "WM_COLORMAP_WINDOWS", False);
+#endif
+#ifdef MWM_HINTS
+	mwm_hints = XInternAtom(dpy, _XA_MWM_HINTS, False);
+#endif
+
+	font = XLoadQueryFont(dpy, opt_font);
+	if (!font) font = XLoadQueryFont(dpy, DEF_FONT);
+
+	move_curs = XCreateFontCursor(dpy, XC_fleur);
+	resize_curs = XCreateFontCursor(dpy, XC_plus);
+
+	/* find out which modifier is NumLock - we'll use this when grabbing
+	 * every combination of modifiers we can think of */
+	modmap = XGetModifierMapping(dpy);
+	for (i = 0; i < 8; i++) {
+		for (j = 0; j < modmap->max_keypermod; j++) {
+			if (modmap->modifiermap[i*modmap->max_keypermod+j] == XKeysymToKeycode(dpy, XK_Num_Lock)) {
+				numlockmask = (1<<i);
+#ifdef DEBUG
+				fprintf(stderr, "setup_display() : XK_Num_Lock is (1<<0x%02x)\n", i);
+#endif
+			}
+		}
+	}
+	XFreeModifiermap(modmap);
+
+	/* set up GC parameters - same for each screen */
+	gv.function = GXinvert;
+	gv.subwindow_mode = IncludeInferiors;
+	gv.line_width = 1;  /* opt_bw */
+	gv.font = font->fid;
+
+	/* set up root window attributes - same for each screen */
+	attr.event_mask = ChildMask | PropertyChangeMask | EnterWindowMask | LeaveWindowMask
+#ifdef COLOURMAP
+		| ColormapChangeMask
+#endif
+#ifdef MOUSE
+		| ButtonMask
+#endif
+		;
+
+	/* now set up each screen in turn */
+	num_screens = ScreenCount(dpy);
+	screens = (ScreenInfo *)xmalloc(num_screens * sizeof(ScreenInfo));
+	for (i = 0; i < num_screens; i++) {
+		char *ds, *colon, *dot;
+		ds = DisplayString(dpy);
+		/* set up DISPLAY environment variable to use */
+		colon = rindex(ds, ':');
+		if (colon && num_screens > 1) {
+			int xlen = 14 + strlen(ds);
+
+			screens[i].display = (char *)xmalloc(xlen);
+			strlcpy(screens[i].display, "DISPLAY=", xlen);
+			strlcat(screens[i].display, ds, xlen);
+			colon = rindex(screens[i].display, ':');
+			dot = index(colon, '.');
+			if (!dot)
+				dot = colon + strlen(colon);
+			snprintf(dot, 5, ".%d", i);
+		} else
+			screens[i].display = NULL;
+
+		screens[i].screen = i;
+		screens[i].root = RootWindow(dpy, i);
+
+		XAllocNamedColor(dpy, DefaultColormap(dpy, i), opt_fg, &screens[i].fg, &dummy);
+		XAllocNamedColor(dpy, DefaultColormap(dpy, i), opt_bg, &screens[i].bg, &dummy);
+#ifdef VWM
+		XAllocNamedColor(dpy, DefaultColormap(dpy, i), opt_fc, &screens[i].fc, &dummy);
+#endif
+
+		screens[i].invert_gc = XCreateGC(dpy, screens[i].root, GCFunction | GCSubwindowMode | GCLineWidth | GCFont, &gv);
+
+		XChangeWindowAttributes(dpy, screens[i].root, CWEventMask, &attr);
+		/* Unfortunately grabbing AnyKey under Solaris seems not to work */
+		/* XGrabKey(dpy, AnyKey, ControlMask|Mod1Mask, root, True, GrabModeAsync, GrabModeAsync); */
+		/* So now I grab each and every one. */
+
+		for (keysym = keys_to_grab; *keysym; keysym++) {
+			grab_keysym(screens[i].root, ControlMask|Mod1Mask, *keysym);
+		}
+		grab_keysym(screens[i].root, Mod1Mask, XK_Tab);
+
+		/* scan all the windows on this screen */
+#ifdef XDEBUG
+		fprintf(stderr, "main:XQueryTree(); ");
+#endif
+		XQueryTree(dpy, screens[i].root, &dw1, &dw2, &wins, &nwins);
+#ifdef XDEBUG
+		fprintf(stderr, "%d windows\n", nwins);
+#endif
+		for (j = 0; j < nwins; j++) {
+			XGetWindowAttributes(dpy, wins[j], &winattr);
+			if (!winattr.override_redirect && winattr.map_state == IsViewable)
+				make_new_client(wins[j], &screens[i]);
+		}
+		XFree(wins);
+	}
+	current_screen = find_screen(DefaultScreen(dpy));
+}
+@
+
+
+1.8
+log
+@* use window's hints as the account to be resized by by default,
+  not a fixed value of 16 (thanks to ciruz (Jonathan Schleifer) for
+  mentioning this value exists)
+* move check if hints are <1 to after all hints have been received
+  from the X server and application (could have been overridden)
+* don't let the user resize a window by keyboard to less than one
+  (1) pixel width and height
+* update licence template
+* CFLAGS -> CPPFLAGS in Makefile, as usual
+@
+text
+@d1 3
+a3 2
+/* $MirBSD: src/share/misc/licence.template,v 1.11 2004/05/28 15:34:01 tg Rel $
+ *-
+d117 1
+a117 1
+			printf("evilwm version " VERSION " $MirBSD: src/X-Window/extras/evilwm/main.c,v 1.7 2004/01/31 02:17:20 tg Exp $\n");
+@
+
+
+1.7
+log
+@* this time, make b-r for real
+* including X-Window
+* merge evilwm import
+* install all .cf etc. files, especially the MirBSD.cf one
+* cope in X for MirOS changes
+* refine anoncvssh: all defines in Makefile, etc.
+* cope for XFree86 1.1 licence
+* merge nlist.c import
+* nuke unused files
+* remove warnings
+* fix really bogus bug in rcdb again
+* offer bsd.slim for installation
+* fix the default route bug
+* sync distrib stuff
+(...)
+
+thanks for alpha-testing to
+ * Jannis "Kabelaffe" Konrad
+ * José António "T0ni" "jesus_" Matias de Jesus
+@
+text
+@d1 1
+a1 1
+/* $MirBSD: licence.template,v 1.8 2003/12/17 14:35:00 tg Exp $
+d4 1
+a4 1
+ *	Thorsten "mirabile" Glaser <x86@@ePost.de>
+d6 6
+a11 6
+ * Subject to these terms, everybody who obtained a copy of this work
+ * is hereby permitted to deal in the work without restriction inclu-
+ * ding without limitation the rights to use, distribute, sell, modi-
+ * fy, publically perform, give away, merge or sublicence it provided
+ * this notice is kept and the authors and contributors are given due
+ * credit in derivates or accompanying documents.
+d13 7
+a19 5
+ * This work is provided "as is" with no explicit or implicit warran-
+ * ties whatsoever to the maximum extent permitted by applicable law;
+ * in no event may an author or contributor be held liable for damage
+ * that is, directly or indirectly, caused by the work, even if advi-
+ * sed of the possibility of such damage.
+d116 1
+a116 1
+			printf("evilwm version " VERSION " $MirBSD: main.c,v 1.6 2003/09/18 19:20:21 tg Exp $\n");
+@
+
+
+1.6
+log
+@Upgrade evilwm to 0.99.16-mirbsd.
+
+This work sponsored by: NetzLaden.org
+@
+text
+@d1 1
+a1 1
+/* $MirBSD: main.c,v 1.5 2003/07/07 22:13:21 tg Exp $
+d3 2
+a4 1
+ * Copyright (c) 2003 Thorsten Glaser <x86@@ePost.de>
+d9 1
+a9 1
+ * fy, publically perform, give away, merge or sublicense it provided
+d12 1
+d14 1
+a14 1
+ * ties whatsoever to the maximum extend permitted by applicable law;
+d59 3
+d110 2
+d114 1
+a114 1
+			printf("evilwm version " VERSION " $MirBSD: main.c,v 1.5 2003/07/07 22:13:21 tg Exp $\n");
+d120 1
+a120 1
+			printf("\t[-bg background] [-bw borderwidth] [-V]\n");
+d211 1
+a211 1
+	if (!dpy) { 
+d276 5
+a280 3
+			screens[i].display = (char *)xmalloc(14 + strlen(ds));
+			strcpy(screens[i].display, "DISPLAY=");
+			strcat(screens[i].display, ds);
+@
+
+
+1.5
+log
+@MirBSD version
+@
+text
+@d1 1
+a1 1
+/* $MirBSD: main.c,v 1.4 2003/07/07 22:12:38 tg Exp $
+a32 10
+/*
+int		screen;
+Window		root;
+GC		invert_gc;
+#ifdef VWM
+XColor		fg, bg, fc;
+#else
+XColor		fg, bg;
+#endif
+*/
+d47 5
+a51 5
+char		*opt_display = "";
+char		*opt_font = DEF_FONT;
+char		*opt_fg = DEF_FG;
+char		*opt_bg = DEF_BG;
+char		**opt_term = NULL;
+d54 1
+a54 1
+char		*opt_fc = DEF_FC;
+d66 13
+d101 1
+a101 1
+			opt_term = (char **)malloc(3 * sizeof(char *));
+d107 1
+a107 1
+			printf("evilwm version " VERSION " $MirBSD$\n");
+d119 1
+a119 1
+		opt_term = (char **)malloc(3 * sizeof(char *));
+a126 3
+/* #ifdef SA_NOCLDSTOP */
+/*	act.sa_flags = SA_NOCLDSTOP; */ /* don't care about STOP, CONT */
+/* #else */
+a127 1
+/* #endif */
+a130 1
+	/* sigaction(SIGCHLD, &act, NULL); */ /* handling this differently */
+a167 2
+			/* case Expose:
+				handle_expose_event(&ev.xexpose); break; */
+d242 1
+a242 1
+	XFree(modmap);
+d262 1
+a262 1
+	screens = (ScreenInfo *)malloc(num_screens * sizeof(ScreenInfo));
+d269 1
+a269 1
+			screens[i].display = (char *)malloc(14 + strlen(ds));
+@
+
+
+1.4
+log
+@implement QWER resizing (by 16, no error checking)
+@
+text
+@d1 1
+a1 1
+/* $MirBSD: licence.template,v 1.4 2003/07/07 19:03:08 tg Exp $
+d104 1
+a104 1
+			printf("evilwm version " VERSION "\n");
+@
+
+
+1.3
+log
+@update to evilwm 0.99.14
+@
+text
+@d1 17
+d193 1
+@
+
+
+1.2
+log
+@Provide a way to exit evilwm.
+
+Since the switch to XFree86 4.3 I have been unable
+to zap the X server with ctrl-alt-backspace for
+unknown reason.
+@
+text
+@d16 1
+a16 1
+Client		*current = NULL;
+d20 11
+d44 1
+a44 1
+char		*opt_term;
+a46 1
+XColor		fg, bg, fc;
+d48 1
+a48 8
+# ifndef VDESK_BOTH
+ int		vdesk = XK_1;
+# endif
+#else
+XColor		fg, bg;
+#endif /* def VWM */
+#ifdef SANITY
+int		tracked_count = 0;
+d53 3
+a55 3
+#ifdef VDESK_BOTH
+Atom	vdesk_desktop;
+char * vdesk_property_name = DEF_VDESK_PROP;
+d57 1
+a57 1
+int		quitting = 0;
+d67 1
+a67 1
+		else if (!strcmp(argv[i], "-display") && i+1<argc)
+d69 1
+a77 4
+#ifdef VDESK_BOTH
+		else if (!strcmp(argv[i], "-deskprop") && i+1<argc)
+			vdesk_property_name = argv[++i];
+#endif
+d81 4
+a84 1
+			opt_term = argv[++i];
+a93 3
+# ifdef VDESK_BOTH
+			printf("\t[-deskprop name]\n");
+# endif
+d98 6
+a122 2
+	scan_windows();
+
+a124 3
+#ifdef SANITY
+		sanity_check();
+#endif
+d147 2
+d170 3
+a172 2
+	int *i;
+	int keys_to_grab[] = {
+d184 4
+a188 3
+#ifdef XDEBUG
+	fprintf(stderr, "main:XOpenDisplay(); ");
+#endif
+a197 3
+	screen = DefaultScreen(dpy);
+	root = RootWindow(dpy, screen);
+
+d205 2
+a206 9
+#ifdef VDESK_BOTH
+	vdesk_desktop = XInternAtom(dpy, vdesk_property_name, False);
+	SET_VDESK(1);
+#endif
+
+	XAllocNamedColor(dpy, DefaultColormap(dpy, screen), opt_fg, &fg, &dummy);
+	XAllocNamedColor(dpy, DefaultColormap(dpy, screen), opt_bg, &bg, &dummy);
+#ifdef VWM
+	XAllocNamedColor(dpy, DefaultColormap(dpy, screen), opt_fc, &fc, &dummy);
+d215 16
+a234 1
+	invert_gc = XCreateGC(dpy, root, GCFunction | GCSubwindowMode | GCLineWidth | GCFont, &gv);
+d236 2
+a237 1
+	attr.event_mask = ChildMask | PropertyChangeMask
+a244 11
+	XChangeWindowAttributes(dpy, root, CWEventMask, &attr);
+	/* Unfortunately grabbing AnyKey under Solaris seems not to work */
+	/* XGrabKey(dpy, AnyKey, ControlMask|Mod1Mask, root, True, GrabModeAsync, GrabModeAsync); */
+	/* So now I grab each and every one. */
+	for (i = keys_to_grab; *i; i++) {
+		XGrabKey(dpy, XKeysymToKeycode(dpy, *i), ControlMask|Mod1Mask, root, True, GrabModeAsync, GrabModeAsync);
+		XGrabKey(dpy, XKeysymToKeycode(dpy, *i), Mod3Mask|ControlMask|Mod1Mask, root, True, GrabModeAsync, GrabModeAsync);
+	}
+	XGrabKey(dpy, XKeysymToKeycode(dpy, XK_Tab), Mod1Mask, root, True, GrabModeAsync, GrabModeAsync);
+	XGrabKey(dpy, XKeysymToKeycode(dpy, XK_Tab), Mod3Mask|Mod1Mask, root, True, GrabModeAsync, GrabModeAsync);
+}
+d246 40
+a285 4
+void scan_windows() {
+	unsigned int i, nwins;
+	Window dw1, dw2, *wins;
+	XWindowAttributes attr;
+d287 1
+d289 1
+a289 1
+	fprintf(stderr, "main:XQueryTree(); ");
+d291 1
+a291 1
+	XQueryTree(dpy, root, &dw1, &dw2, &wins, &nwins);
+d293 1
+a293 1
+	fprintf(stderr, "%d windows\n", nwins);
+d295 6
+a300 4
+	for (i = 0; i < nwins; i++) {
+		XGetWindowAttributes(dpy, wins[i], &attr);
+		if (!attr.override_redirect && attr.map_state == IsViewable)
+			make_new_client(wins[i]);
+d302 1
+a302 1
+	XFree(wins);
+@
+
+
+1.1
+log
+@evilwm is a minimalist window manager for the X Window System.
+
+Features:
+* No window decorations apart from a simple 1 pixel border.
+* No icons.
+* Good keyboard control, including repositioning and maximise toggles.
+* Solid window drags.
+* Virtual desktops.
+* Small binary size.
+
+WWW: http://evilwm.sf.net/
+@
+text
+@d177 1
+@
+
+
+1.1.3.1
+log
+@evilwm 0.99.17
+@
+text
+@a15 3
+int 		num_screens;
+ScreenInfo	*screens;
+ScreenInfo	*current_screen;
+d17 3
+a19 1
+Window		initialising = None;
+d29 5
+a33 5
+const char	*opt_display = "";
+const char	*opt_font = DEF_FONT;
+const char	*opt_fg = DEF_FG;
+const char	*opt_bg = DEF_BG;
+const char	**opt_term = NULL;
+d36 10
+a45 5
+const char	*opt_fc = DEF_FC;
+int		vdesk = KEY_TO_VDESK(XK_1);
+#endif
+#ifdef SNAP
+int		opt_snap = 0;
+d50 4
+a54 17
+#ifdef MWM_HINTS
+Atom		mwm_hints;
+#endif
+unsigned int numlockmask = 0;
+
+static void *xmalloc(size_t size);
+
+static void *xmalloc(size_t size) {
+	void *ptr = malloc(size);
+	if (!ptr) {
+#ifdef STDIO
+		fprintf(stderr,"out of memory, looking for %d bytes\n",size);
+#endif
+		exit(1);
+	}
+	return ptr;
+}
+d64 1
+a64 1
+		else if (!strcmp(argv[i], "-display") && i+1<argc) {
+a65 1
+		}
+d74 4
+d81 1
+a81 6
+			opt_term = (const char **)xmalloc(3 * sizeof(const char *));
+			opt_term[0] = argv[++i];
+			opt_term[1] = opt_term[0];
+			opt_term[2] = NULL;
+		} else if (!strcmp(argv[i], "-snap") && i+1<argc) {
+			opt_snap = atoi(argv[++i]);
+d90 4
+a93 1
+			printf("\t[-bg background] [-bw borderwidth] [-snap num] [-V]\n");
+a97 6
+	if (!opt_term) {
+		opt_term = (const char **)xmalloc(3 * sizeof(const char *));
+		opt_term[0] = DEF_TERM;
+		opt_term[1] = opt_term[0];
+		opt_term[2] = NULL;
+	}
+d101 3
+d105 1
+d109 1
+d117 2
+d121 3
+a145 2
+			case LeaveNotify:
+				handle_leave_event(&ev.xcrossing); break;
+d150 2
+d167 2
+a168 3
+	XModifierKeymap *modmap;
+	KeySym *keysym;
+	KeySym keys_to_grab[] = {
+a178 4
+	/* used in scanning windows (XQueryTree) */
+	unsigned int i, j, nwins;
+	Window dw1, dw2, *wins;
+	XWindowAttributes winattr;
+d180 3
+d192 3
+d202 9
+a210 2
+#ifdef MWM_HINTS
+	mwm_hints = XInternAtom(dpy, _XA_MWM_HINTS, False);
+a218 16
+	/* find out which modifier is NumLock - we'll use this when grabbing
+	 * every combination of modifiers we can think of */
+	modmap = XGetModifierMapping(dpy);
+	for (i = 0; i < 8; i++) {
+		for (j = 0; j < modmap->max_keypermod; j++) {
+			if (modmap->modifiermap[i*modmap->max_keypermod+j] == XKeysymToKeycode(dpy, XK_Num_Lock)) {
+				numlockmask = (1<<i);
+#ifdef DEBUG
+				fprintf(stderr, "setup_display() : XK_Num_Lock is (1<<0x%02x)\n", i);
+#endif
+			}
+		}
+	}
+	XFreeModifiermap(modmap);
+
+	/* set up GC parameters - same for each screen */
+d223 1
+d225 1
+a225 2
+	/* set up root window attributes - same for each screen */
+	attr.event_mask = ChildMask | PropertyChangeMask | EnterWindowMask | LeaveWindowMask
+d233 11
+d245 4
+a248 19
+	/* now set up each screen in turn */
+	num_screens = ScreenCount(dpy);
+	screens = (ScreenInfo *)xmalloc(num_screens * sizeof(ScreenInfo));
+	for (i = 0; i < num_screens; i++) {
+		char *ds, *colon, *dot;
+		ds = DisplayString(dpy);
+		/* set up DISPLAY environment variable to use */
+		colon = rindex(ds, ':');
+		if (colon && num_screens > 1) {
+			screens[i].display = (char *)xmalloc(14 + strlen(ds));
+			strcpy(screens[i].display, "DISPLAY=");
+			strcat(screens[i].display, ds);
+			colon = rindex(screens[i].display, ':');
+			dot = index(colon, '.');
+			if (!dot)
+				dot = colon + strlen(colon);
+			snprintf(dot, 5, ".%d", i);
+		} else
+			screens[i].display = NULL;
+a249 22
+		screens[i].screen = i;
+		screens[i].root = RootWindow(dpy, i);
+
+		XAllocNamedColor(dpy, DefaultColormap(dpy, i), opt_fg, &screens[i].fg, &dummy);
+		XAllocNamedColor(dpy, DefaultColormap(dpy, i), opt_bg, &screens[i].bg, &dummy);
+#ifdef VWM
+		XAllocNamedColor(dpy, DefaultColormap(dpy, i), opt_fc, &screens[i].fc, &dummy);
+#endif
+
+		screens[i].invert_gc = XCreateGC(dpy, screens[i].root, GCFunction | GCSubwindowMode | GCLineWidth | GCFont, &gv);
+
+		XChangeWindowAttributes(dpy, screens[i].root, CWEventMask, &attr);
+		/* Unfortunately grabbing AnyKey under Solaris seems not to work */
+		/* XGrabKey(dpy, AnyKey, ControlMask|Mod1Mask, root, True, GrabModeAsync, GrabModeAsync); */
+		/* So now I grab each and every one. */
+
+		for (keysym = keys_to_grab; *keysym; keysym++) {
+			grab_keysym(screens[i].root, ControlMask|Mod1Mask, *keysym);
+		}
+		grab_keysym(screens[i].root, Mod1Mask, XK_Tab);
+
+		/* scan all the windows on this screen */
+d251 1
+a251 1
+		fprintf(stderr, "main:XQueryTree(); ");
+d253 1
+a253 1
+		XQueryTree(dpy, screens[i].root, &dw1, &dw2, &wins, &nwins);
+d255 1
+a255 1
+		fprintf(stderr, "%d windows\n", nwins);
+d257 4
+a260 6
+		for (j = 0; j < nwins; j++) {
+			XGetWindowAttributes(dpy, wins[j], &winattr);
+			if (!winattr.override_redirect && winattr.map_state == IsViewable)
+				make_new_client(wins[j], &screens[i]);
+		}
+		XFree(wins);
+d262 1
+a262 1
+	current_screen = find_screen(DefaultScreen(dpy));
+@
+
+
+1.1.1.1
+log
+@Move evilwm 0.99.14 to a vendor branch, too. Facilitates easier updating.
+@
+text
+@d16 1
+a16 1
+/*
+a19 11
+#ifdef VWM
+XColor		fg, bg, fc;
+#else
+XColor		fg, bg;
+#endif
+*/
+int 		num_screens;
+ScreenInfo	*screens;
+ScreenInfo	*current_screen;
+Client		*current = NULL;
+Window		initialising = None;
+d33 1
+a33 1
+char		**opt_term = NULL;
+d36 1
+d38 8
+a45 1
+int		vdesk = KEY_TO_VDESK(XK_1);
+d50 4
+a54 4
+#ifdef MWM_HINTS
+Atom		mwm_hints;
+#endif
+unsigned int numlockmask = 0;
+d64 1
+a64 1
+		else if (!strcmp(argv[i], "-display") && i+1<argc) {
+a65 1
+		}
+d74 4
+d81 1
+a81 4
+			opt_term = (char **)malloc(3 * sizeof(char *));
+			opt_term[0] = argv[++i];
+			opt_term[1] = opt_term[0];
+			opt_term[2] = NULL;
+d91 3
+a97 6
+	if (!opt_term) {
+		opt_term = (char **)malloc(3 * sizeof(char *));
+		opt_term[0] = DEF_TERM;
+		opt_term[1] = opt_term[0];
+		opt_term[2] = NULL;
+	}
+d117 2
+d121 3
+a145 2
+			case LeaveNotify:
+				handle_leave_event(&ev.xcrossing); break;
+d167 2
+a168 3
+	XModifierKeymap *modmap;
+	KeySym *keysym;
+	KeySym keys_to_grab[] = {
+a178 4
+	/* used in scanning windows (XQueryTree) */
+	unsigned int i, j, nwins;
+	Window dw1, dw2, *wins;
+	XWindowAttributes winattr;
+d180 3
+d192 3
+d202 9
+a210 2
+#ifdef MWM_HINTS
+	mwm_hints = XInternAtom(dpy, _XA_MWM_HINTS, False);
+a218 16
+	/* find out which modifier is NumLock - we'll use this when grabbing
+	 * every combination of modifiers we can think of */
+	modmap = XGetModifierMapping(dpy);
+	for (i = 0; i < 8; i++) {
+		for (j = 0; j < modmap->max_keypermod; j++) {
+			if (modmap->modifiermap[i*modmap->max_keypermod+j] == XKeysymToKeycode(dpy, XK_Num_Lock)) {
+				numlockmask = (1<<i);
+#ifdef DEBUG
+				fprintf(stderr, "setup_display() : XK_Num_Lock is (1<<0x%02x)\n", i);
+#endif
+			}
+		}
+	}
+	XFree(modmap);
+
+	/* set up GC parameters - same for each screen */
+d223 1
+d225 1
+a225 2
+	/* set up root window attributes - same for each screen */
+	attr.event_mask = ChildMask | PropertyChangeMask | EnterWindowMask | LeaveWindowMask
+d233 11
+d245 4
+a248 28
+	/* now set up each screen in turn */
+	num_screens = ScreenCount(dpy);
+	screens = (ScreenInfo *)malloc(num_screens * sizeof(ScreenInfo));
+	for (i = 0; i < num_screens; i++) {
+		char *ds, *colon, *dot;
+		ds = DisplayString(dpy);
+		/* set up DISPLAY environment variable to use */
+		colon = rindex(ds, ':');
+		if (colon && num_screens > 1) {
+			screens[i].display = (char *)malloc(14 + strlen(ds));
+			strcpy(screens[i].display, "DISPLAY=");
+			strcat(screens[i].display, ds);
+			colon = rindex(screens[i].display, ':');
+			dot = index(colon, '.');
+			if (!dot)
+				dot = colon + strlen(colon);
+			snprintf(dot, 5, ".%d", i);
+		} else
+			screens[i].display = NULL;
+
+		screens[i].screen = i;
+		screens[i].root = RootWindow(dpy, i);
+
+		XAllocNamedColor(dpy, DefaultColormap(dpy, i), opt_fg, &screens[i].fg, &dummy);
+		XAllocNamedColor(dpy, DefaultColormap(dpy, i), opt_bg, &screens[i].bg, &dummy);
+#ifdef VWM
+		XAllocNamedColor(dpy, DefaultColormap(dpy, i), opt_fc, &screens[i].fc, &dummy);
+#endif
+a249 13
+		screens[i].invert_gc = XCreateGC(dpy, screens[i].root, GCFunction | GCSubwindowMode | GCLineWidth | GCFont, &gv);
+
+		XChangeWindowAttributes(dpy, screens[i].root, CWEventMask, &attr);
+		/* Unfortunately grabbing AnyKey under Solaris seems not to work */
+		/* XGrabKey(dpy, AnyKey, ControlMask|Mod1Mask, root, True, GrabModeAsync, GrabModeAsync); */
+		/* So now I grab each and every one. */
+
+		for (keysym = keys_to_grab; *keysym; keysym++) {
+			grab_keysym(screens[i].root, ControlMask|Mod1Mask, *keysym);
+		}
+		grab_keysym(screens[i].root, Mod1Mask, XK_Tab);
+
+		/* scan all the windows on this screen */
+d251 1
+a251 1
+		fprintf(stderr, "main:XQueryTree(); ");
+d253 1
+a253 1
+		XQueryTree(dpy, screens[i].root, &dw1, &dw2, &wins, &nwins);
+d255 1
+a255 1
+		fprintf(stderr, "%d windows\n", nwins);
+d257 4
+a260 6
+		for (j = 0; j < nwins; j++) {
+			XGetWindowAttributes(dpy, wins[j], &winattr);
+			if (!winattr.override_redirect && winattr.map_state == IsViewable)
+				make_new_client(wins[j], &screens[i]);
+		}
+		XFree(wins);
+d262 1
+a262 1
+	current_screen = find_screen(DefaultScreen(dpy));
+@
+
+
+1.1.1.2
+log
+@Update evilwm to release 0.99.16
+@
+text
+@d16 10
+d40 5
+a44 5
+const char	*opt_display = "";
+const char	*opt_font = DEF_FONT;
+const char	*opt_fg = DEF_FG;
+const char	*opt_bg = DEF_BG;
+const char	**opt_term = NULL;
+d47 1
+a47 1
+const char	*opt_fc = DEF_FC;
+a58 13
+static void *xmalloc(size_t size);
+
+static void *xmalloc(size_t size) {
+	void *ptr = malloc(size);
+	if (!ptr) {
+#ifdef STDIO
+		fprintf(stderr,"out of memory, looking for %d bytes\n",size);
+#endif
+		exit(1);
+	}
+	return ptr;
+}
+
+d81 1
+a81 1
+			opt_term = (const char **)xmalloc(3 * sizeof(const char *));
+d99 1
+a99 1
+		opt_term = (const char **)xmalloc(3 * sizeof(const char *));
+d107 3
+d111 1
+d115 1
+d153 2
+d227 1
+a227 1
+	XFreeModifiermap(modmap);
+d247 1
+a247 1
+	screens = (ScreenInfo *)xmalloc(num_screens * sizeof(ScreenInfo));
+d254 1
+a254 1
+			screens[i].display = (char *)xmalloc(14 + strlen(ds));
+@
+
+

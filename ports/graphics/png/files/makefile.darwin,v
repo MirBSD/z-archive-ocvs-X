@@ -1,0 +1,199 @@
+head	1.1;
+access;
+symbols;
+locks; strict;
+comment	@# @;
+
+
+1.1
+date	2005.03.13.16.22.47;	author bsiegert;	state Exp;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.1
+log
+@Update libpng to 1.2.8, should fix all the security issues. Also unbreak
+build on Darwin. The supplied makefile.darwin is unusable, so I rolled my
+own. Contrary to fink, there is no libpng12.0.1.2.8.dylib and
+libpng.3.1.2.8.dylib, just libpng.6.0.dylib, as under MirOS.
+@
+text
+@# makefile for libpng on Darwin / Mac OS X
+# Copyright (C) 2002,2004 Glenn Randers-Pehrson
+# Copyright (C) 2001 Christoph Pfisterer
+# derived from makefile.linux:
+#  Copyright (C) 1998, 1999 Greg Roelofs
+#  Copyright (C) 1996, 1997 Andreas Dilger
+# For conditions of distribution and use, see copyright notice in png.h
+
+LIBNAME = libpng
+
+PREFIX?= /usr/local
+BINDIR=	${PREFIX}/bin
+LIBDIR=	${PREFIX}/lib
+MANDIR=	${PREFIX}/man/cat
+INCDIR=	${PREFIX}/include/libpng
+DOCDIR=	${PREFIX}/share/doc/png
+
+CC=cc
+CFLAGS+= -Wall
+LDFLAGS+= -L. -lpng -lz
+
+RANLIB=ranlib
+
+PNGMAJ = 6
+PNGMIN = 0
+PNGVER = $(PNGMAJ).$(PNGMIN)
+
+MAN=	libpng.3 libpngpf.3 png.5
+DOCS=	README libpng.txt
+
+# override DESTDIR= on the make install command line to easily support
+# installing into a temporary location.  Example:
+#
+#    make install DESTDIR=/tmp/build/libpng
+#
+# If you're going to install into a temporary location
+# via DESTDIR, $(DESTDIR)$(PREFIX) must already exist before
+# you execute make install.
+DESTDIR=
+
+OBJS = png.o pngset.o pngget.o pngrutil.o pngtrans.o pngwutil.o \
+	pngread.o pngrio.o pngwio.o pngwrite.o pngrtran.o \
+	pngwtran.o pngmem.o pngerror.o pngpread.o
+
+
+
+OBJSDLL = $(OBJS:.o=.pic.o)
+
+.SUFFIXES:      .c .o .pic.o
+
+.c.pic.o:
+	$(CC) -c $(CFLAGS) -fno-common -o $@@ $*.c
+
+all: $(LIBNAME).a $(LIBNAME).dylib pngtest $(LIBNAME).pc $(LIBNAME)-config __MANALL
+
+$(LIBNAME).a: $(OBJS)
+	ar rc $@@ $(OBJS)
+	$(RANLIB) $@@
+
+$(LIBNAME).pc:
+	cat scripts/$(LIBNAME).pc.in | sed -e s\!@@PREFIX@@!$(PREFIX)! | \
+	   sed -e s/-lm// > $(LIBNAME).pc
+
+$(LIBNAME)-config:
+	( cat scripts/$(LIBNAME)-config-head.in; \
+	echo prefix=\"$(PREFIX)\"; \
+	echo I_opts=\"-I$(INCPATH)/$(LIBNAME)\"; \
+	echo L_opts=\"-L$(LIBPATH)\"; \
+	echo libs=\"-lpng -lz\"; \
+	cat scripts/$(LIBNAME)-config-body.in ) > $(LIBNAME)-config
+	chmod +x $(LIBNAME)-config
+
+$(LIBNAME).dylib: $(LIBNAME).$(PNGVER).dylib
+	ln -sf $(LIBNAME).$(PNGVER).dylib $(LIBNAME).dylib
+
+$(LIBNAME).$(PNGMAJ).dylib: $(LIBNAME).$(PNGVER).dylib
+	ln -sf $(LIBNAME).$(PNGVER).dylib $(LIBNAME).$(PNGMAJ).dylib
+
+$(LIBNAME).$(PNGVER).dylib: $(OBJSDLL)
+	$(CC) -dynamiclib \
+	 -install_name $(LIBPATH)/$(LIBNAME).$(PNGMAJ).dylib \
+	 -current_version $(PNGVER) -compatibility_version $(PNGVER) \
+	 -o $(LIBNAME).$(PNGVER).dylib \
+	 $(OBJSDLL) -L$(ZLIBLIB) -lz
+
+pngtest: pngtest.o $(LIBNAME).dylib
+	$(CC) -o pngtest $(CFLAGS) pngtest.o $(LDFLAGS)
+
+test regress: pngtest
+	./pngtest
+
+beforeinstall:
+	if [ ! -d ${DESTDIR}${INCDIR} ]; then \
+	  ${INSTALL} -d ${DESTDIR}${INCDIR}; \
+	fi
+	if [ ! -d ${DESTDIR}${LIBDIR} ]; then \
+	  ${INSTALL} -d ${DESTDIR}${LIBDIR}; \
+	fi
+#	if [ ! -d ${DESTDIR}${LIBDIR}/pkgconfig ]; then \
+#	  ${INSTALL} -d ${DESTDIR}${LIBDIR}/pkgconfig; \
+#	fi
+	if [ ! -d ${DESTDIR}${MANDIR}3 ]; then \
+	  ${INSTALL} -d ${DESTDIR}${MANDIR}3; \
+	fi
+	if [ ! -d ${DESTDIR}${MANDIR}5 ]; then \
+	  ${INSTALL} -d ${DESTDIR}${MANDIR}5; \
+	fi
+	if [ ! -d ${DESTDIR}${DOCDIR} ]; then \
+	  ${INSTALL} -d ${DESTDIR}${DOCDIR}; \
+	fi
+
+install-headers: beforeinstall png.h pngconf.h
+	${INSTALL} ${INSTALL_COPY} -m ${NONBINMODE} png.h ${DESTDIR}${INCDIR}
+	${INSTALL} ${INSTALL_COPY} -m ${NONBINMODE} pngconf.h ${DESTDIR}${INCDIR}
+
+install-static: install-headers $(LIBNAME).a
+	${INSTALL} ${INSTALL_COPY} -m ${NONBINMODE} ${LIBNAME}.a \
+		${DESTDIR}${LIBDIR}
+	${RANLIB} ${DESTDIR}${LIBDIR}/${LIBNAME}.a
+
+install-shared: install-headers ${LIBNAME}.dylib ${LIBNAME}.pc ${LIBNAME}.${PNGVER}.dylib
+	${INSTALL} ${INSTALL_COPY} -m ${BINMODE} ${LIBNAME}.${PNGVER}.dylib \
+		${DESTDIR}${LIBDIR}
+	(cd ${DESTDIR}${LIBDIR}; \
+	ln -sf ${LIBNAME}.${PNGVER}.dylib ${LIBNAME}.${PNGMAJ}.dylib; \
+	ln -sf ${LIBNAME}.${PNGVER}.dylib ${LIBNAME}.dylib)
+#	${INSTALL} ${INSTALL_COPY} -m ${NONBINMODE} ${LIBNAME}.pc \
+#		${DESTDIR}${LIBDIR}/pkgconfig
+
+install-docs: ${DOCS}
+	${INSTALL} ${INSTALL_COPY} -m ${NONBINMODE} ${DOCS} ${DESTDIR}${DOCDIR}
+
+install-config: ${LIBNAME}-config
+	${INSTALL} ${INSTALL_COPY} -m ${BINMODE} ${LIBNAME}-config \
+		${DESTDIR}${BINDIR}
+
+install: beforeinstall install-static install-shared maninstall install-docs install-config
+
+# If you installed in $(DESTDIR), test-installed won't work until you
+# move the library to its final location.  Use test-dd to test it
+# before then.
+
+test-installed:
+	$(CC) $(CFLAGS) \
+	   `$(BINDIR)/libpng-config --cflags` pngtest.c \
+	   -o pngtesti `$(BINDIR)/libpng-config --ldflags`
+	./pngtesti pngtest.png
+
+clean: cleanman
+	rm -f *.o $(LIBNAME).a pngtest pngout.png $(LIBNAME)-config \
+	$(LIBNAME).pc $(LIBNAME).*dylib pngtesti
+
+.include <bsd.man.mk>
+
+# DO NOT DELETE THIS LINE -- make depend depends on it.
+
+png.o png.pic.o: png.h pngconf.h
+pngerror.o pngerror.pic.o: png.h pngconf.h
+pngrio.o pngrio.pic.o: png.h pngconf.h
+pngwio.o pngwio.pic.o: png.h pngconf.h
+pngmem.o pngmem.pic.o: png.h pngconf.h
+pngset.o pngset.pic.o: png.h pngconf.h
+pngget.o pngget.pic.o: png.h pngconf.h
+pngread.o pngread.pic.o: png.h pngconf.h
+pngrtran.o pngrtran.pic.o: png.h pngconf.h
+pngrutil.o pngrutil.pic.o: png.h pngconf.h
+pngtrans.o pngtrans.pic.o: png.h pngconf.h
+pngwrite.o pngwrite.pic.o: png.h pngconf.h
+pngwtran.o pngwtran.pic.o: png.h pngconf.h
+pngwutil.o pngwutil.pic.o: png.h pngconf.h
+pngpread.o pngpread.pic.o: png.h pngconf.h
+
+pngtest.o: png.h pngconf.h
+@

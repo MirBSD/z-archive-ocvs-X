@@ -1,0 +1,714 @@
+head	1.1;
+branch	1.1.1;
+access;
+symbols
+	tg-mergetmp-2:1.1.1.2
+	cvs-200410241530:1.1.1.2
+	cvs-200410012000:1.1.1.2
+	cvs-200407141120:1.1.1.2
+	cvs-200406231010:1.1.1.2
+	MIRBSD_7quater:1.1.1.1
+	cvs-200405271510:1.1.1.2
+	XFree86_4_4_0:1.1.9.1
+	cvs-200403021700:1.1.1.2
+	XFREE86_20040213:1.1.9.1
+	xc:1.1.9
+	cvs-200401291925:1.1.1.1
+	MIRBSD_7_ALPHA:1.1.1.1.0.4
+	MIRBSD_7:1.1.1.1.0.2
+	MIRBSD_7ter:1.1.1.1
+	cvs-20011091815:1.1.1.1
+	cvs-200309162130:1.1.1.1
+	cvs-200308302005:1.1.1.1
+	ctmx-0387:1.1.1.1
+	ctmx-0384:1.1.1.1
+	MIRBSD_5:1.1.1.1
+	ctmx-0375:1.1.1.1
+	ctmx-0373:1.1.1.1
+	ctm-0371:1.1.1.1
+	ctm-0370:1.1.1.1
+	MIRBSD_4:1.1.1.1
+	ctm-0363:1.1.1.1
+	ctm-0359:1.1.1.1
+	openbsd:1.1.1;
+locks; strict;
+comment	@ * @;
+
+
+1.1
+date	2003.04.08.18.31.32;	author tg;	state Exp;
+branches
+	1.1.1.1
+	1.1.9.1;
+next	;
+
+1.1.1.1
+date	2003.04.08.18.31.32;	author tg;	state Exp;
+branches;
+next	1.1.1.2;
+
+1.1.1.2
+date	2004.03.02.17.58.58;	author tg;	state Stab;
+branches;
+next	;
+
+1.1.9.1
+date	2004.02.14.19.18.03;	author tg;	state Exp;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@/* $XFree86: xc/lib/GL/mesa/src/drv/r200/r200_pixel.c,v 1.2 2002/12/16 16:18:54 dawes Exp $ */
+/*
+Copyright (C) The Weather Channel, Inc.  2002.  All Rights Reserved.
+
+The Weather Channel (TM) funded Tungsten Graphics to develop the
+initial release of the Radeon 8500 driver under the XFree86 license.
+This notice must be preserved.
+
+Permission is hereby granted, free of charge, to any person obtaining
+a copy of this software and associated documentation files (the
+"Software"), to deal in the Software without restriction, including
+without limitation the rights to use, copy, modify, merge, publish,
+distribute, sublicense, and/or sell copies of the Software, and to
+permit persons to whom the Software is furnished to do so, subject to
+the following conditions:
+
+The above copyright notice and this permission notice (including the
+next paragraph) shall be included in all copies or substantial
+portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
+IN NO EVENT SHALL THE COPYRIGHT OWNER(S) AND/OR ITS SUPPLIERS BE
+LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
+OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
+WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+*/
+
+/*
+ * Authors:
+ *   Keith Whitwell <keith@@tungstengraphics.com>
+ */
+
+#include "enums.h"
+#include "mtypes.h"
+#include "macros.h"
+#include "texutil.h"
+#include "r200_context.h"
+#include "r200_ioctl.h"
+#include "r200_pixel.h"
+#include "r200_swtcl.h"
+
+#include "xf86drm.h"
+#include "swrast/swrast.h"
+
+
+
+
+
+static GLboolean
+check_color( const GLcontext *ctx, GLenum type, GLenum format,
+	     const struct gl_pixelstore_attrib *packing,
+	     const void *pixels, GLint sz, GLint pitch )
+{
+   r200ContextPtr rmesa = R200_CONTEXT(ctx);
+   GLuint cpp = rmesa->r200Screen->cpp;
+
+   if (R200_DEBUG & DEBUG_PIXEL)
+      fprintf(stderr, "%s\n", __FUNCTION__);
+
+   if (	(pitch & 63) ||
+	ctx->_ImageTransferState ||
+	packing->SwapBytes ||
+	packing->LsbFirst) {
+      if (R200_DEBUG & DEBUG_PIXEL)
+	 fprintf(stderr, "%s: failed 1\n", __FUNCTION__);
+      return GL_FALSE;
+   }
+
+   if ( type == GL_UNSIGNED_INT_8_8_8_8_REV && 
+	cpp == 4 && 
+	format == GL_BGRA ) {
+      if (R200_DEBUG & DEBUG_PIXEL)
+	 fprintf(stderr, "%s: passed 2\n", __FUNCTION__);
+      return GL_TRUE;
+   }
+
+   if (R200_DEBUG & DEBUG_PIXEL)
+      fprintf(stderr, "%s: failed\n", __FUNCTION__);
+
+   return GL_FALSE;
+}
+
+static GLboolean
+check_color_per_fragment_ops( const GLcontext *ctx )
+{
+   int result;
+   result = (!(     ctx->Color.AlphaEnabled || 
+		    ctx->Depth.Test ||
+		    ctx->Fog.Enabled ||
+		    ctx->Scissor.Enabled ||
+		    ctx->Stencil.Enabled ||
+		    !ctx->Color.ColorMask[0] ||
+		    !ctx->Color.ColorMask[1] ||
+		    !ctx->Color.ColorMask[2] ||
+		    !ctx->Color.ColorMask[3] ||
+		    ctx->Color.ColorLogicOpEnabled ||
+		    ctx->Texture._ReallyEnabled ||
+		    ctx->Depth.OcclusionTest
+           ) &&
+	   ctx->Current.RasterPosValid);
+   
+   return result;
+}
+
+
+
+static GLboolean
+clip_pixelrect( const GLcontext *ctx,
+		const GLframebuffer *buffer,
+		GLint *x, GLint *y,
+		GLsizei *width, GLsizei *height,
+		GLint *size )
+{
+   r200ContextPtr rmesa = R200_CONTEXT(ctx);
+
+   /* left clipping */
+   if (*x < buffer->_Xmin) {
+      *width -= (buffer->_Xmin - *x);
+      *x = buffer->_Xmin;
+   }
+
+   /* right clipping */
+   if (*x + *width > buffer->_Xmax)
+      *width -= (*x + *width - buffer->_Xmax - 1);
+
+   if (*width <= 0)
+      return GL_FALSE;
+
+   /* bottom clipping */
+   if (*y < buffer->_Ymin) {
+      *height -= (buffer->_Ymin - *y);
+      *y = buffer->_Ymin;
+   }
+
+   /* top clipping */
+   if (*y + *height > buffer->_Ymax)
+      *height -= (*y + *height - buffer->_Ymax - 1);
+
+   if (*height <= 0)
+      return GL_FALSE;
+
+   *size = ((*y + *height - 1) * rmesa->r200Screen->frontPitch +
+	    (*x + *width - 1) * rmesa->r200Screen->cpp);
+
+   return GL_TRUE;
+}
+
+static GLboolean
+r200TryReadPixels( GLcontext *ctx,
+		  GLint x, GLint y, GLsizei width, GLsizei height,
+		  GLenum format, GLenum type,
+		  const struct gl_pixelstore_attrib *pack,
+		  GLvoid *pixels )
+{
+   r200ContextPtr rmesa = R200_CONTEXT(ctx);
+   GLint size;
+   GLint pitch = pack->RowLength ? pack->RowLength : width;
+   GLint blit_format;
+
+   if (R200_DEBUG & DEBUG_PIXEL)
+      fprintf(stderr, "%s\n", __FUNCTION__);
+
+   /* Only accelerate reading to agp buffers.
+    */
+   if ( !r200IsAgpMemory(rmesa, pixels, 
+			 pitch * height * rmesa->r200Screen->cpp ) ) {
+      if (R200_DEBUG & DEBUG_PIXEL)
+	 fprintf(stderr, "%s: dest not agp\n", __FUNCTION__);
+      return GL_FALSE;
+   }
+
+   /* Need GL_PACK_INVERT_MESA to cope with upsidedown results from
+    * blitter:
+    */
+   if (!pack->Invert) {
+      if (R200_DEBUG & DEBUG_PIXEL)
+	 fprintf(stderr, "%s: MESA_PACK_INVERT not set\n", __FUNCTION__);
+      return GL_FALSE;
+   }
+
+   if (!check_color(ctx, type, format, pack, pixels, size, pitch))
+      return GL_FALSE;
+
+   switch ( rmesa->r200Screen->cpp ) {
+   case 4:
+      blit_format = R200_CP_COLOR_FORMAT_ARGB8888;
+      break;
+   default:
+      return GL_FALSE;
+   }
+
+
+   /* Although the blits go on the command buffer, need to do this and
+    * fire with lock held to guarentee cliprects and drawOffset are
+    * correct.
+    *
+    * This is an unusual situation however, as the code which flushes
+    * a full command buffer expects to be called unlocked.  As a
+    * workaround, immediately flush the buffer on aquiring the lock.
+    */
+   LOCK_HARDWARE( rmesa );
+
+   if (rmesa->store.cmd_used)
+      r200FlushCmdBufLocked( rmesa, __FUNCTION__ );
+
+   if (!clip_pixelrect(ctx, ctx->ReadBuffer, &x, &y, &width, &height,
+		       &size)) {
+      UNLOCK_HARDWARE( rmesa );
+      if (R200_DEBUG & DEBUG_PIXEL)
+	 fprintf(stderr, "%s totally clipped -- nothing to do\n",
+		 __FUNCTION__);
+      return GL_TRUE;
+   }
+
+   {
+      __DRIdrawablePrivate *dPriv = rmesa->dri.drawable;
+      int nbox = dPriv->numClipRects;
+      int src_offset = rmesa->state.color.drawOffset;
+      int src_pitch = rmesa->state.color.drawPitch * rmesa->r200Screen->cpp;
+      int dst_offset = r200AgpOffsetFromVirtual( rmesa, pixels);
+      int dst_pitch = pitch * rmesa->r200Screen->cpp;
+      XF86DRIClipRectRec *box = dPriv->pClipRects;
+      int i;
+
+      r200EmitWait( rmesa, RADEON_WAIT_3D ); 
+
+      y = dPriv->h - y - height;
+      x += dPriv->x;
+      y += dPriv->y;
+
+
+      if (R200_DEBUG & DEBUG_PIXEL)
+	 fprintf(stderr, "readpixel blit src_pitch %d dst_pitch %d\n",
+		 src_pitch, dst_pitch);
+
+      for (i = 0 ; i < nbox ; i++)
+      {
+	 GLint bx = box[i].x1;
+	 GLint by = box[i].y1;
+	 GLint bw = box[i].x2 - bx;
+	 GLint bh = box[i].y2 - by;
+	 
+	 if (bx < x) bw -= x - bx, bx = x;
+	 if (by < y) bh -= y - by, by = y;
+	 if (bx + bw > x + width) bw = x + width - bx;
+	 if (by + bh > y + height) bh = y + height - by;
+	 if (bw <= 0) continue;
+	 if (bh <= 0) continue;
+
+	 r200EmitBlit( rmesa,
+		       blit_format,
+		       src_pitch, src_offset,
+		       dst_pitch, dst_offset,
+		       bx, by,
+		       bx - x, by - y,
+		       bw, bh );
+      }
+
+      r200FlushCmdBufLocked( rmesa, __FUNCTION__ );
+   }
+   UNLOCK_HARDWARE( rmesa );
+
+   r200Finish( ctx ); /* required by GL */
+
+   return GL_TRUE;
+}
+
+static void
+r200ReadPixels( GLcontext *ctx,
+		 GLint x, GLint y, GLsizei width, GLsizei height,
+		 GLenum format, GLenum type,
+		 const struct gl_pixelstore_attrib *pack,
+		 GLvoid *pixels )
+{
+   if (R200_DEBUG & DEBUG_PIXEL)
+      fprintf(stderr, "%s\n", __FUNCTION__);
+
+   if (!r200TryReadPixels( ctx, x, y, width, height, format, type, pack, 
+			   pixels))
+      _swrast_ReadPixels( ctx, x, y, width, height, format, type, pack, 
+			  pixels);
+}
+
+
+
+
+static void do_draw_pix( GLcontext *ctx,
+			 GLint x, GLint y, GLsizei width, GLsizei height,
+			 GLint pitch,
+			 const void *pixels,
+			 GLuint dest, GLuint planemask)
+{
+   r200ContextPtr rmesa = R200_CONTEXT(ctx);
+   __DRIdrawablePrivate *dPriv = rmesa->dri.drawable;
+   XF86DRIClipRectPtr box = dPriv->pClipRects;
+   int nbox = dPriv->numClipRects;
+   int i;
+   int blit_format;
+   int size;
+   int src_offset = r200AgpOffsetFromVirtual( rmesa, pixels);
+   int src_pitch = pitch * rmesa->r200Screen->cpp;
+
+   if (R200_DEBUG & DEBUG_PIXEL)
+      fprintf(stderr, "%s\n", __FUNCTION__);
+
+   switch ( rmesa->r200Screen->cpp ) {
+   case 2:
+      blit_format = R200_CP_COLOR_FORMAT_RGB565;
+      break;
+   case 4:
+      blit_format = R200_CP_COLOR_FORMAT_ARGB8888;
+      break;
+   default:
+      return;
+   }
+
+
+   LOCK_HARDWARE( rmesa );
+
+   if (rmesa->store.cmd_used)
+      r200FlushCmdBufLocked( rmesa, __FUNCTION__ );
+
+   y -= height;			/* cope with pixel zoom */
+   
+   if (!clip_pixelrect(ctx, ctx->DrawBuffer,
+		       &x, &y, &width, &height,
+		       &size)) {
+      UNLOCK_HARDWARE( rmesa );
+      return;
+   }
+
+   y = dPriv->h - y - height; 	/* convert from gl to hardware coords */
+   x += dPriv->x;
+   y += dPriv->y;
+
+
+   r200EmitWait( rmesa, RADEON_WAIT_3D );
+
+   for (i = 0 ; i < nbox ; i++ )
+   {
+      GLint bx = box[i].x1;
+      GLint by = box[i].y1;
+      GLint bw = box[i].x2 - bx;
+      GLint bh = box[i].y2 - by;
+
+      if (bx < x) bw -= x - bx, bx = x;
+      if (by < y) bh -= y - by, by = y;
+      if (bx + bw > x + width) bw = x + width - bx;
+      if (by + bh > y + height) bh = y + height - by;
+      if (bw <= 0) continue;
+      if (bh <= 0) continue;
+
+      r200EmitBlit( rmesa,
+		    blit_format,
+		    src_pitch, src_offset,
+		    rmesa->state.color.drawPitch * rmesa->r200Screen->cpp,
+		    rmesa->state.color.drawOffset,
+		    bx - x, by - y,
+		    bx, by,
+		    bw, bh );
+   }
+
+   r200FlushCmdBufLocked( rmesa, __FUNCTION__ );
+   r200WaitForIdleLocked( rmesa ); /* required by GL */
+   UNLOCK_HARDWARE( rmesa );
+}
+
+
+
+
+static GLboolean
+r200TryDrawPixels( GLcontext *ctx,
+		  GLint x, GLint y, GLsizei width, GLsizei height,
+		  GLenum format, GLenum type,
+		  const struct gl_pixelstore_attrib *unpack,
+		  const GLvoid *pixels )
+{
+   r200ContextPtr rmesa = R200_CONTEXT(ctx);
+   GLint pitch = unpack->RowLength ? unpack->RowLength : width;
+   GLuint dest, planemask;
+   GLuint cpp = rmesa->r200Screen->cpp;
+   GLint size = width * pitch * cpp;
+
+   if (R200_DEBUG & DEBUG_PIXEL)
+      fprintf(stderr, "%s\n", __FUNCTION__);
+
+   switch (format) {
+   case GL_RGB:
+   case GL_RGBA:
+   case GL_BGRA:
+      dest = rmesa->state.color.drawOffset;
+
+      planemask = r200PackColor(cpp,
+				ctx->Color.ColorMask[RCOMP],
+				ctx->Color.ColorMask[GCOMP],
+				ctx->Color.ColorMask[BCOMP],
+				ctx->Color.ColorMask[ACOMP]);
+
+      if (cpp == 2)
+	 planemask |= planemask << 16;
+
+      if (planemask != ~0)
+	 return GL_FALSE;	/* fix me -- should be possible */
+
+      /* Can't do conversions on agp reads/draws. 
+       */
+      if ( !r200IsAgpMemory( rmesa, pixels, size ) ) {
+	 if (R200_DEBUG & DEBUG_PIXEL)
+	    fprintf(stderr, "%s: not agp memory\n", __FUNCTION__);
+	 return GL_FALSE;
+      }
+
+      if (!check_color(ctx, type, format, unpack, pixels, size, pitch)) {
+	 return GL_FALSE;
+      }
+      if (!check_color_per_fragment_ops(ctx)) {
+	 return GL_FALSE;
+      }
+
+      if (ctx->Pixel.ZoomX != 1.0F ||
+	  ctx->Pixel.ZoomY != -1.0F)
+	 return GL_FALSE;
+      break;
+
+   default:
+      return GL_FALSE;
+   }
+
+   if ( r200IsAgpMemory(rmesa, pixels, size) )
+   {
+      do_draw_pix( ctx, x, y, width, height, pitch, pixels,
+		   dest, planemask );
+      return GL_TRUE;
+   }
+   else if (0)
+   {
+      /* Pixels is in regular memory -- get dma buffers and perform
+       * upload through them.
+       */
+   }
+   else
+      return GL_FALSE;
+}
+
+static void
+r200DrawPixels( GLcontext *ctx,
+		 GLint x, GLint y, GLsizei width, GLsizei height,
+		 GLenum format, GLenum type,
+		 const struct gl_pixelstore_attrib *unpack,
+		 const GLvoid *pixels )
+{
+   if (R200_DEBUG & DEBUG_PIXEL)
+      fprintf(stderr, "%s\n", __FUNCTION__);
+
+   if (!r200TryDrawPixels( ctx, x, y, width, height, format, type,
+			  unpack, pixels ))
+      _swrast_DrawPixels( ctx, x, y, width, height, format, type,
+			  unpack, pixels );
+}
+
+
+static void
+r200Bitmap( GLcontext *ctx, GLint px, GLint py,
+		  GLsizei width, GLsizei height,
+		  const struct gl_pixelstore_attrib *unpack,
+		  const GLubyte *bitmap )
+{
+   r200ContextPtr rmesa = R200_CONTEXT(ctx);
+
+   if (rmesa->Fallback)
+      _swrast_Bitmap( ctx, px, py, width, height, unpack, bitmap );
+   else
+      r200PointsBitmap( ctx, px, py, width, height, unpack, bitmap );
+}
+
+
+
+void r200InitPixelFuncs( GLcontext *ctx )
+{
+   /* Pixel path fallbacks.
+    */
+   ctx->Driver.Accum = _swrast_Accum;
+   ctx->Driver.Bitmap = _swrast_Bitmap;
+   ctx->Driver.CopyPixels = _swrast_CopyPixels;
+   ctx->Driver.DrawPixels = _swrast_DrawPixels;
+   ctx->Driver.ReadPixels = _swrast_ReadPixels;
+
+   if (!getenv("R200_NO_BLITS") && R200_CONTEXT(ctx)->dri.drmMinor >= 6) {
+      ctx->Driver.ReadPixels = r200ReadPixels;  
+      ctx->Driver.DrawPixels = r200DrawPixels; 
+      if (getenv("R200_HW_BITMAP")) 
+	 ctx->Driver.Bitmap = r200Bitmap;
+   }
+}
+@
+
+
+1.1.9.1
+log
+@OpenBSD just has imported exactly this tree into their vendor branch,
+called the same tag, in XF4/xc
+This is, apparently, the last XFree86 snapshot before the licence change
+(ie, addition of the advertising clause)
+
+Since the developers don't see any problems with that, and we would like
+to integrate improvements done by the remaining one or two (or so) XFree86
+developers (j/k), this prepares enabling us to update X-Window in the future.
+@
+text
+@d1 1
+a1 1
+/* $XFree86: xc/lib/GL/mesa/src/drv/r200/r200_pixel.c,v 1.4 2003/12/02 13:02:39 alanh Exp $ */
+a34 1
+#include "glheader.h"
+a38 2
+#include "swrast/swrast.h"
+
+d44 5
+d99 1
+a99 1
+		    ctx->Texture._EnabledUnits ||
+d165 1
+a165 1
+   /* Only accelerate reading to GART buffers.
+d167 1
+a167 1
+   if ( !r200IsGartMemory(rmesa, pixels, 
+d170 1
+a170 1
+	 fprintf(stderr, "%s: dest not GART\n", __FUNCTION__);
+d220 1
+a220 2
+      int src_offset = rmesa->state.color.drawOffset
+		     + rmesa->r200Screen->fbLocation;
+d222 1
+a222 1
+      int dst_offset = r200GartOffsetFromVirtual( rmesa, pixels );
+d293 1
+a293 1
+			 GLuint planemask)
+d302 1
+a302 1
+   int src_offset = r200GartOffsetFromVirtual( rmesa, pixels );
+d359 1
+a359 1
+		    rmesa->state.color.drawOffset + rmesa->r200Screen->fbLocation,
+d382 1
+a382 1
+   GLuint planemask;
+d393 2
+d407 1
+a407 1
+      /* Can't do conversions on GART reads/draws. 
+d409 1
+a409 1
+      if ( !r200IsGartMemory( rmesa, pixels, size ) ) {
+d411 1
+a411 1
+	    fprintf(stderr, "%s: not GART memory\n", __FUNCTION__);
+d431 1
+a431 1
+   if ( r200IsGartMemory(rmesa, pixels, size) )
+d433 2
+a434 1
+      do_draw_pix( ctx, x, y, width, height, pitch, pixels, planemask );
+@
+
+
+1.1.1.1
+log
+@The X-Windowing System
+
+Import XFree86 4.3 from OpenBSD by CTM, in the hope it's stable
+@
+text
+@@
+
+
+1.1.1.2
+log
+@That's what OpenBSD will, probably, ship as XF4 in 3.5
+their last sync against XFree86 4.3-current has been
+imported into our vendor branch, too
+@
+text
+@d1 1
+a1 1
+/* $XFree86: xc/lib/GL/mesa/src/drv/r200/r200_pixel.c,v 1.4 2003/12/02 13:02:39 alanh Exp $ */
+a34 1
+#include "glheader.h"
+a38 2
+#include "swrast/swrast.h"
+
+d44 5
+d99 1
+a99 1
+		    ctx->Texture._EnabledUnits ||
+d165 1
+a165 1
+   /* Only accelerate reading to GART buffers.
+d167 1
+a167 1
+   if ( !r200IsGartMemory(rmesa, pixels, 
+d170 1
+a170 1
+	 fprintf(stderr, "%s: dest not GART\n", __FUNCTION__);
+d220 1
+a220 2
+      int src_offset = rmesa->state.color.drawOffset
+		     + rmesa->r200Screen->fbLocation;
+d222 1
+a222 1
+      int dst_offset = r200GartOffsetFromVirtual( rmesa, pixels );
+d293 1
+a293 1
+			 GLuint planemask)
+d302 1
+a302 1
+   int src_offset = r200GartOffsetFromVirtual( rmesa, pixels );
+d359 1
+a359 1
+		    rmesa->state.color.drawOffset + rmesa->r200Screen->fbLocation,
+d382 1
+a382 1
+   GLuint planemask;
+d393 2
+d407 1
+a407 1
+      /* Can't do conversions on GART reads/draws. 
+d409 1
+a409 1
+      if ( !r200IsGartMemory( rmesa, pixels, size ) ) {
+d411 1
+a411 1
+	    fprintf(stderr, "%s: not GART memory\n", __FUNCTION__);
+d431 1
+a431 1
+   if ( r200IsGartMemory(rmesa, pixels, size) )
+d433 2
+a434 1
+      do_draw_pix( ctx, x, y, width, height, pitch, pixels, planemask );
+@
+

@@ -1,0 +1,281 @@
+head	1.5;
+branch	1.1.1;
+access;
+symbols
+	ctm-3389:1.1.1.1
+	openbsd:1.1.1
+	MIRBSD_5:1.4
+	MIRBSD_4:1.2;
+locks; strict;
+comment	@# @;
+
+
+1.5
+date	2003.08.31.20.53.01;	author tg;	state dead;
+branches;
+next	1.4;
+
+1.4
+date	2003.05.15.18.57.41;	author tg;	state Exp;
+branches;
+next	1.3;
+
+1.3
+date	2003.05.15.18.56.29;	author tg;	state dead;
+branches;
+next	1.2;
+
+1.2
+date	2003.04.10.12.00.59;	author tg;	state Exp;
+branches;
+next	1.1;
+
+1.1
+date	2003.03.23.15.03.46;	author tg;	state Exp;
+branches
+	1.1.1.1;
+next	;
+
+1.1.1.1
+date	2003.07.06.13.28.39;	author tg;	state Exp;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.5
+log
+@Merge import of OpenBSD source, ports and XF4 tree.
+
+While here,
+o clean up differences where possible
+o whitespace cleanup
+o ifdef ./. if defined()
+o '...' ./. "..."
+o echo foo > bar ./. echo foo >bar
+o `...` ./. $(...) ./. $$(...)
+o `...' ./. '...'
+o modernize "our" tree, e.g. WWW in ports
+o fix some typos and brainos introduced when renaming OpenBSD to MirBSD
+o use hardware 80387 by default
+o migrate Apache 1.3.28 OpenBSD ./. MirBSD ./. KAME
+o work around as many CVS bugs as possible (add back/delete files, ...)
+
+Synchronize stuff, ready for ongoing changes.
+@
+text
+@$MirBSD: patch-gcc_expr_c,v 1.4 2003/05/15 18:57:41 tg Exp $
+--- gcc/expr.c.orig	Tue Apr 22 23:07:53 2003
++++ gcc/expr.c	Thu May 15 18:08:38 2003
+@@@@ -45,6 +45,7 @@@@ Software Foundation, 59 Temple Place - S
+ #include "langhooks.h"
+ #include "intl.h"
+ #include "tm_p.h"
++#include "protector.h"
+ 
+ /* Decide whether a function's arguments should be processed
+    from first to last or from last to first.
+@@@@ -1517,7 +1518,7 @@@@ move_by_pieces (to, from, len, align)
+ 
+       if (USE_LOAD_PRE_DECREMENT (mode) && data.reverse && ! data.autinc_from)
+ 	{
+-	  data.from_addr = copy_addr_to_reg (plus_constant (from_addr, len));
++	  data.from_addr = copy_addr_to_reg (plus_constant (from_addr, len-GET_MODE_SIZE (mode)));
+ 	  data.autinc_from = 1;
+ 	  data.explicit_inc_from = -1;
+ 	}
+@@@@ -1531,7 +1532,7 @@@@ move_by_pieces (to, from, len, align)
+ 	data.from_addr = copy_addr_to_reg (from_addr);
+       if (USE_STORE_PRE_DECREMENT (mode) && data.reverse && ! data.autinc_to)
+ 	{
+-	  data.to_addr = copy_addr_to_reg (plus_constant (to_addr, len));
++	  data.to_addr = copy_addr_to_reg (plus_constant (to_addr, len-GET_MODE_SIZE (mode)));
+ 	  data.autinc_to = 1;
+ 	  data.explicit_inc_to = -1;
+ 	}
+@@@@ -1648,11 +1649,13 @@@@ move_by_pieces_1 (genfun, mode, data)
+ 	from1 = adjust_address (data->from, mode, data->offset);
+ 
+       if (HAVE_PRE_DECREMENT && data->explicit_inc_to < 0)
+-	emit_insn (gen_add2_insn (data->to_addr,
+-				  GEN_INT (-(HOST_WIDE_INT)size)));
++	if (data->explicit_inc_to < -1)
++	  emit_insn (gen_add2_insn (data->to_addr,
++				    GEN_INT (-(HOST_WIDE_INT)size)));
+       if (HAVE_PRE_DECREMENT && data->explicit_inc_from < 0)
+-	emit_insn (gen_add2_insn (data->from_addr,
+-				  GEN_INT (-(HOST_WIDE_INT)size)));
++	if (data->explicit_inc_from < -1)
++	  emit_insn (gen_add2_insn (data->from_addr,
++				    GEN_INT (-(HOST_WIDE_INT)size)));
+ 
+       if (data->to)
+ 	emit_insn ((*genfun) (to1, from1));
+@@@@ -2816,7 +2819,7 @@@@ store_by_pieces_1 (data, align)
+ 
+       if (USE_STORE_PRE_DECREMENT (mode) && data->reverse && ! data->autinc_to)
+ 	{
+-	  data->to_addr = copy_addr_to_reg (plus_constant (to_addr, data->len));
++	  data->to_addr = copy_addr_to_reg (plus_constant (to_addr, data->len-GET_MODE_SIZE (mode)));
+ 	  data->autinc_to = 1;
+ 	  data->explicit_inc_to = -1;
+ 	}
+@@@@ -2887,8 +2890,9 @@@@ store_by_pieces_2 (genfun, mode, data)
+ 	to1 = adjust_address (data->to, mode, data->offset);
+ 
+       if (HAVE_PRE_DECREMENT && data->explicit_inc_to < 0)
+-	emit_insn (gen_add2_insn (data->to_addr,
+-				  GEN_INT (-(HOST_WIDE_INT) size)));
++	if (data->explicit_inc_to < -1)
++	  emit_insn (gen_add2_insn (data->to_addr,
++				    GEN_INT (-(HOST_WIDE_INT) size)));
+ 
+       cst = (*data->constfun) (data->constfundata, data->offset, mode);
+       emit_insn ((*genfun) (to1, cst));
+@@@@ -5882,7 +5886,9 @@@@ force_operand (value, target)
+ 	  && GET_CODE (XEXP (value, 0)) == PLUS
+ 	  && GET_CODE (XEXP (XEXP (value, 0), 0)) == REG
+ 	  && REGNO (XEXP (XEXP (value, 0), 0)) >= FIRST_VIRTUAL_REGISTER
+-	  && REGNO (XEXP (XEXP (value, 0), 0)) <= LAST_VIRTUAL_REGISTER)
++	  && REGNO (XEXP (XEXP (value, 0), 0)) <= LAST_VIRTUAL_REGISTER
++	  && (!flag_propolice_protection
++	      || XEXP (XEXP (value, 0), 0) != virtual_stack_vars_rtx))
+ 	{
+ 	  rtx temp = expand_simple_binop (GET_MODE (value), code,
+ 					  XEXP (XEXP (value, 0), 0), op2,
+@@@@ -8049,7 +8055,8 @@@@ expand_expr (exp, target, tmode, modifie
+       /* If adding to a sum including a constant,
+ 	 associate it to put the constant outside.  */
+       if (GET_CODE (op1) == PLUS
+-	  && CONSTANT_P (XEXP (op1, 1)))
++	  && CONSTANT_P (XEXP (op1, 1))
++	  && !(flag_propolice_protection && (contains_fp (op0) || contains_fp (op1))))
+ 	{
+ 	  rtx constant_term = const0_rtx;
+ 
+@
+
+
+1.4
+log
+@second round... hold your breath
+cvs hates me
+@
+text
+@d1 1
+a1 1
+$MirBSD$
+@
+
+
+1.3
+log
+@first round of gcc update, hold your breath
+@
+text
+@d1 3
+a3 3
+$MirBSD: patch-gcc_expr_c,v 1.2 2003/04/10 12:00:59 tg Exp $
+--- gcc/expr.c.orig	Mon Feb  3 18:01:15 2003
++++ gcc/expr.c	Thu Apr 10 11:42:43 2003
+d12 1
+a12 1
+@@@@ -1448,7 +1449,7 @@@@ move_by_pieces (to, from, len, align)
+d21 1
+a21 1
+@@@@ -1462,7 +1463,7 @@@@ move_by_pieces (to, from, len, align)
+d30 1
+a30 1
+@@@@ -1579,11 +1580,13 @@@@ move_by_pieces_1 (genfun, mode, data)
+d48 1
+a48 1
+@@@@ -2480,7 +2483,7 @@@@ store_by_pieces_1 (data, align)
+d57 1
+a57 1
+@@@@ -2551,8 +2554,9 @@@@ store_by_pieces_2 (genfun, mode, data)
+d69 1
+a69 1
+@@@@ -5474,7 +5478,9 @@@@ force_operand (value, target)
+d80 1
+a80 1
+@@@@ -7614,7 +7620,8 @@@@ expand_expr (exp, target, tmode, modifie
+@
+
+
+1.2
+log
+@bump propolice to 3.2.2-5
+remove support for !i386
+@
+text
+@d1 1
+a1 1
+$MirBSD: patch-gcc_expr_c,v 1.1 2003/03/23 15:03:46 tg Exp $
+@
+
+
+1.1
+log
+@import gcc-3.2.2-propolice -system
+This is a variant of GNU gcc 3.2 with integrated
+propolice support, adaptions for i386-ELF and can
+be used as system compiler.
+@
+text
+@d1 1
+a1 1
+$MirBSD: obsd.ports,v 1.62 2003/03/22 22:33:27 tg Exp $
+d3 1
+a3 1
++++ gcc/expr.c	Mon Feb 17 20:32:16 2003
+d69 12
+a80 1
+@@@@ -7614,7 +7618,8 @@@@ expand_expr (exp, target, tmode, modifie
+@
+
+
+1.1.1.1
+log
+@Import OpenBSD ports tree
+@
+text
+@d1 3
+a3 3
+$MirBSD: patch-gcc_expr_c,v 1.4 2003/05/15 18:57:41 tg Exp $
+--- gcc/expr.c.orig	Tue Apr 22 23:07:53 2003
++++ gcc/expr.c	Thu May 15 18:08:38 2003
+d12 1
+a12 1
+@@@@ -1517,7 +1518,7 @@@@ move_by_pieces (to, from, len, align)
+d21 1
+a21 1
+@@@@ -1531,7 +1532,7 @@@@ move_by_pieces (to, from, len, align)
+d30 1
+a30 1
+@@@@ -1648,11 +1649,13 @@@@ move_by_pieces_1 (genfun, mode, data)
+d48 1
+a48 1
+@@@@ -2816,7 +2819,7 @@@@ store_by_pieces_1 (data, align)
+d57 1
+a57 1
+@@@@ -2887,8 +2890,9 @@@@ store_by_pieces_2 (genfun, mode, data)
+d69 1
+a69 12
+@@@@ -5882,7 +5886,9 @@@@ force_operand (value, target)
+ 	  && GET_CODE (XEXP (value, 0)) == PLUS
+ 	  && GET_CODE (XEXP (XEXP (value, 0), 0)) == REG
+ 	  && REGNO (XEXP (XEXP (value, 0), 0)) >= FIRST_VIRTUAL_REGISTER
+-	  && REGNO (XEXP (XEXP (value, 0), 0)) <= LAST_VIRTUAL_REGISTER)
++	  && REGNO (XEXP (XEXP (value, 0), 0)) <= LAST_VIRTUAL_REGISTER
++	  && (!flag_propolice_protection
++	      || XEXP (XEXP (value, 0), 0) != virtual_stack_vars_rtx))
+ 	{
+ 	  rtx temp = expand_simple_binop (GET_MODE (value), code,
+ 					  XEXP (XEXP (value, 0), 0), op2,
+@@@@ -8049,7 +8055,8 @@@@ expand_expr (exp, target, tmode, modifie
+@
+
+

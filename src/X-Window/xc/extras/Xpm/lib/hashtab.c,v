@@ -1,0 +1,462 @@
+head	1.4;
+access;
+symbols
+	tg-mergetmp-2:1.4
+	cvs-200410241530:1.1.1.2
+	cvs-200410012000:1.1.1.2
+	cvs-200407141120:1.1.1.1
+	cvs-200406231010:1.1.1.1
+	MIRBSD_7quater:1.1.1.1
+	cvs-200405271510:1.1.1.1
+	XFree86_4_4_0:1.1.9.1
+	cvs-200403021700:1.1.1.1
+	XFREE86_20040213:1.1.9.1
+	xc:1.1.9
+	cvs-200401291925:1.1.1.1
+	MIRBSD_7_ALPHA:1.1.1.1.0.4
+	MIRBSD_7:1.1.1.1.0.2
+	MIRBSD_7ter:1.1.1.1
+	cvs-20011091815:1.1.1.1
+	cvs-200309162130:1.1.1.1
+	cvs-200308302005:1.1.1.1
+	ctmx-0387:1.1.1.1
+	ctmx-0384:1.1.1.1
+	MIRBSD_5:1.1.1.1
+	ctmx-0375:1.1.1.1
+	ctmx-0373:1.1.1.1
+	ctm-0371:1.1.1.1
+	ctm-0370:1.1.1.1
+	MIRBSD_4:1.1.1.1
+	ctm-0363:1.1.1.1
+	ctm-0359:1.1.1.1
+	ctm-0349:1.1.1.1
+	openbsd:1.1.1;
+locks; strict;
+comment	@ * @;
+
+
+1.4
+date	2004.12.07.17.54.27;	author tg;	state Exp;
+branches;
+next	1.3;
+
+1.3
+date	2004.09.16.23.43.35;	author tg;	state Exp;
+branches;
+next	1.2;
+
+1.2
+date	2003.05.16.16.29.18;	author tg;	state dead;
+branches;
+next	1.1;
+
+1.1
+date	2003.03.22.20.01.11;	author tg;	state Exp;
+branches
+	1.1.1.1
+	1.1.9.1;
+next	;
+
+1.1.1.1
+date	2003.03.22.20.01.11;	author tg;	state Stab;
+branches
+	1.1.1.1.2.1;
+next	1.1.1.2;
+
+1.1.1.2
+date	2004.10.01.21.03.40;	author tg;	state Exp;
+branches;
+next	;
+
+1.1.1.1.2.1
+date	2004.10.26.19.18.06;	author bsiegert;	state Exp;
+branches;
+next	;
+
+1.1.9.1
+date	2004.02.14.19.05.38;	author tg;	state Exp;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.4
+log
+@Fix by matthieu@@openbsd
+
+X.Org security advisory: potential integer and buffer overflows in libXpm.
+(CAN-2004-0914)
+@
+text
+@/*
+ * Copyright (C) 1989-95 GROUPE BULL
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the "Software"), to
+ * deal in the Software without restriction, including without limitation the
+ * rights to use, copy, modify, merge, publish, distribute, sublicense, and/or
+ * sell copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in
+ * all copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
+ * GROUPE BULL BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN
+ * AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
+ * CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+ *
+ * Except as contained in this notice, the name of GROUPE BULL shall not be
+ * used in advertising or otherwise to promote the sale, use or other dealings
+ * in this Software without prior written authorization from GROUPE BULL.
+ */
+
+/*****************************************************************************\
+* hashtab.c:                                                                  *
+*                                                                             *
+*  XPM library                                                                *
+*                                                                             *
+*  Developed by Arnaud Le Hors                                                *
+*  this originaly comes from Colas Nahaboo as a part of Wool                  *
+*                                                                             *
+\*****************************************************************************/
+
+#include "XpmI.h"
+
+LFUNC(AtomMake, xpmHashAtom, (char *name, void *data));
+LFUNC(HashTableGrows, int, (xpmHashTable * table));
+
+static xpmHashAtom
+AtomMake(name, data)			/* makes an atom */
+    char *name;				/* WARNING: is just pointed to */
+    void *data;
+{
+    xpmHashAtom object = (xpmHashAtom) XpmMalloc(sizeof(struct _xpmHashAtom));
+
+    if (object) {
+	object->name = name;
+	object->data = data;
+    }
+    return object;
+}
+
+/************************\
+* 			 *
+*  hash table routines 	 *
+* 			 *
+\************************/
+
+/*
+ * Hash function definition:
+ * HASH_FUNCTION: hash function, hash = hashcode, hp = pointer on char,
+ *				 hash2 = temporary for hashcode.
+ * INITIAL_TABLE_SIZE in slots
+ * HASH_TABLE_GROWS how hash table grows.
+ */
+
+/* Mock lisp function */
+#define HASH_FUNCTION 	  hash = (hash << 5) - hash + *hp++;
+/* #define INITIAL_HASH_SIZE 2017 */
+#define INITIAL_HASH_SIZE 256		/* should be enough for colors */
+#define HASH_TABLE_GROWS  size = size * 2;
+
+/* aho-sethi-ullman's HPJ (sizes should be primes)*/
+#ifdef notdef
+#define HASH_FUNCTION	hash <<= 4; hash += *hp++; \
+    if(hash2 = hash & 0xf0000000) hash ^= (hash2 >> 24) ^ hash2;
+#define INITIAL_HASH_SIZE 4095		/* should be 2^n - 1 */
+#define HASH_TABLE_GROWS  size = size << 1 + 1;
+#endif
+
+/* GNU emacs function */
+/*
+#define HASH_FUNCTION 	  hash = (hash << 3) + (hash >> 28) + *hp++;
+#define INITIAL_HASH_SIZE 2017
+#define HASH_TABLE_GROWS  size = size * 2;
+*/
+
+/* end of hash functions */
+
+/*
+ * The hash table is used to store atoms via their NAME:
+ *
+ * NAME --hash--> ATOM |--name--> "foo"
+ *		       |--data--> any value which has to be stored
+ *
+ */
+
+/*
+ * xpmHashSlot gives the slot (pointer to xpmHashAtom) of a name
+ * (slot points to NULL if it is not defined)
+ *
+ */
+
+xpmHashAtom *
+xpmHashSlot(table, s)
+    xpmHashTable *table;
+    char *s;
+{
+    xpmHashAtom *atomTable = table->atomTable;
+    unsigned int hash;
+    xpmHashAtom *p;
+    char *hp = s;
+    char *ns;
+
+    hash = 0;
+    while (*hp) {			/* computes hash function */
+	HASH_FUNCTION
+    }
+    p = atomTable + hash % table->size;
+    while (*p) {
+	ns = (*p)->name;
+	if (ns[0] == s[0] && strcmp(ns, s) == 0)
+	    break;
+	p--;
+	if (p < atomTable)
+	    p = atomTable + table->size - 1;
+    }
+    return p;
+}
+
+static int
+HashTableGrows(table)
+    xpmHashTable *table;
+{
+    xpmHashAtom *atomTable = table->atomTable;
+    unsigned int size = table->size;
+    xpmHashAtom *t, *p;
+    int i;
+    unsigned int oldSize = size;
+
+    t = atomTable;
+    HASH_TABLE_GROWS
+	table->size = size;
+    table->limit = size / 3;
+    if (size >= UINT_MAX / sizeof(*atomTable)) 
+	return (XpmNoMemory);
+    atomTable = (xpmHashAtom *) XpmMalloc(size * sizeof(*atomTable));
+    if (!atomTable)
+	return (XpmNoMemory);
+    table->atomTable = atomTable;
+    for (p = atomTable + size; p > atomTable;)
+	*--p = NULL;
+    for (i = 0, p = t; i < oldSize; i++, p++)
+	if (*p) {
+	    xpmHashAtom *ps = xpmHashSlot(table, (*p)->name);
+
+	    *ps = *p;
+	}
+    XpmFree(t);
+    return (XpmSuccess);
+}
+
+/*
+ * xpmHashIntern(table, name, data)
+ * an xpmHashAtom is created if name doesn't exist, with the given data.
+ */
+
+int
+xpmHashIntern(table, tag, data)
+    xpmHashTable *table;
+    char *tag;
+    void *data;
+{
+    xpmHashAtom *slot;
+
+    if (!*(slot = xpmHashSlot(table, tag))) {
+	/* undefined, make a new atom with the given data */
+	if (!(*slot = AtomMake(tag, data)))
+	    return (XpmNoMemory);
+	if (table->used >= table->limit) {
+	    int ErrorStatus;
+
+	    if ((ErrorStatus = HashTableGrows(table)) != XpmSuccess)
+		return (ErrorStatus);
+	    table->used++;
+	    return (XpmSuccess);
+	}
+	table->used++;
+    }
+    return (XpmSuccess);
+}
+
+/*
+ *  must be called before allocating any atom
+ */
+
+int
+xpmHashTableInit(table)
+    xpmHashTable *table;
+{
+    xpmHashAtom *p;
+    xpmHashAtom *atomTable;
+
+    table->size = INITIAL_HASH_SIZE;
+    table->limit = table->size / 3;
+    table->used = 0;
+    if (table->size >= UINT_MAX / sizeof(*atomTable))
+	return (XpmNoMemory);
+    atomTable = (xpmHashAtom *) XpmMalloc(table->size * sizeof(*atomTable));
+    if (!atomTable)
+	return (XpmNoMemory);
+    for (p = atomTable + table->size; p > atomTable;)
+	*--p = NULL;
+    table->atomTable = atomTable;
+    return (XpmSuccess);
+}
+
+/*
+ *   frees a hashtable and all the stored atoms
+ */
+
+void
+xpmHashTableFree(table)
+    xpmHashTable *table;
+{
+    xpmHashAtom *p;
+    xpmHashAtom *atomTable = table->atomTable;
+
+    if (!atomTable)
+	return;
+    for (p = atomTable + table->size; p > atomTable;)
+	if (*--p)
+	    XpmFree(*p);
+    XpmFree(atomTable);
+    table->atomTable = NULL;
+}
+@
+
+
+1.3
+log
+@SECURITY: 019_xpm.patch from OpenBSD
+   Chris Evans reported several flaws (stack and integer overflows) in the [10]Xpm library code that
+   parses image files ([11]CAN-2004-0687, [12]CAN-2004-0688). Some of these would be exploitable when
+   parsing malicious image files in an application that handles XPM images, if they could escape
+   ProPolice.
+looks like SSP helps us again ;-)
+@
+text
+@d141 1
+a141 1
+    int oldSize = size;
+d147 1
+a147 1
+    if (size >= SIZE_MAX / sizeof(*atomTable)) 
+d209 1
+a209 1
+    if (table->size >= SIZE_MAX / sizeof(*atomTable))
+@
+
+
+1.2
+log
+@remove a bunch of files not used in MirBSD - clean tree. People who want them got cvs.
+@
+text
+@d138 1
+a138 1
+    int size = table->size;
+d147 2
+d209 2
+@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@@
+
+
+1.1.9.1
+log
+@OpenBSD just has imported exactly this tree into their vendor branch,
+called the same tag, in XF4/xc
+This is, apparently, the last XFree86 snapshot before the licence change
+(ie, addition of the advertising clause)
+
+Since the developers don't see any problems with that, and we would like
+to integrate improvements done by the remaining one or two (or so) XFree86
+developers (j/k), this prepares enabling us to update X-Window in the future.
+@
+text
+@@
+
+
+1.1.1.1
+log
+@Import OpenBSD 3.3 XF4 repository from CTM 3132 the first time
+This finalizes starting an OpenBSD-mirabile (aka MirBSD) repository.
+
+### MirBSD is:
+# Copyright (c) 1982-2003 by Thorsten "mirabile" Glaser <x86@@ePost.de>
+# Copyright © 1968-2003  The authors of And contributors to UNIX®, the
+#       C Language, BSD/Berkeley Unix; 386BSD, NetBSD 1.1 and OpenBSD.
+#
+# Anyone who obtained a copy of this work is hereby permitted to freely use,
+# distribute, modify, merge, sublicence, give away or sell it as long as the
+# authors are given due credit and the following notice is retained:
+#
+# This work is provided "as is", with no explicit or implicit warranty what-
+# soever. Use it only at your own risk. In no event may an author or contri-
+# butor be held liable for any damage, directly or indirectly, that origina-
+# ted through or is caused by creation or modification of this work.
+
+MirBSD is my private tree. MirBSD does not differ very much from OpenBSD
+and intentionally tracks OpenBSD. That's why it _is_ OpenBSD, just not the
+official one. It's like with DarrenBSD.
+
+At time of this writing, no advertising for MirBSD must be done,
+because the advertising clause has not yet been sorted out.
+
+http://templeofhate.com/tglaser/MirBSD/index.php
+@
+text
+@@
+
+
+1.1.1.1.2.1
+log
+@Fix from OpenBSD 3.4-stable:
+
+improved bounds checking and strlcpy/strlcat usage
+
+Note you will need to recompile X to install this patch. Wait for the binary
+update.
+@
+text
+@d138 1
+a138 1
+    unsigned int size = table->size;
+a146 2
+    if (size >= SIZE_MAX / sizeof(*atomTable)) 
+	return (XpmNoMemory);
+a206 2
+    if (table->size >= SIZE_MAX / sizeof(*atomTable))
+	return (XpmNoMemory);
+@
+
+
+1.1.1.2
+log
+@OpenBSD's XFree86 based module, latest fixes etc.
+@
+text
+@d138 1
+a138 1
+    unsigned int size = table->size;
+a146 2
+    if (size >= SIZE_MAX / sizeof(*atomTable)) 
+	return (XpmNoMemory);
+a206 2
+    if (table->size >= SIZE_MAX / sizeof(*atomTable))
+	return (XpmNoMemory);
+@
+

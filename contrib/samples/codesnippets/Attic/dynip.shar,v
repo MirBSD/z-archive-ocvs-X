@@ -1,0 +1,283 @@
+head	1.5;
+access;
+symbols;
+locks; strict;
+comment	@# @;
+
+
+1.5
+date	2004.10.05.10.34.56;	author tg;	state dead;
+branches;
+next	1.4;
+
+1.4
+date	2004.09.20.19.49.18;	author tg;	state Exp;
+branches;
+next	1.3;
+
+1.3
+date	2004.09.19.02.44.12;	author tg;	state Exp;
+branches;
+next	1.2;
+
+1.2
+date	2004.09.11.18.06.31;	author tg;	state Exp;
+branches;
+next	1.1;
+
+1.1
+date	2004.05.09.13.05.51;	author tg;	state Stab;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.5
+log
+@major reorganisation of the contrib/ structure
+easier directory paths; code/ for MirSoftware
+XXX still a bit uneasy about gfdl-docs, but a
+XXX solution will come with the new gcc I think
+@
+text
+@#!/bin/sh
+# $MirBSD: contrib/samples/codesnippets/dynip.shar,v 1.4 2004/09/20 19:49:18 tg Exp $
+#-
+# Copyright (c) 2000, 2001, 2002, 2003, 2004
+#	Thorsten "mirabile" Glaser <tg@@66h.42h.de>
+#
+# Licensee is hereby permitted to deal in this work without restric-
+# tion, including unlimited rights to use, publically perform, modi-
+# fy, merge, distribute, sell, give away or sublicence, provided the
+# above copyright notices, these terms and the disclaimer are retai-
+# ned in all redistributions, or reproduced in accompanying documen-
+# tation or other materials provided with binary redistributions.
+#
+# Licensor hereby provides this work "AS IS" and WITHOUT WARRANTY of
+# any kind, expressed or implied, to the maximum extent permitted by
+# applicable law, but with the warranty of being written without ma-
+# licious intent or gross negligence; in no event shall licensor, an
+# author or contributor be held liable for any damage, direct, indi-
+# rect or other, however caused, arising in any way out of the usage
+# of covered work, even if advised of the possibility of such damage.
+#-
+# This is a shell archive.  Save it in a file, remove anything before
+# this line, and then unpack it by entering "sh file".  Note, it may
+# create directories; files and directories will be owned by you and
+# have default permissions.
+#
+# This archive contains:
+#
+#	ip-up
+#	ip-down
+#
+echo x - ip-up
+sed 's/^X//' >ip-up << 'END-of-ip-up'
+X#!/bin/ksh
+X# from $MirBSD: contrib/samples/codesnippets/dynip.shar,v 1.4 2004/09/20 19:49:18 tg Exp $
+X# $Id: dynip.shar,v 1.4 2004/09/20 19:49:18 tg Exp $
+X
+X# This script is called with mirbsdksh when your ppp(8) or pppd(8)
+X# connection goes up and the connection, including routing, has
+X# already been established.
+X
+Xexport PATH=/usr/bin:/bin:/usr/sbin:/sbin:/usr/X11R6/bin:/usr/local/bin:/usr/games
+Xexport SHELL=${SHELL:-/bin/ksh}
+X
+X# OpenIPF
+X#pfctl -f /etc/pf.conf
+X#pfctl -e >/dev/null 2>&1
+X
+X# IPv4
+Xif [[ $4 = +([0-9]).+([0-9]).+([0-9]).+([0-9]) ]]; then
+X	MYIP=$4
+Xelse
+X	MYIP=$(ifconfig tun0 | grep "inet " | head -1 \
+X	    | while read a b c; do print $b; done)
+Xfi
+X
+X# DynDNS: dyndns.org	-> user/pass as plaintext
+XDYNDNS_HOST='hostname.dyndns.org'
+XDYNDNS_AUTH='user:password'
+X
+X# DynDNS: CJB.net	-> user/pass already urlencoded
+XCJBNET_USER='username'
+XCJBNET_PASS='password'
+X
+X# Date/Time
+X#rdate -ncv 192.53.103.104 2>&1 | logger -t SNTP
+X
+X# MirDNS
+X#( /service/tinymaster/root/make.sh dialin 2>&1 | logger -t MirDNS ) &
+X
+X# DynDNS
+XDCMD="SC=\$(sysctl -n kern.allowpsa)\nsysctl -w kern.allowpsa=0 >/dev/null"
+XLCMD="sudo -u nobody lynx -dump -useragent='Lynx2IP4Up2/OpenBSD x86@@ePost.de'"
+Xif [ -n "$CJBNET_USER" ]; then
+X	DCMD="$DCMD\nRES=\"\$($LCMD 'http://www.cjb.net/cgi-bin/dynip.cgi?"
+X	DCMD="${DCMD}username=${CJBNET_USER}&password=${CJBNET_PASS}' 2>&1)\""
+X	DCMD="$DCMD\nif [[ \$RES = *password+( )is+( )incorrect* ]]; then"
+X	DCMD="$DCMD\n ANS='Incorrect CJB password.'"
+X	DCMD="$DCMD\nelif [[ \$RES = *has+( )been+( )updated* ]]; then"
+X	DCMD="$DCMD\n ANS=\$(print \"\$RES\"|grep -A1 'has *been *updated')"
+X	DCMD="$DCMD\nelse ANS='Unknown error at CJB updater.'; fi"
+X	DCMD="$DCMD\nprint "\$ANS" | logger -t DyIP-cjbnet"
+Xfi
+X[ -n "$DYNDNS_HOST" ] && for hn in $DYNDNS_HOST; do
+X	DCMD="$DCMD\n$LCMD 'https://members.dyndns.org/nic/update?"
+X	DCMD="${DCMD}hostname=${hn}&wildcard=ON' -auth '${DYNDNS_AUTH}'"
+X	DCMD="$DCMD 2>&1 | logger -t DyIP-dyndns"
+Xdone
+XDCMD="$DCMD\nsysctl -w kern.allowpsa=\$SC >/dev/null"
+X
+X( print "$DCMD" | $SHELL ) &
+XDCMD=
+X
+X# IPv6
+X#-Freenet6
+X#( (cd /var/log && /usr/local/sbin/tspc -f /etc/tspc.conf) 2>&1 \
+X#	| logger -t Freenet6 ) &
+END-of-ip-up
+echo x - ip-down
+sed 's/^X//' >ip-down << 'END-of-ip-down'
+X#!/bin/ksh
+X# from $MirBSD: contrib/samples/codesnippets/dynip.shar,v 1.4 2004/09/20 19:49:18 tg Exp $
+X# $Id: dynip.shar,v 1.4 2004/09/20 19:49:18 tg Exp $
+X
+X# This script is called with mirbsdksh after your ppp(8) or pppd(8)
+X# connection has gone down.
+X
+Xexport PATH=/usr/bin:/bin:/usr/sbin:/sbin:/usr/X11R6/bin:/usr/local/bin:/usr/games
+Xexport SHELL=${SHELL:-/bin/ksh}
+X
+X# MirDNS
+X#( /service/tinymaster/root/make.sh dialout 2>&1 | logger -t MirDNS ) &
+END-of-ip-down
+chmod 755 ip-up ip-down
+exit
+@
+
+
+1.4
+log
+@* sync with ip-up/ip-down from base MirOS
+* add missing 'fi'
+@
+text
+@d2 1
+a2 1
+# $MirBSD: contrib/samples/codesnippets/dynip.shar,v 1.3 2004/09/19 02:44:12 tg Exp $
+d35 2
+a36 2
+X# from $MirBSD: contrib/samples/codesnippets/dynip.shar,v 1.3 2004/09/19 02:44:12 tg Exp $
+X# $Id: ip-up,v 1.2 2004/09/18 13:09:09 tg Exp $
+d102 2
+a103 2
+X# from $MirBSD: contrib/samples/codesnippets/dynip.shar,v 1.3 2004/09/19 02:44:12 tg Exp $
+X# $Id: ip-down,v 1.2 2004/09/18 13:09:09 tg Exp $
+@
+
+
+1.3
+log
+@some small improvements
+- speed
+- forks
+- shell call unneeded any more
+@
+text
+@d2 1
+a2 1
+# $MirBSD: contrib/samples/codesnippets/dynip.shar,v 1.2 2004/09/11 18:06:31 tg Exp $
+d35 6
+a40 1
+X# from $MirBSD: contrib/samples/codesnippets/dynip.shar,v 1.2 2004/09/11 18:06:31 tg Exp $
+d45 4
+d55 1
+d102 5
+a106 1
+X# from $MirBSD: contrib/samples/codesnippets/dynip.shar,v 1.2 2004/09/11 18:06:31 tg Exp $
+@
+
+
+1.2
+log
+@adjust for new heartbeat client
+fix that beast
+@
+text
+@d2 1
+a2 1
+# $MirBSD: src/share/misc/licence.template,v 1.14 2004/08/15 15:29:11 tg Rel $
+d35 1
+a35 1
+X# from $MirBSD: contrib/samples/codesnippets/dynip.shar,v 1.1 2004/05/09 13:05:51 tg Stab $
+d41 5
+a45 2
+XMYIP=$(ifconfig tun0 | grep "inet " | head -1 \
+X    | while read a b c; do print $b; done)
+d59 1
+a59 1
+X#( $SHELL /service/tinymaster/root/make.sh dialin 2>&1 | logger -t MirDNS ) &
+d92 1
+a92 1
+X# from $MirBSD: contrib/samples/codesnippets/dynip.shar,v 1.1 2004/05/09 13:05:51 tg Stab $
+d98 1
+a98 1
+X#( $SHELL /service/tinymaster/root/make.sh dialout 2>&1 | logger -t MirDNS ) &
+@
+
+
+1.1
+log
+@Shell archive containing sample ip-up and ip-down scripts usable
+for automatically updating dyndns.org and cjb.net accounts, calling
+the freenet6 and/or SixXS tunnel brokers, etc.
+could need some updates (pkill, for example), but almost working
+@
+text
+@d2 1
+a2 1
+# $MirBSD$
+d5 1
+a5 1
+#	Thorsten Glaser <tg@@66h.42h.de>
+d14 7
+a20 7
+# Licensor hereby provides this work "as is" and without any warran-
+# ties whatsoever, express or implied, to the maximum extent permit-
+# ted by applicable law, except that the work is not written or pub-
+# lished with malice intent; in no event may authors or contributors
+# be held liable for any damage, however caused, direct or indirect,
+# arising in any way out of the usage of covered work, even if advi-
+# sed of the possibility of such damage.
+d35 1
+a35 1
+X# from $MirBSD$
+d41 2
+a42 1
+XMYIP=$(ifconfig tun0|grep "inet "|while read a b c; do print $b; done|head -1)
+a84 7
+X#-SixXS		-> XXX use pkill?
+X#ps ax|grep sixxs|grep -v grep|while read pid rest; do
+X#	kill $pid
+X#done
+X#ifconfig gif0 up
+X#nice -n -1 /usr/local/sbin/sixxs-heartbeatd /etc/ppp/heartbeat.conf
+X#route add -inet6 default fe80::%gif0 -mtu 1280
+d89 1
+a89 1
+X# from $MirBSD$
+a95 7
+X
+X# IPv6 (SixXS)	-> XXX use pkill?
+X#ps ax|grep sixxs|grep -v grep|while read pid rest; do
+X#	kill $pid
+X#done
+X#route -n delete -inet6 default
+X#ifconfig gif0 deletetunnel down
+@
+

@@ -1,0 +1,804 @@
+head	1.1;
+branch	1.1.1;
+access;
+symbols
+	tg-mergetmp-2:1.1.1.3
+	cvs-200410241530:1.1.1.3
+	cvs-200410012000:1.1.1.3
+	cvs-200407141120:1.1.1.3
+	cvs-200406231010:1.1.1.3
+	MIRBSD_7quater:1.1.1.2
+	cvs-200405271510:1.1.1.3
+	XFree86_4_4_0:1.1.9.1
+	cvs-200403021700:1.1.1.3
+	XFREE86_20040213:1.1.9.1
+	xc:1.1.9
+	cvs-200401291925:1.1.1.2
+	MIRBSD_7_ALPHA:1.1.1.2.0.4
+	MIRBSD_7:1.1.1.2.0.2
+	MIRBSD_7ter:1.1.1.2
+	cvs-20011091815:1.1.1.2
+	cvs-200309162130:1.1.1.2
+	cvs-200308302005:1.1.1.2
+	ctmx-0387:1.1.1.2
+	ctmx-0384:1.1.1.2
+	MIRBSD_5:1.1.1.2
+	ctmx-0375:1.1.1.2
+	ctmx-0373:1.1.1.2
+	ctm-0371:1.1.1.2
+	ctm-0370:1.1.1.2
+	MIRBSD_4:1.1.1.2
+	ctm-0363:1.1.1.2
+	ctm-0359:1.1.1.2
+	ctm-0349:1.1.1.1
+	openbsd:1.1.1;
+locks; strict;
+comment	@ * @;
+
+
+1.1
+date	2003.03.22.20.09.20;	author tg;	state Exp;
+branches
+	1.1.1.1
+	1.1.9.1;
+next	;
+
+1.1.1.1
+date	2003.03.22.20.09.20;	author tg;	state Exp;
+branches;
+next	1.1.1.2;
+
+1.1.1.2
+date	2003.04.08.18.38.00;	author tg;	state Exp;
+branches;
+next	1.1.1.3;
+
+1.1.1.3
+date	2004.03.02.18.28.38;	author tg;	state Stab;
+branches;
+next	;
+
+1.1.9.1
+date	2004.02.14.19.26.02;	author tg;	state Exp;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@/* $Xorg: Screen.c,v 1.3 2000/08/17 19:53:28 cpqbld Exp $ */
+/*
+
+Copyright 1993 by Davor Matic
+
+Permission to use, copy, modify, distribute, and sell this software
+and its documentation for any purpose is hereby granted without fee,
+provided that the above copyright notice appear in all copies and that
+both that copyright notice and this permission notice appear in
+supporting documentation.  Davor Matic makes no representations about
+the suitability of this software for any purpose.  It is provided "as
+is" without express or implied warranty.
+
+*/
+/* $XFree86: xc/programs/Xserver/hw/xnest/Screen.c,v 3.9 2001/03/23 01:27:09 paulo Exp $ */
+
+#include "X.h"
+#include "Xproto.h"
+#include "scrnintstr.h"
+#include "dix.h"
+#include "mi.h"
+#include "mibstore.h"
+#include "colormapst.h"
+#include "resource.h"
+
+#include "Xnest.h"
+
+#include "Display.h"
+#include "Screen.h"
+#include "Args.h"
+#include "XNGC.h"
+#include "GCOps.h"
+#include "Drawable.h"
+#include "XNFont.h"
+#include "Color.h"
+#include "Cursor.h"
+#include "Visual.h"
+#include "Events.h"
+#include "Init.h"
+#include "mipointer.h"
+#include "Args.h"
+
+extern Window xnestParentWindow;
+
+Window xnestDefaultWindows[MAXSCREENS];
+Window xnestScreenSaverWindows[MAXSCREENS];
+
+ScreenPtr xnestScreen(window)
+     Window window;
+{
+  int i;
+  
+  for (i = 0; i < xnestNumScreens; i++)
+    if (xnestDefaultWindows[i] == window) 
+      return screenInfo.screens[i];
+
+  return NULL;
+}
+
+static int offset(mask)
+     unsigned long mask;
+{
+  int count;
+  
+  for (count = 0; !(mask & 1) && count < 32; count++)
+    mask >>= 1;
+  
+  return count;
+}
+
+static Bool xnestSaveScreen(pScreen, what)
+     ScreenPtr pScreen;
+     int what;
+{
+  if (xnestSoftwareScreenSaver)
+    return False;
+  else {
+    switch (what) {
+    case SCREEN_SAVER_ON:
+      XMapRaised(xnestDisplay, xnestScreenSaverWindows[pScreen->myNum]);
+      xnestSetScreenSaverColormapWindow(pScreen);
+      break;
+      
+    case SCREEN_SAVER_OFF:
+      XUnmapWindow(xnestDisplay, xnestScreenSaverWindows[pScreen->myNum]);
+      xnestSetInstalledColormapWindows(pScreen);
+      break;
+      
+    case SCREEN_SAVER_FORCER:
+      lastEventTime = GetTimeInMillis();
+      XUnmapWindow(xnestDisplay, xnestScreenSaverWindows[pScreen->myNum]);
+      xnestSetInstalledColormapWindows(pScreen);
+      break;
+      
+    case SCREEN_SAVER_CYCLE:
+      XUnmapWindow(xnestDisplay, xnestScreenSaverWindows[pScreen->myNum]);
+      xnestSetInstalledColormapWindows(pScreen);
+      break;
+    }
+    return True;
+  }
+}
+
+static Bool
+xnestCursorOffScreen (ppScreen, x, y)
+    ScreenPtr   *ppScreen;
+    int         *x, *y;
+{
+    return FALSE;
+}
+
+static void
+xnestCrossScreen (pScreen, entering)
+    ScreenPtr   pScreen;
+    Bool        entering;
+{
+}
+
+static miPointerScreenFuncRec xnestPointerCursorFuncs =
+{
+    xnestCursorOffScreen,
+    xnestCrossScreen,
+    miPointerWarpCursor
+};
+
+Bool xnestOpenScreen(index, pScreen, argc, argv)
+     int index;
+     register ScreenPtr pScreen;
+     int argc;
+     char *argv[];
+{
+  VisualPtr visuals;
+  DepthPtr depths;
+  int numVisuals, numDepths;
+  int i, j, depthIndex;
+  unsigned long valuemask;
+  XSetWindowAttributes attributes;
+  XWindowAttributes gattributes;
+  XSizeHints sizeHints;
+
+  if (!(AllocateWindowPrivate(pScreen, xnestWindowPrivateIndex,
+			    sizeof(xnestPrivWin))  &&
+	  AllocateGCPrivate(pScreen, xnestGCPrivateIndex, 
+			    sizeof(xnestPrivGC)))) 
+    return False;
+
+  visuals = (VisualPtr)xalloc(xnestNumVisuals * sizeof(VisualRec));
+  numVisuals = 0;
+
+  depths = (DepthPtr)xalloc(MAXDEPTH * sizeof(DepthRec));
+  depths[0].depth = 1;
+  depths[0].numVids = 0;
+  depths[0].vids = (VisualID *)xalloc(MAXVISUALSPERDEPTH * sizeof(VisualID));
+  numDepths = 1;
+
+  for (i = 0; i < xnestNumVisuals; i++) {
+    visuals[numVisuals].vid = FakeClientID(0);
+    visuals[numVisuals].class = xnestVisuals[i].class;
+    visuals[numVisuals].bitsPerRGBValue = xnestVisuals[i].bits_per_rgb;
+    visuals[numVisuals].ColormapEntries = xnestVisuals[i].colormap_size;
+    visuals[numVisuals].nplanes = xnestVisuals[i].depth;
+    visuals[numVisuals].redMask = xnestVisuals[i].red_mask;
+    visuals[numVisuals].greenMask = xnestVisuals[i].green_mask;
+    visuals[numVisuals].blueMask = xnestVisuals[i].blue_mask;
+    visuals[numVisuals].offsetRed = offset(xnestVisuals[i].red_mask);
+    visuals[numVisuals].offsetGreen = offset(xnestVisuals[i].green_mask);
+    visuals[numVisuals].offsetBlue = offset(xnestVisuals[i].blue_mask);
+    
+    depthIndex = UNDEFINED;
+    for (j = 0; j < numDepths; j++)
+      if (depths[j].depth == xnestVisuals[i].depth) {
+	depthIndex = j;
+	break;
+      }
+    
+    if (depthIndex == UNDEFINED) {
+      depthIndex = numDepths;
+      depths[depthIndex].depth = xnestVisuals[i].depth;
+      depths[depthIndex].numVids = 0;
+      depths[depthIndex].vids = 
+	(VisualID *)xalloc(MAXVISUALSPERDEPTH * sizeof(VisualID));
+      numDepths++;
+    }
+    if (depths[depthIndex].numVids >= MAXVISUALSPERDEPTH) {
+	FatalError("Visual table overflow");
+    }
+    depths[depthIndex].vids[depths[depthIndex].numVids] = 
+      visuals[numVisuals].vid;
+    depths[depthIndex].numVids++;
+    
+    numVisuals++;
+  }
+
+  if (xnestParentWindow != 0) {
+    XGetWindowAttributes(xnestDisplay, xnestParentWindow, &gattributes);
+    xnestWidth = gattributes.width;
+    xnestHeight = gattributes.height;
+  }
+
+  /* myNum */
+  /* id */
+  miScreenInit(pScreen, NULL, xnestWidth, xnestHeight, 1, 1, xnestWidth,
+	       visuals[xnestDefaultVisualIndex].nplanes, /* rootDepth */
+	       numDepths, depths,
+	       visuals[xnestDefaultVisualIndex].vid, /* root visual */
+	       numVisuals, visuals);
+
+  miInitializeBackingStore(pScreen);
+
+  miDCInitialize(pScreen, &xnestPointerCursorFuncs);
+
+  pScreen->mmWidth = xnestWidth * DisplayWidthMM(xnestDisplay, 
+		       DefaultScreen(xnestDisplay)) / 
+			 DisplayWidth(xnestDisplay, 
+			   DefaultScreen(xnestDisplay));
+  pScreen->mmHeight = xnestHeight * DisplayHeightMM(xnestDisplay, 
+		        DefaultScreen(xnestDisplay)) /
+			  DisplayHeight(xnestDisplay, 
+			    DefaultScreen(xnestDisplay));
+
+  pScreen->defColormap = (Colormap) FakeClientID(0);
+  pScreen->minInstalledCmaps = MINCMAPS;
+  pScreen->maxInstalledCmaps = MAXCMAPS;
+  pScreen->backingStoreSupport = NotUseful;
+  pScreen->saveUnderSupport = NotUseful;
+  pScreen->whitePixel = xnestWhitePixel;
+  pScreen->blackPixel = xnestBlackPixel;
+  /* rgf */
+  /* GCperDepth */
+  /* PixmapPerDepth */
+  pScreen->devPrivate = NULL;
+  /* WindowPrivateLen */
+  /* WindowPrivateSizes */
+  /* totalWindowSize */
+  /* GCPrivateLen */
+  /* GCPrivateSizes */
+  /* totalGCSize */
+
+  /* Random screen procedures */
+
+  pScreen->CloseScreen = xnestCloseScreen;
+  pScreen->QueryBestSize = xnestQueryBestSize;
+  pScreen->SaveScreen = xnestSaveScreen;
+  pScreen->GetImage = xnestGetImage;
+  pScreen->GetSpans = xnestGetSpans;
+  pScreen->PointerNonInterestBox = (void (*)()) 0;
+  pScreen->SourceValidate = (void (*)()) 0;
+
+  /* Window Procedures */
+  
+  pScreen->CreateWindow = xnestCreateWindow;
+  pScreen->DestroyWindow = xnestDestroyWindow;
+  pScreen->PositionWindow = xnestPositionWindow;
+  pScreen->ChangeWindowAttributes = xnestChangeWindowAttributes;
+  pScreen->RealizeWindow = xnestRealizeWindow;
+  pScreen->UnrealizeWindow = xnestUnrealizeWindow;
+  pScreen->PostValidateTree = (void (*)()) 0;
+  pScreen->WindowExposures = xnestWindowExposures;
+  pScreen->PaintWindowBackground = xnestPaintWindowBackground;
+  pScreen->PaintWindowBorder = xnestPaintWindowBorder;
+  pScreen->CopyWindow = xnestCopyWindow;
+  pScreen->ClipNotify = xnestClipNotify;
+
+  /* Pixmap procedures */
+
+  pScreen->CreatePixmap = xnestCreatePixmap;
+  pScreen->DestroyPixmap = xnestDestroyPixmap;
+
+  /* Backing store procedures */
+  
+  pScreen->SaveDoomedAreas = (void (*)()) 0;
+  pScreen->RestoreAreas = (RegionPtr (*)()) 0;
+  pScreen->ExposeCopy = (void (*)()) 0;
+  pScreen->TranslateBackingStore = (RegionPtr (*)()) 0;
+  pScreen->ClearBackingStore = (RegionPtr (*)()) 0;
+  pScreen->DrawGuarantee = (void (*)()) 0;
+
+  /* Font procedures */
+
+  pScreen->RealizeFont = xnestRealizeFont;
+  pScreen->UnrealizeFont = xnestUnrealizeFont;
+
+  /* Cursor Procedures */
+
+  pScreen->ConstrainCursor = xnestConstrainCursor;
+  pScreen->CursorLimits = xnestCursorLimits;
+  pScreen->DisplayCursor = xnestDisplayCursor;
+  pScreen->RealizeCursor = xnestRealizeCursor;
+  pScreen->UnrealizeCursor = xnestUnrealizeCursor;
+  pScreen->RecolorCursor = xnestRecolorCursor;
+  pScreen->SetCursorPosition = xnestSetCursorPosition;
+
+  /* GC procedures */
+  
+  pScreen->CreateGC = xnestCreateGC;
+
+  /* Colormap procedures */
+
+  pScreen->CreateColormap = xnestCreateColormap;
+  pScreen->DestroyColormap = xnestDestroyColormap;
+  pScreen->InstallColormap = xnestInstallColormap;
+  pScreen->UninstallColormap = xnestUninstallColormap;
+  pScreen->ListInstalledColormaps = xnestListInstalledColormaps;
+  pScreen->StoreColors = xnestStoreColors;
+  pScreen->ResolveColor = xnestResolveColor;
+
+   pScreen->BitmapToRegion = xnestPixmapToRegion;
+
+  /* OS layer procedures */
+
+  pScreen->BlockHandler = (void (*)())NoopDDA;
+  pScreen->WakeupHandler = (void (*)())NoopDDA;
+  pScreen->blockData = (pointer)0;
+  pScreen->wakeupData = (pointer)0;
+  if (!miScreenDevPrivateInit(pScreen, xnestWidth, NULL))
+      return FALSE;
+
+  /* devPrivates */
+
+#define POSITION_OFFSET (pScreen->myNum * (xnestWidth + xnestHeight) / 32)
+    
+  if (xnestDoFullGeneration) {
+
+    valuemask = CWBackPixel | CWEventMask | CWColormap;
+    attributes.background_pixel = xnestWhitePixel;
+    attributes.event_mask = xnestEventMask;
+    attributes.colormap = xnestDefaultVisualColormap(xnestDefaultVisual(pScreen));
+    
+    if (xnestParentWindow != 0) {
+      xnestDefaultWindows[pScreen->myNum] = xnestParentWindow;
+      XSelectInput (xnestDisplay, xnestDefaultWindows[pScreen->myNum],
+		    xnestEventMask);
+    } else
+      xnestDefaultWindows[pScreen->myNum] = 
+	XCreateWindow(xnestDisplay, 
+		      DefaultRootWindow(xnestDisplay),
+		      xnestX + POSITION_OFFSET,
+		      xnestY + POSITION_OFFSET,
+		      xnestWidth, xnestHeight,
+		      xnestBorderWidth,
+		      pScreen->rootDepth,
+		      InputOutput,
+		      xnestDefaultVisual(pScreen),
+		      valuemask, &attributes);
+
+    if (!xnestWindowName)
+      xnestWindowName = argv[0];
+    
+    sizeHints.flags = PPosition | PSize | PMaxSize;
+    sizeHints.x = xnestX + POSITION_OFFSET;
+    sizeHints.y = xnestY + POSITION_OFFSET;
+    sizeHints.width = sizeHints.max_width = xnestWidth;
+    sizeHints.height = sizeHints.max_height = xnestHeight;
+    if (xnestUserGeometry & XValue || xnestUserGeometry & YValue)
+      sizeHints.flags |= USPosition;
+    if (xnestUserGeometry & WidthValue || xnestUserGeometry & HeightValue)
+      sizeHints.flags |= USSize;
+    XSetStandardProperties(xnestDisplay, 
+			   xnestDefaultWindows[pScreen->myNum], 
+			   xnestWindowName, 
+			   xnestWindowName, 
+			   xnestIconBitmap,
+			   argv, argc, &sizeHints);
+    
+    XMapWindow(xnestDisplay, xnestDefaultWindows[pScreen->myNum]);
+
+    valuemask = CWBackPixmap | CWColormap;
+    attributes.background_pixmap = xnestScreenSaverPixmap;
+    attributes.colormap = 
+      DefaultColormap(xnestDisplay, DefaultScreen(xnestDisplay));
+    xnestScreenSaverWindows[pScreen->myNum] =
+      XCreateWindow(xnestDisplay, 
+		    xnestDefaultWindows[pScreen->myNum],
+		    0, 0, xnestWidth, xnestHeight, 0,
+		    DefaultDepth(xnestDisplay, DefaultScreen(xnestDisplay)),
+		    InputOutput, 
+		    DefaultVisual(xnestDisplay, DefaultScreen(xnestDisplay)),
+		    valuemask, &attributes);
+  }
+  
+  if (!xnestCreateDefaultColormap(pScreen)) return False;
+  
+  return True;
+}
+
+Bool xnestCloseScreen(index, pScreen)
+     int index;
+     ScreenPtr pScreen;
+{
+  int i;
+  
+  for (i = 0; i < pScreen->numDepths; i++)
+    xfree(pScreen->allowedDepths[i].vids);
+  xfree(pScreen->allowedDepths);
+  xfree(pScreen->visuals);
+  xfree(pScreen->devPrivate);
+
+  /*
+    If xnestDoFullGeneration all x resources will be destroyed upon closing
+    the display connection.  There is no need to generate extra protocol.
+    */
+
+  return True;
+}
+@
+
+
+1.1.9.1
+log
+@OpenBSD just has imported exactly this tree into their vendor branch,
+called the same tag, in XF4/xc
+This is, apparently, the last XFree86 snapshot before the licence change
+(ie, addition of the advertising clause)
+
+Since the developers don't see any problems with that, and we would like
+to integrate improvements done by the remaining one or two (or so) XFree86
+developers (j/k), this prepares enabling us to update X-Window in the future.
+@
+text
+@d15 1
+a15 1
+/* $XFree86: xc/programs/Xserver/hw/xnest/Screen.c,v 3.13 2003/11/16 05:05:20 dawes Exp $ */
+a22 1
+#include "micmap.h"
+d30 1
+d36 1
+a36 1
+#include "XNCursor.h"
+d43 2
+d48 2
+a49 10
+#ifdef GLXEXT
+extern void GlxWrapInitVisuals(miInitVisualsProcPtr *);
+#endif
+
+#ifdef PIXPRIV
+int xnestScreenGeneration = -1;
+#endif
+
+ScreenPtr
+xnestScreen(Window window)
+d60 2
+a61 2
+static int
+offset(unsigned long mask)
+d71 3
+a73 2
+static Bool
+xnestSaveScreen(ScreenPtr pScreen, int what)
+d105 3
+a107 1
+xnestCursorOffScreen(ScreenPtr *ppScreen, int *x, int *y)
+d113 3
+a115 1
+xnestCrossScreen(ScreenPtr pScreen, Bool entering)
+d126 5
+a130 2
+Bool
+xnestOpenScreen(int index, ScreenPtr pScreen, int argc, char *argv[])
+a139 2
+  VisualID defaultVisual;
+  int rootDepth;
+a146 11
+#ifdef PIXPRIV
+  if (xnestScreenGeneration != serverGeneration) {
+      if ((xnestPixmapPrivateIndex = AllocatePixmapPrivateIndex()) < 0)
+	  return False;
+      xnestScreenGeneration = serverGeneration;
+  }
+  
+  if (!AllocatePixmapPrivate(pScreen,xnestPixmapPrivateIndex,
+			     sizeof (xnestPrivPixmap)))
+      return False;
+#endif
+d157 1
+d168 1
+a168 20
+
+    /* Check for and remove duplicates. */
+    for (j = 0; j < numVisuals; j++) {
+      if (visuals[numVisuals].class           == visuals[j].class           &&
+	  visuals[numVisuals].bitsPerRGBValue == visuals[j].bitsPerRGBValue &&
+	  visuals[numVisuals].ColormapEntries == visuals[j].ColormapEntries &&
+	  visuals[numVisuals].nplanes         == visuals[j].nplanes         &&
+	  visuals[numVisuals].redMask         == visuals[j].redMask         &&
+	  visuals[numVisuals].greenMask       == visuals[j].greenMask       &&
+	  visuals[numVisuals].blueMask        == visuals[j].blueMask        &&
+	  visuals[numVisuals].offsetRed       == visuals[j].offsetRed       &&
+	  visuals[numVisuals].offsetGreen     == visuals[j].offsetGreen     &&
+	  visuals[numVisuals].offsetBlue      == visuals[j].offsetBlue)
+	break;
+    }
+    if (j < numVisuals)
+      break;
+
+    visuals[numVisuals].vid = FakeClientID(0);
+
+a192 15
+  visuals = (VisualPtr)xrealloc(visuals, numVisuals * sizeof(VisualRec));
+
+  defaultVisual = visuals[xnestDefaultVisualIndex].vid;
+  rootDepth = visuals[xnestDefaultVisualIndex].nplanes;
+
+#ifdef GLXEXT
+  {
+    miInitVisualsProcPtr proc = NULL;
+
+    GlxWrapInitVisuals(&proc);
+    /* GlxInitVisuals ignores the last three arguments. */
+    proc(&visuals, &depths, &numVisuals, &numDepths,
+	 &rootDepth, &defaultVisual, 0, 0, 0);
+  }
+#endif
+d203 1
+a203 1
+	       rootDepth,
+d205 1
+a205 1
+	       defaultVisual, /* root visual */
+d246 2
+a247 2
+  pScreen->PointerNonInterestBox = NULL;
+  pScreen->SourceValidate = NULL;
+d257 1
+a257 1
+  pScreen->PostValidateTree = NULL;
+d271 6
+a276 6
+  pScreen->SaveDoomedAreas = NULL;
+  pScreen->RestoreAreas = NULL;
+  pScreen->ExposeCopy = NULL;
+  pScreen->TranslateBackingStore = NULL;
+  pScreen->ClearBackingStore = NULL;
+  pScreen->DrawGuarantee = NULL;
+d311 4
+a314 4
+  pScreen->BlockHandler = (ScreenBlockHandlerProcPtr)NoopDDA;
+  pScreen->WakeupHandler = (ScreenWakeupHandlerProcPtr)NoopDDA;
+  pScreen->blockData = NULL;
+  pScreen->wakeupData = NULL;
+d386 3
+a388 2
+Bool
+xnestCloseScreen(int index, ScreenPtr pScreen)
+@
+
+
+1.1.1.1
+log
+@Import OpenBSD 3.3 XF4 repository from CTM 3132 the first time
+This finalizes starting an OpenBSD-mirabile (aka MirBSD) repository.
+
+### MirBSD is:
+# Copyright (c) 1982-2003 by Thorsten "mirabile" Glaser <x86@@ePost.de>
+# Copyright © 1968-2003  The authors of And contributors to UNIX®, the
+#       C Language, BSD/Berkeley Unix; 386BSD, NetBSD 1.1 and OpenBSD.
+#
+# Anyone who obtained a copy of this work is hereby permitted to freely use,
+# distribute, modify, merge, sublicence, give away or sell it as long as the
+# authors are given due credit and the following notice is retained:
+#
+# This work is provided "as is", with no explicit or implicit warranty what-
+# soever. Use it only at your own risk. In no event may an author or contri-
+# butor be held liable for any damage, directly or indirectly, that origina-
+# ted through or is caused by creation or modification of this work.
+
+MirBSD is my private tree. MirBSD does not differ very much from OpenBSD
+and intentionally tracks OpenBSD. That's why it _is_ OpenBSD, just not the
+official one. It's like with DarrenBSD.
+
+At time of this writing, no advertising for MirBSD must be done,
+because the advertising clause has not yet been sorted out.
+
+http://templeofhate.com/tglaser/MirBSD/index.php
+@
+text
+@@
+
+
+1.1.1.2
+log
+@The X-Windowing System
+
+Import XFree86 4.3 from OpenBSD by CTM, in the hope it's stable
+@
+text
+@d15 1
+a15 1
+/* $XFree86: xc/programs/Xserver/hw/xnest/Screen.c,v 3.11 2003/01/10 13:29:40 eich Exp $ */
+d30 1
+d36 1
+a36 1
+#include "XNCursor.h"
+a47 4
+#ifdef PIXPRIV
+int xnestScreenGeneration = -1;
+#endif
+
+a146 11
+#ifdef PIXPRIV
+  if (xnestScreenGeneration != serverGeneration) {
+      if ((xnestPixmapPrivateIndex = AllocatePixmapPrivateIndex()) < 0)
+	  return False;
+      xnestScreenGeneration = serverGeneration;
+  }
+  
+  if (!AllocatePixmapPrivate(pScreen,xnestPixmapPrivateIndex,
+			     sizeof (xnestPrivPixmap)))
+      return False;
+#endif
+@
+
+
+1.1.1.3
+log
+@That's what OpenBSD will, probably, ship as XF4 in 3.5
+their last sync against XFree86 4.3-current has been
+imported into our vendor branch, too
+@
+text
+@d15 1
+a15 1
+/* $XFree86: xc/programs/Xserver/hw/xnest/Screen.c,v 3.13 2003/11/16 05:05:20 dawes Exp $ */
+a22 1
+#include "micmap.h"
+d42 2
+a46 4
+#ifdef GLXEXT
+extern void GlxWrapInitVisuals(miInitVisualsProcPtr *);
+#endif
+
+d51 2
+a52 2
+ScreenPtr
+xnestScreen(Window window)
+d63 2
+a64 2
+static int
+offset(unsigned long mask)
+d74 3
+a76 2
+static Bool
+xnestSaveScreen(ScreenPtr pScreen, int what)
+d108 3
+a110 1
+xnestCursorOffScreen(ScreenPtr *ppScreen, int *x, int *y)
+d116 3
+a118 1
+xnestCrossScreen(ScreenPtr pScreen, Bool entering)
+d129 5
+a133 2
+Bool
+xnestOpenScreen(int index, ScreenPtr pScreen, int argc, char *argv[])
+a142 2
+  VisualID defaultVisual;
+  int rootDepth;
+d171 1
+d182 1
+a182 20
+
+    /* Check for and remove duplicates. */
+    for (j = 0; j < numVisuals; j++) {
+      if (visuals[numVisuals].class           == visuals[j].class           &&
+	  visuals[numVisuals].bitsPerRGBValue == visuals[j].bitsPerRGBValue &&
+	  visuals[numVisuals].ColormapEntries == visuals[j].ColormapEntries &&
+	  visuals[numVisuals].nplanes         == visuals[j].nplanes         &&
+	  visuals[numVisuals].redMask         == visuals[j].redMask         &&
+	  visuals[numVisuals].greenMask       == visuals[j].greenMask       &&
+	  visuals[numVisuals].blueMask        == visuals[j].blueMask        &&
+	  visuals[numVisuals].offsetRed       == visuals[j].offsetRed       &&
+	  visuals[numVisuals].offsetGreen     == visuals[j].offsetGreen     &&
+	  visuals[numVisuals].offsetBlue      == visuals[j].offsetBlue)
+	break;
+    }
+    if (j < numVisuals)
+      break;
+
+    visuals[numVisuals].vid = FakeClientID(0);
+
+a206 15
+  visuals = (VisualPtr)xrealloc(visuals, numVisuals * sizeof(VisualRec));
+
+  defaultVisual = visuals[xnestDefaultVisualIndex].vid;
+  rootDepth = visuals[xnestDefaultVisualIndex].nplanes;
+
+#ifdef GLXEXT
+  {
+    miInitVisualsProcPtr proc = NULL;
+
+    GlxWrapInitVisuals(&proc);
+    /* GlxInitVisuals ignores the last three arguments. */
+    proc(&visuals, &depths, &numVisuals, &numDepths,
+	 &rootDepth, &defaultVisual, 0, 0, 0);
+  }
+#endif
+d217 1
+a217 1
+	       rootDepth,
+d219 1
+a219 1
+	       defaultVisual, /* root visual */
+d260 2
+a261 2
+  pScreen->PointerNonInterestBox = NULL;
+  pScreen->SourceValidate = NULL;
+d271 1
+a271 1
+  pScreen->PostValidateTree = NULL;
+d285 6
+a290 6
+  pScreen->SaveDoomedAreas = NULL;
+  pScreen->RestoreAreas = NULL;
+  pScreen->ExposeCopy = NULL;
+  pScreen->TranslateBackingStore = NULL;
+  pScreen->ClearBackingStore = NULL;
+  pScreen->DrawGuarantee = NULL;
+d325 4
+a328 4
+  pScreen->BlockHandler = (ScreenBlockHandlerProcPtr)NoopDDA;
+  pScreen->WakeupHandler = (ScreenWakeupHandlerProcPtr)NoopDDA;
+  pScreen->blockData = NULL;
+  pScreen->wakeupData = NULL;
+d400 3
+a402 2
+Bool
+xnestCloseScreen(int index, ScreenPtr pScreen)
+@
+
+

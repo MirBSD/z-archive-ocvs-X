@@ -1,0 +1,1840 @@
+head	1.1;
+branch	1.1.1;
+access;
+symbols
+	tg-mergetmp-2:1.1.1.2
+	cvs-200410241530:1.1.1.2
+	cvs-200410012000:1.1.1.2
+	cvs-200407141120:1.1.1.2
+	cvs-200406231010:1.1.1.2
+	MIRBSD_7quater:1.1.1.2
+	cvs-200405271510:1.1.1.2
+	XFree86_4_4_0:1.1.9.1
+	cvs-200403021700:1.1.1.2
+	XFREE86_20040213:1.1.9.1
+	xc:1.1.9
+	cvs-200401291925:1.1.1.2
+	MIRBSD_7_ALPHA:1.1.1.2.0.4
+	MIRBSD_7:1.1.1.2.0.2
+	MIRBSD_7ter:1.1.1.2
+	cvs-20011091815:1.1.1.2
+	cvs-200309162130:1.1.1.2
+	cvs-200308302005:1.1.1.2
+	ctmx-0387:1.1.1.2
+	ctmx-0384:1.1.1.2
+	MIRBSD_5:1.1.1.2
+	ctmx-0375:1.1.1.2
+	ctmx-0373:1.1.1.2
+	ctm-0371:1.1.1.2
+	ctm-0370:1.1.1.2
+	MIRBSD_4:1.1.1.2
+	ctm-0363:1.1.1.2
+	ctm-0359:1.1.1.2
+	ctm-0349:1.1.1.1
+	openbsd:1.1.1;
+locks; strict;
+comment	@ * @;
+
+
+1.1
+date	2003.03.22.20.11.01;	author tg;	state Exp;
+branches
+	1.1.1.1
+	1.1.9.1;
+next	;
+
+1.1.1.1
+date	2003.03.22.20.11.01;	author tg;	state Exp;
+branches;
+next	1.1.1.2;
+
+1.1.1.2
+date	2003.04.08.18.41.02;	author tg;	state Stab;
+branches;
+next	;
+
+1.1.9.1
+date	2004.02.14.19.29.24;	author tg;	state Exp;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@/* $XConsortium: toc.c,v 2.59 95/01/09 16:52:53 swick Exp $
+ * $XFree86: xc/programs/xmh/toc.c,v 3.4 2001/10/28 03:34:39 tsi Exp $
+ *
+ *
+ *			  COPYRIGHT 1987
+ *		   DIGITAL EQUIPMENT CORPORATION
+ *		       MAYNARD, MASSACHUSETTS
+ *			ALL RIGHTS RESERVED.
+ *
+ * THE INFORMATION IN THIS SOFTWARE IS SUBJECT TO CHANGE WITHOUT NOTICE AND
+ * SHOULD NOT BE CONSTRUED AS A COMMITMENT BY DIGITAL EQUIPMENT CORPORATION.
+ * DIGITAL MAKES NO REPRESENTATIONS ABOUT THE SUITABILITY OF THIS SOFTWARE FOR
+ * ANY PURPOSE.  IT IS SUPPLIED "AS IS" WITHOUT EXPRESS OR IMPLIED WARRANTY.
+ *
+ * IF THE SOFTWARE IS MODIFIED IN A MANNER CREATING DERIVATIVE COPYRIGHT
+ * RIGHTS, APPROPRIATE LEGENDS MAY BE PLACED ON THE DERIVATIVE WORK IN
+ * ADDITION TO THAT SET FORTH ABOVE.
+ *
+ * Permission to use, copy, modify, and distribute this software and its
+ * documentation for any purpose and without fee is hereby granted, provided
+ * that the above copyright notice appear in all copies and that both that
+ * copyright notice and this permission notice appear in supporting
+ * documentation, and that the name of Digital Equipment Corporation not be
+ * used in advertising or publicity pertaining to distribution of the software
+ * without specific, written prior permission.
+ */
+
+/* toc.c -- handle things in the toc widget. */
+
+#include "xmh.h"
+#include "tocintrnl.h"
+#include "toc.h"
+#include "tocutil.h"
+#include <sys/stat.h>
+
+static int IsDir(name)
+char *name;
+{
+    char str[500];
+    struct stat buf;
+    if (*name == '.')
+	return FALSE;
+    (void) sprintf(str, "%s/%s", app_resources.mail_path, name);
+    if (stat(str, &buf) /* failed */) return False;
+#ifdef S_ISDIR
+    return S_ISDIR(buf.st_mode);
+#else
+    return (buf.st_mode & S_IFMT) == S_IFDIR;
+#endif
+}
+
+
+static void MakeSureFolderExists(namelistptr, numfoldersptr, name)
+char ***namelistptr;
+int *numfoldersptr;
+char *name;
+{
+    int i;
+    char str[200];
+    for (i=0 ; i<*numfoldersptr ; i++)
+	if (strcmp((*namelistptr)[i], name) == 0) return;
+    (void) sprintf(str, "%s/%s", app_resources.mail_path, name);
+    (void) mkdir(str, 0700);
+    *numfoldersptr = ScanDir(app_resources.mail_path, namelistptr, IsDir);
+    for (i=0 ; i<*numfoldersptr ; i++)
+	if (strcmp((*namelistptr)[i], name) == 0) return;
+    Punt("Can't create new mail folder!");
+}
+
+
+static void MakeSureSubfolderExists(namelistptr, numfoldersptr, name)
+    char ***		namelistptr;
+    int *		numfoldersptr;
+    char *		name;
+{
+    char folder[300];
+    char subfolder_path[300];
+    char *subfolder;
+    struct stat buf;
+
+    /* Make sure that the parent folder exists */
+
+    subfolder = strchr( strcpy(folder, name), '/');
+    *subfolder = '\0';
+    subfolder++;
+    MakeSureFolderExists(namelistptr, numfoldersptr, folder);
+	
+    /* The parent folder exists.  Make sure the subfolder exists. */
+
+    (void) sprintf(subfolder_path, "%s/%s", app_resources.mail_path, name);
+    if (stat(subfolder_path, &buf) /* failed */) {
+	(void) mkdir(subfolder_path, 0700);
+	if (stat(subfolder_path, &buf) /* failed */)
+	    Punt("Can't create new xmh subfolder!");
+    }
+#ifdef S_ISDIR
+    if (!S_ISDIR(buf.st_mode))
+#else
+    if ((buf.st_mode & S_IFMT) != S_IFDIR)
+#endif
+	Punt("Can't create new xmh subfolder!");
+}
+
+int TocFolderExists(toc)
+    Toc	toc;
+{
+    struct stat buf;
+    if (! toc->path) {
+	char str[500];
+	(void) sprintf(str, "%s/%s", app_resources.mail_path, toc->foldername);
+	toc->path = XtNewString(str);
+    }
+    return ((stat(toc->path, &buf) == 0) &&
+#ifdef S_ISDIR
+	    (S_ISDIR(buf.st_mode)));
+#else
+	    ((buf.st_mode & S_IFMT) == S_IFDIR));
+#endif
+}
+
+static void LoadCheckFiles()
+{
+    FILE *fid;
+    char str[1024];
+
+    (void) sprintf(str, "%s/.xmhcheck", homeDir);
+    fid = myfopen(str, "r");
+    if (fid) {
+	int i;
+	char *ptr, *ptr2;
+
+	while ((ptr = ReadLine(fid))) {
+	    while (*ptr == ' ' || *ptr == '\t') ptr++;
+	    ptr2 = ptr;
+	    while (*ptr2 && *ptr2 != ' ' && *ptr2 != '\t') ptr2++;
+	    if (*ptr2 == 0) continue;
+	    *ptr2++ = 0;
+	    while (*ptr2 == ' ' || *ptr2 == '\t') ptr2++;
+	    if (*ptr2 == 0) continue;
+	    for (i=0 ; i<numFolders ; i++) {
+		if (strcmp(ptr, folderList[i]->foldername) == 0) {
+		    folderList[i]->incfile = XtNewString(ptr2);
+		    break;
+		}
+	    }
+	}
+	myfclose(fid);
+    } else if ( app_resources.initial_inc_file &&
+	       *app_resources.initial_inc_file)
+	InitialFolder->incfile = app_resources.initial_inc_file;
+}
+	    
+
+/*	PUBLIC ROUTINES 	*/
+
+
+/* Read in the list of folders. */
+
+void TocInit()
+{
+    Toc toc;
+    char **namelist;
+    int i;
+    numFolders = ScanDir(app_resources.mail_path, &namelist, IsDir);
+    if (numFolders < 0) {
+	(void) mkdir(app_resources.mail_path, 0700);
+	numFolders = ScanDir(app_resources.mail_path, &namelist, IsDir);
+	if (numFolders < 0)
+	    Punt("Can't create or read mail directory!");
+    }
+    if (IsSubfolder(app_resources.initial_folder_name))
+	MakeSureSubfolderExists(&namelist, &numFolders,
+				app_resources.initial_folder_name);
+    else
+	MakeSureFolderExists(&namelist, &numFolders,
+			     app_resources.initial_folder_name);
+
+    if (IsSubfolder(app_resources.drafts_folder_name))
+	MakeSureSubfolderExists(&namelist, &numFolders,
+				app_resources.drafts_folder_name);
+    else
+	MakeSureFolderExists(&namelist, &numFolders,
+			     app_resources.drafts_folder_name);
+    folderList = (Toc *) XtMalloc((Cardinal)numFolders * sizeof(Toc));
+    for (i=0 ; i<numFolders ; i++) {
+	toc = folderList[i] = TUMalloc();
+	toc->foldername = XtNewString(namelist[i]);
+	free((char *)namelist[i]);
+    }
+    if (! (InitialFolder = TocGetNamed(app_resources.initial_folder_name)))
+	InitialFolder = TocCreate(app_resources.initial_folder_name);
+
+    if (! (DraftsFolder = TocGetNamed(app_resources.drafts_folder_name)))
+	DraftsFolder = TocCreate(app_resources.drafts_folder_name);
+    free((char *)namelist);
+    LoadCheckFiles();
+}
+
+
+
+/* Create a toc and add a folder to the folderList.  */
+
+Toc TocCreate(foldername)
+    char	*foldername;
+{
+    Toc		toc = TUMalloc();
+
+    toc->foldername = XtNewString(foldername);
+    folderList = (Toc *) XtRealloc((char *) folderList,
+				   (unsigned) ++numFolders * sizeof(Toc));
+    folderList[numFolders - 1] = toc;
+    return toc;
+}
+
+
+/* Create a new folder with the given name. */
+
+Toc TocCreateFolder(foldername)
+char *foldername;
+{
+    Toc toc;
+    char str[500];
+    if (TocGetNamed(foldername)) return NULL;
+    (void) sprintf(str, "%s/%s", app_resources.mail_path, foldername);
+    if (mkdir(str, 0700) < 0) return NULL;
+    toc = TocCreate(foldername);
+    return toc;
+}
+
+int TocHasMail(toc)
+    Toc toc;
+{
+    return toc->mailpending;
+}
+
+static int CheckForNewMail(toc)
+    Toc toc;
+{
+    if (toc->incfile)
+	return (GetFileLength(toc->incfile) > 0);
+    else if (toc == InitialFolder) {
+	char **argv;
+	char *result;
+	int hasmail;
+
+	argv = MakeArgv(4);
+	argv[0] = "msgchk";
+	argv[1] = "-nonotify";
+	argv[2] = "nomail";
+	argv[3] = "-nodate";
+	result = DoCommandToString(argv);
+	hasmail = (*result != '\0');
+	XtFree(result);
+	XtFree((char*)argv);
+	return hasmail;
+    }
+    return False;
+}
+
+/*ARGSUSED*/
+void TocCheckForNewMail(update)
+    Boolean update;	/* if True, actually make the check */
+{
+    Toc toc;
+    Scrn scrn;
+    int i, j, hasmail;
+    Boolean mail_waiting = False;
+
+    if (update) {
+	for (i=0 ; i<numFolders ; i++) {
+	    toc = folderList[i];
+	    if (TocCanIncorporate(toc)) {
+		toc->mailpending = hasmail = CheckForNewMail(toc);
+		if (hasmail) mail_waiting = True;
+		for (j=0 ; j<numScrns ; j++) {
+		    scrn = scrnList[j];
+		    if (scrn->kind == STtocAndView)
+			/* give visual indication of new mail waiting */
+			BBoxMailFlag(scrn->folderbuttons, TocName(toc),
+				     hasmail);
+		}
+	    }
+	}
+    } else {
+	for (i=0; i < numFolders; i++) {
+	    toc = folderList[i];
+	    if (toc->mailpending) {
+		mail_waiting = True;
+		break;
+	    }
+	}
+    }
+
+    if (app_resources.mail_waiting_flag) {
+	Arg args[1];
+	static Boolean icon_state = -1;
+
+	if (icon_state != mail_waiting) {
+	    icon_state = mail_waiting;
+	    for (i=0; i < numScrns; i++) {
+		scrn = scrnList[i];
+		if (scrn->kind == STtocAndView) {
+		    XtSetArg(args[0], XtNiconPixmap,
+			     (mail_waiting ? app_resources.new_mail_icon
+			                   : app_resources.no_mail_icon));
+		    XtSetValues(scrn->parent, args, (Cardinal)1);
+		}
+	    }
+	}
+    }
+}
+
+/* Intended to support mutual exclusion on deleting folders, so that you
+ * cannot have two confirm popups at the same time on the same folder.
+ *
+ * You can have confirm popups on different folders simultaneously.
+ * However, I did not protect the user from popping up a delete confirm
+ * popup on folder A, then popping up a delete confirm popup on folder
+ * A/subA, then deleting A, then deleting A/subA -- which of course is 
+ * already gone, and will cause xmh to Punt.
+ *
+ * TocClearDeletePending is a callback from the No confirmation button
+ * of the confirm popup.
+ */
+
+Boolean TocTestAndSetDeletePending(toc)
+    Toc	toc;
+{
+    Boolean flag;
+
+    flag = toc->delete_pending;
+    toc->delete_pending = True;
+    return flag;
+}
+
+void TocClearDeletePending(toc)
+    Toc	toc;
+{
+    toc->delete_pending = False;
+}
+
+
+/* Recursively delete an entire directory.  Nasty. */
+
+static void NukeDirectory(path)
+    char *path;
+{
+    struct stat buf;
+
+#ifdef S_IFLNK
+    /* POSIX.1 does not discuss symbolic links. */
+    if (lstat(path, &buf) /* failed */)
+	return;
+    if ((buf.st_mode & S_IFMT) == S_IFLNK) {
+	(void) unlink(path);
+	return;
+    }
+#endif
+    if (stat(path, &buf) /* failed */)
+	return;
+    if (buf.st_mode & S_IWRITE) {
+	char **argv = MakeArgv(3);
+	argv[0] = "/bin/rm";
+	argv[1] = "-rf";
+	argv[2] = path;
+	(void) DoCommand(argv, (char*)NULL, (char*)NULL);
+	XtFree((char*)argv);
+    } 
+}
+
+
+/* Destroy the given folder. */
+
+void TocDeleteFolder(toc)
+Toc toc;
+{
+    Toc toc2;
+    int i, j, w;
+    if (toc == NULL) return;
+    TUGetFullFolderInfo(toc);
+
+    w = -1;
+    for (i=0 ; i<numFolders ; i++) {
+	toc2 = folderList[i];
+	if (toc2 == toc)
+	    w = i;
+	else if (toc2->validity == valid)
+	    for (j=0 ; j<toc2->nummsgs ; j++)
+		if (toc2->msgs[j]->desttoc == toc)
+		    MsgSetFate(toc2->msgs[j], Fignore, (Toc) NULL);
+    }
+    if (w < 0) Punt("Couldn't find it in TocDeleteFolder!");
+    NukeDirectory(toc->path);
+    if (toc->validity == valid) {
+	for (i=0 ; i<toc->nummsgs ; i++) {
+	    MsgSetScrnForce(toc->msgs[i], (Scrn) NULL);
+	    MsgFree(toc->msgs[i]);
+	}
+	XtFree((char *) toc->msgs);
+    }
+    XtFree((char *)toc);
+    numFolders--;
+    for (i=w ; i<numFolders ; i++) folderList[i] = folderList[i+1];
+}
+
+
+/*
+ * Display the given toc in the given scrn.  If scrn is NULL, then remove the
+ * toc from all scrns displaying it.
+ */
+
+void TocSetScrn(toc, scrn)
+Toc toc;
+Scrn scrn;
+{
+    int i;
+    if (toc == NULL && scrn == NULL) return;
+    if (scrn == NULL) {
+	for (i=0 ; i<toc->num_scrns ; i++)
+	    TocSetScrn((Toc) NULL, toc->scrn[i]);
+	return;
+    }
+    if (scrn->toc == toc) return;
+    if (scrn->toc != NULL) {
+	for (i=0 ; i<scrn->toc->num_scrns ; i++)
+	    if (scrn->toc->scrn[i] == scrn) break;
+	if (i >= scrn->toc->num_scrns)
+	    Punt("Couldn't find scrn in TocSetScrn!");
+	scrn->toc->scrn[i] = scrn->toc->scrn[--scrn->toc->num_scrns];
+    }
+    scrn->toc = toc;
+    if (toc == NULL) {
+	TUResetTocLabel(scrn);
+	TURedisplayToc(scrn);
+	StoreWindowName(scrn, progName);
+    } else {
+	toc->num_scrns++;
+	toc->scrn = (Scrn *) XtRealloc((char *) toc->scrn,
+				       (unsigned)toc->num_scrns*sizeof(Scrn));
+	toc->scrn[toc->num_scrns - 1] = scrn;
+	TUEnsureScanIsValidAndOpen(toc, True);
+	TUResetTocLabel(scrn);
+	if (app_resources.prefix_wm_and_icon_name) {
+	    char wm_name[64];
+	    int length = strlen(progName);
+	    (void) strncpy(wm_name, progName, length);
+	    (void) strncpy(wm_name + length , ": ", 2);
+	    (void) strcpy(wm_name + length + 2, toc->foldername);
+	    StoreWindowName(scrn, wm_name);
+	}
+	else
+	    StoreWindowName(scrn, toc->foldername);
+	TURedisplayToc(scrn);
+	SetCurrentFolderName(scrn, toc->foldername);
+    }
+    EnableProperButtons(scrn);
+}
+
+
+
+/* Remove the given message from the toc.  Doesn't actually touch the file.
+   Also note that it does not free the storage for the msg. */
+
+void TocRemoveMsg(toc, msg)
+Toc toc;
+Msg msg;
+{
+    Msg newcurmsg;
+    MsgList mlist;
+    int i;
+    if (toc->validity == unknown)
+	TUGetFullFolderInfo(toc);
+    if (toc->validity != valid)
+	return;
+    newcurmsg = TocMsgAfter(toc, msg);
+    if (newcurmsg) newcurmsg->changed = TRUE;
+    newcurmsg = toc->curmsg;
+    if (msg == toc->curmsg) {
+	newcurmsg = TocMsgAfter(toc, msg);
+	if (newcurmsg == NULL) newcurmsg = TocMsgBefore(toc, msg);
+	toc->curmsg = NULL;
+    }
+    toc->length -= msg->length;
+    if (msg->visible) toc->lastPos -= msg->length;
+    for(i = TUGetMsgPosition(toc, msg), toc->nummsgs--; i<toc->nummsgs ; i++) {
+	toc->msgs[i] = toc->msgs[i+1];
+	if (msg->visible) toc->msgs[i]->position -= msg->length;
+    }
+    for (i=0 ; i<toc->numsequences ; i++) {
+	mlist = toc->seqlist[i]->mlist;
+	if (mlist) DeleteMsgFromMsgList(mlist, msg);
+    }
+
+    if (msg->visible && toc->num_scrns > 0 && !toc->needsrepaint)
+	TSourceInvalid(toc, msg->position, -msg->length);
+    TocSetCurMsg(toc, newcurmsg);
+    TUSaveTocFile(toc);
+}
+    
+
+
+void TocRecheckValidity(toc)
+    Toc toc;
+{
+    int i;
+    if (toc && toc->validity == valid && TUScanFileOutOfDate(toc)) {
+	if (app_resources.block_events_on_busy) ShowBusyCursor();
+
+	TUScanFileForToc(toc);
+	if (toc->source)
+	    TULoadTocFile(toc);
+	for (i=0 ; i<toc->num_scrns ; i++)
+	    TURedisplayToc(toc->scrn[i]);
+
+	if (app_resources.block_events_on_busy) UnshowBusyCursor();
+    }
+}
+
+
+/* Set the current message. */
+
+void TocSetCurMsg(toc, msg)
+  Toc toc;
+  Msg msg;
+{
+    Msg msg2;
+    int i;
+    if (toc->validity != valid) return;
+    if (msg != toc->curmsg) {
+	msg2 = toc->curmsg;
+	toc->curmsg = msg;
+	if (msg2)
+	    MsgSetFate(msg2, msg2->fate, msg2->desttoc);
+    }
+    if (msg) {
+	MsgSetFate(msg, msg->fate, msg->desttoc);
+	if (toc->num_scrns) {
+	    if (toc->stopupdate)
+		toc->needsrepaint = TRUE;
+	    else {
+		for (i=0 ; i<toc->num_scrns ; i++)
+		    XawTextSetInsertionPoint(toc->scrn[i]->tocwidget,
+						msg->position);
+	    }
+	}
+    }
+}
+
+
+/* Return the current message. */
+
+Msg TocGetCurMsg(toc)
+Toc toc;
+{
+    return toc->curmsg;
+}
+
+
+
+
+/* Return the message after the given one.  (If none, return NULL.) */
+
+Msg TocMsgAfter(toc, msg)
+  Toc toc;
+  Msg msg;
+{
+    int i;
+    i = TUGetMsgPosition(toc, msg);
+    do {
+	i++;
+	if (i >= toc->nummsgs)
+	    return NULL;
+    } while (!(toc->msgs[i]->visible));
+    return toc->msgs[i];
+}
+
+
+
+/* Return the message before the given one.  (If none, return NULL.) */
+
+Msg TocMsgBefore(toc, msg)
+  Toc toc;
+  Msg msg;
+{
+    int i;
+    i = TUGetMsgPosition(toc, msg);
+    do {
+	i--;
+	if (i < 0)
+	    return NULL;
+    } while (!(toc->msgs[i]->visible));
+    return toc->msgs[i];
+}
+
+
+
+/* The caller KNOWS the toc's information is out of date; rescan it. */
+
+void TocForceRescan(toc)
+    Toc	toc;
+{
+    register int i;
+    if (toc->num_scrns) {
+	toc->viewedseq = toc->seqlist[0];
+	for (i=0 ; i<toc->num_scrns ; i++)
+	    TUResetTocLabel(toc->scrn[i]);
+	TUScanFileForToc(toc);
+	TULoadTocFile(toc);
+	for (i=0 ; i<toc->num_scrns ; i++)
+	    TURedisplayToc(toc->scrn[i]);
+    } else {
+	TUGetFullFolderInfo(toc);
+	(void) unlink(toc->scanfile);
+	toc->validity = invalid;
+    }
+}
+
+
+
+/* The caller has just changed a sequence list.  Reread them from mh. */
+
+void TocReloadSeqLists(toc)
+Toc toc;
+{
+    int i;
+    TocSetCacheValid(toc);
+    TULoadSeqLists(toc);
+    TURefigureWhatsVisible(toc);
+    for (i=0 ; i<toc->num_scrns ; i++) {
+	TUResetTocLabel(toc->scrn[i]);
+	EnableProperButtons(toc->scrn[i]);
+    }
+}
+
+
+/*ARGSUSED*/
+void XmhReloadSeqLists(w, event, params, num_params)
+    Widget	w;
+    XEvent	*event;
+    String	*params;
+    Cardinal	*num_params;
+{
+    Scrn scrn = ScrnFromWidget(w);
+    TocReloadSeqLists(scrn->toc);
+    TUCheckSequenceMenu(scrn->toc);
+}
+
+
+
+/* Return TRUE if the toc has an interesting sequence. */
+
+int TocHasSequences(toc)
+Toc toc;
+{
+    return toc && toc->numsequences > 1;
+}
+
+
+/* Change which sequence is being viewed. */
+
+void TocChangeViewedSeq(toc, seq)
+  Toc toc;
+  Sequence seq;
+{
+    if (seq == NULL) seq = toc->viewedseq;
+    toc->viewedseq = seq;
+    toc->force_reset = True; /* %%% force Text source to be reset */
+    TURefigureWhatsVisible(toc);
+}
+
+
+/* Return the sequence with the given name in the given toc. */
+
+Sequence TocGetSeqNamed(toc, name)
+Toc toc;
+char *name;
+{
+    register int i;
+    if (name == NULL)
+	return (Sequence) NULL;
+
+    for (i=0 ; i<toc->numsequences ; i++)
+	if (strcmp(toc->seqlist[i]->name, name) == 0)
+	    return toc->seqlist[i];
+    return (Sequence) NULL;
+}
+
+
+/* Return the sequence currently being viewed in the toc. */
+
+Sequence TocViewedSequence(toc)
+Toc toc;
+{
+    return toc->viewedseq;
+}
+
+
+/* Set the selected sequence in the toc */
+
+void TocSetSelectedSequence(toc, sequence)
+    Toc		toc;
+    Sequence	sequence;
+{
+    if (toc) 
+	toc->selectseq = sequence;
+}
+
+
+/* Return the sequence currently selected */
+
+Sequence TocSelectedSequence(toc)
+    Toc	toc;
+{
+    if (toc) return (toc->selectseq);
+    else return (Sequence) NULL;
+}
+
+
+/* Return the list of messages currently selected. */
+
+#define SrcScan XawTextSourceScan
+
+MsgList TocCurMsgList(toc)
+  Toc toc;
+{
+    MsgList result;
+    XawTextPosition pos1, pos2;
+    extern Msg MsgFromPosition();
+    if (toc->num_scrns == 0) return NULL;
+    result = MakeNullMsgList();
+    XawTextGetSelectionPos( toc->scrn[0]->tocwidget, &pos1, &pos2); /* %%% */
+    if (pos1 < pos2) {
+	pos1 = SrcScan(toc->source, pos1, XawstEOL, XawsdLeft, 1, FALSE);
+	pos2 = SrcScan(toc->source, pos2, XawstPositions, XawsdLeft, 1, TRUE);
+	pos2 = SrcScan(toc->source, pos2, XawstEOL, XawsdRight, 1, FALSE);
+	while (pos1 < pos2) {
+	    AppendMsgList(result, MsgFromPosition(toc, pos1, XawsdRight));
+	    pos1 = SrcScan(toc->source, pos1, XawstEOL, XawsdRight, 1, TRUE);
+	}
+    }
+    return result;
+}
+
+
+
+/* Unset the current selection. */
+
+void TocUnsetSelection(toc)
+Toc toc;
+{
+    if (toc->source)
+        XawTextUnsetSelection(toc->scrn[0]->tocwidget);
+}
+
+
+
+/* Create a brand new, blank message. */
+
+Msg TocMakeNewMsg(toc)
+Toc toc;
+{
+    Msg msg;
+    static int looping = False;
+    TUEnsureScanIsValidAndOpen(toc, False);
+    msg = TUAppendToc(toc, "####  empty\n");
+    if (FileExists(MsgFileName(msg))) {
+	if (looping++) Punt( "Cannot correct scan file" );
+        DEBUG2("**** FOLDER %s WAS INVALID; msg %d already existed!\n",
+	       toc->foldername, msg->msgid);
+	TocForceRescan(toc);
+	return TocMakeNewMsg(toc); /* Try again.  Using recursion here is ugly,
+				      but what the hack ... */
+    }
+    CopyFileAndCheck("/dev/null", MsgFileName(msg));
+    looping = False;
+    return msg;
+}
+
+
+/* Set things to not update cache or display until further notice. */
+
+void TocStopUpdate(toc)
+Toc toc;
+{
+    int i;
+    for (i=0 ; i<toc->num_scrns ; i++)
+	XawTextDisableRedisplay(toc->scrn[i]->tocwidget);
+    toc->stopupdate++;
+}
+
+
+/* Start updating again, and do whatever updating has been queued. */
+
+void TocStartUpdate(toc)
+Toc toc;
+{
+    int i;
+    if (toc->stopupdate && --(toc->stopupdate) == 0) {
+	for (i=0 ; i<toc->num_scrns ; i++) {
+	    if (toc->needsrepaint) 
+		TURedisplayToc(toc->scrn[i]);
+	    if (toc->needslabelupdate)
+		TUResetTocLabel(toc->scrn[i]);
+	}
+	if (toc->needscachesave)
+	    TUSaveTocFile(toc);
+    }
+    for (i=0 ; i<toc->num_scrns ; i++)
+	XawTextEnableRedisplay(toc->scrn[i]->tocwidget);
+}
+
+
+
+/* Something has happened that could later convince us that our cache is out
+   of date.  Make this not happen; our cache really *is* up-to-date. */
+
+void TocSetCacheValid(toc)
+Toc toc;
+{
+    TUSaveTocFile(toc);
+}
+
+
+/* Return the full folder pathname of the given toc, prefixed w/'+' */
+
+char *TocMakeFolderName(toc)
+Toc toc;
+{
+    char* name = XtMalloc((Cardinal) (strlen(toc->path) + 2) );
+    (void)sprintf( name, "+%s", toc->path );
+    return name;
+}
+
+char *TocName(toc)
+Toc toc;
+{
+    return toc->foldername;
+}
+
+
+
+/* Given a foldername, return the corresponding toc. */
+
+Toc TocGetNamed(name)
+char *name;
+{
+    int i;
+    for (i=0; i<numFolders ; i++)
+	if (strcmp(folderList[i]->foldername, name) == 0) return folderList[i];
+    return NULL;
+}
+
+
+Boolean TocHasChanges(toc)
+    Toc toc;
+{
+    int i;
+    for (i=0 ; i<toc->nummsgs ; i++)
+	if (toc->msgs[i]->fate != Fignore) return True;
+
+    return False;
+}
+
+
+
+/* Throw out all changes to this toc, and close all views of msgs in it.
+   Requires confirmation by the user. */
+
+/*ARGSUSED*/
+static void TocCataclysmOkay(widget, client_data, call_data)
+    Widget	widget;		/* unused */
+    XtPointer	client_data;
+    XtPointer	call_data;	/* unused */
+{
+    Toc			toc = (Toc) client_data;
+    register int	i;
+
+    for (i=0; i < toc->nummsgs; i++)
+	MsgSetFate(toc->msgs[i], Fignore, (Toc)NULL);
+
+/* Doesn't make sense to have this MsgSetScrn for loop here. dmc. %%% */
+    for (i=0; i < toc->nummsgs; i++)
+	MsgSetScrn(toc->msgs[i], (Scrn) NULL, (XtCallbackList) NULL, 
+		   (XtCallbackList) NULL);
+}
+	
+int TocConfirmCataclysm(toc, confirms, cancels)
+    Toc			toc;
+    XtCallbackList	confirms;
+    XtCallbackList	cancels;
+{	
+    register int	i;
+    static XtCallbackRec yes_callbacks[] = {
+	{TocCataclysmOkay,	(XtPointer) NULL},
+	{(XtCallbackProc) NULL,	(XtPointer) NULL},
+	{(XtCallbackProc) NULL,	(XtPointer) NULL}
+    };
+
+    if (! toc)
+	return 0;
+
+    if (TocHasChanges(toc)) {
+	char		str[300];
+	Widget		tocwidget;
+
+	(void)sprintf(str,"Are you sure you want to remove all changes to %s?",
+		      toc->foldername);
+	yes_callbacks[0].closure = (XtPointer) toc;
+	yes_callbacks[1].callback = confirms[0].callback;
+	yes_callbacks[1].closure = confirms[0].closure;
+
+	tocwidget = NULL;
+	for (i=0; i < toc->num_scrns; i++)
+	    if (toc->scrn[i]->mapped) {
+		tocwidget = toc->scrn[i]->tocwidget;
+		break;
+	    }
+
+	PopupConfirm(tocwidget, str, yes_callbacks, cancels);
+	return NEEDS_CONFIRMATION;
+    }
+    else {
+/* Doesn't make sense to have this MsgSetFate for loop here. dmc. %%% */
+	for (i=0 ; i<toc->nummsgs ; i++)
+	    MsgSetFate(toc->msgs[i], Fignore, (Toc)NULL);
+
+	for (i=0 ; i<toc->nummsgs ; i++)
+	    if (MsgSetScrn(toc->msgs[i], (Scrn) NULL, confirms, cancels))
+		return NEEDS_CONFIRMATION;
+	return 0;
+    }
+}
+    
+
+/* Commit all the changes in this toc; all messages will meet their 'fate'. */
+
+/*ARGSUSED*/
+void TocCommitChanges(widget, client_data, call_data)
+    Widget	widget;		/* unused */
+    XtPointer	client_data;	
+    XtPointer	call_data;	/* unused */
+{
+    Toc toc = (Toc) client_data;
+    Msg msg;
+    int i, cur = 0;
+    char str[100], **argv = NULL;
+    FateType curfate, fate; 
+    Toc desttoc;
+    Toc curdesttoc = NULL;
+    XtCallbackRec	confirms[2];
+
+    confirms[0].callback = TocCommitChanges;
+    confirms[0].closure = (XtPointer) toc;
+    confirms[1].callback = (XtCallbackProc) NULL;
+    confirms[1].closure = (XtPointer) NULL;
+
+    if (toc == NULL) return;
+    for (i=0 ; i<toc->nummsgs ; i++) {
+	msg = toc->msgs[i];
+	fate = MsgGetFate(msg, (Toc *)NULL);
+	if (fate != Fignore && fate != Fcopy)
+	    if (MsgSetScrn(msg, (Scrn) NULL, confirms, (XtCallbackList) NULL)
+		== NEEDS_CONFIRMATION)
+	        return;
+    }
+    XFlush(XtDisplay(toc->scrn[0]->parent));
+    for (i=0 ; i<numFolders ; i++)
+	TocStopUpdate(folderList[i]);
+    toc->haschanged = TRUE;
+    if (app_resources.block_events_on_busy) ShowBusyCursor();
+
+    do {
+	curfate = Fignore;
+	i = 0;
+	while (i < toc->nummsgs) {
+	    msg = toc->msgs[i];
+	    fate = MsgGetFate(msg, &desttoc);
+	    if (curfate == Fignore && fate != Fignore) {
+		curfate = fate;
+		argv = MakeArgv(2);
+		switch (curfate) {
+		  case Fdelete:
+		    argv[0] = XtNewString("rmm");
+		    argv[1] = TocMakeFolderName(toc);
+		    cur = 2;
+		    curdesttoc = NULL;
+		    break;
+		  case Fmove:
+		  case Fcopy:
+		    argv[0] = XtNewString("refile");
+		    cur = 1;
+		    curdesttoc = desttoc;
+		    break;
+		  default:
+		    break;
+		}
+	    }
+	    if (curfate != Fignore &&
+		  curfate == fate && desttoc == curdesttoc) {
+		argv = ResizeArgv(argv, cur + 1);
+		(void) sprintf(str, "%d", MsgGetId(msg));
+		argv[cur++] = XtNewString(str);
+		MsgSetFate(msg, Fignore, (Toc)NULL);
+		if (curdesttoc) {
+		    (void) TUAppendToc(curdesttoc, MsgGetScanLine(msg));
+		    curdesttoc->haschanged = TRUE;
+		}
+		if (curfate != Fcopy) {
+		    TocRemoveMsg(toc, msg);
+		    MsgFree(msg);
+		    i--;
+		}
+		if (cur > 40)
+		    break;	/* Do only 40 at a time, just to be safe. */
+	    } 
+	    i++;
+	}
+	if (curfate != Fignore) {
+	    switch (curfate) {
+	      case Fmove:
+	      case Fcopy:
+		argv = ResizeArgv(argv, cur + 4);
+		argv[cur++] = XtNewString(curfate == Fmove ? "-nolink"
+				       			   : "-link");
+		argv[cur++] = XtNewString("-src");
+		argv[cur++] = TocMakeFolderName(toc);
+		argv[cur++] = TocMakeFolderName(curdesttoc);
+		break;
+	      default:
+		break;
+	    }
+	    if (app_resources.debug) {
+		for (i = 0; i < cur; i++)
+		    (void) fprintf(stderr, "%s ", argv[i]);
+		(void) fprintf(stderr, "\n");
+		(void) fflush(stderr);
+	    }
+	    DoCommand(argv, (char *) NULL, (char *) NULL);
+	    for (i = 0; argv[i]; i++)
+		XtFree((char *) argv[i]);
+	    XtFree((char *) argv);
+	}
+    } while (curfate != Fignore);
+    for (i=0 ; i<numFolders ; i++) {
+	if (folderList[i]->haschanged) {
+	    TocReloadSeqLists(folderList[i]);
+	    folderList[i]->haschanged = FALSE;
+	}
+	TocStartUpdate(folderList[i]);
+    }
+
+    if (app_resources.block_events_on_busy) UnshowBusyCursor();
+}
+
+
+
+/* Return whether the given toc can incorporate mail. */
+
+int TocCanIncorporate(toc)
+Toc toc;
+{
+    return (toc && (toc == InitialFolder || toc->incfile));
+}
+
+
+/* Incorporate new messages into the given toc. */
+
+int TocIncorporate(toc)
+Toc toc;
+{
+    char **argv;
+    char str[100], *file, *ptr;
+    Msg msg, firstmessage = NULL;
+    FILEPTR fid;
+
+    argv = MakeArgv(toc->incfile ? 7 : 4);
+    argv[0] = "inc";
+    argv[1] = TocMakeFolderName(toc);
+    argv[2] = "-width";
+    (void) sprintf(str, "%d", app_resources.toc_width);
+    argv[3] = str;
+    if (toc->incfile) {
+	argv[4] = "-file";
+	argv[5] = toc->incfile;
+	argv[6] = "-truncate";
+    }
+    if (app_resources.block_events_on_busy) ShowBusyCursor();
+
+    file = DoCommandToFile(argv);
+    XtFree(argv[1]);
+    XtFree((char *)argv);
+    TUGetFullFolderInfo(toc);
+    if (toc->validity == valid) {
+	fid = FOpenAndCheck(file, "r");
+	TocStopUpdate(toc);
+	while ((ptr = ReadLineWithCR(fid))) {
+	    if (atoi(ptr) > 0) {
+		msg = TUAppendToc(toc, ptr);
+		if (firstmessage == NULL) firstmessage = msg;
+	    }
+	}
+	if (firstmessage && firstmessage->visible) {
+	    TocSetCurMsg(toc, firstmessage);
+	}
+	TocStartUpdate(toc);
+	myfclose(fid);
+    }
+    DeleteFileAndCheck(file);
+
+    if (app_resources.block_events_on_busy) UnshowBusyCursor();
+
+    toc->mailpending = False;
+    return (firstmessage != NULL);
+}
+
+
+/* The given message has changed.  Rescan it and change the scanfile. */
+
+void TocMsgChanged(toc, msg)
+Toc toc;
+Msg msg;
+{
+    char **argv, str[100], str2[10], *ptr;
+    int length, delta, i;
+    FateType fate;
+    Toc desttoc;
+    if (toc->validity != valid) return;
+    fate = MsgGetFate(msg, &desttoc);
+    MsgSetFate(msg, Fignore, (Toc) NULL);
+    argv = MakeArgv(6);
+    argv[0] = "scan";
+    argv[1] = TocMakeFolderName(toc);
+    (void) sprintf(str, "%d", msg->msgid);
+    argv[2] = str;
+    argv[3] = "-width";
+    (void) sprintf(str2, "%d", app_resources.toc_width);
+    argv[4] = str2;
+    argv[5] = "-noheader";
+    ptr = DoCommandToString(argv);
+    XtFree(argv[1]);
+    XtFree((char *) argv);
+    if (strcmp(ptr, msg->buf) != 0) {
+	length = strlen(ptr);
+	delta = length - msg->length;
+	XtFree(msg->buf);
+	msg->buf = ptr;
+	msg->length = length;
+	toc->length += delta;
+	if (msg->visible) {
+	    if (delta != 0) {
+		for (i=TUGetMsgPosition(toc, msg)+1; i<toc->nummsgs ; i++)
+		    toc->msgs[i]->position += delta;
+		toc->lastPos += delta;
+	    }
+	    for (i=0 ; i<toc->num_scrns ; i++)
+		TURedisplayToc(toc->scrn[i]);
+	}
+	MsgSetFate(msg, fate, desttoc);
+	TUSaveTocFile(toc);
+    } else XtFree(ptr);
+}
+
+
+
+Msg TocMsgFromId(toc, msgid)
+Toc toc;
+int msgid;
+{
+    int h, l, m;
+    l = 0;
+    h = toc->nummsgs - 1;
+    if (h < 0) {
+	if (app_resources.debug) {
+	    char str[100];
+	    (void)sprintf(str, "Toc is empty! folder=%s\n", toc->foldername);
+	    DEBUG( str )
+	}
+	return NULL;
+    }
+    while (l < h - 1) {
+	m = (l + h) / 2;
+	if (toc->msgs[m]->msgid > msgid)
+	    h = m;
+	else
+	    l = m;
+    }
+    if (toc->msgs[l]->msgid == msgid) return toc->msgs[l];
+    if (toc->msgs[h]->msgid == msgid) return toc->msgs[h];
+    if (app_resources.debug) {
+	char str[100];
+	(void) sprintf(str,
+		      "TocMsgFromId search failed! hi=%d, lo=%d, msgid=%d\n",
+		      h, l, msgid);
+	DEBUG( str )
+    }
+    return NULL;
+}
+
+/* Sequence names are put on a stack which is specific to the folder. 
+ * Sequence names are very volatile, so we make our own copies of the strings.
+ */
+
+/*ARGSUSED*/
+void XmhPushSequence(w, event, params, count)
+    Widget	w;
+    XEvent	*event;
+    String	*params;
+    Cardinal	*count;
+{
+    Scrn	scrn = ScrnFromWidget(w);
+    Toc		toc;
+    int		i;
+
+    if (! (toc = scrn->toc)) return;
+    
+    if (*count == 0) {
+	if (toc->selectseq)
+	    Push(&toc->sequence_stack, XtNewString(toc->selectseq->name));
+    }
+    else
+	for (i=0; i < *count; i++) 
+	    Push(&toc->sequence_stack, XtNewString(params[i]));
+}
+
+
+/*ARGSUSED*/
+void XmhPopSequence(w, event, params, count)
+    Widget	w;		/* any widget on the screen of interest */
+    XEvent	*event;
+    String	*params;
+    Cardinal	*count;
+{
+    Scrn	scrn = ScrnFromWidget(w);
+    char	*seqname;
+    Widget	sequenceMenu, selected, original;
+    Button	button;
+    Sequence	sequence;
+
+    if ((seqname = Pop(&scrn->toc->sequence_stack)) != NULL) {
+
+	button = BBoxFindButtonNamed(scrn->mainbuttons,
+				     MenuBoxButtons[XMH_SEQUENCE].button_name);
+	sequenceMenu = BBoxMenuOfButton(button);
+
+	if ((selected = XawSimpleMenuGetActiveEntry(sequenceMenu)))
+	    ToggleMenuItem(selected, False);
+
+	if ((original = XtNameToWidget(sequenceMenu, seqname))) {
+	    ToggleMenuItem(original, True);
+	    sequence = TocGetSeqNamed(scrn->toc, seqname);
+	    TocSetSelectedSequence(scrn->toc, sequence);
+	}
+	XtFree(seqname);
+    }
+}
+@
+
+
+1.1.9.1
+log
+@OpenBSD just has imported exactly this tree into their vendor branch,
+called the same tag, in XF4/xc
+This is, apparently, the last XFree86 snapshot before the licence change
+(ie, addition of the advertising clause)
+
+Since the developers don't see any problems with that, and we would like
+to integrate improvements done by the remaining one or two (or so) XFree86
+developers (j/k), this prepares enabling us to update X-Window in the future.
+@
+text
+@d2 1
+a2 1
+ * $XFree86: xc/programs/xmh/toc.c,v 3.5 2002/04/05 21:06:29 dickey Exp $
+a33 2
+#include "actions.h"
+
+d36 2
+a37 1
+static int IsDir(char *name)
+d53 4
+a56 4
+static void MakeSureFolderExists(
+    char ***namelistptr,
+    int *numfoldersptr,
+    char *name)
+d71 4
+a74 4
+static void MakeSureSubfolderExists(
+    char ***		namelistptr,
+    int *		numfoldersptr,
+    char *		name)
+d104 2
+a105 1
+int TocFolderExists(Toc toc)
+d121 1
+a121 1
+static void LoadCheckFiles(void)
+d159 1
+a159 1
+void TocInit(void)
+d203 2
+a204 1
+Toc TocCreate(char *foldername)
+d218 2
+a219 1
+Toc TocCreateFolder(char *foldername)
+d230 2
+a231 1
+int TocHasMail(Toc toc)
+d236 2
+a237 1
+static int CheckForNewMail(Toc toc)
+d261 2
+a262 2
+void TocCheckForNewMail(
+    Boolean update)	/* if True, actually make the check */
+d326 2
+a327 1
+Boolean TocTestAndSetDeletePending(Toc toc)
+d336 2
+a337 1
+void TocClearDeletePending(Toc toc)
+d345 2
+a346 1
+static void NukeDirectory(char *path)
+d374 2
+a375 1
+void TocDeleteFolder(Toc toc)
+d412 3
+a414 1
+void TocSetScrn(Toc toc, Scrn scrn)
+d416 1
+a416 2
+    Cardinal i;
+
+d464 3
+a466 1
+void TocRemoveMsg(Toc toc, Msg msg)
+d502 2
+a503 1
+void TocRecheckValidity(Toc toc)
+d505 1
+a505 2
+    Cardinal i;
+
+d522 3
+a524 1
+void TocSetCurMsg(Toc toc, Msg msg)
+d527 1
+a527 2
+    Cardinal i;
+
+d552 2
+a553 1
+Msg TocGetCurMsg(Toc toc)
+d563 3
+a565 1
+Msg TocMsgAfter(Toc toc, Msg msg)
+d581 3
+a583 1
+Msg TocMsgBefore(Toc toc, Msg msg)
+d599 2
+a600 1
+void TocForceRescan(Toc toc)
+d602 1
+a602 2
+    register Cardinal i;
+
+d622 2
+a623 1
+void TocReloadSeqLists(Toc toc)
+d625 1
+a625 2
+    Cardinal i;
+
+d637 5
+a641 5
+void XmhReloadSeqLists(
+    Widget	w,
+    XEvent	*event,
+    String	*params,
+    Cardinal	*num_params)
+d652 2
+a653 1
+int TocHasSequences(Toc toc)
+d661 3
+a663 1
+void TocChangeViewedSeq(Toc toc, Sequence seq)
+d674 3
+a676 1
+Sequence TocGetSeqNamed(Toc toc, char *name)
+d691 2
+a692 1
+Sequence TocViewedSequence(Toc toc)
+d700 3
+a702 3
+void TocSetSelectedSequence(
+    Toc		toc,
+    Sequence	sequence)
+d711 2
+a712 1
+Sequence TocSelectedSequence(Toc toc)
+d723 2
+a724 1
+MsgList TocCurMsgList(Toc toc)
+d728 1
+a728 1
+
+d748 2
+a749 1
+void TocUnsetSelection(Toc toc)
+d759 2
+a760 1
+Msg TocMakeNewMsg(Toc toc)
+d782 2
+a783 1
+void TocStopUpdate(Toc toc)
+d785 1
+a785 2
+    Cardinal i;
+
+d794 2
+a795 1
+void TocStartUpdate(Toc toc)
+d797 1
+a797 2
+    Cardinal i;
+
+d817 2
+a818 1
+void TocSetCacheValid(Toc toc)
+d826 2
+a827 1
+char *TocMakeFolderName(Toc toc)
+d834 2
+a835 1
+char *TocName(Toc toc)
+d844 2
+a845 1
+Toc TocGetNamed(char *name)
+d854 2
+a855 1
+Boolean TocHasChanges(Toc toc)
+d870 4
+a873 4
+static void TocCataclysmOkay(
+    Widget	widget,		/* unused */
+    XtPointer	client_data,
+    XtPointer	call_data)	/* unused */
+d887 4
+a890 4
+int TocConfirmCataclysm(
+    Toc			toc,
+    XtCallbackList	confirms,
+    XtCallbackList	cancels)
+a892 1
+
+d938 4
+a941 4
+void TocCommitChanges(
+    Widget	widget,		/* unused */
+    XtPointer	client_data,	
+    XtPointer	call_data)	/* unused */
+d1059 2
+a1060 1
+int TocCanIncorporate(Toc toc)
+d1068 2
+a1069 1
+int TocIncorporate(Toc toc)
+d1119 3
+a1121 1
+void TocMsgChanged(Toc toc, Msg msg)
+d1124 1
+a1124 2
+    int length, delta;
+    int i;
+a1126 1
+
+d1165 3
+a1167 1
+Msg TocMsgFromId(Toc toc, int msgid)
+d1204 5
+a1208 5
+void XmhPushSequence(
+    Widget	w,
+    XEvent	*event,
+    String	*params,
+    Cardinal	*count)
+d1212 1
+a1212 1
+    Cardinal	i;
+d1227 5
+a1231 5
+void XmhPopSequence(
+    Widget	w,		/* any widget on the screen of interest */
+    XEvent	*event,
+    String	*params,
+    Cardinal	*count)
+@
+
+
+1.1.1.1
+log
+@Import OpenBSD 3.3 XF4 repository from CTM 3132 the first time
+This finalizes starting an OpenBSD-mirabile (aka MirBSD) repository.
+
+### MirBSD is:
+# Copyright (c) 1982-2003 by Thorsten "mirabile" Glaser <x86@@ePost.de>
+# Copyright © 1968-2003  The authors of And contributors to UNIX®, the
+#       C Language, BSD/Berkeley Unix; 386BSD, NetBSD 1.1 and OpenBSD.
+#
+# Anyone who obtained a copy of this work is hereby permitted to freely use,
+# distribute, modify, merge, sublicence, give away or sell it as long as the
+# authors are given due credit and the following notice is retained:
+#
+# This work is provided "as is", with no explicit or implicit warranty what-
+# soever. Use it only at your own risk. In no event may an author or contri-
+# butor be held liable for any damage, directly or indirectly, that origina-
+# ted through or is caused by creation or modification of this work.
+
+MirBSD is my private tree. MirBSD does not differ very much from OpenBSD
+and intentionally tracks OpenBSD. That's why it _is_ OpenBSD, just not the
+official one. It's like with DarrenBSD.
+
+At time of this writing, no advertising for MirBSD must be done,
+because the advertising clause has not yet been sorted out.
+
+http://templeofhate.com/tglaser/MirBSD/index.php
+@
+text
+@@
+
+
+1.1.1.2
+log
+@The X-Windowing System
+
+Import XFree86 4.3 from OpenBSD by CTM, in the hope it's stable
+@
+text
+@d2 1
+a2 1
+ * $XFree86: xc/programs/xmh/toc.c,v 3.5 2002/04/05 21:06:29 dickey Exp $
+a33 2
+#include "actions.h"
+
+d36 2
+a37 1
+static int IsDir(char *name)
+d53 4
+a56 4
+static void MakeSureFolderExists(
+    char ***namelistptr,
+    int *numfoldersptr,
+    char *name)
+d71 4
+a74 4
+static void MakeSureSubfolderExists(
+    char ***		namelistptr,
+    int *		numfoldersptr,
+    char *		name)
+d104 2
+a105 1
+int TocFolderExists(Toc toc)
+d121 1
+a121 1
+static void LoadCheckFiles(void)
+d159 1
+a159 1
+void TocInit(void)
+d203 2
+a204 1
+Toc TocCreate(char *foldername)
+d218 2
+a219 1
+Toc TocCreateFolder(char *foldername)
+d230 2
+a231 1
+int TocHasMail(Toc toc)
+d236 2
+a237 1
+static int CheckForNewMail(Toc toc)
+d261 2
+a262 2
+void TocCheckForNewMail(
+    Boolean update)	/* if True, actually make the check */
+d326 2
+a327 1
+Boolean TocTestAndSetDeletePending(Toc toc)
+d336 2
+a337 1
+void TocClearDeletePending(Toc toc)
+d345 2
+a346 1
+static void NukeDirectory(char *path)
+d374 2
+a375 1
+void TocDeleteFolder(Toc toc)
+d412 3
+a414 1
+void TocSetScrn(Toc toc, Scrn scrn)
+d416 1
+a416 2
+    Cardinal i;
+
+d464 3
+a466 1
+void TocRemoveMsg(Toc toc, Msg msg)
+d502 2
+a503 1
+void TocRecheckValidity(Toc toc)
+d505 1
+a505 2
+    Cardinal i;
+
+d522 3
+a524 1
+void TocSetCurMsg(Toc toc, Msg msg)
+d527 1
+a527 2
+    Cardinal i;
+
+d552 2
+a553 1
+Msg TocGetCurMsg(Toc toc)
+d563 3
+a565 1
+Msg TocMsgAfter(Toc toc, Msg msg)
+d581 3
+a583 1
+Msg TocMsgBefore(Toc toc, Msg msg)
+d599 2
+a600 1
+void TocForceRescan(Toc toc)
+d602 1
+a602 2
+    register Cardinal i;
+
+d622 2
+a623 1
+void TocReloadSeqLists(Toc toc)
+d625 1
+a625 2
+    Cardinal i;
+
+d637 5
+a641 5
+void XmhReloadSeqLists(
+    Widget	w,
+    XEvent	*event,
+    String	*params,
+    Cardinal	*num_params)
+d652 2
+a653 1
+int TocHasSequences(Toc toc)
+d661 3
+a663 1
+void TocChangeViewedSeq(Toc toc, Sequence seq)
+d674 3
+a676 1
+Sequence TocGetSeqNamed(Toc toc, char *name)
+d691 2
+a692 1
+Sequence TocViewedSequence(Toc toc)
+d700 3
+a702 3
+void TocSetSelectedSequence(
+    Toc		toc,
+    Sequence	sequence)
+d711 2
+a712 1
+Sequence TocSelectedSequence(Toc toc)
+d723 2
+a724 1
+MsgList TocCurMsgList(Toc toc)
+d728 1
+a728 1
+
+d748 2
+a749 1
+void TocUnsetSelection(Toc toc)
+d759 2
+a760 1
+Msg TocMakeNewMsg(Toc toc)
+d782 2
+a783 1
+void TocStopUpdate(Toc toc)
+d785 1
+a785 2
+    Cardinal i;
+
+d794 2
+a795 1
+void TocStartUpdate(Toc toc)
+d797 1
+a797 2
+    Cardinal i;
+
+d817 2
+a818 1
+void TocSetCacheValid(Toc toc)
+d826 2
+a827 1
+char *TocMakeFolderName(Toc toc)
+d834 2
+a835 1
+char *TocName(Toc toc)
+d844 2
+a845 1
+Toc TocGetNamed(char *name)
+d854 2
+a855 1
+Boolean TocHasChanges(Toc toc)
+d870 4
+a873 4
+static void TocCataclysmOkay(
+    Widget	widget,		/* unused */
+    XtPointer	client_data,
+    XtPointer	call_data)	/* unused */
+d887 4
+a890 4
+int TocConfirmCataclysm(
+    Toc			toc,
+    XtCallbackList	confirms,
+    XtCallbackList	cancels)
+a892 1
+
+d938 4
+a941 4
+void TocCommitChanges(
+    Widget	widget,		/* unused */
+    XtPointer	client_data,	
+    XtPointer	call_data)	/* unused */
+d1059 2
+a1060 1
+int TocCanIncorporate(Toc toc)
+d1068 2
+a1069 1
+int TocIncorporate(Toc toc)
+d1119 3
+a1121 1
+void TocMsgChanged(Toc toc, Msg msg)
+d1124 1
+a1124 2
+    int length, delta;
+    int i;
+a1126 1
+
+d1165 3
+a1167 1
+Msg TocMsgFromId(Toc toc, int msgid)
+d1204 5
+a1208 5
+void XmhPushSequence(
+    Widget	w,
+    XEvent	*event,
+    String	*params,
+    Cardinal	*count)
+d1212 1
+a1212 1
+    Cardinal	i;
+d1227 5
+a1231 5
+void XmhPopSequence(
+    Widget	w,		/* any widget on the screen of interest */
+    XEvent	*event,
+    String	*params,
+    Cardinal	*count)
+@
+

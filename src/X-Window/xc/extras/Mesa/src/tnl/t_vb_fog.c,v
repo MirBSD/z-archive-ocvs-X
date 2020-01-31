@@ -1,0 +1,528 @@
+head	1.2;
+branch	1.1.1;
+access;
+symbols
+	tg-mergetmp-2:1.1.1.2
+	cvs-200410241530:1.1.1.2
+	cvs-200410012000:1.1.1.2
+	cvs-200407141120:1.1.1.2
+	cvs-200406231010:1.1.1.2
+	MIRBSD_7quater:1.1.1.1
+	cvs-200405271510:1.1.1.2
+	XFree86_4_4_0:1.1.9.1
+	cvs-200403021700:1.1.1.2
+	XFREE86_20040213:1.1.9.1
+	xc:1.1.9
+	cvs-200401291925:1.1.1.1
+	MIRBSD_7_ALPHA:1.1.1.1.0.4
+	MIRBSD_7:1.1.1.1.0.2
+	MIRBSD_7ter:1.1.1.1
+	cvs-20011091815:1.1.1.1
+	cvs-200309162130:1.1.1.1
+	cvs-200308302005:1.1.1.1
+	ctmx-0387:1.1.1.1
+	ctmx-0384:1.1.1.1
+	MIRBSD_5:1.1.1.1
+	ctmx-0375:1.1.1.1
+	ctmx-0373:1.1.1.1
+	ctm-0371:1.1.1.1
+	ctm-0370:1.1.1.1
+	MIRBSD_4:1.1.1.1
+	ctm-0363:1.1.1.1
+	ctm-0359:1.1.1.1
+	openbsd:1.1.1;
+locks; strict;
+comment	@ * @;
+
+
+1.2
+date	2003.05.16.16.29.00;	author tg;	state dead;
+branches;
+next	1.1;
+
+1.1
+date	2003.04.08.18.20.16;	author tg;	state Exp;
+branches
+	1.1.1.1
+	1.1.9.1;
+next	;
+
+1.1.1.1
+date	2003.04.08.18.20.16;	author tg;	state Exp;
+branches;
+next	1.1.1.2;
+
+1.1.1.2
+date	2004.03.02.17.30.24;	author tg;	state Stab;
+branches;
+next	;
+
+1.1.9.1
+date	2004.02.14.19.05.17;	author tg;	state Exp;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.2
+log
+@remove a bunch of files not used in MirBSD - clean tree. People who want them got cvs.
+@
+text
+@
+/*
+ * Mesa 3-D graphics library
+ * Version:  3.5
+ *
+ * Copyright (C) 1999-2001  Brian Paul   All Rights Reserved.
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a
+ * copy of this software and associated documentation files (the "Software"),
+ * to deal in the Software without restriction, including without limitation
+ * the rights to use, copy, modify, merge, publish, distribute, sublicense,
+ * and/or sell copies of the Software, and to permit persons to whom the
+ * Software is furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included
+ * in all copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
+ * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL
+ * BRIAN PAUL BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN
+ * AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
+ * CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+ *
+ * Authors:
+ *    Keith Whitwell <keithw@@valinux.com>
+ */
+
+
+#include "glheader.h"
+#include "colormac.h"
+#include "context.h"
+#include "macros.h"
+#include "mem.h"
+#include "mmath.h"
+#include "mtypes.h"
+
+#include "math/m_xform.h"
+
+#include "t_context.h"
+#include "t_pipeline.h"
+
+
+struct fog_stage_data {
+   GLvector1f fogcoord;		/* has actual storage allocated */
+   GLvector1f input;		/* points into VB->EyePtr Z values */
+};
+
+#define FOG_STAGE_DATA(stage) ((struct fog_stage_data *)stage->privatePtr)
+
+#define FOG_EXP_TABLE_SIZE 256
+#define FOG_MAX (10.0)
+#define EXP_FOG_MAX .0006595
+#define FOG_INCR (FOG_MAX/FOG_EXP_TABLE_SIZE)
+static GLfloat exp_table[FOG_EXP_TABLE_SIZE];
+static GLfloat inited = 0;
+
+#if 1
+#define NEG_EXP( result, narg )						\
+do {									\
+   GLfloat f = (GLfloat) (narg * (1.0/FOG_INCR));			\
+   GLint k = (GLint) f;							\
+   if (k > FOG_EXP_TABLE_SIZE-2) 					\
+      result = (GLfloat) EXP_FOG_MAX;					\
+   else									\
+      result = exp_table[k] + (f-k)*(exp_table[k+1]-exp_table[k]);	\
+} while (0)
+#else
+#define NEG_EXP( result, narg )					\
+do {								\
+   result = exp(-narg);						\
+} while (0)
+#endif
+
+
+static void init_static_data( void )
+{
+   GLfloat f = 0.0F;
+   GLint i = 0;
+   for ( ; i < FOG_EXP_TABLE_SIZE ; i++, f += FOG_INCR) {
+      exp_table[i] = (GLfloat) exp(-f);
+   }
+   inited = 1;
+}
+
+
+static void make_win_fog_coords( GLcontext *ctx, GLvector1f *out,
+				 const GLvector1f *in )
+{
+   GLfloat end  = ctx->Fog.End;
+   GLfloat *v = in->start;
+   GLuint stride = in->stride;
+   GLuint n = in->count;
+   GLfloat *data = out->data;
+   GLfloat d;
+   GLuint i;
+
+   out->count = in->count;
+
+   switch (ctx->Fog.Mode) {
+   case GL_LINEAR:
+      if (ctx->Fog.Start == ctx->Fog.End)
+         d = 1.0F;
+      else
+         d = 1.0F / (ctx->Fog.End - ctx->Fog.Start);
+      for ( i = 0 ; i < n ; i++, STRIDE_F(v, stride)) {
+         GLfloat f = (end - ABSF(*v)) * d;
+	 data[i] = CLAMP(f, 0.0F, 1.0F);
+      }
+      break;
+   case GL_EXP:
+      d = ctx->Fog.Density;
+      for ( i = 0 ; i < n ; i++, STRIDE_F(v,stride))
+         NEG_EXP( data[i], d * ABSF(*v) );
+      break;
+   case GL_EXP2:
+      d = ctx->Fog.Density*ctx->Fog.Density;
+      for ( i = 0 ; i < n ; i++, STRIDE_F(v, stride)) {
+         GLfloat z = *v;
+         NEG_EXP( data[i], d * z * z );
+      }
+      break;
+   default:
+      _mesa_problem(ctx, "Bad fog mode in make_fog_coord");
+      return;
+   }
+}
+
+
+static GLboolean run_fog_stage( GLcontext *ctx,
+				struct gl_pipeline_stage *stage )
+{
+   struct vertex_buffer *VB = &TNL_CONTEXT(ctx)->vb;
+   struct fog_stage_data *store = FOG_STAGE_DATA(stage);
+   GLvector1f *input;
+
+   if (stage->changed_inputs == 0)
+      return GL_TRUE;
+
+   if (ctx->Fog.FogCoordinateSource == GL_FRAGMENT_DEPTH_EXT) {
+      /* fog computed from Z depth */
+      /* source = VB->ObjPtr or VB->EyePtr coords */
+      /* dest = VB->FogCoordPtr = fog stage private storage */
+      VB->FogCoordPtr = &store->fogcoord;
+
+      if (!ctx->_NeedEyeCoords) {
+	 GLfloat *m = ctx->ModelView.m;
+	 GLfloat plane[4];
+
+	 /* Use this to store calculated eye z values:
+	  */
+	 input = &store->fogcoord;
+
+	 plane[0] = m[2];
+	 plane[1] = m[6];
+	 plane[2] = m[10];
+	 plane[3] = m[14];
+
+	 /* Full eye coords weren't required, just calculate the
+	  * eye Z values.
+	  */
+	 _mesa_dotprod_tab[VB->ObjPtr->size]( input->data,
+					      sizeof(GLfloat),
+					      VB->ObjPtr, plane );
+
+	 input->count = VB->ObjPtr->count;
+      }
+      else
+      {
+	 input = &store->input;
+
+	 if (VB->EyePtr->size < 2)
+	    _mesa_vector4f_clean_elem( VB->EyePtr, VB->Count, 2 );
+
+	 input->data = &(VB->EyePtr->data[0][2]);
+	 input->start = VB->EyePtr->start+2;
+	 input->stride = VB->EyePtr->stride;
+	 input->count = VB->EyePtr->count;
+      }
+   } else {
+      /* use glFogCoord() coordinates */
+      /* source = VB->FogCoordPtr */
+      input = VB->FogCoordPtr;
+      /* dest = fog stage private storage */
+      VB->FogCoordPtr = &store->fogcoord;
+   }
+
+   make_win_fog_coords( ctx, VB->FogCoordPtr, input );
+   return GL_TRUE;
+}
+
+static void check_fog_stage( GLcontext *ctx, struct gl_pipeline_stage *stage )
+{
+   stage->active = ctx->Fog.Enabled;
+
+   if (ctx->Fog.FogCoordinateSource == GL_FRAGMENT_DEPTH_EXT)
+      stage->inputs = VERT_EYE;
+   else
+      stage->inputs = VERT_FOG_COORD;
+}
+
+
+/* Called the first time stage->run() is invoked.
+ */
+static GLboolean alloc_fog_data( GLcontext *ctx,
+				 struct gl_pipeline_stage *stage )
+{
+   TNLcontext *tnl = TNL_CONTEXT(ctx);
+   struct fog_stage_data *store;
+   stage->privatePtr = MALLOC(sizeof(*store));
+   store = FOG_STAGE_DATA(stage);
+   if (!store)
+      return GL_FALSE;
+
+   _mesa_vector1f_alloc( &store->fogcoord, 0, tnl->vb.Size, 32 );
+   _mesa_vector1f_init( &store->input, 0, 0 );
+
+   if (!inited)
+      init_static_data();
+
+   /* Now run the stage.
+    */
+   stage->run = run_fog_stage;
+   return stage->run( ctx, stage );
+}
+
+
+static void free_fog_data( struct gl_pipeline_stage *stage )
+{
+   struct fog_stage_data *store = FOG_STAGE_DATA(stage);
+   if (store) {
+      _mesa_vector1f_free( &store->fogcoord );
+      FREE( store );
+      stage->privatePtr = NULL;
+   }
+}
+
+
+const struct gl_pipeline_stage _tnl_fog_coordinate_stage =
+{
+   "build fog coordinates",
+   _NEW_FOG,
+   _NEW_FOG,
+   0, 0, VERT_FOG_COORD,	/* active, inputs, outputs */
+   0, 0,			/* changed_inputs, private_data */
+   free_fog_data,		/* dtr */
+   check_fog_stage,		/* check */
+   alloc_fog_data		/* run -- initially set to init. */
+};
+@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@@
+
+
+1.1.9.1
+log
+@OpenBSD just has imported exactly this tree into their vendor branch,
+called the same tag, in XF4/xc
+This is, apparently, the last XFree86 snapshot before the licence change
+(ie, addition of the advertising clause)
+
+Since the developers don't see any problems with that, and we would like
+to integrate improvements done by the remaining one or two (or so) XFree86
+developers (j/k), this prepares enabling us to update X-Window in the future.
+@
+text
+@d4 1
+a4 1
+ * Version:  4.1
+d6 1
+a6 1
+ * Copyright (C) 1999-2002  Brian Paul   All Rights Reserved.
+d26 1
+a26 1
+ *    Keith Whitwell <keith@@tungstengraphics.com>
+d34 1
+a34 1
+#include "imports.h"
+d45 2
+a46 2
+   GLvector4f fogcoord;		/* has actual storage allocated */
+   GLvector4f input;		/* points into VB->EyePtr Z values */
+d87 2
+a88 2
+static void make_win_fog_coords( GLcontext *ctx, GLvector4f *out,
+				 const GLvector4f *in )
+d94 1
+a94 1
+   GLfloat (*data)[4] = out->data;
+d108 1
+a108 1
+	 data[i][0] = CLAMP(f, 0.0F, 1.0F);
+d114 1
+a114 1
+         NEG_EXP( data[i][0], d * ABSF(*v) );
+d120 1
+a120 1
+         NEG_EXP( data[i][0], d * z * z );
+d135 1
+a135 1
+   GLvector4f *input;
+d147 1
+a147 1
+	 const GLfloat *m = ctx->ModelviewMatrixStack.Top->m;
+d162 2
+a163 2
+	 _mesa_dotprod_tab[VB->ObjPtr->size]( (GLfloat *) input->data,
+					      4 * sizeof(GLfloat),
+d168 2
+a169 1
+      else {
+d175 1
+a175 1
+	 input->data = (GLfloat (*)[4]) &(VB->EyePtr->data[0][2]);
+d180 1
+a180 2
+   }
+   else {
+a191 1
+
+d194 1
+a194 1
+   stage->active = ctx->Fog.Enabled && !ctx->VertexProgram.Enabled;
+d197 1
+a197 1
+      stage->inputs = VERT_BIT_EYE;
+d199 1
+a199 1
+      stage->inputs = VERT_BIT_FOG;
+d215 2
+a216 2
+   _mesa_vector4f_alloc( &store->fogcoord, 0, tnl->vb.Size, 32 );
+   _mesa_vector4f_init( &store->input, 0, 0 );
+d232 1
+a232 1
+      _mesa_vector4f_free( &store->fogcoord );
+d241 5
+a245 8
+   "build fog coordinates",	/* name */
+   _NEW_FOG,			/* check_state */
+   _NEW_FOG,			/* run_state */
+   GL_FALSE,			/* active? */
+   0,				/* inputs */
+   VERT_BIT_FOG,		/* outputs */
+   0,				/* changed_inputs */
+   NULL,			/* private_data */
+@
+
+
+1.1.1.1
+log
+@The X-Windowing System
+
+Import XFree86 4.3 from OpenBSD by CTM, in the hope it's stable
+@
+text
+@@
+
+
+1.1.1.2
+log
+@That's what OpenBSD will, probably, ship as XF4 in 3.5
+their last sync against XFree86 4.3-current has been
+imported into our vendor branch, too
+@
+text
+@d4 1
+a4 1
+ * Version:  4.1
+d6 1
+a6 1
+ * Copyright (C) 1999-2002  Brian Paul   All Rights Reserved.
+d26 1
+a26 1
+ *    Keith Whitwell <keith@@tungstengraphics.com>
+d34 1
+a34 1
+#include "imports.h"
+d45 2
+a46 2
+   GLvector4f fogcoord;		/* has actual storage allocated */
+   GLvector4f input;		/* points into VB->EyePtr Z values */
+d87 2
+a88 2
+static void make_win_fog_coords( GLcontext *ctx, GLvector4f *out,
+				 const GLvector4f *in )
+d94 1
+a94 1
+   GLfloat (*data)[4] = out->data;
+d108 1
+a108 1
+	 data[i][0] = CLAMP(f, 0.0F, 1.0F);
+d114 1
+a114 1
+         NEG_EXP( data[i][0], d * ABSF(*v) );
+d120 1
+a120 1
+         NEG_EXP( data[i][0], d * z * z );
+d135 1
+a135 1
+   GLvector4f *input;
+d147 1
+a147 1
+	 const GLfloat *m = ctx->ModelviewMatrixStack.Top->m;
+d162 2
+a163 2
+	 _mesa_dotprod_tab[VB->ObjPtr->size]( (GLfloat *) input->data,
+					      4 * sizeof(GLfloat),
+d168 2
+a169 1
+      else {
+d175 1
+a175 1
+	 input->data = (GLfloat (*)[4]) &(VB->EyePtr->data[0][2]);
+d180 1
+a180 2
+   }
+   else {
+a191 1
+
+d194 1
+a194 1
+   stage->active = ctx->Fog.Enabled && !ctx->VertexProgram.Enabled;
+d197 1
+a197 1
+      stage->inputs = VERT_BIT_EYE;
+d199 1
+a199 1
+      stage->inputs = VERT_BIT_FOG;
+d215 2
+a216 2
+   _mesa_vector4f_alloc( &store->fogcoord, 0, tnl->vb.Size, 32 );
+   _mesa_vector4f_init( &store->input, 0, 0 );
+d232 1
+a232 1
+      _mesa_vector4f_free( &store->fogcoord );
+d241 5
+a245 8
+   "build fog coordinates",	/* name */
+   _NEW_FOG,			/* check_state */
+   _NEW_FOG,			/* run_state */
+   GL_FALSE,			/* active? */
+   0,				/* inputs */
+   VERT_BIT_FOG,		/* outputs */
+   0,				/* changed_inputs */
+   NULL,			/* private_data */
+@
+

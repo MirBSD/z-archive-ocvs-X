@@ -1,0 +1,523 @@
+head	1.1;
+branch	1.1.1;
+access;
+symbols
+	tg-mergetmp-2:1.1.1.2
+	cvs-200410241530:1.1.1.2
+	cvs-200410012000:1.1.1.2
+	cvs-200407141120:1.1.1.2
+	cvs-200406231010:1.1.1.2
+	MIRBSD_7quater:1.1.1.2
+	cvs-200405271510:1.1.1.2
+	XFree86_4_4_0:1.1.9.1
+	cvs-200403021700:1.1.1.2
+	XFREE86_20040213:1.1.9.1
+	xc:1.1.9
+	cvs-200401291925:1.1.1.2
+	MIRBSD_7_ALPHA:1.1.1.2.0.4
+	MIRBSD_7:1.1.1.2.0.2
+	MIRBSD_7ter:1.1.1.2
+	cvs-20011091815:1.1.1.2
+	cvs-200309162130:1.1.1.2
+	cvs-200308302005:1.1.1.2
+	ctmx-0387:1.1.1.2
+	ctmx-0384:1.1.1.2
+	MIRBSD_5:1.1.1.2
+	ctmx-0375:1.1.1.2
+	ctmx-0373:1.1.1.2
+	ctm-0371:1.1.1.2
+	ctm-0370:1.1.1.2
+	MIRBSD_4:1.1.1.2
+	ctm-0363:1.1.1.2
+	ctm-0359:1.1.1.2
+	ctm-0349:1.1.1.1
+	openbsd:1.1.1;
+locks; strict;
+comment	@ * @;
+
+
+1.1
+date	2003.03.22.20.04.19;	author tg;	state Exp;
+branches
+	1.1.1.1
+	1.1.9.1;
+next	;
+
+1.1.1.1
+date	2003.03.22.20.04.19;	author tg;	state Exp;
+branches;
+next	1.1.1.2;
+
+1.1.1.2
+date	2003.04.08.18.31.32;	author tg;	state Stab;
+branches;
+next	;
+
+1.1.9.1
+date	2004.02.14.19.18.02;	author tg;	state Exp;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@/* $XFree86: xc/lib/GL/mesa/src/drv/r128/r128_tris.h,v 1.6 2001/04/10 16:07:53 dawes Exp $ */
+/**************************************************************************
+
+Copyright 1999, 2000 ATI Technologies Inc. and Precision Insight, Inc.,
+                                               Cedar Park, Texas.
+All Rights Reserved.
+
+Permission is hereby granted, free of charge, to any person obtaining a
+copy of this software and associated documentation files (the "Software"),
+to deal in the Software without restriction, including without limitation
+on the rights to use, copy, modify, merge, publish, distribute, sub
+license, and/or sell copies of the Software, and to permit persons to whom
+the Software is furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice (including the next
+paragraph) shall be included in all copies or substantial portions of the
+Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NON-INFRINGEMENT. IN NO EVENT SHALL
+ATI, PRECISION INSIGHT AND/OR THEIR SUPPLIERS BE LIABLE FOR ANY CLAIM,
+DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR
+OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE
+USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+**************************************************************************/
+
+/*
+ * Authors:
+ *   Gareth Hughes <gareth@@valinux.com>
+ *   Kevin E. Martin <martin@@valinux.com>
+ *
+ */
+
+#ifndef __R128_TRIS_H__
+#define __R128_TRIS_H__
+
+#ifdef GLX_DIRECT_RENDERING
+
+#include "r128_vb.h"
+
+extern void r128DDChooseRenderState( GLcontext *ctx );
+extern void r128DDTriangleFuncsInit( void );
+
+#define R128_FLAT_BIT		0x01
+#define R128_OFFSET_BIT		0x02
+#define R128_TWOSIDE_BIT	0x04
+#define R128_NODRAW_BIT		0x08
+#define R128_FALLBACK_BIT	0x10
+#define R128_MAX_TRIFUNC	0x20
+
+
+static __inline void r128_draw_triangle( r128ContextPtr rmesa,
+					 r128VertexPtr v0,
+					 r128VertexPtr v1,
+					 r128VertexPtr v2 )
+{
+   GLuint vertsize = rmesa->vertsize;
+   CARD32 *vb = r128AllocVerticesInline( rmesa, 3 );
+   int j;
+
+#if defined (USE_X86_ASM)
+   /* GH: We can safely assume the vertex stride is some number of
+    * dwords, and thus a "rep movsd" is okay.  The vb pointer is
+    * automagically updated with this instruction, so we don't have
+    * to manually take care of incrementing it.
+    */
+   __asm__ __volatile__( "rep ; movsl"
+			 : "=%c" (j)
+			 : "0" (vertsize), "D" ((long)vb), "S" ((long)v0)
+			 : "memory" );
+   __asm__ __volatile__( "rep ; movsl"
+			 : "=%c" (j)
+			 : "0" (vertsize), "S" ((long)v1)
+			 : "memory" );
+   __asm__ __volatile__( "rep ; movsl"
+			 : "=%c" (j)
+			 : "0" (vertsize), "S" ((long)v2)
+			 : "memory" );
+#else
+   for ( j = 0 ; j < vertsize ; j++ )
+      LE32_OUT( vb[j], v0->ui[j] );
+
+   vb += vertsize;
+   for ( j = 0 ; j < vertsize ; j++ )
+      LE32_OUT( vb[j], v1->ui[j] );
+
+   vb += vertsize;
+   for ( j = 0 ; j < vertsize ; j++ )
+      LE32_OUT( vb[j], v2->ui[j] );
+#endif
+}
+
+static __inline void r128_draw_quad( r128ContextPtr rmesa,
+				     r128VertexPtr v0,
+				     r128VertexPtr v1,
+				     r128VertexPtr v2,
+				     r128VertexPtr v3 )
+{
+   GLuint vertsize = rmesa->vertsize;
+   CARD32 *vb = r128AllocVerticesInline( rmesa, 6 );
+   int j;
+
+#if defined (USE_X86_ASM)
+   /* GH: We can safely assume the vertex stride is some number of
+    * dwords, and thus a "rep movsd" is okay.  The vb pointer is
+    * automagically updated with this instruction, so we don't have
+    * to manually take care of incrementing it.
+    */
+   __asm__ __volatile__( "rep ; movsl"
+			 : "=%c" (j)
+			 : "0" (vertsize), "D" ((long)vb), "S" ((long)v0)
+			 : "memory" );
+   __asm__ __volatile__( "rep ; movsl"
+			 : "=%c" (j)
+			 : "0" (vertsize), "S" ((long)v1)
+			 : "memory" );
+   __asm__ __volatile__( "rep ; movsl"
+			 : "=%c" (j)
+			 : "0" (vertsize), "S" ((long)v3)
+			 : "memory" );
+   __asm__ __volatile__( "rep ; movsl"
+			 : "=%c" (j)
+			 : "0" (vertsize), "S" ((long)v1)
+			 : "memory" );
+   __asm__ __volatile__( "rep ; movsl"
+			 : "=%c" (j)
+			 : "0" (vertsize), "S" ((long)v2)
+			 : "memory" );
+   __asm__ __volatile__( "rep ; movsl"
+			 : "=%c" (j)
+			 : "0" (vertsize), "S" ((long)v3)
+			 : "memory" );
+#else
+   for ( j = 0 ; j < vertsize ; j++ )
+      LE32_OUT( vb[j], v0->ui[j] );
+
+   vb += vertsize;
+   for ( j = 0 ; j < vertsize ; j++ )
+      LE32_OUT( vb[j], v1->ui[j] );
+
+   vb += vertsize;
+   for ( j = 0 ; j < vertsize ; j++ )
+      LE32_OUT( vb[j], v3->ui[j] );
+
+   vb += vertsize;
+   for ( j = 0 ; j < vertsize ; j++ )
+      LE32_OUT( vb[j], v1->ui[j] );
+
+   vb += vertsize;
+   for ( j = 0 ; j < vertsize ; j++ )
+      LE32_OUT( vb[j], v2->ui[j] );
+
+   vb += vertsize;
+   for ( j = 0 ; j < vertsize ; j++ )
+      LE32_OUT( vb[j], v3->ui[j] );
+#endif
+}
+
+static __inline void r128_draw_line( r128ContextPtr rmesa,
+				     r128VertexPtr tmp0,
+				     r128VertexPtr tmp1,
+				     GLfloat width )
+{
+#if 1
+   GLuint vertsize = rmesa->vertsize;
+   CARD32 *vb = r128AllocVerticesInline( rmesa, 6 );
+   GLfloat hw, dx, dy, ix, iy;
+   GLuint j;
+   GLfloat x0 = tmp0->v.x;
+   GLfloat y0 = tmp0->v.y;
+   GLfloat x1 = tmp1->v.x;
+   GLfloat y1 = tmp1->v.y;
+
+   hw = 0.5F * width;
+   if (hw > 0.1F && hw < 0.5F) {
+      hw = 0.5F;
+   }
+
+   /* adjust vertices depending on line direction */
+   dx = tmp0->v.x - tmp1->v.x;
+   dy = tmp0->v.y - tmp1->v.y;
+   if (dx * dx > dy * dy) {
+      /* X-major line */
+      ix = 0.0F;
+      iy = hw;
+      if (x1 < x0) {
+         x0 += 0.5F;
+         x1 += 0.5F;
+      }
+      y0 -= 0.5F;
+      y1 -= 0.5F;
+   }
+   else {
+      /* Y-major line */
+      ix = hw;
+      iy = 0.0F;
+      if (y1 > y0) {
+         y0 -= 0.5F;
+         y1 -= 0.5F;
+      }
+      x0 += 0.5F;
+      x1 += 0.5F;
+   }
+
+   LE32_OUT_FLOAT( vb[0], x0 - ix );
+   LE32_OUT_FLOAT( vb[1], y0 - iy );
+   for (j = 2 ; j < vertsize ; j++)
+      LE32_OUT( vb[j], tmp0->ui[j] );
+   vb += vertsize;
+
+   LE32_OUT_FLOAT( vb[0], x1 + ix );
+   LE32_OUT_FLOAT( vb[1], y1 + iy );
+   for (j = 2 ; j < vertsize ; j++)
+      LE32_OUT( vb[j], tmp1->ui[j] );
+   vb += vertsize;
+
+   LE32_OUT_FLOAT( vb[0], x0 + ix );
+   LE32_OUT_FLOAT( vb[1], y0 + iy );
+   for (j = 2 ; j < vertsize ; j++)
+      LE32_OUT( vb[j], tmp0->ui[j] );
+   vb += vertsize;
+
+   LE32_OUT_FLOAT( vb[0], x0 - ix );
+   LE32_OUT_FLOAT( vb[1], y0 - iy );
+   for (j = 2 ; j < vertsize ; j++)
+      LE32_OUT( vb[j], tmp0->ui[j] );
+   vb += vertsize;
+
+   LE32_OUT_FLOAT( vb[0], x1 - ix );
+   LE32_OUT_FLOAT( vb[1], y1 - iy );
+   for (j = 2 ; j < vertsize ; j++)
+      LE32_OUT( vb[j], tmp1->ui[j] );
+   vb += vertsize;
+
+   LE32_OUT_FLOAT( vb[0], x1 + ix );
+   LE32_OUT_FLOAT( vb[1], y1 + iy );
+   for (j = 2 ; j < vertsize ; j++)
+      LE32_OUT( vb[j], tmp1->ui[j] );
+
+#else
+
+   int vertsize = rmesa->vertsize;
+   CARD32 *vb = r128AllocVerticesInline( rmesa, 2 );
+   int j;
+
+#if defined (USE_X86_ASM)
+   /* GH: We can safely assume the vertex stride is some number of
+    * dwords, and thus a "rep movsd" is okay.  The vb pointer is
+    * automagically updated with this instruction, so we don't have
+    * to manually take care of incrementing it.
+    */
+   __asm__ __volatile__( "rep ; movsl"
+			 : "=%c" (j)
+			 : "0" (vertsize), "D" ((long)vb), "S" ((long)tmp0)
+			 : "memory" );
+   __asm__ __volatile__( "rep ; movsl"
+			 : "=%c" (j)
+			 : "0" (vertsize), "S" ((long)tmp1)
+			 : "memory" );
+#else
+   for ( j = 0 ; j < vertsize ; j++ )
+      vb[j] = tmp0->ui[j];
+
+   vb += vertsize;
+   for ( j = 0 ; j < vertsize ; j++ )
+      vb[j] = tmp1->ui[j];
+#endif
+#endif
+}
+
+static __inline void r128_draw_point( r128ContextPtr rmesa,
+				      r128VertexPtr tmp, GLfloat sz )
+{
+#if 1
+   GLuint vertsize = rmesa->vertsize;
+   CARD32 *vb = r128AllocVerticesInline( rmesa, 6 );
+   int j;
+   const float x = tmp->v.x + PNT_X_OFFSET;
+   const float y = tmp->v.y + PNT_Y_OFFSET;
+
+   LE32_OUT_FLOAT( vb[0], x - sz );
+   LE32_OUT_FLOAT( vb[1], y - sz );
+   for (j = 2 ; j < vertsize ; j++)
+      LE32_OUT( vb[j], tmp->ui[j] );
+   vb += vertsize;
+
+   LE32_OUT_FLOAT( vb[0], x + sz );
+   LE32_OUT_FLOAT( vb[1], y - sz );
+   for (j = 2 ; j < vertsize ; j++)
+      LE32_OUT( vb[j], tmp->ui[j] );
+   vb += vertsize;
+
+   LE32_OUT_FLOAT( vb[0], x + sz );
+   LE32_OUT_FLOAT( vb[1], y + sz );
+   for (j = 2 ; j < vertsize ; j++)
+      LE32_OUT( vb[j], tmp->ui[j] );
+   vb += vertsize;
+
+   LE32_OUT_FLOAT( vb[0], x + sz );
+   LE32_OUT_FLOAT( vb[1], y + sz );
+   for (j = 2 ; j < vertsize ; j++)
+      LE32_OUT( vb[j], tmp->ui[j] );
+   vb += vertsize;
+
+   LE32_OUT_FLOAT( vb[0], x - sz );
+   LE32_OUT_FLOAT( vb[1], y + sz );
+   for (j = 2 ; j < vertsize ; j++)
+      LE32_OUT( vb[j], tmp->ui[j] );
+   vb += vertsize;
+
+   LE32_OUT_FLOAT( vb[0], x - sz );
+   LE32_OUT_FLOAT( vb[1], y - sz );
+   for (j = 2 ; j < vertsize ; j++)
+      LE32_OUT( vb[j], tmp->ui[j] );
+
+#else
+
+   int vertsize = rmesa->vertsize;
+   CARD32 *vb = r128AllocVerticesInline( rmesa, 1 );
+   int j;
+
+#if defined (USE_X86_ASM)
+   /* GH: We can safely assume the vertex stride is some number of
+    * dwords, and thus a "rep movsd" is okay.  The vb pointer is
+    * automagically updated with this instruction, so we don't have
+    * to manually take care of incrementing it.
+    */
+   __asm__ __volatile__( "rep ; movsl"
+			 : "=%c" (j)
+			 : "0" (vertsize), "D" ((long)vb), "S" ((long)tmp)
+			 : "memory" );
+#else
+   for ( j = 0 ; j < vertsize ; j++ )
+      vb[j] = tmp->ui[j];
+#endif
+#endif
+}
+
+#endif
+#endif /* __R128_TRIS_H__ */
+@
+
+
+1.1.9.1
+log
+@OpenBSD just has imported exactly this tree into their vendor branch,
+called the same tag, in XF4/xc
+This is, apparently, the last XFree86 snapshot before the licence change
+(ie, addition of the advertising clause)
+
+Since the developers don't see any problems with that, and we would like
+to integrate improvements done by the remaining one or two (or so) XFree86
+developers (j/k), this prepares enabling us to update X-Window in the future.
+@
+text
+@d1 1
+a1 1
+/* $XFree86: xc/lib/GL/mesa/src/drv/r128/r128_tris.h,v 1.8 2002/10/30 12:51:43 alanh Exp $ */
+d4 2
+a5 3
+Copyright 2000, 2001 ATI Technologies Inc., Ontario, Canada, and
+                     VA Linux Systems Inc., Fremont, California.
+
+d22 1
+a22 1
+ATI, VA LINUX SYSTEMS AND/OR THEIR SUPPLIERS BE LIABLE FOR ANY CLAIM,
+d31 2
+a32 1
+ *   Keith Whitwell <keith@@tungstengraphics.com>
+d39 1
+a39 3
+#include "mtypes.h"
+
+extern void r128InitTriFuncs( GLcontext *ctx );
+d41 1
+d43 2
+a44 2
+extern void r128Fallback( GLcontext *ctx, GLuint bit, GLboolean mode );
+#define FALLBACK( rmesa, bit, mode ) r128Fallback( rmesa->glCtx, bit, mode )
+d46 294
+d341 1
+@
+
+
+1.1.1.1
+log
+@Import OpenBSD 3.3 XF4 repository from CTM 3132 the first time
+This finalizes starting an OpenBSD-mirabile (aka MirBSD) repository.
+
+### MirBSD is:
+# Copyright (c) 1982-2003 by Thorsten "mirabile" Glaser <x86@@ePost.de>
+# Copyright © 1968-2003  The authors of And contributors to UNIX®, the
+#       C Language, BSD/Berkeley Unix; 386BSD, NetBSD 1.1 and OpenBSD.
+#
+# Anyone who obtained a copy of this work is hereby permitted to freely use,
+# distribute, modify, merge, sublicence, give away or sell it as long as the
+# authors are given due credit and the following notice is retained:
+#
+# This work is provided "as is", with no explicit or implicit warranty what-
+# soever. Use it only at your own risk. In no event may an author or contri-
+# butor be held liable for any damage, directly or indirectly, that origina-
+# ted through or is caused by creation or modification of this work.
+
+MirBSD is my private tree. MirBSD does not differ very much from OpenBSD
+and intentionally tracks OpenBSD. That's why it _is_ OpenBSD, just not the
+official one. It's like with DarrenBSD.
+
+At time of this writing, no advertising for MirBSD must be done,
+because the advertising clause has not yet been sorted out.
+
+http://templeofhate.com/tglaser/MirBSD/index.php
+@
+text
+@@
+
+
+1.1.1.2
+log
+@The X-Windowing System
+
+Import XFree86 4.3 from OpenBSD by CTM, in the hope it's stable
+@
+text
+@d1 1
+a1 1
+/* $XFree86: xc/lib/GL/mesa/src/drv/r128/r128_tris.h,v 1.8 2002/10/30 12:51:43 alanh Exp $ */
+d4 2
+a5 3
+Copyright 2000, 2001 ATI Technologies Inc., Ontario, Canada, and
+                     VA Linux Systems Inc., Fremont, California.
+
+d22 1
+a22 1
+ATI, VA LINUX SYSTEMS AND/OR THEIR SUPPLIERS BE LIABLE FOR ANY CLAIM,
+d31 2
+a32 1
+ *   Keith Whitwell <keith@@tungstengraphics.com>
+d39 1
+a39 3
+#include "mtypes.h"
+
+extern void r128InitTriFuncs( GLcontext *ctx );
+d41 1
+d43 2
+a44 2
+extern void r128Fallback( GLcontext *ctx, GLuint bit, GLboolean mode );
+#define FALLBACK( rmesa, bit, mode ) r128Fallback( rmesa->glCtx, bit, mode )
+d46 294
+d341 1
+@
+

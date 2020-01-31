@@ -1,0 +1,250 @@
+head	1.1;
+branch	1.1.1;
+access;
+symbols
+	tg-mergetmp-2:1.1.1.1
+	cvs-200410241530:1.1.1.1
+	cvs-200410012000:1.1.1.1
+	cvs-200407221130:1.1.1.1
+	cvs-200407141120:1.1.1.1
+	cvs-200406231010:1.1.1.1
+	MIRBSD_7quater:1.1.1.1
+	cvs-200405271510:1.1.1.1
+	XFree86_4_4_0:1.1.9.1
+	cvs-200403021700:1.1.1.1
+	XFREE86_20040213:1.1.9.1
+	xc:1.1.9
+	cvs-200401291925:1.1.1.1
+	MIRBSD_7_ALPHA:1.1.1.1.0.4
+	MIRBSD_7:1.1.1.1.0.2
+	MIRBSD_7ter:1.1.1.1
+	cvs-20011091815:1.1.1.1
+	cvs-200309162130:1.1.1.1
+	cvs-200308302005:1.1.1.1
+	ctmx-0387:1.1.1.1
+	ctmx-0384:1.1.1.1
+	MIRBSD_5:1.1.1.1
+	ctmx-0375:1.1.1.1
+	ctmx-0373:1.1.1.1
+	ctm-0371:1.1.1.1
+	ctm-0370:1.1.1.1
+	MIRBSD_4:1.1.1.1
+	ctm-0363:1.1.1.1
+	ctm-0359:1.1.1.1
+	ctm-0349:1.1.1.1
+	openbsd:1.1.1;
+locks; strict;
+comment	@ * @;
+
+
+1.1
+date	2003.03.22.20.08.53;	author tg;	state Exp;
+branches
+	1.1.1.1
+	1.1.9.1;
+next	;
+
+1.1.1.1
+date	2003.03.22.20.08.53;	author tg;	state Stab;
+branches;
+next	;
+
+1.1.9.1
+date	2004.02.14.19.25.19;	author tg;	state Exp;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@/* $XFree86: xc/programs/Xserver/hw/xfree86/os-support/os2/os2_ioperm.c,v 3.6 1999/04/29 09:13:49 dawes Exp $ */
+/*
+ * Copyright 1993 by David Wexelblat <dwex@@goblin.org>
+ * Modified 1996 by Sebastien Marineau <marineau@@genie.uottawa.ca>
+ *
+ * Permission to use, copy, modify, distribute, and sell this software and its
+ * documentation for any purpose is hereby granted without fee, provided that
+ * the above copyright notice appear in all copies and that both that
+ * copyright notice and this permission notice appear in supporting
+ * documentation, and that the name of David Wexelblat not be used in
+ * advertising or publicity pertaining to distribution of the software without
+ * specific, written prior permission.  David Wexelblat makes no representations
+ * about the suitability of this software for any purpose.  It is provided
+ * "as is" without express or implied warranty.
+ *
+ * DAVID WEXELBLAT DISCLAIMS ALL WARRANTIES WITH REGARD TO THIS SOFTWARE,
+ * INCLUDING ALL IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS, IN NO
+ * EVENT SHALL DAVID WEXELBLAT BE LIABLE FOR ANY SPECIAL, INDIRECT OR
+ * CONSEQUENTIAL DAMAGES OR ANY DAMAGES WHATSOEVER RESULTING FROM LOSS OF USE,
+ * DATA OR PROFITS, WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER
+ * TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR
+ * PERFORMANCE OF THIS SOFTWARE.
+ *
+ */
+/* $XConsortium: os2_ioperm.c /main/4 1996/04/18 16:50:01 kaleb $ */
+
+
+
+#define I_NEED_OS2_H
+#define INCL_32
+#define INCL_DOS
+#define INCL_DOSFILEMGR
+#include "xf86.h"
+#include "xf86Priv.h"
+#include "xf86_OSlib.h"
+
+/*
+ * To access I/O ports under OS/2, we use the xf86sup.sys driver.
+ * For the moment, we use a function which basically grants IO priviledge
+ * to the whole server. NOTE: Once the server is running, we should 
+ * change this to use inline IO functions through the callgate returned by 
+ * the fastio$ driver.
+ */
+
+int ioEnabled=FALSE;
+ULONG action;
+char *ioDrvPath = "/dev/fastio$";
+USHORT callgate[3]={0,0,0};
+
+
+void xf86EnableIO()
+{
+
+HFILE hfd;
+	ULONG dlen;
+	APIRET rc;
+
+	/* no need to call multiple times */
+	if (ioEnabled) return;
+	
+	if (DosOpen((PSZ)ioDrvPath, (PHFILE)&hfd, (PULONG)&action,
+	   (ULONG)0, FILE_SYSTEM, FILE_OPEN,
+	   OPEN_SHARE_DENYNONE|OPEN_FLAGS_NOINHERIT|OPEN_ACCESS_READONLY,
+	   (ULONG)0) != 0) {
+		xf86Msg(X_ERROR,"Error opening fastio$ driver...\n");
+		xf86Msg(X_ERROR,"Please install xf86sup.sys in config.sys!\n");
+		exit(42);
+	}
+	callgate[0] = callgate[1] = 0;
+
+/* Get callgate from driver for fast io to ports and other stuff */
+
+	rc = DosDevIOCtl(hfd, (ULONG)0x76, (ULONG)0x64,
+		NULL, 0, NULL,
+		(ULONG*)&callgate[2], sizeof(USHORT), &dlen);
+	if (rc) {
+		xf86Msg(X_ERROR,
+			"EnableIOPorts failed, rc=%d, dlen=%d; emergency exit\n",
+			rc,dlen);
+		DosClose(hfd);
+		exit(42);
+	}
+
+/* Calling callgate with function 13 sets IOPL for the program */
+
+	asm volatile ("movl $13,%%ebx;.byte 0xff,0x1d;.long _callgate"
+			: /*no outputs */ 
+			: /*no inputs */
+			: "eax","ebx","ecx","edx","cc");
+
+	ioEnabled = TRUE;
+        DosClose(hfd);
+	return;
+}
+
+void xf86DisableIO()
+{
+HFILE hfd;
+	ULONG dlen;
+	APIRET rc;
+
+	/* no need to call multiple times */
+	if (!ioEnabled) return;
+	
+	if (DosOpen((PSZ)ioDrvPath, (PHFILE)&hfd, (PULONG)&action,
+	   (ULONG)0, FILE_SYSTEM, FILE_OPEN,
+	   OPEN_SHARE_DENYNONE|OPEN_FLAGS_NOINHERIT|OPEN_ACCESS_READONLY,
+	   (ULONG)0) != 0) {
+		xf86Msg(X_ERROR,"Error opening fastio$ driver...\n");
+		xf86Msg(X_ERROR,"Please install xf86sup.sys in config.sys!\n");
+		return;
+	}
+	callgate[0] = callgate[1] = 0;
+
+	rc = DosDevIOCtl(hfd, (ULONG)0x76, (ULONG)0x64,
+		NULL, 0, NULL,
+		(ULONG*)&callgate[2], sizeof(USHORT), &dlen);
+	if (rc) {
+		xf86Msg(X_ERROR,"DisableIOPorts failed, rc=%d, dlen=%d\n",
+			rc,dlen);
+		DosClose(hfd);
+		return;
+	}
+
+/* Function 14 of callgate brings program back to ring 3 */
+
+	asm volatile ("movl $14,%%ebx;.byte 0xff,0x1d;.long _callgate"
+			: /*no outputs */ 
+			: /*no inputs */
+			: "eax","ebx","ecx","edx","cc");
+	ioEnabled=FALSE;
+        DosClose(hfd);
+	return;
+
+}
+
+@
+
+
+1.1.9.1
+log
+@OpenBSD just has imported exactly this tree into their vendor branch,
+called the same tag, in XF4/xc
+This is, apparently, the last XFree86 snapshot before the licence change
+(ie, addition of the advertising clause)
+
+Since the developers don't see any problems with that, and we would like
+to integrate improvements done by the remaining one or two (or so) XFree86
+developers (j/k), this prepares enabling us to update X-Window in the future.
+@
+text
+@@
+
+
+1.1.1.1
+log
+@Import OpenBSD 3.3 XF4 repository from CTM 3132 the first time
+This finalizes starting an OpenBSD-mirabile (aka MirBSD) repository.
+
+### MirBSD is:
+# Copyright (c) 1982-2003 by Thorsten "mirabile" Glaser <x86@@ePost.de>
+# Copyright © 1968-2003  The authors of And contributors to UNIX®, the
+#       C Language, BSD/Berkeley Unix; 386BSD, NetBSD 1.1 and OpenBSD.
+#
+# Anyone who obtained a copy of this work is hereby permitted to freely use,
+# distribute, modify, merge, sublicence, give away or sell it as long as the
+# authors are given due credit and the following notice is retained:
+#
+# This work is provided "as is", with no explicit or implicit warranty what-
+# soever. Use it only at your own risk. In no event may an author or contri-
+# butor be held liable for any damage, directly or indirectly, that origina-
+# ted through or is caused by creation or modification of this work.
+
+MirBSD is my private tree. MirBSD does not differ very much from OpenBSD
+and intentionally tracks OpenBSD. That's why it _is_ OpenBSD, just not the
+official one. It's like with DarrenBSD.
+
+At time of this writing, no advertising for MirBSD must be done,
+because the advertising clause has not yet been sorted out.
+
+http://templeofhate.com/tglaser/MirBSD/index.php
+@
+text
+@@

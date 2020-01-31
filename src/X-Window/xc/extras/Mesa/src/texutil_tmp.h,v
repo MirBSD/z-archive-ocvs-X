@@ -1,0 +1,1350 @@
+head	1.2;
+branch	1.1.1;
+access;
+symbols
+	tg-mergetmp-2:1.1.1.3
+	cvs-200410241530:1.1.1.3
+	cvs-200410012000:1.1.1.3
+	cvs-200407141120:1.1.1.3
+	cvs-200406231010:1.1.1.3
+	MIRBSD_7quater:1.1.1.2
+	cvs-200405271510:1.1.1.3
+	XFree86_4_4_0:1.1.9.1
+	cvs-200403021700:1.1.1.3
+	XFREE86_20040213:1.1.9.1
+	xc:1.1.9
+	cvs-200401291925:1.1.1.2
+	MIRBSD_7_ALPHA:1.1.1.2.0.4
+	MIRBSD_7:1.1.1.2.0.2
+	MIRBSD_7ter:1.1.1.2
+	cvs-20011091815:1.1.1.2
+	cvs-200309162130:1.1.1.2
+	cvs-200308302005:1.1.1.2
+	ctmx-0387:1.1.1.2
+	ctmx-0384:1.1.1.2
+	MIRBSD_5:1.1.1.2
+	ctmx-0375:1.1.1.2
+	ctmx-0373:1.1.1.2
+	ctm-0371:1.1.1.2
+	ctm-0370:1.1.1.2
+	MIRBSD_4:1.1.1.2
+	ctm-0363:1.1.1.2
+	ctm-0359:1.1.1.2
+	ctm-0349:1.1.1.1
+	openbsd:1.1.1;
+locks; strict;
+comment	@ * @;
+
+
+1.2
+date	2003.05.16.16.28.22;	author tg;	state dead;
+branches;
+next	1.1;
+
+1.1
+date	2003.03.22.20.01.02;	author tg;	state Exp;
+branches
+	1.1.1.1
+	1.1.9.1;
+next	;
+
+1.1.1.1
+date	2003.03.22.20.01.02;	author tg;	state Exp;
+branches;
+next	1.1.1.2;
+
+1.1.1.2
+date	2003.04.08.18.20.05;	author tg;	state Exp;
+branches;
+next	1.1.1.3;
+
+1.1.1.3
+date	2004.03.02.17.29.10;	author tg;	state Stab;
+branches;
+next	;
+
+1.1.9.1
+date	2004.02.14.19.04.51;	author tg;	state Exp;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.2
+log
+@remove a bunch of files not used in MirBSD - clean tree. People who want them got cvs.
+@
+text
+@/*
+ * NOTE: All 3D code is untested and most definitely broken...
+ */
+
+#define DST_TEXEL_BYTES		(4 / DST_TEXELS_PER_DWORD)
+#define DST_ROW_WIDTH		(convert->width * DST_TEXEL_BYTES)
+#define DST_ROW_STRIDE		(convert->imageWidth * DST_TEXEL_BYTES)
+#define DST_IMG_STRIDE		(convert->imageWidth *			\
+				 convert->imageHeight * DST_TEXEL_BYTES)
+
+
+/* ================================================================
+ * PRE: No pixelstore attribs, width == imageWidth.
+ */
+static GLboolean
+TAG(texsubimage2d)( struct gl_texture_convert *convert )
+{
+   const GLubyte *src = (const GLubyte *)convert->srcImage;
+   GLuint *dst = (GLuint *)((GLubyte *)convert->dstImage +
+			    (convert->yoffset * convert->imageWidth +
+			     convert->xoffset) * DST_TEXEL_BYTES);
+   GLint dwords, i;
+   (void) dwords; (void) i;
+
+#if DEBUG_TEXUTIL
+   fprintf( stderr, __FUNCTION__ "\n" );
+#endif
+
+#ifdef CONVERT_DIRECT
+   MEMCPY( dst, src, convert->height * DST_ROW_WIDTH );
+#else
+   dwords = (convert->width * convert->height +
+	     DST_TEXELS_PER_DWORD - 1) / DST_TEXELS_PER_DWORD;
+
+   for ( i = 0 ; i < dwords ; i++ ) {
+      *dst++ = CONVERT_TEXEL_DWORD( src );
+      src += SRC_TEXEL_BYTES * DST_TEXELS_PER_DWORD;
+   }
+#endif
+
+   return GL_TRUE;
+}
+
+/* PRE: As above, height == imageHeight also.
+ */
+static GLboolean
+TAG(texsubimage3d)( struct gl_texture_convert *convert )
+{
+   const GLubyte *src = (const GLubyte *)convert->srcImage;
+   GLuint *dst = (GLuint *)((GLubyte *)convert->dstImage +
+			    ((convert->zoffset * convert->height +
+			      convert->yoffset) * convert->width +
+			     convert->xoffset) * DST_TEXEL_BYTES);
+   GLint dwords, i;
+   (void) dwords; (void) i;
+
+#if DEBUG_TEXUTIL
+   fprintf( stderr, __FUNCTION__ "\n" );
+#endif
+
+#ifdef CONVERT_DIRECT
+   MEMCPY( dst, src, convert->depth * convert->height * DST_ROW_WIDTH );
+#else
+   dwords = (convert->width * convert->height * convert->depth +
+	     DST_TEXELS_PER_DWORD - 1) / DST_TEXELS_PER_DWORD;
+
+   for ( i = 0 ; i < dwords ; i++ ) {
+      *dst++ = CONVERT_TEXEL_DWORD( src );
+      src += SRC_TEXEL_BYTES * DST_TEXELS_PER_DWORD;
+   }
+#endif
+
+   return GL_TRUE;
+}
+
+
+
+/* ================================================================
+ * PRE: No pixelstore attribs, width != imageWidth.
+ */
+static GLboolean
+TAG(texsubimage2d_stride)( struct gl_texture_convert *convert )
+{
+   const GLubyte *src = (const GLubyte *)convert->srcImage;
+   DST_TYPE *dst = (DST_TYPE *)((GLubyte *)convert->dstImage +
+				(convert->yoffset * convert->imageWidth +
+				 convert->xoffset) * DST_TEXEL_BYTES);
+   GLint adjust;
+   GLint row, col;
+
+   adjust = convert->imageWidth - convert->width;
+
+#if DEBUG_TEXUTIL
+   fprintf( stderr, __FUNCTION__ ":\n" );
+   fprintf( stderr, "   x=%d y=%d w=%d h=%d s=%d\n",
+            convert->xoffset, convert->yoffset, convert->width,
+            convert->height, convert->imageWidth );
+   fprintf( stderr, "   adjust=%d\n", adjust );
+#endif
+
+   for ( row = 0 ; row < convert->height ; row++ ) {
+      for ( col = 0 ; col < convert->width ; col++ ) {
+	 *dst++ = CONVERT_TEXEL( src );
+	 src += SRC_TEXEL_BYTES;
+      }
+      dst += adjust;
+   }
+
+   return GL_TRUE;
+}
+
+/* PRE: As above, or height != imageHeight also.
+ */
+static GLboolean
+TAG(texsubimage3d_stride)( struct gl_texture_convert *convert )
+{
+   const GLubyte *src = (const GLubyte *)convert->srcImage;
+   DST_TYPE *dst = (DST_TYPE *)((GLubyte *)convert->dstImage +
+				((convert->zoffset * convert->imageHeight +
+				  convert->yoffset) * convert->imageWidth +
+				 convert->xoffset) * DST_TEXEL_BYTES);
+   GLint adjust;
+   GLint row, col, img;
+
+   adjust = convert->imageWidth - convert->width;
+
+#if DEBUG_TEXUTIL
+   fprintf( stderr, __FUNCTION__ ":\n" );
+   fprintf( stderr, "   x=%d y=%d w=%d h=%d s=%d\n",
+            convert->xoffset, convert->yoffset, convert->width,
+            convert->height, convert->imageWidth );
+   fprintf( stderr, "   adjust=%d\n", adjust );
+#endif
+
+   for ( img = 0 ; img < convert->depth ; img++ ) {
+      for ( row = 0 ; row < convert->height ; row++ ) {
+	 for ( col = 0 ; col < convert->width ; col++ ) {
+	    *dst++ = CONVERT_TEXEL( src );
+	    src += SRC_TEXEL_BYTES;
+	 }
+	 dst += adjust;
+      }
+      /* FIXME: ... */
+   }
+
+   return GL_TRUE;
+}
+
+
+
+/* ================================================================
+ * PRE: Require pixelstore attribs, width == imageWidth.
+ */
+static GLboolean
+TAG(texsubimage2d_pack)( struct gl_texture_convert *convert )
+{
+   const GLubyte *src = (const GLubyte *)
+      _mesa_image_address( convert->packing, convert->srcImage,
+			   convert->width, convert->height,
+			   convert->format, convert->type, 0, 0, 0 );
+   const GLint srcRowStride =
+      _mesa_image_row_stride( convert->packing, convert->width,
+			      convert->format, convert->type );
+   GLuint *dst = (GLuint *)((GLubyte *)convert->dstImage +
+			    (convert->yoffset * convert->width +
+			     convert->xoffset) * DST_TEXEL_BYTES);
+   GLint width;
+   GLint row, col;
+   (void) col;
+
+#if DEBUG_TEXUTIL
+   fprintf( stderr, __FUNCTION__ "\n" );
+#endif
+
+   width = ((convert->width + DST_TEXELS_PER_DWORD - 1)
+	    & ~(DST_TEXELS_PER_DWORD - 1));
+
+   for ( row = 0 ; row < convert->height ; row++ ) {
+#ifdef CONVERT_DIRECT
+      MEMCPY( dst, src, DST_ROW_STRIDE );
+      src += srcRowStride;
+      dst = (GLuint *)((GLubyte *)dst + DST_ROW_STRIDE);
+#else
+      const GLubyte *srcRow = src;
+      for ( col = width / DST_TEXELS_PER_DWORD ; col ; col-- ) {
+	 *dst++ = CONVERT_TEXEL_DWORD( src );
+	 src += SRC_TEXEL_BYTES * DST_TEXELS_PER_DWORD;
+      }
+      src = srcRow + srcRowStride;
+#endif
+   }
+
+   return GL_TRUE;
+}
+
+/* PRE: as above, height == imageHeight also.
+ */
+static GLboolean
+TAG(texsubimage3d_pack)( struct gl_texture_convert *convert )
+{
+   const GLubyte *src = (const GLubyte *)
+      _mesa_image_address( convert->packing, convert->srcImage,
+			   convert->width, convert->height,
+			   convert->format, convert->type, 0, 0, 0 );
+   const GLint srcRowStride =
+      _mesa_image_row_stride( convert->packing, convert->width,
+			      convert->format, convert->type );
+   GLuint *dst = (GLuint *)((GLubyte *)convert->dstImage +
+			    ((convert->zoffset * convert->height +
+			      convert->yoffset) * convert->width +
+			     convert->xoffset) * DST_TEXEL_BYTES);
+   GLint width;
+   GLint row, col, img;
+   (void) col;
+
+#if DEBUG_TEXUTIL
+   fprintf( stderr, __FUNCTION__ "\n" );
+#endif
+
+   width = ((convert->width + DST_TEXELS_PER_DWORD - 1)
+	    & ~(DST_TEXELS_PER_DWORD - 1));
+
+   for ( img = 0 ; img < convert->depth ; img++ ) {
+      for ( row = 0 ; row < convert->height ; row++ ) {
+#ifdef CONVERT_DIRECT
+	 MEMCPY( dst, src, DST_ROW_STRIDE );
+	 src += srcRowStride;
+	 dst = (GLuint *)((GLubyte *)dst + DST_ROW_STRIDE);
+#else
+	 const GLubyte *srcRow = src;
+	 for ( col = width / DST_TEXELS_PER_DWORD ; col ; col-- ) {
+	    *dst++ = CONVERT_TEXEL_DWORD( src );
+	    src += SRC_TEXEL_BYTES * DST_TEXELS_PER_DWORD;
+	 }
+	 src = srcRow + srcRowStride;
+#endif
+      }
+   }
+
+   return GL_TRUE;
+}
+
+
+
+/* ================================================================
+ * PRE: Require pixelstore attribs, width != imageWidth.
+ */
+static GLboolean
+TAG(texsubimage2d_stride_pack)( struct gl_texture_convert *convert )
+{
+   const GLubyte *src = (const GLubyte *)
+      _mesa_image_address( convert->packing, convert->srcImage,
+			   convert->width, convert->height,
+			   convert->format, convert->type, 0, 0, 0 );
+   const GLint srcRowStride =
+      _mesa_image_row_stride( convert->packing, convert->width,
+			      convert->format, convert->type );
+   DST_TYPE *dst = (DST_TYPE *)((GLubyte *)convert->dstImage +
+				(convert->yoffset * convert->imageWidth +
+				 convert->xoffset) * DST_TEXEL_BYTES);
+   GLint adjust;
+   GLint row, col;
+   (void) col;
+
+   adjust = convert->imageWidth - convert->width;
+
+#if DEBUG_TEXUTIL
+   fprintf( stderr, __FUNCTION__ ":\n" );
+   fprintf( stderr, "   x=%d y=%d w=%d h=%d s=%d\n",
+            convert->xoffset, convert->yoffset, convert->width,
+            convert->height, convert->imageWidth );
+   fprintf( stderr, "   adjust=%d\n", adjust );
+#endif
+
+   for ( row = 0 ; row < convert->height ; row++ ) {
+#ifdef CONVERT_DIRECT
+      MEMCPY( dst, src, DST_ROW_WIDTH );
+      src += srcRowStride;
+      dst += convert->imageWidth;
+#else
+      const GLubyte *srcRow = src;
+      for ( col = 0 ; col < convert->width ; col++ ) {
+	 *dst++ = CONVERT_TEXEL( src );
+	 src += SRC_TEXEL_BYTES;
+      }
+      src = srcRow + srcRowStride;
+      dst += adjust;
+#endif
+   }
+
+   return GL_TRUE;
+}
+
+/* PRE: As above, or height != imageHeight also.
+ */
+static GLboolean
+TAG(texsubimage3d_stride_pack)( struct gl_texture_convert *convert )
+{
+   const GLubyte *src = (const GLubyte *)
+      _mesa_image_address( convert->packing, convert->srcImage,
+			   convert->width, convert->height,
+			   convert->format, convert->type, 0, 0, 0 );
+   const GLint srcRowStride =
+      _mesa_image_row_stride( convert->packing, convert->width,
+			      convert->format, convert->type );
+   DST_TYPE *dst = (DST_TYPE *)((GLubyte *)convert->dstImage +
+				((convert->zoffset * convert->imageHeight +
+				  convert->yoffset) * convert->imageWidth +
+				 convert->xoffset) * DST_TEXEL_BYTES);
+   GLint adjust;
+   GLint row, col, img;
+   (void) col;
+
+   adjust = convert->imageWidth - convert->width;
+
+#if DEBUG_TEXUTIL
+   fprintf( stderr, __FUNCTION__ ":\n" );
+   fprintf( stderr, "   x=%d y=%d w=%d h=%d s=%d\n",
+            convert->xoffset, convert->yoffset, convert->width,
+            convert->height, convert->imageWidth );
+   fprintf( stderr, "   adjust=%d\n", adjust );
+#endif
+
+   for ( img = 0 ; img < convert->depth ; img++ ) {
+      for ( row = 0 ; row < convert->height ; row++ ) {
+#ifdef CONVERT_DIRECT
+	 MEMCPY( dst, src, DST_ROW_WIDTH );
+	 src += srcRowStride;
+	 dst += convert->imageWidth;
+#else
+	 const GLubyte *srcRow = src;
+	 for ( col = 0 ; col < convert->width ; col++ ) {
+	    *dst++ = CONVERT_TEXEL( src );
+	    src += SRC_TEXEL_BYTES;
+	 }
+	 src = srcRow + srcRowStride;
+	 dst += adjust;
+#endif
+      }
+      /* FIXME: ... */
+   }
+
+   return GL_TRUE;
+}
+
+
+
+static convert_func TAG(texsubimage2d_tab)[] = {
+   TAG(texsubimage2d),
+   TAG(texsubimage2d_stride),
+   TAG(texsubimage2d_pack),
+   TAG(texsubimage2d_stride_pack),
+};
+
+static convert_func TAG(texsubimage3d_tab)[] = {
+   TAG(texsubimage3d),
+   TAG(texsubimage3d_stride),
+   TAG(texsubimage3d_pack),
+   TAG(texsubimage3d_stride_pack),
+};
+
+
+#ifndef PRESERVE_DST_TYPE
+#undef DST_TYPE
+#undef DST_TEXELS_PER_DWORD
+#endif
+
+#undef SRC_TEXEL_BYTES
+#undef DST_TEXEL_BYTES
+#undef DST_ROW_WIDTH
+#undef DST_ROW_STRIDE
+
+#undef CONVERT_TEXEL
+#undef CONVERT_TEXEL_DWORD
+#undef CONVERT_DIRECT
+
+#undef TAG
+
+#undef PRESERVE_DST_TYPE
+@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@@
+
+
+1.1.9.1
+log
+@OpenBSD just has imported exactly this tree into their vendor branch,
+called the same tag, in XF4/xc
+This is, apparently, the last XFree86 snapshot before the licence change
+(ie, addition of the advertising clause)
+
+Since the developers don't see any problems with that, and we would like
+to integrate improvements done by the remaining one or two (or so) XFree86
+developers (j/k), this prepares enabling us to update X-Window in the future.
+@
+text
+@a0 1
+/* $XFree86: xc/extras/Mesa/src/texutil_tmp.h,v 1.4 2003/10/22 15:27:41 tsi Exp $ */
+d2 1
+a2 24
+ * Mesa 3-D graphics library
+ * Version:  4.0.2
+ *
+ * Copyright (C) 1999-2002  Brian Paul   All Rights Reserved.
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a
+ * copy of this software and associated documentation files (the "Software"),
+ * to deal in the Software without restriction, including without limitation
+ * the rights to use, copy, modify, merge, publish, distribute, sublicense,
+ * and/or sell copies of the Software, and to permit persons to whom the
+ * Software is furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included
+ * in all copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
+ * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL
+ * BRIAN PAUL BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN
+ * AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
+ * CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+ *
+ * Author:
+ *    Gareth Hughes
+a4 22
+
+/*
+ * For 2D and 3D texture images, we generate functions for
+ *  - conversion without pixel unpacking and standard stride
+ *  - conversion without pixel unpacking and non-standard stride
+ *  - conversion with pixel unpacking and standard stride
+ *  - conversion with pixel unpacking and non-standard stride
+ *
+ *
+ * Macros which need to be defined before including this file:
+ *  TAG(x)  - the function name wrapper
+ *  DST_TYPE - the destination texel datatype (GLuint, GLushort, etc)
+ *  DST_TEXELS_PER_DWORD - number of dest texels that'll fit in 4 bytes
+ *  CONVERT_TEXEL - code to convert from source to dest texel
+ *  CONVER_TEXEL_DWORD - if multiple texels fit in 4 bytes, this macros
+ *                       will convert/store multiple texels at once
+ *  CONVERT_DIRECT - if defined, just memcpy texels from src to dest
+ *  SRC_TEXEL_BYTES - bytes per source texel
+ *  PRESERVE_DST_TYPE - if defined, don't undefined these macros at end
+ */
+
+
+d6 4
+a9 4
+#define DST_ROW_BYTES		(convert->width * DST_TEXEL_BYTES)
+#define DST_ROW_STRIDE		(convert->dstImageWidth * DST_TEXEL_BYTES)
+#define DST_IMG_STRIDE		(convert->dstImageWidth *		\
+				 convert->dstImageHeight * DST_TEXEL_BYTES)
+d12 2
+a13 2
+/* =============================================================
+ * PRE: No pixelstore attribs, width == dstImageWidth.
+d16 1
+a16 1
+TAG(texsubimage2d)( const struct convert_info *convert )
+d20 1
+a20 1
+			    (convert->yoffset * convert->dstImageWidth +
+d22 2
+d26 1
+a26 1
+   _mesa_debug( NULL, __FUNCTION__ "\n" );
+d30 1
+a30 1
+   MEMCPY( dst, src, convert->height * DST_ROW_BYTES );
+d32 6
+a37 13
+   {
+      const GLint texels = convert->width * convert->height;
+      const GLint dwords = texels / DST_TEXELS_PER_DWORD;
+      const GLint leftover = texels - dwords * DST_TEXELS_PER_DWORD;
+      GLint i;
+      for ( i = 0 ; i < dwords ; i++ ) {
+         CONVERT_TEXEL_DWORD( *dst++, src );
+         src += SRC_TEXEL_BYTES * DST_TEXELS_PER_DWORD;
+      }
+      for ( i = 0; i < leftover; i++ ) {
+         CONVERT_TEXEL( *dst++, src );
+         src += SRC_TEXEL_BYTES;
+      }
+d44 1
+a44 1
+/* PRE: As above, height == dstImageHeight also.
+d47 1
+a47 1
+TAG(texsubimage3d)( const struct convert_info *convert )
+d54 3
+d58 1
+a58 1
+   _mesa_debug( NULL, __FUNCTION__ "\n" );
+d62 1
+a62 1
+   MEMCPY( dst, src, convert->depth * convert->height * DST_ROW_BYTES );
+d64 6
+a69 13
+   {
+      const GLint texels = convert->width * convert->height * convert->depth;
+      const GLint dwords = texels / DST_TEXELS_PER_DWORD;
+      const GLint leftover = texels - dwords * DST_TEXELS_PER_DWORD;
+      GLint i;
+      for ( i = 0 ; i < dwords ; i++ ) {
+         CONVERT_TEXEL_DWORD( *dst++, src );
+         src += SRC_TEXEL_BYTES * DST_TEXELS_PER_DWORD;
+      }
+      for ( i = 0; i < leftover; i++ ) {
+         CONVERT_TEXEL( *dst++, src );
+         src += SRC_TEXEL_BYTES;
+      }
+d78 2
+a79 2
+/* =============================================================
+ * PRE: No pixelstore attribs, width != dstImageWidth.
+d82 1
+a82 1
+TAG(texsubimage2d_stride)( const struct convert_info *convert )
+d86 1
+a86 1
+				(convert->yoffset * convert->dstImageWidth +
+d91 1
+a91 1
+   adjust = convert->dstImageWidth - convert->width;
+d94 2
+a95 2
+   _mesa_debug( NULL, __FUNCTION__ ":\n" );
+   _mesa_debug( NULL, "   x=%d y=%d w=%d h=%d s=%d\n",
+d97 2
+a98 2
+            convert->height, convert->dstImageWidth );
+   _mesa_debug( NULL, "   adjust=%d\n", adjust );
+d103 1
+a103 1
+	 CONVERT_TEXEL( *dst++, src );
+d112 1
+a112 1
+/* PRE: As above, or height != dstImageHeight also.
+d115 1
+a115 1
+TAG(texsubimage3d_stride)( const struct convert_info *convert )
+d119 2
+a120 2
+				((convert->zoffset * convert->dstImageHeight +
+				  convert->yoffset) * convert->dstImageWidth +
+d125 1
+a125 1
+   adjust = convert->dstImageWidth - convert->width;
+d128 2
+a129 2
+   _mesa_debug( NULL, __FUNCTION__ ":\n" );
+   _mesa_debug( NULL, "   x=%d y=%d w=%d h=%d s=%d\n",
+d131 2
+a132 2
+            convert->height, convert->dstImageWidth );
+   _mesa_debug( NULL, "   adjust=%d\n", adjust );
+d138 1
+a138 1
+	    CONVERT_TEXEL( *dst++, src );
+d151 2
+a152 2
+/* =============================================================
+ * PRE: Require pixelstore attribs, width == dstImageWidth.
+d155 1
+a155 1
+TAG(texsubimage2d_unpack)( const struct convert_info *convert )
+d158 1
+a158 1
+      _mesa_image_address( convert->unpacking, convert->srcImage,
+d162 1
+a162 1
+      _mesa_image_row_stride( convert->unpacking, convert->width,
+d164 4
+d169 1
+d172 1
+a172 1
+   _mesa_debug( NULL, __FUNCTION__ "\n" );
+d175 4
+a178 22
+   if (convert->width & (DST_TEXELS_PER_DWORD - 1)) {
+      /* Can't use dword conversion (i.e. when width = 1 and texels/dword = 2
+       * or width = 2 and texels/dword = 4).
+       */
+      DST_TYPE *dst = (DST_TYPE *)((GLubyte *)convert->dstImage +
+                                   (convert->yoffset * convert->width +
+                                    convert->xoffset) * DST_TEXEL_BYTES);
+      for ( row = 0 ; row < convert->height ; row++ ) {
+         const GLubyte *srcRow = src;
+         for ( col = 0; col < convert->width; col++ ) {
+            CONVERT_TEXEL(*dst, src);
+            src += SRC_TEXEL_BYTES;
+         }
+         src = srcRow + srcRowStride;
+      }
+   }
+   else {
+      /* the common case */
+      GLuint *dst = (GLuint *)((GLubyte *)convert->dstImage +
+                               (convert->yoffset * convert->width +
+                                convert->xoffset) * DST_TEXEL_BYTES);
+      for ( row = 0 ; row < convert->height ; row++ ) {
+d180 3
+a182 3
+         MEMCPY( dst, src, DST_ROW_STRIDE );
+         src += srcRowStride;
+         dst = (GLuint *)((GLubyte *)dst + DST_ROW_STRIDE);
+d184 6
+a189 6
+         const GLubyte *srcRow = src;
+         for ( col = convert->width / DST_TEXELS_PER_DWORD ; col ; col-- ) {
+            CONVERT_TEXEL_DWORD( *dst++, src );
+            src += SRC_TEXEL_BYTES * DST_TEXELS_PER_DWORD;
+         }
+         src = srcRow + srcRowStride;
+a190 1
+      }
+d196 1
+a196 1
+/* PRE: as above, height == dstImageHeight also.
+d199 1
+a199 1
+TAG(texsubimage3d_unpack)( const struct convert_info *convert )
+d202 1
+a202 1
+      _mesa_image_address( convert->unpacking, convert->srcImage,
+a204 4
+   const GLint srcImgStride = (const GLubyte *)
+      _mesa_image_address( convert->unpacking, convert->srcImage,
+			   convert->width, convert->height,
+			   convert->format, convert->type, 1, 0, 0 ) - src;
+d206 1
+a206 1
+      _mesa_image_row_stride( convert->unpacking, convert->width,
+d208 5
+d214 1
+d217 1
+a217 1
+   _mesa_debug( NULL, __FUNCTION__ "\n" );
+d220 5
+a224 30
+   if (convert->width & (DST_TEXELS_PER_DWORD - 1)) {
+      /* Can't use dword conversion (i.e. when width = 1 and texels/dword = 2
+       * or width = 2 and texels/dword = 4).
+       */
+      DST_TYPE *dst = (DST_TYPE *)((GLubyte *)convert->dstImage +
+                                   ((convert->zoffset * convert->height +
+                                     convert->yoffset) * convert->width +
+                                    convert->xoffset) * DST_TEXEL_BYTES);
+      for ( img = 0 ; img < convert->depth ; img++ ) {
+         const GLubyte *srcImage = src;
+         for ( row = 0 ; row < convert->height ; row++ ) {
+            const GLubyte *srcRow = src;
+            for ( col = 0; col < convert->width; col++ ) {
+               CONVERT_TEXEL(*dst, src);
+               src += SRC_TEXEL_BYTES;
+            }
+            src = srcRow + srcRowStride;
+         }
+         src = srcImage + srcImgStride;
+      }
+   }
+   else {
+      /* the common case */
+      GLuint *dst = (GLuint *)((GLubyte *)convert->dstImage +
+                               ((convert->zoffset * convert->height +
+                                 convert->yoffset) * convert->width +
+                                convert->xoffset) * DST_TEXEL_BYTES);
+      for ( img = 0 ; img < convert->depth ; img++ ) {
+         const GLubyte *srcImage = src;
+         for ( row = 0 ; row < convert->height ; row++ ) {
+d226 3
+a228 3
+            MEMCPY( dst, src, DST_ROW_STRIDE );
+            src += srcRowStride;
+            dst = (GLuint *)((GLubyte *)dst + DST_ROW_STRIDE);
+d230 6
+a235 6
+            const GLubyte *srcRow = src;
+            for ( col = convert->width / DST_TEXELS_PER_DWORD ; col ; col-- ) {
+               CONVERT_TEXEL_DWORD( *dst++, src );
+               src += SRC_TEXEL_BYTES * DST_TEXELS_PER_DWORD;
+            }
+            src = srcRow + srcRowStride;
+a236 2
+         }
+         src = srcImage + srcImgStride;
+d245 2
+a246 2
+/* =============================================================
+ * PRE: Require pixelstore attribs, width != dstImageWidth.
+d249 1
+a249 1
+TAG(texsubimage2d_stride_unpack)( const struct convert_info *convert )
+d252 1
+a252 1
+      _mesa_image_address( convert->unpacking, convert->srcImage,
+d256 1
+a256 1
+      _mesa_image_row_stride( convert->unpacking, convert->width,
+d259 1
+a259 1
+				(convert->yoffset * convert->dstImageWidth +
+d261 3
+a263 1
+   GLint row;
+d265 1
+a265 3
+#ifndef CONVERT_DIRECT
+   GLint adjust = convert->dstImageWidth - convert->width;
+#endif
+d268 2
+a269 2
+   _mesa_debug( NULL, __FUNCTION__ ":\n" );
+   _mesa_debug( NULL, "   x=%d y=%d w=%d h=%d s=%d\n",
+d271 2
+a272 1
+            convert->height, convert->dstImageWidth );
+d277 1
+a277 1
+      MEMCPY( dst, src, DST_ROW_BYTES );
+d279 1
+a279 1
+      dst += convert->dstImageWidth;
+a281 1
+      GLint col;
+d283 1
+a283 1
+	 CONVERT_TEXEL( *dst++, src );
+d294 1
+a294 1
+/* PRE: As above, or height != dstImageHeight also.
+d297 1
+a297 1
+TAG(texsubimage3d_stride_unpack)( const struct convert_info *convert )
+d300 1
+a300 1
+      _mesa_image_address( convert->unpacking, convert->srcImage,
+a302 4
+   const GLint srcImgStride = (const GLubyte *)
+      _mesa_image_address( convert->unpacking, convert->srcImage,
+			   convert->width, convert->height,
+			   convert->format, convert->type, 1, 0, 0 ) - src;
+d304 1
+a304 1
+      _mesa_image_row_stride( convert->unpacking, convert->width,
+d307 2
+a308 2
+				((convert->zoffset * convert->dstImageHeight +
+				  convert->yoffset) * convert->dstImageWidth +
+d310 3
+a312 1
+   GLint row, img;
+d314 1
+a314 3
+#ifndef CONVERT_DIRECT
+   GLint adjust = convert->dstImageWidth - convert->width;
+#endif
+d317 2
+a318 2
+   _mesa_debug( NULL, __FUNCTION__ ":\n" );
+   _mesa_debug( NULL, "   x=%d y=%d w=%d h=%d s=%d\n",
+d320 2
+a321 1
+            convert->height, convert->dstImageWidth );
+a324 1
+      const GLubyte *srcImage = src;
+d327 1
+a327 1
+	 MEMCPY( dst, src, DST_ROW_BYTES );
+d329 1
+a329 1
+	 dst += convert->dstImageWidth;
+a331 1
+	 GLint col;
+d333 1
+a333 1
+	    CONVERT_TEXEL( *dst++, src );
+d340 1
+a340 1
+      src = srcImage + srcImgStride;
+d351 2
+a352 2
+   TAG(texsubimage2d_unpack),
+   TAG(texsubimage2d_stride_unpack),
+d358 2
+a359 2
+   TAG(texsubimage3d_unpack),
+   TAG(texsubimage3d_stride_unpack),
+d370 1
+a370 1
+#undef DST_ROW_BYTES
+@
+
+
+1.1.1.1
+log
+@Import OpenBSD 3.3 XF4 repository from CTM 3132 the first time
+This finalizes starting an OpenBSD-mirabile (aka MirBSD) repository.
+
+### MirBSD is:
+# Copyright (c) 1982-2003 by Thorsten "mirabile" Glaser <x86@@ePost.de>
+# Copyright © 1968-2003  The authors of And contributors to UNIX®, the
+#       C Language, BSD/Berkeley Unix; 386BSD, NetBSD 1.1 and OpenBSD.
+#
+# Anyone who obtained a copy of this work is hereby permitted to freely use,
+# distribute, modify, merge, sublicence, give away or sell it as long as the
+# authors are given due credit and the following notice is retained:
+#
+# This work is provided "as is", with no explicit or implicit warranty what-
+# soever. Use it only at your own risk. In no event may an author or contri-
+# butor be held liable for any damage, directly or indirectly, that origina-
+# ted through or is caused by creation or modification of this work.
+
+MirBSD is my private tree. MirBSD does not differ very much from OpenBSD
+and intentionally tracks OpenBSD. That's why it _is_ OpenBSD, just not the
+official one. It's like with DarrenBSD.
+
+At time of this writing, no advertising for MirBSD must be done,
+because the advertising clause has not yet been sorted out.
+
+http://templeofhate.com/tglaser/MirBSD/index.php
+@
+text
+@@
+
+
+1.1.1.2
+log
+@The X-Windowing System
+
+Import XFree86 4.3 from OpenBSD by CTM, in the hope it's stable
+@
+text
+@d2 1
+a2 24
+ * Mesa 3-D graphics library
+ * Version:  4.0.4
+ *
+ * Copyright (C) 1999-2002  Brian Paul   All Rights Reserved.
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a
+ * copy of this software and associated documentation files (the "Software"),
+ * to deal in the Software without restriction, including without limitation
+ * the rights to use, copy, modify, merge, publish, distribute, sublicense,
+ * and/or sell copies of the Software, and to permit persons to whom the
+ * Software is furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included
+ * in all copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
+ * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL
+ * BRIAN PAUL BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN
+ * AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
+ * CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+ *
+ * Author:
+ *    Gareth Hughes <gareth@@valinux.com>
+a4 21
+/*
+ * For 2D and 3D texture images, we generate functions for
+ *  - conversion without pixel unpacking and standard stride
+ *  - conversion without pixel unpacking and non-standard stride
+ *  - conversion with pixel unpacking and standard stride
+ *  - conversion with pixel unpacking and non-standard stride
+ *
+ *
+ * Macros which need to be defined before including this file:
+ *  TAG(x)  - the function name wrapper
+ *  DST_TYPE - the destination texel datatype (GLuint, GLushort, etc)
+ *  DST_TEXELS_PER_DWORD - number of dest texels that'll fit in 4 bytes
+ *  CONVERT_TEXEL - code to convert from source to dest texel
+ *  CONVER_TEXEL_DWORD - if multiple texels fit in 4 bytes, this macros
+ *                       will convert/store multiple texels at once
+ *  CONVERT_DIRECT - if defined, just memcpy texels from src to dest
+ *  SRC_TEXEL_BYTES - bytes per source texel
+ *  PRESERVE_DST_TYPE - if defined, don't undefined these macros at end
+ */
+
+
+d6 4
+a9 4
+#define DST_ROW_BYTES		(convert->width * DST_TEXEL_BYTES)
+#define DST_ROW_STRIDE		(convert->dstImageWidth * DST_TEXEL_BYTES)
+#define DST_IMG_STRIDE		(convert->dstImageWidth *		\
+				 convert->dstImageHeight * DST_TEXEL_BYTES)
+d12 2
+a13 2
+/* =============================================================
+ * PRE: No pixelstore attribs, width == dstImageWidth.
+d16 1
+a16 1
+TAG(texsubimage2d)( const struct convert_info *convert )
+d20 1
+a20 1
+			    (convert->yoffset * convert->dstImageWidth +
+d22 2
+d30 1
+a30 1
+   MEMCPY( dst, src, convert->height * DST_ROW_BYTES );
+d32 6
+a37 13
+   {
+      const GLint texels = convert->width * convert->height;
+      const GLint dwords = texels / DST_TEXELS_PER_DWORD;
+      const GLint leftover = texels - dwords * DST_TEXELS_PER_DWORD;
+      GLint i;
+      for ( i = 0 ; i < dwords ; i++ ) {
+         CONVERT_TEXEL_DWORD( *dst++, src );
+         src += SRC_TEXEL_BYTES * DST_TEXELS_PER_DWORD;
+      }
+      for ( i = 0; i < leftover; i++ ) {
+         CONVERT_TEXEL( *dst++, src );
+         src += SRC_TEXEL_BYTES;
+      }
+d44 1
+a44 1
+/* PRE: As above, height == dstImageHeight also.
+d47 1
+a47 1
+TAG(texsubimage3d)( const struct convert_info *convert )
+d54 3
+d62 1
+a62 1
+   MEMCPY( dst, src, convert->depth * convert->height * DST_ROW_BYTES );
+d64 6
+a69 13
+   {
+      const GLint texels = convert->width * convert->height * convert->depth;
+      const GLint dwords = texels / DST_TEXELS_PER_DWORD;
+      const GLint leftover = texels - dwords * DST_TEXELS_PER_DWORD;
+      GLint i;
+      for ( i = 0 ; i < dwords ; i++ ) {
+         CONVERT_TEXEL_DWORD( *dst++, src );
+         src += SRC_TEXEL_BYTES * DST_TEXELS_PER_DWORD;
+      }
+      for ( i = 0; i < leftover; i++ ) {
+         CONVERT_TEXEL( *dst++, src );
+         src += SRC_TEXEL_BYTES;
+      }
+d78 2
+a79 2
+/* =============================================================
+ * PRE: No pixelstore attribs, width != dstImageWidth.
+d82 1
+a82 1
+TAG(texsubimage2d_stride)( const struct convert_info *convert )
+d86 1
+a86 1
+				(convert->yoffset * convert->dstImageWidth +
+d91 1
+a91 1
+   adjust = convert->dstImageWidth - convert->width;
+d97 1
+a97 1
+            convert->height, convert->dstImageWidth );
+d103 1
+a103 1
+	 CONVERT_TEXEL( *dst++, src );
+d112 1
+a112 1
+/* PRE: As above, or height != dstImageHeight also.
+d115 1
+a115 1
+TAG(texsubimage3d_stride)( const struct convert_info *convert )
+d119 2
+a120 2
+				((convert->zoffset * convert->dstImageHeight +
+				  convert->yoffset) * convert->dstImageWidth +
+d125 1
+a125 1
+   adjust = convert->dstImageWidth - convert->width;
+d131 1
+a131 1
+            convert->height, convert->dstImageWidth );
+d138 1
+a138 1
+	    CONVERT_TEXEL( *dst++, src );
+d151 2
+a152 2
+/* =============================================================
+ * PRE: Require pixelstore attribs, width == dstImageWidth.
+d155 1
+a155 1
+TAG(texsubimage2d_unpack)( const struct convert_info *convert )
+d158 1
+a158 1
+      _mesa_image_address( convert->unpacking, convert->srcImage,
+d162 1
+a162 1
+      _mesa_image_row_stride( convert->unpacking, convert->width,
+d164 4
+d169 1
+d175 4
+a178 22
+   if (convert->width & (DST_TEXELS_PER_DWORD - 1)) {
+      /* Can't use dword conversion (i.e. when width = 1 and texels/dword = 2
+       * or width = 2 and texels/dword = 4).
+       */
+      DST_TYPE *dst = (DST_TYPE *)((GLubyte *)convert->dstImage +
+                                   (convert->yoffset * convert->width +
+                                    convert->xoffset) * DST_TEXEL_BYTES);
+      for ( row = 0 ; row < convert->height ; row++ ) {
+         const GLubyte *srcRow = src;
+         for ( col = 0; col < convert->width; col++ ) {
+            CONVERT_TEXEL(*dst, src);
+            src += SRC_TEXEL_BYTES;
+         }
+         src = srcRow + srcRowStride;
+      }
+   }
+   else {
+      /* the common case */
+      GLuint *dst = (GLuint *)((GLubyte *)convert->dstImage +
+                               (convert->yoffset * convert->width +
+                                convert->xoffset) * DST_TEXEL_BYTES);
+      for ( row = 0 ; row < convert->height ; row++ ) {
+d180 3
+a182 3
+         MEMCPY( dst, src, DST_ROW_STRIDE );
+         src += srcRowStride;
+         dst = (GLuint *)((GLubyte *)dst + DST_ROW_STRIDE);
+d184 6
+a189 6
+         const GLubyte *srcRow = src;
+         for ( col = convert->width / DST_TEXELS_PER_DWORD ; col ; col-- ) {
+            CONVERT_TEXEL_DWORD( *dst++, src );
+            src += SRC_TEXEL_BYTES * DST_TEXELS_PER_DWORD;
+         }
+         src = srcRow + srcRowStride;
+a190 1
+      }
+d196 1
+a196 1
+/* PRE: as above, height == dstImageHeight also.
+d199 1
+a199 1
+TAG(texsubimage3d_unpack)( const struct convert_info *convert )
+d202 1
+a202 1
+      _mesa_image_address( convert->unpacking, convert->srcImage,
+a204 4
+   const GLint srcImgStride = (const GLubyte *)
+      _mesa_image_address( convert->unpacking, convert->srcImage,
+			   convert->width, convert->height,
+			   convert->format, convert->type, 1, 0, 0 ) - src;
+d206 1
+a206 1
+      _mesa_image_row_stride( convert->unpacking, convert->width,
+d208 5
+d214 1
+d220 5
+a224 30
+   if (convert->width & (DST_TEXELS_PER_DWORD - 1)) {
+      /* Can't use dword conversion (i.e. when width = 1 and texels/dword = 2
+       * or width = 2 and texels/dword = 4).
+       */
+      DST_TYPE *dst = (DST_TYPE *)((GLubyte *)convert->dstImage +
+                                   ((convert->zoffset * convert->height +
+                                     convert->yoffset) * convert->width +
+                                    convert->xoffset) * DST_TEXEL_BYTES);
+      for ( img = 0 ; img < convert->depth ; img++ ) {
+         const GLubyte *srcImage = src;
+         for ( row = 0 ; row < convert->height ; row++ ) {
+            const GLubyte *srcRow = src;
+            for ( col = 0; col < convert->width; col++ ) {
+               CONVERT_TEXEL(*dst, src);
+               src += SRC_TEXEL_BYTES;
+            }
+            src = srcRow + srcRowStride;
+         }
+         src = srcImage + srcImgStride;
+      }
+   }
+   else {
+      /* the common case */
+      GLuint *dst = (GLuint *)((GLubyte *)convert->dstImage +
+                               ((convert->zoffset * convert->height +
+                                 convert->yoffset) * convert->width +
+                                convert->xoffset) * DST_TEXEL_BYTES);
+      for ( img = 0 ; img < convert->depth ; img++ ) {
+         const GLubyte *srcImage = src;
+         for ( row = 0 ; row < convert->height ; row++ ) {
+d226 3
+a228 3
+            MEMCPY( dst, src, DST_ROW_STRIDE );
+            src += srcRowStride;
+            dst = (GLuint *)((GLubyte *)dst + DST_ROW_STRIDE);
+d230 6
+a235 6
+            const GLubyte *srcRow = src;
+            for ( col = convert->width / DST_TEXELS_PER_DWORD ; col ; col-- ) {
+               CONVERT_TEXEL_DWORD( *dst++, src );
+               src += SRC_TEXEL_BYTES * DST_TEXELS_PER_DWORD;
+            }
+            src = srcRow + srcRowStride;
+a236 2
+         }
+         src = srcImage + srcImgStride;
+d245 2
+a246 2
+/* =============================================================
+ * PRE: Require pixelstore attribs, width != dstImageWidth.
+d249 1
+a249 1
+TAG(texsubimage2d_stride_unpack)( const struct convert_info *convert )
+d252 1
+a252 1
+      _mesa_image_address( convert->unpacking, convert->srcImage,
+d256 1
+a256 1
+      _mesa_image_row_stride( convert->unpacking, convert->width,
+d259 1
+a259 1
+				(convert->yoffset * convert->dstImageWidth +
+d265 1
+a265 1
+   adjust = convert->dstImageWidth - convert->width;
+d271 1
+a271 1
+            convert->height, convert->dstImageWidth );
+d277 1
+a277 1
+      MEMCPY( dst, src, DST_ROW_BYTES );
+d279 1
+a279 1
+      dst += convert->dstImageWidth;
+d283 1
+a283 1
+	 CONVERT_TEXEL( *dst++, src );
+d294 1
+a294 1
+/* PRE: As above, or height != dstImageHeight also.
+d297 1
+a297 1
+TAG(texsubimage3d_stride_unpack)( const struct convert_info *convert )
+d300 1
+a300 1
+      _mesa_image_address( convert->unpacking, convert->srcImage,
+a302 4
+   const GLint srcImgStride = (const GLubyte *)
+      _mesa_image_address( convert->unpacking, convert->srcImage,
+			   convert->width, convert->height,
+			   convert->format, convert->type, 1, 0, 0 ) - src;
+d304 1
+a304 1
+      _mesa_image_row_stride( convert->unpacking, convert->width,
+d307 2
+a308 2
+				((convert->zoffset * convert->dstImageHeight +
+				  convert->yoffset) * convert->dstImageWidth +
+d314 1
+a314 1
+   adjust = convert->dstImageWidth - convert->width;
+d320 1
+a320 1
+            convert->height, convert->dstImageWidth );
+a324 1
+      const GLubyte *srcImage = src;
+d327 1
+a327 1
+	 MEMCPY( dst, src, DST_ROW_BYTES );
+d329 1
+a329 1
+	 dst += convert->dstImageWidth;
+d333 1
+a333 1
+	    CONVERT_TEXEL( *dst++, src );
+d340 1
+a340 1
+      src = srcImage + srcImgStride;
+d351 2
+a352 2
+   TAG(texsubimage2d_unpack),
+   TAG(texsubimage2d_stride_unpack),
+d358 2
+a359 2
+   TAG(texsubimage3d_unpack),
+   TAG(texsubimage3d_stride_unpack),
+d370 1
+a370 1
+#undef DST_ROW_BYTES
+@
+
+
+1.1.1.3
+log
+@That's what OpenBSD will, probably, ship as XF4 in 3.5
+their last sync against XFree86 4.3-current has been
+imported into our vendor branch, too
+@
+text
+@a0 1
+/* $XFree86: xc/extras/Mesa/src/texutil_tmp.h,v 1.4 2003/10/22 15:27:41 tsi Exp $ */
+d3 1
+a3 1
+ * Version:  4.0.2
+d25 1
+a25 1
+ *    Gareth Hughes
+a27 1
+
+d68 1
+a68 1
+   _mesa_debug( NULL, __FUNCTION__ "\n" );
+d104 1
+a104 1
+   _mesa_debug( NULL, __FUNCTION__ "\n" );
+d147 2
+a148 2
+   _mesa_debug( NULL, __FUNCTION__ ":\n" );
+   _mesa_debug( NULL, "   x=%d y=%d w=%d h=%d s=%d\n",
+d151 1
+a151 1
+   _mesa_debug( NULL, "   adjust=%d\n", adjust );
+d181 2
+a182 2
+   _mesa_debug( NULL, __FUNCTION__ ":\n" );
+   _mesa_debug( NULL, "   x=%d y=%d w=%d h=%d s=%d\n",
+d185 1
+a185 1
+   _mesa_debug( NULL, "   adjust=%d\n", adjust );
+d220 1
+a220 1
+   _mesa_debug( NULL, __FUNCTION__ "\n" );
+d282 1
+a282 1
+   _mesa_debug( NULL, __FUNCTION__ "\n" );
+d353 3
+a355 1
+   GLint row;
+d357 1
+a357 3
+#ifndef CONVERT_DIRECT
+   GLint adjust = convert->dstImageWidth - convert->width;
+#endif
+d360 2
+a361 2
+   _mesa_debug( NULL, __FUNCTION__ ":\n" );
+   _mesa_debug( NULL, "   x=%d y=%d w=%d h=%d s=%d\n",
+d364 1
+a373 1
+      GLint col;
+d406 3
+a408 1
+   GLint row, img;
+d410 1
+a410 3
+#ifndef CONVERT_DIRECT
+   GLint adjust = convert->dstImageWidth - convert->width;
+#endif
+d413 2
+a414 2
+   _mesa_debug( NULL, __FUNCTION__ ":\n" );
+   _mesa_debug( NULL, "   x=%d y=%d w=%d h=%d s=%d\n",
+d417 1
+a428 1
+	 GLint col;
+@
+
+

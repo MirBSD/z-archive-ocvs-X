@@ -1,0 +1,743 @@
+head	1.1;
+branch	1.1.1;
+access;
+symbols
+	tg-mergetmp-2:1.1.1.3
+	cvs-200410241530:1.1.1.3
+	cvs-200410012000:1.1.1.3
+	cvs-200407141120:1.1.1.3
+	cvs-200406231010:1.1.1.2
+	MIRBSD_7quater:1.1.1.1
+	cvs-200405271510:1.1.1.2
+	XFree86_4_4_0:1.1.9.1
+	cvs-200403021700:1.1.1.2
+	XFREE86_20040213:1.1.9.1
+	xc:1.1.9
+	cvs-200401291925:1.1.1.1
+	MIRBSD_7_ALPHA:1.1.1.1.0.4
+	MIRBSD_7:1.1.1.1.0.2
+	MIRBSD_7ter:1.1.1.1
+	cvs-20011091815:1.1.1.1
+	cvs-200309162130:1.1.1.1
+	cvs-200308302005:1.1.1.1
+	ctmx-0387:1.1.1.1
+	ctmx-0384:1.1.1.1
+	MIRBSD_5:1.1.1.1
+	ctmx-0375:1.1.1.1
+	ctmx-0373:1.1.1.1
+	ctm-0371:1.1.1.1
+	ctm-0370:1.1.1.1
+	MIRBSD_4:1.1.1.1
+	ctm-0363:1.1.1.1
+	ctm-0359:1.1.1.1
+	ctm-0349:1.1.1.1
+	openbsd:1.1.1;
+locks; strict;
+comment	@ * @;
+
+
+1.1
+date	2003.03.22.20.05.01;	author tg;	state Exp;
+branches
+	1.1.1.1
+	1.1.9.1;
+next	;
+
+1.1.1.1
+date	2003.03.22.20.05.01;	author tg;	state Exp;
+branches;
+next	1.1.1.2;
+
+1.1.1.2
+date	2004.03.02.18.05.25;	author tg;	state Exp;
+branches;
+next	1.1.1.3;
+
+1.1.1.3
+date	2004.07.14.11.58.31;	author tg;	state Stab;
+branches;
+next	;
+
+1.1.9.1
+date	2004.02.14.19.19.41;	author tg;	state Exp;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@/* $Xorg: Threads.c,v 1.4 2001/02/09 02:03:59 xorgcvs Exp $ */
+
+/************************************************************
+Copyright 1993 by Sun Microsystems, Inc. Mountain View, CA.
+
+                    All Rights Reserved
+
+Permission  to  use,  copy,  modify,  and  distribute   this
+software  and  its documentation for any purpose and without
+fee is hereby granted, provided that the above copyright no-
+tice  appear  in all copies and that both that copyright no-
+tice and this permission notice appear in  supporting  docu-
+mentation,  and  that the name Sun not be used in advertising 
+or publicity pertaining to distribution  of  the software  
+without specific prior written permission. Sun makes no 
+representations about the suitability of this software for 
+any purpose. It is provided "as is" without any express or 
+implied warranty.
+
+SUN DISCLAIMS ALL WARRANTIES WITH REGARD TO  THIS  SOFTWARE,
+INCLUDING ALL IMPLIED WARRANTIES OF MERCHANTABILITY AND FIT-
+NESS FOR A PARTICULAR PURPOSE. IN NO EVENT SHALL SUN BE  LI-
+ABLE  FOR  ANY SPECIAL, INDIRECT OR CONSEQUENTIAL DAMAGES OR
+ANY DAMAGES WHATSOEVER RESULTING FROM LOSS OF USE,  DATA  OR
+PROFITS,  WHETHER  IN  AN  ACTION OF CONTRACT, NEGLIGENCE OR
+OTHER TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION  WITH
+THE USE OR PERFORMANCE OF THIS SOFTWARE.
+
+********************************************************/
+
+/*
+
+Copyright 1994, 1998  The Open Group
+
+Permission to use, copy, modify, distribute, and sell this software and its
+documentation for any purpose is hereby granted without fee, provided that
+the above copyright notice appear in all copies and that both that
+copyright notice and this permission notice appear in supporting
+documentation.
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
+OPEN GROUP BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN
+AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
+CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+Except as contained in this notice, the name of The Open Group shall not be
+used in advertising or otherwise to promote the sale, use or other dealings
+in this Software without prior written authorization from The Open Group.
+
+*/
+/* $XFree86: xc/lib/Xt/Threads.c,v 3.6 2001/12/14 19:56:31 dawes Exp $ */
+
+#include "IntrinsicI.h"
+
+#ifdef XTHREADS
+
+#define xmalloc __XtMalloc
+#define xfree XtFree
+#include <X11/Xthreads.h>
+
+#ifndef NDEBUG
+#define NDEBUG
+#endif
+#include <assert.h>
+#include <stdio.h>
+
+typedef struct _ThreadStack {
+    unsigned int size;
+    int sp;
+    struct _Tstack {
+	xthread_t t;
+	xcondition_t c;
+    } *st;
+} ThreadStack;
+
+typedef struct _LockRec {
+    xmutex_t mutex;
+    int level;
+    ThreadStack stack;
+#ifndef _XMUTEX_NESTS
+    xthread_t holder;
+    xcondition_t cond;
+#endif
+} LockRec;
+
+
+#define STACK_INCR 16
+
+static LockPtr process_lock = NULL;
+
+static void
+InitProcessLock(void)
+{
+    if(!process_lock) {
+    	process_lock = XtNew(LockRec);
+    	process_lock->mutex = xmutex_malloc();
+    	xmutex_init(process_lock->mutex);
+    	process_lock->level = 0;
+#ifndef _XMUTEX_NESTS
+    	process_lock->cond = xcondition_malloc();
+    	xcondition_init(process_lock->cond);
+    	xthread_clear_id(process_lock->holder);
+#endif
+    }
+}
+
+static void 
+ProcessLock(void)
+{
+#ifdef _XMUTEX_NESTS
+    xmutex_lock(process_lock->mutex);
+    process_lock->level++;
+#else
+    xthread_t this_thread = xthread_self();
+    
+    xmutex_lock(process_lock->mutex);
+    
+    if (!xthread_have_id(process_lock->holder)) {
+	process_lock->holder = this_thread;
+	xmutex_unlock(process_lock->mutex);
+	return;
+    }
+    
+    if (xthread_equal(process_lock->holder,this_thread)) {
+	process_lock->level++;
+	xmutex_unlock(process_lock->mutex);
+	return;
+    }
+    
+    while(xthread_have_id(process_lock->holder))
+	xcondition_wait(process_lock->cond, process_lock->mutex);
+    
+    process_lock->holder = this_thread;
+    assert(xthread_equal(process_lock->holder, this_thread));
+    xmutex_unlock(process_lock->mutex);
+#endif
+}
+
+static void 
+ProcessUnlock(void)
+{
+#ifdef _XMUTEX_NESTS
+    process_lock->level--;
+    xmutex_unlock(process_lock->mutex);
+#else
+    xmutex_lock(process_lock->mutex);
+    assert(xthread_equal(process_lock->holder, xthread_self()));
+    if (process_lock->level != 0) {
+	process_lock->level--;
+	xmutex_unlock(process_lock->mutex);
+	return;
+    }
+    
+    xthread_clear_id(process_lock->holder);
+    xcondition_signal(process_lock->cond);
+    
+    xmutex_unlock(process_lock->mutex);
+#endif
+}
+
+
+static void
+#if NeedFunctionPrototypes
+AppLock(
+    XtAppContext app)
+#else
+AppLock(app)
+    XtAppContext app;
+#endif
+{
+    LockPtr app_lock = app->lock_info;
+#ifdef _XMUTEX_NESTS
+    xmutex_lock(app_lock->mutex);
+    app_lock->level++;
+#else
+    xthread_t self = xthread_self();
+    xmutex_lock(app_lock->mutex);
+    if (!xthread_have_id(app_lock->holder)) {
+	app_lock->holder = self;
+    	assert(xthread_equal(app_lock->holder, self));
+	xmutex_unlock(app_lock->mutex);
+	return;
+    }
+    if (xthread_equal(app_lock->holder, self)) {
+	app_lock->level++;
+	xmutex_unlock(app_lock->mutex);
+	return;
+    }
+    while(xthread_have_id(app_lock->holder)) {
+	xcondition_wait(app_lock->cond, app_lock->mutex);
+    }
+    app_lock->holder = self;
+    assert(xthread_equal(app_lock->holder, self));
+    xmutex_unlock(app_lock->mutex);
+#endif
+}
+
+static void
+#if NeedFunctionPrototypes
+AppUnlock(
+    XtAppContext app)
+#else
+AppUnlock(app)
+    XtAppContext app;
+#endif
+{
+    LockPtr app_lock = app->lock_info;
+#ifdef _XMUTEX_NESTS
+    app_lock->level--;
+    xmutex_unlock(app_lock->mutex);
+#else
+    xthread_t self;
+
+    self = xthread_self();
+    xmutex_lock(app_lock->mutex);
+    assert(xthread_equal(app_lock->holder, self));
+    if (app_lock->level != 0) {
+	app_lock->level--;
+	xmutex_unlock(app_lock->mutex);
+	return;
+    }
+    xthread_clear_id(app_lock->holder);
+    xcondition_signal(app_lock->cond);
+    xmutex_unlock(app_lock->mutex);
+#endif
+}
+
+static void
+#if NeedFunctionPrototypes
+YieldAppLock(
+    XtAppContext app,
+    Boolean* push_thread,
+    Boolean* pushed_thread,
+    int* level)
+#else
+YieldAppLock(app, push_thread, pushed_thread, level)
+    XtAppContext app;
+    Boolean* push_thread;
+    Boolean* pushed_thread;
+    int* level;
+#endif
+{
+    LockPtr app_lock = app->lock_info;
+    xthread_t self = xthread_self();
+#ifndef _XMUTEX_NESTS
+    xmutex_lock(app_lock->mutex);
+    assert(xthread_equal(app_lock->holder, self));
+#endif
+    *level = app_lock->level;
+    if (*push_thread) {
+	*push_thread = FALSE;
+	*pushed_thread = TRUE;
+
+	if(app_lock->stack.sp == app_lock->stack.size - 1) {
+	    int ii;
+	    app_lock->stack.st = (struct _Tstack *) 
+		XtRealloc ((char *)app_lock->stack.st, 
+		(app_lock->stack.size + STACK_INCR) * sizeof (struct _Tstack));
+	    ii = app_lock->stack.size;
+	    app_lock->stack.size += STACK_INCR;
+	    for ( ; ii < app_lock->stack.size; ii++) {
+		app_lock->stack.st[ii].c = xcondition_malloc();
+		xcondition_init(app_lock->stack.st[ii].c);
+	    }
+	}
+	app_lock->stack.st[++(app_lock->stack.sp)].t = self;
+    }
+#ifdef _XMUTEX_NESTS
+    while (app_lock->level > 0) {
+	app_lock->level--;
+	xmutex_unlock(app_lock->mutex);
+    }
+#else
+    xcondition_signal(app_lock->cond);
+    app_lock->level = 0;
+    xthread_clear_id(app_lock->holder);
+    xmutex_unlock(app_lock->mutex);
+#endif
+}
+
+static void
+#if NeedFunctionPrototypes
+RestoreAppLock(
+    XtAppContext app, 
+    int level,
+    Boolean* pushed_thread)
+#else
+RestoreAppLock(app, level, pushed_thread)
+    XtAppContext app;
+    int level;
+    Boolean* pushed_thread;
+#endif
+{
+    LockPtr app_lock = app->lock_info;
+    xthread_t self = xthread_self();
+    xmutex_lock(app_lock->mutex);
+#ifdef _XMUTEX_NESTS
+    app_lock->level++;
+#else
+    while(xthread_have_id(app_lock->holder)) {
+	xcondition_wait(app_lock->cond, app_lock->mutex);
+    }
+#endif
+    if (!xthread_equal(app_lock->stack.st[app_lock->stack.sp].t, self)) {
+	int ii;
+	for (ii = app_lock->stack.sp - 1; ii >= 0; ii--) {
+	    if (xthread_equal(app_lock->stack.st[ii].t, self)) {
+		xcondition_wait(app_lock->stack.st[ii].c, app_lock->mutex);
+		break;
+	    }
+	}
+#ifndef _XMUTEX_NESTS
+	while(xthread_have_id(app_lock->holder)) {
+	    xcondition_wait(app_lock->cond, app_lock->mutex);
+	}
+#endif
+    }
+#ifdef _XMUTEX_NESTS
+    while (app_lock->level < level) {
+	xmutex_lock(app_lock->mutex);
+	app_lock->level++;
+    }
+#else
+    app_lock->holder = self;
+    app_lock->level = level;
+    assert(xthread_equal(app_lock->holder, self)); 
+#endif
+    if (*pushed_thread) {
+	*pushed_thread = FALSE;
+	(app_lock->stack.sp)--;
+	if (app_lock->stack.sp >= 0) {
+	    xcondition_signal (app_lock->stack.st[app_lock->stack.sp].c);
+	}
+    }
+#ifndef _XMUTEX_NESTS
+    xmutex_unlock(app_lock->mutex);
+#endif
+}
+
+static void
+#if NeedFunctionPrototypes
+FreeAppLock(
+    XtAppContext app)
+#else
+FreeAppLock(app)
+    XtAppContext app;
+#endif
+{
+    int ii;
+    LockPtr app_lock = app->lock_info;
+
+    if(app_lock) {
+	xmutex_clear(app_lock->mutex);
+	xmutex_free(app_lock->mutex);
+#ifndef _XMUTEX_NESTS
+	xcondition_clear(app_lock->cond);
+	xcondition_free(app_lock->cond);
+#endif
+	if(app_lock->stack.st != (struct _Tstack *)NULL) {
+	    for (ii = 0; ii < app_lock->stack.size; ii++) {
+		xcondition_clear(app_lock->stack.st[ii].c);
+		xcondition_free(app_lock->stack.st[ii].c);
+	    }
+	    XtFree((char *)app_lock->stack.st);
+	}
+	XtFree((char *)app_lock);
+	app->lock_info = NULL;
+    }
+}
+
+static void
+#if NeedFunctionPrototypes
+InitAppLock(
+    XtAppContext app)
+#else
+InitAppLock(app)
+    XtAppContext app;
+#endif
+{
+    int ii;
+    LockPtr app_lock;
+
+    app->lock = AppLock;
+    app->unlock = AppUnlock;
+    app->yield_lock = YieldAppLock;
+    app->restore_lock = RestoreAppLock;
+    app->free_lock = FreeAppLock;
+
+    app_lock = app->lock_info = XtNew(LockRec);
+    app_lock->mutex = xmutex_malloc();
+    xmutex_init(app_lock->mutex);
+    app_lock->level = 0;
+#ifndef _XMUTEX_NESTS
+    app_lock->cond = xcondition_malloc();
+    xcondition_init(app_lock->cond);
+    xthread_clear_id(app_lock->holder);
+#endif   
+    app_lock->stack.size = STACK_INCR;
+    app_lock->stack.sp = -1;
+    app_lock->stack.st = 
+	(struct _Tstack *)__XtMalloc(sizeof(struct _Tstack)*STACK_INCR);
+    for (ii = 0; ii < STACK_INCR; ii++) {
+	app_lock->stack.st[ii].c = xcondition_malloc();
+	xcondition_init(app_lock->stack.st[ii].c);
+    }
+}
+
+#endif /* defined(XTHREADS) */
+
+#if NeedFunctionPrototypes
+void XtAppLock(
+    XtAppContext app)
+#else
+void XtAppLock(app)
+    XtAppContext app;
+#endif
+{
+#ifdef XTHREADS
+    if(app->lock)
+	(*app->lock)(app);
+#endif
+}
+
+#if NeedFunctionPrototypes
+void XtAppUnlock(
+    XtAppContext app)
+#else
+void XtAppUnlock(app)
+    XtAppContext app;
+#endif
+{
+#ifdef XTHREADS
+    if(app->unlock)
+	(*app->unlock)(app);
+#endif
+}
+
+void XtProcessLock()
+{
+#ifdef XTHREADS
+    if(_XtProcessLock)
+	(*_XtProcessLock)();
+#endif
+}
+
+void XtProcessUnlock()
+{
+#ifdef XTHREADS
+    if(_XtProcessUnlock)
+	(*_XtProcessUnlock)();
+#endif
+}
+
+Boolean XtToolkitThreadInitialize()
+{
+#ifdef XTHREADS
+    if (_XtProcessLock == NULL) {
+#ifdef xthread_init
+	xthread_init();
+#endif
+	InitProcessLock();
+	_XtProcessLock = ProcessLock;
+	_XtProcessUnlock = ProcessUnlock;
+	_XtInitAppLock = InitAppLock;
+    }
+    return True;
+#else
+    return False;
+#endif
+}
+
+@
+
+
+1.1.9.1
+log
+@OpenBSD just has imported exactly this tree into their vendor branch,
+called the same tag, in XF4/xc
+This is, apparently, the last XFree86 snapshot before the licence change
+(ie, addition of the advertising clause)
+
+Since the developers don't see any problems with that, and we would like
+to integrate improvements done by the remaining one or two (or so) XFree86
+developers (j/k), this prepares enabling us to update X-Window in the future.
+@
+text
+@d56 1
+a56 1
+/* $XFree86: xc/lib/Xt/Threads.c,v 3.7 2003/04/21 16:34:29 herrb Exp $ */
+d168 7
+a174 1
+AppLock(XtAppContext app)
+d204 7
+a210 1
+AppUnlock(XtAppContext app)
+d234 1
+d240 7
+d287 1
+d292 6
+d346 7
+a352 1
+FreeAppLock(XtAppContext app)
+d377 7
+a383 1
+InitAppLock(XtAppContext app)
+d415 7
+a421 1
+void XtAppLock(XtAppContext app)
+d429 7
+a435 1
+void XtAppUnlock(XtAppContext app)
+d443 1
+a443 1
+void XtProcessLock(void)
+d451 1
+a451 1
+void XtProcessUnlock(void)
+@
+
+
+1.1.1.1
+log
+@Import OpenBSD 3.3 XF4 repository from CTM 3132 the first time
+This finalizes starting an OpenBSD-mirabile (aka MirBSD) repository.
+
+### MirBSD is:
+# Copyright (c) 1982-2003 by Thorsten "mirabile" Glaser <x86@@ePost.de>
+# Copyright © 1968-2003  The authors of And contributors to UNIX®, the
+#       C Language, BSD/Berkeley Unix; 386BSD, NetBSD 1.1 and OpenBSD.
+#
+# Anyone who obtained a copy of this work is hereby permitted to freely use,
+# distribute, modify, merge, sublicence, give away or sell it as long as the
+# authors are given due credit and the following notice is retained:
+#
+# This work is provided "as is", with no explicit or implicit warranty what-
+# soever. Use it only at your own risk. In no event may an author or contri-
+# butor be held liable for any damage, directly or indirectly, that origina-
+# ted through or is caused by creation or modification of this work.
+
+MirBSD is my private tree. MirBSD does not differ very much from OpenBSD
+and intentionally tracks OpenBSD. That's why it _is_ OpenBSD, just not the
+official one. It's like with DarrenBSD.
+
+At time of this writing, no advertising for MirBSD must be done,
+because the advertising clause has not yet been sorted out.
+
+http://templeofhate.com/tglaser/MirBSD/index.php
+@
+text
+@@
+
+
+1.1.1.2
+log
+@That's what OpenBSD will, probably, ship as XF4 in 3.5
+their last sync against XFree86 4.3-current has been
+imported into our vendor branch, too
+@
+text
+@d56 1
+a56 1
+/* $XFree86: xc/lib/Xt/Threads.c,v 3.7 2003/04/21 16:34:29 herrb Exp $ */
+d168 7
+a174 1
+AppLock(XtAppContext app)
+d204 7
+a210 1
+AppUnlock(XtAppContext app)
+d234 1
+d240 7
+d287 1
+d292 6
+d346 7
+a352 1
+FreeAppLock(XtAppContext app)
+d377 7
+a383 1
+InitAppLock(XtAppContext app)
+d415 7
+a421 1
+void XtAppLock(XtAppContext app)
+d429 7
+a435 1
+void XtAppUnlock(XtAppContext app)
+d443 1
+a443 1
+void XtProcessLock(void)
+d451 1
+a451 1
+void XtProcessUnlock(void)
+@
+
+
+1.1.1.3
+log
+@OpenBSD XF4 tree (minus old and mit) as of today
+-> lib and fvwm fixes
+@
+text
+@d13 5
+a17 5
+mentation,  and  that the name Sun not be used in advertising
+or publicity pertaining to distribution  of  the software
+without specific prior written permission. Sun makes no
+representations about the suitability of this software for
+any purpose. It is provided "as is" without any express or
+d56 1
+a56 1
+/* $XFree86: xc/lib/Xt/Threads.c,v 3.8 2004/05/05 00:07:03 dickey Exp $ */
+d112 1
+a112 1
+static void
+d120 1
+a120 1
+
+d122 1
+a122 1
+
+d128 1
+a128 1
+
+d134 1
+a134 1
+
+d137 1
+a137 1
+
+d144 1
+a144 1
+static void
+d158 1
+a158 1
+
+d161 1
+a161 1
+
+d239 4
+a242 4
+	if(app_lock->stack.sp == (int)app_lock->stack.size - 1) {
+	    unsigned ii;
+	    app_lock->stack.st = (struct _Tstack *)
+		XtRealloc ((char *)app_lock->stack.st,
+d268 1
+a268 1
+    XtAppContext app,
+d304 1
+a304 1
+    assert(xthread_equal(app_lock->holder, self));
+d321 1
+a321 1
+    unsigned ii;
+d363 1
+a363 1
+#endif
+d366 1
+a366 1
+    app_lock->stack.st =
+d408 1
+a408 1
+Boolean XtToolkitThreadInitialize(void)
+@
+
+

@@ -1,0 +1,223 @@
+head	1.2;
+access;
+symbols
+	tg-mergetmp-2:1.2
+	MIRBSD_7quater:1.2
+	MIRBSD_7_ALPHA:1.2.0.4
+	MIRBSD_7:1.2.0.2
+	MIRBSD_7ter:1.2
+	ctm-0349:1.1.1.1
+	openbsd-xf4:1.1.1;
+locks; strict;
+comment	@ * @;
+
+
+1.2
+date	2003.04.08.19.32.11;	author tg;	state dead;
+branches;
+next	1.1;
+
+1.1
+date	2003.03.22.20.00.59;	author tg;	state Exp;
+branches
+	1.1.1.1;
+next	;
+
+1.1.1.1
+date	2003.03.22.20.00.59;	author tg;	state Exp;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.2
+log
+@merge conflicts
+@
+text
+@
+/*
+ * Mesa 3-D graphics library
+ * Version:  3.1
+ * 
+ * Copyright (C) 1999  Brian Paul   All Rights Reserved.
+ * 
+ * Permission is hereby granted, free of charge, to any person obtaining a
+ * copy of this software and associated documentation files (the "Software"),
+ * to deal in the Software without restriction, including without limitation
+ * the rights to use, copy, modify, merge, publish, distribute, sublicense,
+ * and/or sell copies of the Software, and to permit persons to whom the
+ * Software is furnished to do so, subject to the following conditions:
+ * 
+ * The above copyright notice and this permission notice shall be included
+ * in all copies or substantial portions of the Software.
+ * 
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
+ * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL
+ * BRIAN PAUL BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN
+ * AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
+ * CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+ */
+
+#undef INTERP_UBYTE
+#define INTERP_UBYTE( out, t, a, b ) {			\
+      GLfloat fa = UBYTE_COLOR_TO_FLOAT_COLOR(a);	\
+      GLfloat fb = UBYTE_COLOR_TO_FLOAT_COLOR(b);	\
+      GLfloat fo = LINTERP(t, fa, fb);			\
+      FLOAT_COLOR_TO_UBYTE_COLOR(out, fo);		\
+}
+
+#if 1
+
+#undef INTERP_RGBA
+#define INTERP_RGBA(nr, t, out, a, b) {			\
+   int i;						\
+   for (i = 0; i < nr; i++) {				\
+      GLfloat fa = UBYTE_COLOR_TO_FLOAT_COLOR(a[i]);	\
+      GLfloat fb = UBYTE_COLOR_TO_FLOAT_COLOR(b[i]);	\
+      GLfloat fo = LINTERP(t, fa, fb);			\
+      FLOAT_COLOR_TO_UBYTE_COLOR(out[i], fo);		\
+   }							\
+}
+#else
+
+#undef INTERP_RGBA
+#define INTERP_RGBA(nr, t, out, a, b) {				\
+   int n;							\
+   const GLuint ti = FloatToInt(t*256.0F);			\
+   const GLubyte *Ib = (const GLubyte *)&a[0];			\
+   const GLubyte *Jb = (const GLubyte *)&b[0];			\
+   GLubyte *Ob = (GLubyte *)&out[0];				\
+								\
+   for (n = 0 ; n < nr ; n++)					\
+      Ob[n] = (GLubyte) (Ib[n] + ((ti * (Jb[n] - Ib[n]))/256));	\
+}
+#endif
+
+
+
+static void NAME( struct vertex_buffer *VB,
+		  GLuint dst, GLfloat t, GLuint in, GLuint out )
+{
+   (void) VB;
+   (void) dst;
+   (void) t;
+   (void) in;
+   (void) out;
+
+#if (IND & CLIP_RGBA0)
+   INTERP_RGBA( 4, t, 
+		VB->Color[0]->data[dst], 
+		VB->Color[0]->data[in],
+		VB->Color[0]->data[out] );
+#endif
+
+#if (IND & CLIP_RGBA1)
+   if (VB->ctx->TriangleCaps & DD_TRI_LIGHT_TWOSIDE) {
+      INTERP_RGBA( 4, t, 
+		   VB->Color[1]->data[dst], 
+		   VB->Color[1]->data[in],
+		   VB->Color[1]->data[out] );
+   }
+
+   if (VB->ctx->TriangleCaps & DD_SEPERATE_SPECULAR) 
+   {
+      INTERP_RGBA( 3, t, 
+		   VB->Spec[0][dst], 
+		   VB->Spec[0][in],
+		   VB->Spec[0][out] );
+
+      if (VB->ctx->TriangleCaps & DD_TRI_LIGHT_TWOSIDE) {
+	 INTERP_RGBA( 3, t, 
+		      VB->Spec[1][dst], 
+		      VB->Spec[1][in],
+		      VB->Spec[1][out] );
+      }
+   }      
+#endif
+
+#if (IND & CLIP_FOG_COORD)
+   {
+      GLubyte a = VB->Spec[0][in][3], b = VB->Spec[0][out][3];
+      INTERP_UBYTE( VB->Spec[0][dst][3], t, a, b );
+   }
+#endif
+
+
+#if (IND & CLIP_INDEX0)
+   VB->IndexPtr->data[dst] = (GLuint) (GLint) 
+      LINTERP( t, 
+	       (GLfloat) VB->Index[0]->data[in],
+	       (GLfloat) VB->Index[0]->data[out] );
+#endif
+
+#if (IND & CLIP_INDEX1)
+   VB->Index[1]->data[dst] = (GLuint) (GLint) 
+      LINTERP( t, 
+	       (GLfloat) VB->Index[1]->data[in],
+	       (GLfloat) VB->Index[1]->data[out] );
+#endif
+
+#if (IND & CLIP_TEX0)
+   INTERP_SZ( t, 
+	      VB->TexCoordPtr[0]->data, 
+	      dst, in, out, 
+	      VB->TexCoordPtr[0]->size );
+#endif
+
+#if (IND & CLIP_TEX1)
+   INTERP_SZ( t, 
+	      VB->TexCoordPtr[1]->data, 
+	      dst, in, out, 
+	      VB->TexCoordPtr[1]->size );
+#endif
+}
+
+
+#undef IND
+#undef NAME
+@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@@
+
+
+1.1.1.1
+log
+@Import OpenBSD 3.3 XF4 repository from CTM 3132 the first time
+This finalizes starting an OpenBSD-mirabile (aka MirBSD) repository.
+
+### MirBSD is:
+# Copyright (c) 1982-2003 by Thorsten "mirabile" Glaser <x86@@ePost.de>
+# Copyright © 1968-2003  The authors of And contributors to UNIX®, the
+#       C Language, BSD/Berkeley Unix; 386BSD, NetBSD 1.1 and OpenBSD.
+#
+# Anyone who obtained a copy of this work is hereby permitted to freely use,
+# distribute, modify, merge, sublicence, give away or sell it as long as the
+# authors are given due credit and the following notice is retained:
+#
+# This work is provided "as is", with no explicit or implicit warranty what-
+# soever. Use it only at your own risk. In no event may an author or contri-
+# butor be held liable for any damage, directly or indirectly, that origina-
+# ted through or is caused by creation or modification of this work.
+
+MirBSD is my private tree. MirBSD does not differ very much from OpenBSD
+and intentionally tracks OpenBSD. That's why it _is_ OpenBSD, just not the
+official one. It's like with DarrenBSD.
+
+At time of this writing, no advertising for MirBSD must be done,
+because the advertising clause has not yet been sorted out.
+
+http://templeofhate.com/tglaser/MirBSD/index.php
+@
+text
+@@

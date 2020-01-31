@@ -1,0 +1,415 @@
+head	1.5;
+access;
+symbols
+	cvs-200408271520:1.1.3.1 tg:1.1.3;
+locks; strict;
+comment	@ * @;
+
+
+1.5
+date	2005.03.12.18.40.25;	author tg;	state Exp;
+branches;
+next	1.4;
+
+1.4
+date	2005.03.12.17.20.34;	author tg;	state Exp;
+branches;
+next	1.3;
+
+1.3
+date	2004.11.12.13.06.39;	author bsiegert;	state Exp;
+branches;
+next	1.2;
+
+1.2
+date	2004.10.10.16.46.17;	author tg;	state Exp;
+branches;
+next	1.1;
+
+1.1
+date	2004.08.27.15.27.01;	author tg;	state Exp;
+branches
+	1.1.3.1;
+next	;
+
+1.1.3.1
+date	2004.08.27.15.27.01;	author tg;	state Stab;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.5
+log
+@some cleanup:
+* more const
+* less redundant decls
+* no shadowing variables with wider scope
+* declare functions or static them
+
+goal: to pass
+  -Wall -Wextra -Wunused -Wdeclaration-after-statement -Wundef
+  -Wendif-labels -Wshadow -Wpointer-arith -Wbad-function-cast
+  -Wcast-qual -Wcast-align -Wwrite-strings -Wstrict-prototypes
+  -Wold-style-definition -Wmissing-prototypes -Wmissing-declarations
+  -Wmissing-noreturn -Wmissing-format-attribute -Wredundant-decls
+  -Wno-unreachable-code -Winline -pedantic -std=c99
+
+end goal:
+  -Wreachable-code -Wconversion
+
+the former is broken in my very gcc 3.4.4 snapshot,
+and the latter is broken for all <stdbool.h> types
+due to integer promotion rules
+
+thanks to waldi (the mirbsd.de sponsor) for helping with C a bit
+@
+text
+@/* $MirBSD: ports/infrastructure/stools/add/main.c,v 1.4 2005/03/12 17:20:34 tg Exp $ */
+/* $OpenBSD: main.c,v 1.18 2003/08/06 20:46:36 millert Exp $	*/
+
+/*
+ * FreeBSD install - a package for the installation and maintainance
+ * of non-core utilities.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ *
+ * Jordan K. Hubbard
+ * 18 July 1993
+ *
+ * This is the add module.
+ */
+
+#include <err.h>
+#include <sys/param.h>
+#include "lib.h"
+#include "add.h"
+
+__RCSID("$MirBSD: ports/infrastructure/stools/add/main.c,v 1.4 2005/03/12 17:20:34 tg Exp $");
+
+static char Options[] = "hvIRfnp:SMt:d:";
+
+char	*Prefix		= NULL;
+bool	NoInstall	= false;
+bool	NoRecord	= false;
+
+char	*Mode		= NULL;
+char	*Owner		= NULL;
+char	*Group		= NULL;
+char	*PkgName	= NULL;
+const char *Directory	= NULL;
+char	FirstPen[FILENAME_MAX];
+add_mode_t AddMode	= NORMAL;
+display_mode_t DisplayMode = ENV;
+
+char **pkgs;
+int pkg_count = 0;
+
+static __dead void usage(void);
+
+int
+main(int argc, char **argv)
+{
+    int ch, error;
+    char **start;
+    char *cp;
+
+    start = argv;
+    while ((ch = getopt(argc, argv, Options)) != -1) {
+	switch(ch) {
+	case 'd':
+	    switch(optarg[0]) {
+		case 'c':
+		    DisplayMode = CAT;
+		    break;
+		case 'e':
+		    DisplayMode = ENV;
+		    break;
+		case 'l':
+		    DisplayMode = LESS;
+		    break;
+		case 'm':
+		    DisplayMode = MORE;
+		    break;
+		default:
+		    usage();
+		    break;
+	    }
+	    break;
+	case 'v':
+	    Verbose = true;
+	    break;
+
+	case 'p':
+	    Prefix = optarg;
+	    break;
+
+	case 'I':
+	    NoInstall = true;
+	    break;
+
+	case 'R':
+	    NoRecord = true;
+	    break;
+
+	case 'f':
+	    Force = true;
+	    break;
+
+	case 'n':
+	    Fake = true;
+	    Verbose = true;
+	    break;
+
+	case 't':
+	    strlcpy(FirstPen, optarg, sizeof(FirstPen));
+	    break;
+
+	case 'S':
+	    AddMode = SLAVE;
+	    break;
+
+	case 'M':
+	    AddMode = MASTER;
+	    break;
+
+	case 'h':
+	case '?':
+	default:
+	    usage();
+	    break;
+	}
+    }
+    argc -= optind;
+    argv += optind;
+
+    pkg_count = argc + 1;
+    pkgs = (char **)calloc(pkg_count,  sizeof(char **));
+    if (pkgs == NULL) {
+    	fprintf(stderr, "malloc failed - abandoning package add.\n");
+    	exit(1);
+    }
+
+    if (AddMode != SLAVE) {
+
+	/* Get all the remaining package names, if any */
+	for (ch = 0; *argv; ch++, argv++) {
+	    /* Don't mangle stdin ("-") or URL arguments */
+	    if ( (strcmp(*argv, "-") == 0)
+		 || (isURL(*argv))) {
+	         pkgs[ch] = strdup(*argv);
+		 if (pkgs[ch] == NULL) {
+		     fprintf(stderr,
+			     "malloc failed - abandoning package add.\n");
+		     exit(1);
+		 }
+	    }
+	    else {			/* expand all pathnames to fullnames */
+		char *s, *tmp;
+
+		s=ensure_tgz(*argv);
+
+		if (fexists(s)) { /* refers to a file directly */
+		    pkgs[ch] = (char *) malloc(MAXPATHLEN * sizeof(char));
+		    if (pkgs[ch] == NULL) {
+		        fprintf(stderr,
+				"malloc failed - abandoning package add.\n");
+			exit(1);
+		    }
+		    tmp = realpath(s, pkgs[ch]);
+		    if (tmp == NULL) {
+		        perror("realpath failed");
+			fprintf(stderr, "failing path was %s\n", pkgs[ch]);
+			exit(1);
+		    }
+		}
+		else if (ispkgpattern(*argv)
+			 && (s=findbestmatchingname(dirname(*argv),
+						    basename(*argv)))
+			    != NULL) {
+		    if (Verbose)
+			printf("Using %s for %s\n",s, *argv);
+		    pkgs[ch] = (char *) malloc(MAXPATHLEN * sizeof(char));
+		    if (pkgs[ch] == NULL) {
+		        fprintf(stderr,
+				"malloc failed - abandoning package add.\n");
+			exit(1);
+		    }
+		    tmp = realpath(s, pkgs[ch]);
+		    if (tmp == NULL) {
+		        perror("realpath failed");
+			fprintf(stderr, "failing path was %s\n", pkgs[ch]);
+			exit(1);
+		    }
+		    free(s);
+		} else {
+		    /* look for the file(pattern) in the expected places */
+		    if (!(cp = fileFindByPath(NULL, *argv))) {
+		        fprintf(stderr, "can't find package '%s'\n", s);
+			exit(1);
+		    }
+		    else {
+			pkgs[ch] = strdup(cp);
+			if (pkgs[ch] == NULL) {
+			    fprintf(stderr,
+				  "malloc failed - abandoning package add.\n");
+			    exit(1);
+			}
+		    }
+		}
+	    }
+	}
+	/* If no packages, yelp */
+	if (!ch)
+	    pwarnx("missing package name(s)"), usage();
+	else if (ch > 1 && AddMode == MASTER)
+	    pwarnx("only one package name may be specified with master mode"),
+	    usage();
+    }
+    if ((error = pkg_perform(pkgs)) != 0) {
+	if (Verbose)
+	    pwarnx("%d package addition(s) failed", error);
+	return error;
+    }
+    else
+	return 0;
+}
+
+static __dead void
+usage(void)
+{
+    fprintf(stderr, "%s\n",
+	"usage: pkg_add [-vInfRMS] [-d celm] [-t template] [-p prefix] pkg-name ...");
+    exit(1);
+}
+@
+
+
+1.4
+log
+@* Boolean/TRUE/FALSE -> bool/true/false
+* SUCCESS/FAIL -> 0/-1
+* no /usr/tmp (it violates hier(7))
+@
+text
+@d1 1
+a1 1
+/* $MirBSD: ports/infrastructure/stools/add/main.c,v 1.3 2004/11/12 13:06:39 bsiegert Exp $ */
+d28 1
+a28 1
+__RCSID("$MirBSD: ports/infrastructure/stools/add/main.c,v 1.3 2004/11/12 13:06:39 bsiegert Exp $");
+d40 1
+a40 1
+char	*Directory	= NULL;
+d48 1
+a48 1
+static void usage(void);
+d53 1
+a53 1
+    int ch, err;
+d209 1
+a209 1
+    if ((err = pkg_perform(pkgs)) != 0) {
+d211 2
+a212 2
+	    pwarnx("%d package addition(s) failed", err);
+	return err;
+d218 2
+a219 2
+static void
+usage()
+@
+
+
+1.3
+log
+@Remove all traces of basename_of() and dirname_of() and replace by
+basename(3) and dirname(3) from libc (which seemingly did not exist when
+the pkgtools were written).
+
+As for testing: I have tested pkg_create, add, and remove with the changes.
+pkg_create gave me a package that was two bytes larger, but when uncompressed
+and unpacked showed no difference. So I assume it works :).
+@
+text
+@d1 1
+a1 1
+/* $MirBSD: ports/infrastructure/stools/add/main.c,v 1.2 2004/10/10 16:46:17 tg Exp $ */
+d28 1
+a28 1
+__RCSID("$MirBSD: ports/infrastructure/stools/add/main.c,v 1.2 2004/10/10 16:46:17 tg Exp $");
+d33 2
+a34 2
+Boolean	NoInstall	= FALSE;
+Boolean	NoRecord	= FALSE;
+d80 1
+a80 1
+	    Verbose = TRUE;
+d88 1
+a88 1
+	    NoInstall = TRUE;
+d92 1
+a92 1
+	    NoRecord = TRUE;
+d96 1
+a96 1
+	    Force = TRUE;
+d100 2
+a101 2
+	    Fake = TRUE;
+	    Verbose = TRUE;
+@
+
+
+1.2
+log
+@* sync pkg tools with what's currently in src/
+  idea by bsiegert@@
+* -Wall -Werror only ifndef PORTABLE
+  (so it's still in for native development)
+* let setup.sh define PORTABLE
+@
+text
+@d1 1
+a1 1
+/* $MirBSD: src/usr.sbin/pkg_install/add/main.c,v 1.4 2004/07/21 10:24:31 tg Stab $ */
+d28 1
+a28 1
+__RCSID("$MirBSD: src/usr.sbin/pkg_install/add/main.c,v 1.4 2004/07/21 10:24:31 tg Stab $");
+d167 2
+a168 2
+			 && (s=findbestmatchingname(dirname_of(*argv),
+						    basename_of(*argv)))
+@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@d1 1
+a1 1
+/* $MirBSD: src/usr.sbin/pkg_install/add/main.c,v 1.4 2004/07/21 10:24:31 tg Exp $ */
+d28 1
+a28 1
+__RCSID("$MirBSD: src/usr.sbin/pkg_install/add/main.c,v 1.4 2004/07/21 10:24:31 tg Exp $");
+@
+
+
+1.1.3.1
+log
+@src/usr.sbin/pkg_install comes into ports/infrastructure
+@
+text
+@@

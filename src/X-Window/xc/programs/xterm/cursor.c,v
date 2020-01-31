@@ -1,0 +1,893 @@
+head	1.1;
+branch	1.1.1;
+access;
+symbols
+	tg-mergetmp-2:1.1.1.2
+	cvs-200410241530:1.1.1.2
+	cvs-200410012000:1.1.1.2
+	cvs-200407190955:1.1.1.2
+	cvs-200407141120:1.1.1.2
+	cvs-200406231010:1.1.1.2
+	MIRBSD_7quater:1.1.1.2
+	cvs-200405271510:1.1.1.2
+	XFree86_4_4_0:1.1.9.1
+	cvs-200403021700:1.1.1.2
+	XFREE86_20040213:1.1.9.1
+	xc:1.1.9
+	cvs-200401291925:1.1.1.2
+	MIRBSD_7_ALPHA:1.1.1.2.0.4
+	MIRBSD_7:1.1.1.2.0.2
+	MIRBSD_7ter:1.1.1.2
+	cvs-20011091815:1.1.1.2
+	cvs-200309162130:1.1.1.2
+	cvs-200308302005:1.1.1.2
+	ctmx-0387:1.1.1.2
+	ctmx-0384:1.1.1.2
+	MIRBSD_5:1.1.1.2
+	ctmx-0375:1.1.1.2
+	ctmx-0373:1.1.1.2
+	ctm-0371:1.1.1.2
+	ctm-0370:1.1.1.2
+	MIRBSD_4:1.1.1.2
+	ctm-0363:1.1.1.2
+	ctm-0359:1.1.1.2
+	ctm-0349:1.1.1.1
+	openbsd:1.1.1;
+locks; strict;
+comment	@ * @;
+
+
+1.1
+date	2003.03.22.20.11.10;	author tg;	state Exp;
+branches
+	1.1.1.1
+	1.1.9.1;
+next	;
+
+1.1.1.1
+date	2003.03.22.20.11.10;	author tg;	state Exp;
+branches;
+next	1.1.1.2;
+
+1.1.1.2
+date	2003.04.08.18.41.12;	author tg;	state Stab;
+branches;
+next	;
+
+1.1.9.1
+date	2004.02.14.19.29.42;	author tg;	state Exp;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@/*
+ *	$Xorg: cursor.c,v 1.3 2000/08/17 19:55:08 cpqbld Exp $
+ */
+
+/* $XFree86: xc/programs/xterm/cursor.c,v 3.14 2001/01/17 23:46:36 dawes Exp $ */
+
+/*
+ * Copyright 1987 by Digital Equipment Corporation, Maynard, Massachusetts.
+ *
+ *                         All Rights Reserved
+ *
+ * Permission to use, copy, modify, and distribute this software and its
+ * documentation for any purpose and without fee is hereby granted,
+ * provided that the above copyright notice appear in all copies and that
+ * both that copyright notice and this permission notice appear in
+ * supporting documentation, and that the name of Digital Equipment
+ * Corporation not be used in advertising or publicity pertaining to
+ * distribution of the software without specific, written prior permission.
+ *
+ *
+ * DIGITAL DISCLAIMS ALL WARRANTIES WITH REGARD TO THIS SOFTWARE, INCLUDING
+ * ALL IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS, IN NO EVENT SHALL
+ * DIGITAL BE LIABLE FOR ANY SPECIAL, INDIRECT OR CONSEQUENTIAL DAMAGES OR
+ * ANY DAMAGES WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS,
+ * WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION,
+ * ARISING OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS
+ * SOFTWARE.
+ */
+
+/* cursor.c */
+
+#include <xterm.h>
+#include <data.h>
+
+/*
+ * Clear the selection if the cursor moves "before" the current position. 
+ * Moving "after" is ok.
+ *
+ * That sounds fine - if the cursor really had anything direct relationship to
+ * the selection.  For instance, if the cursor moved due to command line
+ * editing, it would be nice to deselect.  However, what that means in practice
+ * is that a fullscreen program which scrolls back a line will (because it must
+ * temporarily reposition the cursor) clear the selection.
+ *
+ * However, it has an indirect relationship to the selection - we want to
+ * prevent the application from changing the screen contents under the
+ * highlighted region.
+ */
+#define _CheckSelection(screen) \
+    if ((screen->cur_row < screen->endHRow) || \
+	(screen->cur_row == screen->endHRow && \
+	 screen->cur_col < screen->endHCol)) \
+	DisownSelection(term);
+
+/*
+ * Moves the cursor to the specified position, checking for bounds.
+ * (this includes scrolling regions)
+ * The origin is considered to be 0, 0 for this procedure.
+ */
+void
+CursorSet(register TScreen *screen, register int row, register int col, unsigned flags)
+{
+	register int maxr;
+
+	col = (col < 0 ? 0 : col);
+	screen->cur_col = (col <= screen->max_col ? col : screen->max_col);
+	maxr = screen->max_row;
+	if (flags & ORIGIN) {
+		row += screen->top_marg;
+		maxr = screen->bot_marg;
+	}
+	row = (row < 0 ? 0 : row);
+	screen->cur_row = (row <= maxr ? row : maxr);
+	screen->do_wrap = 0;
+	_CheckSelection(screen);
+}
+
+/*
+ * moves the cursor left n, no wrap around
+ */
+void
+CursorBack(register TScreen *screen, int n)
+{
+	register int i, j, k, rev;
+
+	if((rev = (term->flags & (REVERSEWRAP | WRAPAROUND)) ==
+	                         (REVERSEWRAP | WRAPAROUND)) != 0
+	 && screen->do_wrap)
+		n--;
+	if ((screen->cur_col -= n) < 0) {
+		if(rev) {
+			if((i = (j = screen->max_col + 1) * screen->cur_row +
+			 screen->cur_col) < 0) {
+				k = j * (screen->max_row + 1);
+				i += ((-i) / k + 1) * k;
+			}
+			screen->cur_row = i / j;
+			screen->cur_col = i % j;
+		} else
+			screen->cur_col = 0;
+	}
+	screen->do_wrap = 0;
+	_CheckSelection(screen);
+}
+
+/*
+ * moves the cursor forward n, no wraparound
+ */
+void
+CursorForward(register TScreen *screen, int n)
+{
+	screen->cur_col += n;
+	if (screen->cur_col > CurMaxCol(screen, screen->cur_row))
+		screen->cur_col = CurMaxCol(screen, screen->cur_row);
+	screen->do_wrap = 0;
+	_CheckSelection(screen);
+}
+
+/*
+ * moves the cursor down n, no scrolling.
+ * Won't pass bottom margin or bottom of screen.
+ */
+void
+CursorDown(register TScreen *screen, int n)
+{
+	register int max;
+
+	max = (screen->cur_row > screen->bot_marg ?
+		screen->max_row : screen->bot_marg);
+
+	screen->cur_row += n;
+	if (screen->cur_row > max)
+		screen->cur_row = max;
+	screen->do_wrap = 0;
+	_CheckSelection(screen);
+}
+
+/*
+ * moves the cursor up n, no linestarving.
+ * Won't pass top margin or top of screen.
+ */
+void
+CursorUp(register TScreen *screen, int n)
+{
+	register int min;
+
+	min = (screen->cur_row < screen->top_marg ?
+		0 : screen->top_marg);
+
+	screen->cur_row -= n;
+	if (screen->cur_row < min)
+		screen->cur_row = min;
+	screen->do_wrap = 0;
+	_CheckSelection(screen);
+}
+
+/*
+ * Moves cursor down amount lines, scrolls if necessary.
+ * Won't leave scrolling region. No carriage return.
+ */
+void
+xtermIndex(register TScreen *screen, register int amount)
+{
+	register int j;
+
+	/*
+	 * indexing when below scrolling region is cursor down.
+	 * if cursor high enough, no scrolling necessary.
+	 */
+	if (screen->cur_row > screen->bot_marg
+	 || screen->cur_row + amount <= screen->bot_marg) {
+		CursorDown(screen, amount);
+		return;
+	}
+
+	CursorDown(screen, j = screen->bot_marg - screen->cur_row);
+	xtermScroll(screen, amount - j);
+}
+
+/*
+ * Moves cursor up amount lines, reverse scrolls if necessary.
+ * Won't leave scrolling region. No carriage return.
+ */
+void
+RevIndex(register TScreen *screen, register int amount)
+{
+	/*
+	 * reverse indexing when above scrolling region is cursor up.
+	 * if cursor low enough, no reverse indexing needed
+	 */
+	if (screen->cur_row < screen->top_marg
+	 || screen->cur_row-amount >= screen->top_marg) {
+		CursorUp(screen, amount);
+		return;
+	}
+
+	RevScroll(screen, amount - (screen->cur_row - screen->top_marg));
+	CursorUp(screen, screen->cur_row - screen->top_marg);
+}
+
+/*
+ * Moves Cursor To First Column In Line
+ * (Note: xterm doesn't implement SLH, SLL which would affect use of this)
+ */
+void
+CarriageReturn(register TScreen *screen)
+{
+	screen->cur_col = 0;
+	screen->do_wrap = 0;
+	_CheckSelection(screen);
+}
+
+/*
+ * Save Cursor and Attributes
+ */
+void
+CursorSave(register XtermWidget tw)
+{
+	register TScreen *screen = &tw->screen;
+	register SavedCursor *sc = &screen->sc[screen->alternate != False];
+
+	sc->saved = True;
+	sc->row = screen->cur_row;
+	sc->col = screen->cur_col;
+	sc->flags = tw->flags;
+	sc->curgl = screen->curgl;
+	sc->curgr = screen->curgr;
+#if OPT_ISO_COLORS
+	sc->cur_foreground = tw->cur_foreground;
+	sc->cur_background = tw->cur_background;
+	sc->sgr_foreground = tw->sgr_foreground;
+#endif
+	memmove( sc->gsets, screen->gsets, sizeof(screen->gsets));
+}
+
+/*
+ * We save/restore all visible attributes, plus wrapping, origin mode, and the
+ * selective erase attribute.
+ */
+#define DECSC_FLAGS (ATTRIBUTES|ORIGIN|WRAPAROUND|PROTECTED)
+
+/*
+ * Restore Cursor and Attributes
+ */
+void
+CursorRestore(register XtermWidget tw)
+{
+	register TScreen *screen = &tw->screen;
+	register SavedCursor *sc = &screen->sc[screen->alternate != False];
+
+	/* Restore the character sets, unless we never did a save-cursor op.
+	 * In that case, we'll reset the character sets.
+	 */
+	if (sc->saved) {
+		memmove( screen->gsets, sc->gsets, sizeof(screen->gsets));
+		screen->curgl = sc->curgl;
+		screen->curgr = sc->curgr;
+	} else {
+		resetCharsets(screen);
+	}
+
+	tw->flags &= ~DECSC_FLAGS;
+	tw->flags |= sc->flags & DECSC_FLAGS;
+	CursorSet (screen,
+		(tw->flags & ORIGIN)
+			? sc->row - screen->top_marg
+			: sc->row,
+		sc->col, tw->flags);
+
+#if OPT_ISO_COLORS
+	tw->sgr_foreground = sc->sgr_foreground;
+	SGR_Foreground(tw->flags & FG_COLOR ? sc->cur_foreground : -1);
+	SGR_Background(tw->flags & BG_COLOR ? sc->cur_background : -1);
+#endif
+}
+
+/*
+ * Move the cursor to the first column of the n-th next line.
+ */
+void
+CursorNextLine(TScreen *screen, int count)
+{
+	CursorDown(screen, count < 1 ? 1 : count);
+	CarriageReturn(screen);
+	do_xevents();
+}
+
+/*
+ * Move the cursor to the first column of the n-th previous line.
+ */
+void
+CursorPrevLine(TScreen *screen, int count)
+{
+	CursorUp(screen, count < 1 ? 1 : count);
+	CarriageReturn(screen);
+	do_xevents();
+}
+@
+
+
+1.1.9.1
+log
+@OpenBSD just has imported exactly this tree into their vendor branch,
+called the same tag, in XF4/xc
+This is, apparently, the last XFree86 snapshot before the licence change
+(ie, addition of the advertising clause)
+
+Since the developers don't see any problems with that, and we would like
+to integrate improvements done by the remaining one or two (or so) XFree86
+developers (j/k), this prepares enabling us to update X-Window in the future.
+@
+text
+@d5 1
+a5 1
+/* $XFree86: xc/programs/xterm/cursor.c,v 3.15 2002/04/28 19:04:20 dickey Exp $ */
+a7 28
+ * Copyright 2002 by Thomas E. Dickey
+ * 
+ *                         All Rights Reserved
+ * 
+ * Permission is hereby granted, free of charge, to any person obtaining a
+ * copy of this software and associated documentation files (the
+ * "Software"), to deal in the Software without restriction, including
+ * without limitation the rights to use, copy, modify, merge, publish,
+ * distribute, sublicense, and/or sell copies of the Software, and to
+ * permit persons to whom the Software is furnished to do so, subject to
+ * the following conditions:
+ * 
+ * The above copyright notice and this permission notice shall be included
+ * in all copies or substantial portions of the Software.
+ * 
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
+ * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+ * MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
+ * IN NO EVENT SHALL THE ABOVE LISTED COPYRIGHT HOLDER(S) BE LIABLE FOR ANY
+ * CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,
+ * TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
+ * SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+ * 
+ * Except as contained in this notice, the name(s) of the above copyright
+ * holders shall not be used in advertising or otherwise to promote the
+ * sale, use or other dealings in this Software without prior written
+ * authorization.
+ * 
+d61 1
+a61 1
+CursorSet(register TScreen * screen, register int row, register int col, unsigned flags)
+d63 1
+a63 1
+    register int maxr;
+d65 11
+a75 11
+    col = (col < 0 ? 0 : col);
+    screen->cur_col = (col <= screen->max_col ? col : screen->max_col);
+    maxr = screen->max_row;
+    if (flags & ORIGIN) {
+	row += screen->top_marg;
+	maxr = screen->bot_marg;
+    }
+    row = (row < 0 ? 0 : row);
+    screen->cur_row = (row <= maxr ? row : maxr);
+    screen->do_wrap = 0;
+    _CheckSelection(screen);
+d82 1
+a82 1
+CursorBack(register TScreen * screen, int n)
+d84 1
+a84 1
+    register int i, j, k, rev;
+d86 18
+a103 18
+    if ((rev = (term->flags & (REVERSEWRAP | WRAPAROUND)) ==
+	 (REVERSEWRAP | WRAPAROUND)) != 0
+	&& screen->do_wrap)
+	n--;
+    if ((screen->cur_col -= n) < 0) {
+	if (rev) {
+	    if ((i = ((j = screen->max_col + 1)
+		      * screen->cur_row) + screen->cur_col) < 0) {
+		k = j * (screen->max_row + 1);
+		i += ((-i) / k + 1) * k;
+	    }
+	    screen->cur_row = i / j;
+	    screen->cur_col = i % j;
+	} else
+	    screen->cur_col = 0;
+    }
+    screen->do_wrap = 0;
+    _CheckSelection(screen);
+d110 1
+a110 1
+CursorForward(register TScreen * screen, int n)
+d112 5
+a116 5
+    screen->cur_col += n;
+    if (screen->cur_col > CurMaxCol(screen, screen->cur_row))
+	screen->cur_col = CurMaxCol(screen, screen->cur_row);
+    screen->do_wrap = 0;
+    _CheckSelection(screen);
+d124 1
+a124 1
+CursorDown(register TScreen * screen, int n)
+d126 1
+a126 1
+    register int max;
+d128 2
+a129 2
+    max = (screen->cur_row > screen->bot_marg ?
+	   screen->max_row : screen->bot_marg);
+d131 5
+a135 5
+    screen->cur_row += n;
+    if (screen->cur_row > max)
+	screen->cur_row = max;
+    screen->do_wrap = 0;
+    _CheckSelection(screen);
+d143 1
+a143 1
+CursorUp(register TScreen * screen, int n)
+d145 1
+a145 1
+    register int min;
+d147 2
+a148 2
+    min = (screen->cur_row < screen->top_marg ?
+	   0 : screen->top_marg);
+d150 5
+a154 5
+    screen->cur_row -= n;
+    if (screen->cur_row < min)
+	screen->cur_row = min;
+    screen->do_wrap = 0;
+    _CheckSelection(screen);
+d162 1
+a162 1
+xtermIndex(register TScreen * screen, register int amount)
+d164 1
+a164 1
+    register int j;
+d166 9
+a174 9
+    /*
+     * indexing when below scrolling region is cursor down.
+     * if cursor high enough, no scrolling necessary.
+     */
+    if (screen->cur_row > screen->bot_marg
+	|| screen->cur_row + amount <= screen->bot_marg) {
+	CursorDown(screen, amount);
+	return;
+    }
+d176 2
+a177 2
+    CursorDown(screen, j = screen->bot_marg - screen->cur_row);
+    xtermScroll(screen, amount - j);
+d185 1
+a185 1
+RevIndex(register TScreen * screen, register int amount)
+d187 9
+a195 9
+    /*
+     * reverse indexing when above scrolling region is cursor up.
+     * if cursor low enough, no reverse indexing needed
+     */
+    if (screen->cur_row < screen->top_marg
+	|| screen->cur_row - amount >= screen->top_marg) {
+	CursorUp(screen, amount);
+	return;
+    }
+d197 2
+a198 2
+    RevScroll(screen, amount - (screen->cur_row - screen->top_marg));
+    CursorUp(screen, screen->cur_row - screen->top_marg);
+d206 1
+a206 1
+CarriageReturn(register TScreen * screen)
+d208 3
+a210 3
+    screen->cur_col = 0;
+    screen->do_wrap = 0;
+    _CheckSelection(screen);
+d219 2
+a220 2
+    register TScreen *screen = &tw->screen;
+    register SavedCursor *sc = &screen->sc[screen->alternate != False];
+d222 6
+a227 6
+    sc->saved = True;
+    sc->row = screen->cur_row;
+    sc->col = screen->cur_col;
+    sc->flags = tw->flags;
+    sc->curgl = screen->curgl;
+    sc->curgr = screen->curgr;
+d229 3
+a231 3
+    sc->cur_foreground = tw->cur_foreground;
+    sc->cur_background = tw->cur_background;
+    sc->sgr_foreground = tw->sgr_foreground;
+d233 1
+a233 1
+    memmove(sc->gsets, screen->gsets, sizeof(screen->gsets));
+d248 2
+a249 2
+    register TScreen *screen = &tw->screen;
+    register SavedCursor *sc = &screen->sc[screen->alternate != False];
+d251 18
+a268 18
+    /* Restore the character sets, unless we never did a save-cursor op.
+     * In that case, we'll reset the character sets.
+     */
+    if (sc->saved) {
+	memmove(screen->gsets, sc->gsets, sizeof(screen->gsets));
+	screen->curgl = sc->curgl;
+	screen->curgr = sc->curgr;
+    } else {
+	resetCharsets(screen);
+    }
+
+    tw->flags &= ~DECSC_FLAGS;
+    tw->flags |= sc->flags & DECSC_FLAGS;
+    CursorSet(screen,
+	      ((tw->flags & ORIGIN)
+	       ? sc->row - screen->top_marg
+	       : sc->row),
+	      sc->col, tw->flags);
+d271 3
+a273 3
+    tw->sgr_foreground = sc->sgr_foreground;
+    SGR_Foreground(tw->flags & FG_COLOR ? sc->cur_foreground : -1);
+    SGR_Background(tw->flags & BG_COLOR ? sc->cur_background : -1);
+d281 1
+a281 1
+CursorNextLine(TScreen * screen, int count)
+d283 3
+a285 3
+    CursorDown(screen, count < 1 ? 1 : count);
+    CarriageReturn(screen);
+    do_xevents();
+d292 1
+a292 1
+CursorPrevLine(TScreen * screen, int count)
+d294 3
+a296 3
+    CursorUp(screen, count < 1 ? 1 : count);
+    CarriageReturn(screen);
+    do_xevents();
+@
+
+
+1.1.1.1
+log
+@Import OpenBSD 3.3 XF4 repository from CTM 3132 the first time
+This finalizes starting an OpenBSD-mirabile (aka MirBSD) repository.
+
+### MirBSD is:
+# Copyright (c) 1982-2003 by Thorsten "mirabile" Glaser <x86@@ePost.de>
+# Copyright © 1968-2003  The authors of And contributors to UNIX®, the
+#       C Language, BSD/Berkeley Unix; 386BSD, NetBSD 1.1 and OpenBSD.
+#
+# Anyone who obtained a copy of this work is hereby permitted to freely use,
+# distribute, modify, merge, sublicence, give away or sell it as long as the
+# authors are given due credit and the following notice is retained:
+#
+# This work is provided "as is", with no explicit or implicit warranty what-
+# soever. Use it only at your own risk. In no event may an author or contri-
+# butor be held liable for any damage, directly or indirectly, that origina-
+# ted through or is caused by creation or modification of this work.
+
+MirBSD is my private tree. MirBSD does not differ very much from OpenBSD
+and intentionally tracks OpenBSD. That's why it _is_ OpenBSD, just not the
+official one. It's like with DarrenBSD.
+
+At time of this writing, no advertising for MirBSD must be done,
+because the advertising clause has not yet been sorted out.
+
+http://templeofhate.com/tglaser/MirBSD/index.php
+@
+text
+@@
+
+
+1.1.1.2
+log
+@The X-Windowing System
+
+Import XFree86 4.3 from OpenBSD by CTM, in the hope it's stable
+@
+text
+@d5 1
+a5 1
+/* $XFree86: xc/programs/xterm/cursor.c,v 3.15 2002/04/28 19:04:20 dickey Exp $ */
+a7 28
+ * Copyright 2002 by Thomas E. Dickey
+ * 
+ *                         All Rights Reserved
+ * 
+ * Permission is hereby granted, free of charge, to any person obtaining a
+ * copy of this software and associated documentation files (the
+ * "Software"), to deal in the Software without restriction, including
+ * without limitation the rights to use, copy, modify, merge, publish,
+ * distribute, sublicense, and/or sell copies of the Software, and to
+ * permit persons to whom the Software is furnished to do so, subject to
+ * the following conditions:
+ * 
+ * The above copyright notice and this permission notice shall be included
+ * in all copies or substantial portions of the Software.
+ * 
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
+ * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+ * MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
+ * IN NO EVENT SHALL THE ABOVE LISTED COPYRIGHT HOLDER(S) BE LIABLE FOR ANY
+ * CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,
+ * TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
+ * SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+ * 
+ * Except as contained in this notice, the name(s) of the above copyright
+ * holders shall not be used in advertising or otherwise to promote the
+ * sale, use or other dealings in this Software without prior written
+ * authorization.
+ * 
+d61 1
+a61 1
+CursorSet(register TScreen * screen, register int row, register int col, unsigned flags)
+d63 1
+a63 1
+    register int maxr;
+d65 11
+a75 11
+    col = (col < 0 ? 0 : col);
+    screen->cur_col = (col <= screen->max_col ? col : screen->max_col);
+    maxr = screen->max_row;
+    if (flags & ORIGIN) {
+	row += screen->top_marg;
+	maxr = screen->bot_marg;
+    }
+    row = (row < 0 ? 0 : row);
+    screen->cur_row = (row <= maxr ? row : maxr);
+    screen->do_wrap = 0;
+    _CheckSelection(screen);
+d82 1
+a82 1
+CursorBack(register TScreen * screen, int n)
+d84 1
+a84 1
+    register int i, j, k, rev;
+d86 18
+a103 18
+    if ((rev = (term->flags & (REVERSEWRAP | WRAPAROUND)) ==
+	 (REVERSEWRAP | WRAPAROUND)) != 0
+	&& screen->do_wrap)
+	n--;
+    if ((screen->cur_col -= n) < 0) {
+	if (rev) {
+	    if ((i = ((j = screen->max_col + 1)
+		      * screen->cur_row) + screen->cur_col) < 0) {
+		k = j * (screen->max_row + 1);
+		i += ((-i) / k + 1) * k;
+	    }
+	    screen->cur_row = i / j;
+	    screen->cur_col = i % j;
+	} else
+	    screen->cur_col = 0;
+    }
+    screen->do_wrap = 0;
+    _CheckSelection(screen);
+d110 1
+a110 1
+CursorForward(register TScreen * screen, int n)
+d112 5
+a116 5
+    screen->cur_col += n;
+    if (screen->cur_col > CurMaxCol(screen, screen->cur_row))
+	screen->cur_col = CurMaxCol(screen, screen->cur_row);
+    screen->do_wrap = 0;
+    _CheckSelection(screen);
+d124 1
+a124 1
+CursorDown(register TScreen * screen, int n)
+d126 1
+a126 1
+    register int max;
+d128 2
+a129 2
+    max = (screen->cur_row > screen->bot_marg ?
+	   screen->max_row : screen->bot_marg);
+d131 5
+a135 5
+    screen->cur_row += n;
+    if (screen->cur_row > max)
+	screen->cur_row = max;
+    screen->do_wrap = 0;
+    _CheckSelection(screen);
+d143 1
+a143 1
+CursorUp(register TScreen * screen, int n)
+d145 1
+a145 1
+    register int min;
+d147 2
+a148 2
+    min = (screen->cur_row < screen->top_marg ?
+	   0 : screen->top_marg);
+d150 5
+a154 5
+    screen->cur_row -= n;
+    if (screen->cur_row < min)
+	screen->cur_row = min;
+    screen->do_wrap = 0;
+    _CheckSelection(screen);
+d162 1
+a162 1
+xtermIndex(register TScreen * screen, register int amount)
+d164 1
+a164 1
+    register int j;
+d166 9
+a174 9
+    /*
+     * indexing when below scrolling region is cursor down.
+     * if cursor high enough, no scrolling necessary.
+     */
+    if (screen->cur_row > screen->bot_marg
+	|| screen->cur_row + amount <= screen->bot_marg) {
+	CursorDown(screen, amount);
+	return;
+    }
+d176 2
+a177 2
+    CursorDown(screen, j = screen->bot_marg - screen->cur_row);
+    xtermScroll(screen, amount - j);
+d185 1
+a185 1
+RevIndex(register TScreen * screen, register int amount)
+d187 9
+a195 9
+    /*
+     * reverse indexing when above scrolling region is cursor up.
+     * if cursor low enough, no reverse indexing needed
+     */
+    if (screen->cur_row < screen->top_marg
+	|| screen->cur_row - amount >= screen->top_marg) {
+	CursorUp(screen, amount);
+	return;
+    }
+d197 2
+a198 2
+    RevScroll(screen, amount - (screen->cur_row - screen->top_marg));
+    CursorUp(screen, screen->cur_row - screen->top_marg);
+d206 1
+a206 1
+CarriageReturn(register TScreen * screen)
+d208 3
+a210 3
+    screen->cur_col = 0;
+    screen->do_wrap = 0;
+    _CheckSelection(screen);
+d219 2
+a220 2
+    register TScreen *screen = &tw->screen;
+    register SavedCursor *sc = &screen->sc[screen->alternate != False];
+d222 6
+a227 6
+    sc->saved = True;
+    sc->row = screen->cur_row;
+    sc->col = screen->cur_col;
+    sc->flags = tw->flags;
+    sc->curgl = screen->curgl;
+    sc->curgr = screen->curgr;
+d229 3
+a231 3
+    sc->cur_foreground = tw->cur_foreground;
+    sc->cur_background = tw->cur_background;
+    sc->sgr_foreground = tw->sgr_foreground;
+d233 1
+a233 1
+    memmove(sc->gsets, screen->gsets, sizeof(screen->gsets));
+d248 2
+a249 2
+    register TScreen *screen = &tw->screen;
+    register SavedCursor *sc = &screen->sc[screen->alternate != False];
+d251 18
+a268 18
+    /* Restore the character sets, unless we never did a save-cursor op.
+     * In that case, we'll reset the character sets.
+     */
+    if (sc->saved) {
+	memmove(screen->gsets, sc->gsets, sizeof(screen->gsets));
+	screen->curgl = sc->curgl;
+	screen->curgr = sc->curgr;
+    } else {
+	resetCharsets(screen);
+    }
+
+    tw->flags &= ~DECSC_FLAGS;
+    tw->flags |= sc->flags & DECSC_FLAGS;
+    CursorSet(screen,
+	      ((tw->flags & ORIGIN)
+	       ? sc->row - screen->top_marg
+	       : sc->row),
+	      sc->col, tw->flags);
+d271 3
+a273 3
+    tw->sgr_foreground = sc->sgr_foreground;
+    SGR_Foreground(tw->flags & FG_COLOR ? sc->cur_foreground : -1);
+    SGR_Background(tw->flags & BG_COLOR ? sc->cur_background : -1);
+d281 1
+a281 1
+CursorNextLine(TScreen * screen, int count)
+d283 3
+a285 3
+    CursorDown(screen, count < 1 ? 1 : count);
+    CarriageReturn(screen);
+    do_xevents();
+d292 1
+a292 1
+CursorPrevLine(TScreen * screen, int count)
+d294 3
+a296 3
+    CursorUp(screen, count < 1 ? 1 : count);
+    CarriageReturn(screen);
+    do_xevents();
+@
+

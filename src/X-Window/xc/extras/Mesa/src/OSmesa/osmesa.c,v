@@ -1,0 +1,5396 @@
+head	1.2;
+branch	1.1.1;
+access;
+symbols
+	tg-mergetmp-2:1.1.1.3
+	cvs-200410241530:1.1.1.3
+	cvs-200410012000:1.1.1.3
+	cvs-200407141120:1.1.1.3
+	cvs-200406231010:1.1.1.3
+	MIRBSD_7quater:1.1.1.2
+	cvs-200405271510:1.1.1.3
+	XFree86_4_4_0:1.1.9.1
+	cvs-200403021700:1.1.1.3
+	XFREE86_20040213:1.1.9.1
+	xc:1.1.9
+	cvs-200401291925:1.1.1.2
+	MIRBSD_7_ALPHA:1.1.1.2.0.4
+	MIRBSD_7:1.1.1.2.0.2
+	MIRBSD_7ter:1.1.1.2
+	cvs-20011091815:1.1.1.2
+	cvs-200309162130:1.1.1.2
+	cvs-200308302005:1.1.1.2
+	ctmx-0387:1.1.1.2
+	ctmx-0384:1.1.1.2
+	MIRBSD_5:1.1.1.2
+	ctmx-0375:1.1.1.2
+	ctmx-0373:1.1.1.2
+	ctm-0371:1.1.1.2
+	ctm-0370:1.1.1.2
+	MIRBSD_4:1.1.1.2
+	ctm-0363:1.1.1.2
+	ctm-0359:1.1.1.2
+	ctm-0349:1.1.1.1
+	openbsd:1.1.1;
+locks; strict;
+comment	@ * @;
+
+
+1.2
+date	2003.05.16.16.28.22;	author tg;	state dead;
+branches;
+next	1.1;
+
+1.1
+date	2003.03.22.20.01.02;	author tg;	state Exp;
+branches
+	1.1.1.1
+	1.1.9.1;
+next	;
+
+1.1.1.1
+date	2003.03.22.20.01.02;	author tg;	state Exp;
+branches;
+next	1.1.1.2;
+
+1.1.1.2
+date	2003.04.08.18.20.09;	author tg;	state Exp;
+branches;
+next	1.1.1.3;
+
+1.1.1.3
+date	2004.03.02.17.29.15;	author tg;	state Stab;
+branches;
+next	;
+
+1.1.9.1
+date	2004.02.14.19.04.55;	author tg;	state Exp;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.2
+log
+@remove a bunch of files not used in MirBSD - clean tree. People who want them got cvs.
+@
+text
+@/* $XFree86: xc/extras/Mesa/src/OSmesa/osmesa.c,v 1.9 2002/01/02 17:49:50 tsi Exp $ */
+/*
+ * Mesa 3-D graphics library
+ * Version:  3.3
+ *
+ * Copyright (C) 1999-2000  Brian Paul   All Rights Reserved.
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a
+ * copy of this software and associated documentation files (the "Software"),
+ * to deal in the Software without restriction, including without limitation
+ * the rights to use, copy, modify, merge, publish, distribute, sublicense,
+ * and/or sell copies of the Software, and to permit persons to whom the
+ * Software is furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included
+ * in all copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
+ * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL
+ * BRIAN PAUL BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN
+ * AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
+ * CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+ */
+
+
+/*
+ * Off-Screen Mesa rendering / Rendering into client memory space
+ *
+ * Note on thread safety:  this driver is thread safe.  All
+ * functions are reentrant.  The notion of current context is
+ * managed by the core gl_make_current() and gl_get_current_context()
+ * functions.  Those functions are thread-safe.
+ */
+
+
+#ifdef PC_HEADER
+#include "all.h"
+#else
+#include "glheader.h"
+#include "GL/osmesa.h"
+#include "context.h"
+#include "depth.h"
+#include "mem.h"
+#include "matrix.h"
+#include "types.h"
+#include "vb.h"
+#include "extensions.h"
+#include "mmath.h"
+#endif
+
+
+/*
+ * This is the OS/Mesa context struct.
+ * Notice how it includes a GLcontext.  By doing this we're mimicking
+ * C++ inheritance/derivation.
+ * Later, we can cast a GLcontext pointer into an OSMesaContext pointer
+ * or vice versa.
+ */
+struct osmesa_context {
+   GLcontext gl_ctx;		/* The core GL/Mesa context */
+   GLvisual *gl_visual;		/* Describes the buffers */
+   GLframebuffer *gl_buffer;	/* Depth, stencil, accum, etc buffers */
+   GLenum format;		/* either GL_RGBA or GL_COLOR_INDEX */
+   void *buffer;		/* the image buffer */
+   GLint width, height;		/* size of image buffer */
+   GLuint pixel;		/* current color index or RGBA pixel value */
+   GLuint clearpixel;		/* pixel for clearing the color buffer */
+   GLint rowlength;		/* number of pixels per row */
+   GLint userRowLength;		/* user-specified number of pixels per row */
+   GLint rshift, gshift;	/* bit shifts for RGBA formats */
+   GLint bshift, ashift;
+   GLint rind, gind, bind;	/* index offsets for RGBA formats */
+   void *rowaddr[MAX_HEIGHT];	/* address of first pixel in each image row */
+   GLboolean yup;		/* TRUE  -> Y increases upward */
+				/* FALSE -> Y increases downward */
+};
+
+
+
+/* A forward declaration: */
+static void osmesa_update_state( GLcontext *ctx );
+
+
+
+/**********************************************************************/
+/*****                    Public Functions                        *****/
+/**********************************************************************/
+
+
+/*
+ * Create an Off-Screen Mesa rendering context.  The only attribute needed is
+ * an RGBA vs Color-Index mode flag.
+ *
+ * Input:  format - either GL_RGBA or GL_COLOR_INDEX
+ *         sharelist - specifies another OSMesaContext with which to share
+ *                     display lists.  NULL indicates no sharing.
+ * Return:  an OSMesaContext or 0 if error
+ */
+OSMesaContext GLAPIENTRY
+OSMesaCreateContext( GLenum format, OSMesaContext sharelist )
+{
+   OSMesaContext osmesa;
+   GLint rshift, gshift, bshift, ashift;
+   GLint rind, gind, bind;
+   GLint indexBits, alphaBits = 0;
+   GLboolean rgbmode;
+   GLboolean swalpha;
+   GLuint i4 = 1;
+   GLubyte *i1 = (GLubyte *) &i4;
+   GLint little_endian = *i1;
+
+   swalpha = GL_FALSE;
+   rind = gind = bind = 0;
+   if (format==OSMESA_COLOR_INDEX) {
+      indexBits = 8;
+      rshift = gshift = bshift = ashift = 0;
+      rgbmode = GL_FALSE;
+   }
+   else if (format==OSMESA_RGBA) {
+      indexBits = 0;
+      alphaBits = 8;
+      if (little_endian) {
+         rshift = 0;
+         gshift = 8;
+         bshift = 16;
+         ashift = 24;
+      }
+      else {
+         rshift = 24;
+         gshift = 16;
+         bshift = 8;
+         ashift = 0;
+      }
+      rgbmode = GL_TRUE;
+   }
+   else if (format==OSMESA_BGRA) {
+      indexBits = 0;
+      alphaBits = 8;
+      if (little_endian) {
+         ashift = 0;
+         rshift = 8;
+         gshift = 16;
+         bshift = 24;
+      }
+      else {
+         bshift = 24;
+         gshift = 16;
+         rshift = 8;
+         ashift = 0;
+      }
+      rgbmode = GL_TRUE;
+   }
+   else if (format==OSMESA_ARGB) {
+      indexBits = 0;
+      alphaBits = 8;
+      if (little_endian) {
+         bshift = 0;
+         gshift = 8;
+         rshift = 16;
+         ashift = 24;
+      }
+      else {
+         ashift = 24;
+         rshift = 16;
+         gshift = 8;
+         bshift = 0;
+      }
+      rgbmode = GL_TRUE;
+   }
+   else if (format==OSMESA_RGB) {
+      indexBits = 0;
+      alphaBits = 0;
+      bshift = 0;
+      gshift = 8;
+      rshift = 16;
+      ashift = 24;
+      bind = 2;
+      gind = 1;
+      rind = 0;
+      rgbmode = GL_TRUE;
+      swalpha = GL_TRUE;
+   }
+   else if (format==OSMESA_BGR) {
+      indexBits = 0;
+      alphaBits = 0;
+      bshift = 0;
+      gshift = 8;
+      rshift = 16;
+      ashift = 24;
+      bind = 0;
+      gind = 1;
+      rind = 2;
+      rgbmode = GL_TRUE;
+      swalpha = GL_TRUE;
+   }
+   else {
+      return NULL;
+   }
+
+
+   osmesa = (OSMesaContext) CALLOC_STRUCT(osmesa_context);
+   if (osmesa) {
+      osmesa->gl_visual = gl_create_visual( rgbmode,
+                                            swalpha,    /* software alpha */
+                                            GL_FALSE,	/* double buffer */
+                                            GL_FALSE,	/* stereo */
+                                            DEFAULT_SOFTWARE_DEPTH_BITS,
+                                            STENCIL_BITS,
+                                            rgbmode ? ACCUM_BITS : 0,
+                                            indexBits,
+                                            8, 8, 8, alphaBits );
+      if (!osmesa->gl_visual) {
+         FREE(osmesa);
+         return NULL;
+      }
+
+      if (!_mesa_initialize_context(&osmesa->gl_ctx,
+                                    osmesa->gl_visual,
+                                    sharelist ? &sharelist->gl_ctx
+                                              : (GLcontext *) NULL,
+                                    (void *) osmesa, GL_TRUE )) {
+         _mesa_destroy_visual( osmesa->gl_visual );
+         FREE(osmesa);
+         return NULL;
+      }
+      gl_extensions_enable(&(osmesa->gl_ctx),"GL_HP_occlusion_test");
+      gl_extensions_enable(&(osmesa->gl_ctx), "GL_ARB_texture_cube_map");
+      gl_extensions_enable(&(osmesa->gl_ctx), "GL_EXT_texture_env_combine");
+      gl_extensions_enable(&(osmesa->gl_ctx), "GL_EXT_texture_env_dot3");
+
+      osmesa->gl_buffer = gl_create_framebuffer( osmesa->gl_visual,
+                                           osmesa->gl_visual->DepthBits > 0,
+                                           osmesa->gl_visual->StencilBits > 0,
+                                           osmesa->gl_visual->AccumRedBits > 0,
+                                           osmesa->gl_visual->AlphaBits > 0 );
+
+      if (!osmesa->gl_buffer) {
+         gl_destroy_visual( osmesa->gl_visual );
+         gl_free_context_data( &osmesa->gl_ctx );
+         FREE(osmesa);
+         return NULL;
+      }
+      osmesa->format = format;
+      osmesa->buffer = NULL;
+      osmesa->width = 0;
+      osmesa->height = 0;
+      osmesa->pixel = 0;
+      osmesa->clearpixel = 0;
+      osmesa->userRowLength = 0;
+      osmesa->rowlength = 0;
+      osmesa->yup = GL_TRUE;
+      osmesa->rshift = rshift;
+      osmesa->gshift = gshift;
+      osmesa->bshift = bshift;
+      osmesa->ashift = ashift;
+      osmesa->rind = rind;
+      osmesa->gind = gind;
+      osmesa->bind = bind;
+   }
+   return osmesa;
+}
+
+
+
+/*
+ * Destroy an Off-Screen Mesa rendering context.
+ *
+ * Input:  ctx - the context to destroy
+ */
+void GLAPIENTRY OSMesaDestroyContext( OSMesaContext ctx )
+{
+   if (ctx) {
+      gl_destroy_visual( ctx->gl_visual );
+      gl_destroy_framebuffer( ctx->gl_buffer );
+      gl_free_context_data( &ctx->gl_ctx );
+      FREE( ctx );
+   }
+}
+
+
+
+/*
+ * Recompute the values of the context's rowaddr array.
+ */
+static void compute_row_addresses( OSMesaContext ctx )
+{
+   GLint i;
+
+   if (ctx->yup) {
+      /* Y=0 is bottom line of window */
+      if (ctx->format==OSMESA_COLOR_INDEX) {
+         /* 1-byte CI mode */
+         GLubyte *origin = (GLubyte *) ctx->buffer;
+         for (i=0;i<MAX_HEIGHT;i++) {
+            ctx->rowaddr[i] = origin + i * ctx->rowlength;
+         }
+      }
+      else {
+         if ((ctx->format==OSMESA_RGB) || (ctx->format==OSMESA_BGR)) {
+            /* 3-byte RGB mode */
+            GLubyte *origin = (GLubyte *) ctx->buffer;
+            for (i=0;i<MAX_HEIGHT;i++) {
+               ctx->rowaddr[i] = origin + (i * (ctx->rowlength*3));
+            }
+         } else {
+            /* 4-byte RGBA mode */
+            GLuint *origin = (GLuint *) ctx->buffer;
+            for (i=0;i<MAX_HEIGHT;i++) {
+               ctx->rowaddr[i] = origin + i * ctx->rowlength;
+            }
+         }
+      }
+   }
+   else {
+      /* Y=0 is top line of window */
+      if (ctx->format==OSMESA_COLOR_INDEX) {
+         /* 1-byte CI mode */
+         GLubyte *origin = (GLubyte *) ctx->buffer;
+         for (i=0;i<MAX_HEIGHT;i++) {
+            ctx->rowaddr[i] = origin + (ctx->height-i-1) * ctx->rowlength;
+         }
+      }
+      else {
+         if ((ctx->format==OSMESA_RGB) || (ctx->format==OSMESA_BGR)) {
+            /* 3-byte RGB mode */
+            GLubyte *origin = (GLubyte *) ctx->buffer;
+            for (i=0;i<MAX_HEIGHT;i++) {
+               ctx->rowaddr[i] = origin + ((ctx->height-i-1) * (ctx->rowlength*3));
+            }
+         } else {
+            /* 4-byte RGBA mode */
+            GLuint *origin = (GLuint *) ctx->buffer;
+            for (i=0;i<MAX_HEIGHT;i++) {
+               ctx->rowaddr[i] = origin + (ctx->height-i-1) * ctx->rowlength;
+            }
+         }
+      }
+   }
+}
+
+
+/*
+ * Bind an OSMesaContext to an image buffer.  The image buffer is just a
+ * block of memory which the client provides.  Its size must be at least
+ * as large as width*height*sizeof(type).  Its address should be a multiple
+ * of 4 if using RGBA mode.
+ *
+ * Image data is stored in the order of glDrawPixels:  row-major order
+ * with the lower-left image pixel stored in the first array position
+ * (ie. bottom-to-top).
+ *
+ * Since the only type initially supported is GL_UNSIGNED_BYTE, if the
+ * context is in RGBA mode, each pixel will be stored as a 4-byte RGBA
+ * value.  If the context is in color indexed mode, each pixel will be
+ * stored as a 1-byte value.
+ *
+ * If the context's viewport hasn't been initialized yet, it will now be
+ * initialized to (0,0,width,height).
+ *
+ * Input:  ctx - the rendering context
+ *         buffer - the image buffer memory
+ *         type - data type for pixel components, only GL_UNSIGNED_BYTE
+ *                supported now
+ *         width, height - size of image buffer in pixels, at least 1
+ * Return:  GL_TRUE if success, GL_FALSE if error because of invalid ctx,
+ *          invalid buffer address, type!=GL_UNSIGNED_BYTE, width<1, height<1,
+ *          width>internal limit or height>internal limit.
+ */
+GLboolean GLAPIENTRY
+OSMesaMakeCurrent( OSMesaContext ctx, void *buffer, GLenum type,
+                   GLsizei width, GLsizei height )
+{
+   if (!ctx || !buffer || type!=GL_UNSIGNED_BYTE
+       || width<1 || height<1 || width>MAX_WIDTH || height>MAX_HEIGHT) {
+      return GL_FALSE;
+   }
+
+   osmesa_update_state( &ctx->gl_ctx );
+   gl_make_current( &ctx->gl_ctx, ctx->gl_buffer );
+
+   ctx->buffer = buffer;
+   ctx->width = width;
+   ctx->height = height;
+   if (ctx->userRowLength)
+      ctx->rowlength = ctx->userRowLength;
+   else
+      ctx->rowlength = width;
+
+   compute_row_addresses( ctx );
+
+   /* init viewport */
+   if (ctx->gl_ctx.Viewport.Width==0) {
+      /* initialize viewport and scissor box to buffer size */
+      _mesa_Viewport( 0, 0, width, height );
+      ctx->gl_ctx.Scissor.Width = width;
+      ctx->gl_ctx.Scissor.Height = height;
+   }
+
+   return GL_TRUE;
+}
+
+
+
+OSMesaContext GLAPIENTRY OSMesaGetCurrentContext( void )
+{
+   GLcontext *ctx = gl_get_current_context();
+   if (ctx)
+      return (OSMesaContext) ctx;
+   else
+      return NULL;
+}
+
+
+
+void GLAPIENTRY OSMesaPixelStore( GLint pname, GLint value )
+{
+   OSMesaContext ctx = OSMesaGetCurrentContext();
+
+   switch (pname) {
+      case OSMESA_ROW_LENGTH:
+         if (value<0) {
+            gl_error( &ctx->gl_ctx, GL_INVALID_VALUE,
+                      "OSMesaPixelStore(value)" );
+            return;
+         }
+         ctx->userRowLength = value;
+         ctx->rowlength = value;
+         break;
+      case OSMESA_Y_UP:
+         ctx->yup = value ? GL_TRUE : GL_FALSE;
+         break;
+      default:
+         gl_error( &ctx->gl_ctx, GL_INVALID_ENUM, "OSMesaPixelStore(pname)" );
+         return;
+   }
+
+   compute_row_addresses( ctx );
+}
+
+
+void GLAPIENTRY OSMesaGetIntegerv( GLint pname, GLint *value )
+{
+   OSMesaContext ctx = OSMesaGetCurrentContext();
+
+   switch (pname) {
+      case OSMESA_WIDTH:
+         *value = ctx->width;
+         return;
+      case OSMESA_HEIGHT:
+         *value = ctx->height;
+         return;
+      case OSMESA_FORMAT:
+         *value = ctx->format;
+         return;
+      case OSMESA_TYPE:
+         *value = GL_UNSIGNED_BYTE;
+         return;
+      case OSMESA_ROW_LENGTH:
+         *value = ctx->rowlength;
+         return;
+      case OSMESA_Y_UP:
+         *value = ctx->yup;
+         return;
+      default:
+         gl_error(&ctx->gl_ctx, GL_INVALID_ENUM, "OSMesaGetIntergerv(pname)");
+         return;
+   }
+}
+
+/*
+ * Return the depth buffer associated with an OSMesa context.
+ * Input:  c - the OSMesa context
+ * Output:  width, height - size of buffer in pixels
+ *          bytesPerValue - bytes per depth value (2 or 4)
+ *          buffer - pointer to depth buffer values
+ * Return:  GL_TRUE or GL_FALSE to indicate success or failure.
+ */
+GLboolean GLAPIENTRY
+OSMesaGetDepthBuffer( OSMesaContext c, GLint *width, GLint *height,
+                      GLint *bytesPerValue, void **buffer )
+{
+   if ((!c->gl_buffer) || (!c->gl_buffer->DepthBuffer)) {
+      *width = 0;
+      *height = 0;
+      *bytesPerValue = 0;
+      *buffer = 0;
+      return GL_FALSE;
+   }
+   else {
+      *width = c->gl_buffer->Width;
+      *height = c->gl_buffer->Height;
+      if (c->gl_visual->DepthBits <= 16)
+         *bytesPerValue = sizeof(GLushort);
+      else
+         *bytesPerValue = sizeof(GLuint);
+      *buffer = c->gl_buffer->DepthBuffer;
+      return GL_TRUE;
+   }
+}
+
+/*
+ * Return the color buffer associated with an OSMesa context.
+ * Input:  c - the OSMesa context
+ * Output:  width, height - size of buffer in pixels
+ *          format - the pixel format (OSMESA_FORMAT)
+ *          buffer - pointer to color buffer values
+ * Return:  GL_TRUE or GL_FALSE to indicate success or failure.
+ */
+GLboolean GLAPIENTRY
+OSMesaGetColorBuffer( OSMesaContext c, GLint *width,
+                      GLint *height, GLint *format, void **buffer )
+{
+   if (!c->buffer) {
+      *width = 0;
+      *height = 0;
+      *format = 0;
+      *buffer = 0;
+      return GL_FALSE;
+   }
+   else {
+      *width = c->width;
+      *height = c->height;
+      *format = c->format;
+      *buffer = c->buffer;
+      return GL_TRUE;
+   }
+}
+
+/**********************************************************************/
+/*** Device Driver Functions                                        ***/
+/**********************************************************************/
+
+
+/*
+ * Useful macros:
+ */
+#define PACK_RGBA(R,G,B,A)  (  ((R) << osmesa->rshift) \
+                             | ((G) << osmesa->gshift) \
+                             | ((B) << osmesa->bshift) \
+                             | ((A) << osmesa->ashift) )
+
+#define PACK_RGBA2(R,G,B,A)  (  ((R) << rshift) \
+                              | ((G) << gshift) \
+                              | ((B) << bshift) \
+                              | ((A) << ashift) )
+
+#define UNPACK_RED(P)      (((P) >> osmesa->rshift) & 0xff)
+#define UNPACK_GREEN(P)    (((P) >> osmesa->gshift) & 0xff)
+#define UNPACK_BLUE(P)     (((P) >> osmesa->bshift) & 0xff)
+#define UNPACK_ALPHA(P)    (((P) >> osmesa->ashift) & 0xff)
+
+#define PIXELADDR1(X,Y)  ((GLubyte *) osmesa->rowaddr[Y] + (X))
+#define PIXELADDR3(X,Y)  ((GLubyte *) osmesa->rowaddr[Y] + ((X)*3))
+#define PIXELADDR4(X,Y)  ((GLuint *)  osmesa->rowaddr[Y] + (X))
+
+
+
+
+static GLboolean set_draw_buffer( GLcontext *ctx, GLenum mode )
+{
+   (void) ctx;
+   if (mode==GL_FRONT_LEFT) {
+      return GL_TRUE;
+   }
+   else {
+      return GL_FALSE;
+   }
+}
+
+
+static void set_read_buffer( GLcontext *ctx, GLframebuffer *buffer, GLenum mode )
+{
+   /* separate read buffer not supported */
+   ASSERT(buffer == ctx->DrawBuffer);
+   ASSERT(mode == GL_FRONT_LEFT);
+}
+
+
+static void clear_index( GLcontext *ctx, GLuint index )
+{
+   OSMesaContext osmesa = (OSMesaContext) ctx;
+   osmesa->clearpixel = index;
+}
+
+
+
+static void clear_color( GLcontext *ctx,
+                         GLubyte r, GLubyte g, GLubyte b, GLubyte a )
+{
+   OSMesaContext osmesa = (OSMesaContext) ctx;
+   osmesa->clearpixel = PACK_RGBA( r, g, b, a );
+}
+
+
+
+static GLbitfield clear( GLcontext *ctx, GLbitfield mask, GLboolean all,
+                         GLint x, GLint y, GLint width, GLint height )
+{
+   OSMesaContext osmesa = (OSMesaContext) ctx;
+   const GLuint *colorMask = (GLuint *) &ctx->Color.ColorMask;
+
+   /* we can't handle color or index masking */
+   if (*colorMask != 0xffffffff || ctx->Color.IndexMask != 0xffffffff)
+      return mask;
+
+   /* sanity check - we only have a front-left buffer */
+   ASSERT((mask & (DD_FRONT_RIGHT_BIT | DD_BACK_LEFT_BIT | DD_BACK_RIGHT_BIT)) == 0);
+
+   if (mask & DD_FRONT_LEFT_BIT) {
+      if (osmesa->format==OSMESA_COLOR_INDEX) {
+         if (all) {
+            /* Clear whole CI buffer */
+            MEMSET(osmesa->buffer, osmesa->clearpixel,
+                   osmesa->rowlength * osmesa->height);
+         }
+         else {
+            /* Clear part of CI buffer */
+            GLint i, j;
+            for (i=0;i<height;i++) {
+               GLubyte *ptr1 = PIXELADDR1( x, (y+i) );
+               for (j=0;j<width;j++) {
+                  *ptr1++ = osmesa->clearpixel;
+               }
+            }
+         }
+      }
+      else if ((osmesa->format==OSMESA_RGB)||(osmesa->format==OSMESA_BGR)) {
+         GLubyte rval = UNPACK_RED(osmesa->clearpixel);
+         GLubyte gval = UNPACK_GREEN(osmesa->clearpixel);
+         GLubyte bval = UNPACK_BLUE(osmesa->clearpixel);
+         GLint   rind = osmesa->rind;
+         GLint   gind = osmesa->gind;
+         GLint   bind = osmesa->bind;
+         if (all) {
+            GLuint  i, n;
+            GLubyte *ptr3 = (GLubyte *) osmesa->buffer;
+            /* Clear whole RGB buffer */
+            n = osmesa->rowlength * osmesa->height;
+            for (i=0;i<n;i++) {
+               ptr3[rind] = rval;
+               ptr3[gind] = gval;
+               ptr3[bind] = bval;
+               ptr3 += 3;
+            }
+         }
+         else {
+            /* Clear part of RGB buffer */
+            GLint i, j;
+            for (i=0;i<height;i++) {
+               GLubyte *ptr3 = PIXELADDR3( x, (y+i) );
+               for (j=0;j<width;j++) {
+                  ptr3[rind] = rval;
+                  ptr3[gind] = gval;
+                  ptr3[bind] = bval;
+                  ptr3 += 3;
+               }
+            }
+         }
+      }
+      else {
+         if (all) {
+            /* Clear whole RGBA buffer */
+            GLuint i, n, *ptr4;
+            n = osmesa->rowlength * osmesa->height;
+            ptr4 = (GLuint *) osmesa->buffer;
+            if (osmesa->clearpixel) {
+               for (i=0;i<n;i++) {
+                  *ptr4++ = osmesa->clearpixel;
+               }
+            }
+            else {
+               BZERO(ptr4, n * sizeof(GLuint));
+            }
+         }
+         else {
+            /* Clear part of RGBA buffer */
+            GLint i, j;
+            for (i=0;i<height;i++) {
+               GLuint *ptr4 = PIXELADDR4( x, (y+i) );
+               for (j=0;j<width;j++) {
+                  *ptr4++ = osmesa->clearpixel;
+               }
+            }
+         }
+      }
+   }
+   /* have Mesa clear all other buffers */
+   return mask & (~DD_FRONT_LEFT_BIT);
+}
+
+
+
+static void set_index( GLcontext *ctx, GLuint index )
+{
+   OSMesaContext osmesa = (OSMesaContext) ctx;
+   osmesa->pixel = index;
+}
+
+
+
+static void set_color( GLcontext *ctx,
+                       GLubyte r, GLubyte g, GLubyte b, GLubyte a )
+{
+   OSMesaContext osmesa = (OSMesaContext) ctx;
+   osmesa->pixel = PACK_RGBA( r, g, b, a );
+}
+
+
+
+static void buffer_size( GLcontext *ctx, GLuint *width, GLuint *height )
+{
+   OSMesaContext osmesa = (OSMesaContext) ctx;
+   *width = osmesa->width;
+   *height = osmesa->height;
+}
+
+
+/**********************************************************************/
+/*****        Read/write spans/arrays of RGBA pixels              *****/
+/**********************************************************************/
+
+/* Write RGBA pixels to an RGBA (or permuted) buffer. */
+static void write_rgba_span( const GLcontext *ctx,
+                             GLuint n, GLint x, GLint y,
+                             CONST GLubyte rgba[][4], const GLubyte mask[] )
+{
+   OSMesaContext osmesa = (OSMesaContext) ctx;
+   GLuint *ptr4 = PIXELADDR4( x, y );
+   GLuint i;
+   GLint rshift = osmesa->rshift;
+   GLint gshift = osmesa->gshift;
+   GLint bshift = osmesa->bshift;
+   GLint ashift = osmesa->ashift;
+   if (mask) {
+      for (i=0;i<n;i++,ptr4++) {
+         if (mask[i]) {
+            *ptr4 = PACK_RGBA2( rgba[i][RCOMP], rgba[i][GCOMP], rgba[i][BCOMP], rgba[i][ACOMP] );
+         }
+      }
+   }
+   else {
+      for (i=0;i<n;i++,ptr4++) {
+         *ptr4 = PACK_RGBA2( rgba[i][RCOMP], rgba[i][GCOMP], rgba[i][BCOMP], rgba[i][ACOMP] );
+      }
+   }
+}
+
+
+/* Write RGBA pixels to an RGBA buffer.  This is the fastest span-writer. */
+static void write_rgba_span_rgba( const GLcontext *ctx,
+                                  GLuint n, GLint x, GLint y,
+                                  CONST GLubyte rgba[][4],
+                                  const GLubyte mask[] )
+{
+   OSMesaContext osmesa = (OSMesaContext) ctx;
+   GLuint *ptr4 = PIXELADDR4( x, y );
+   const GLuint *rgba4 = (const GLuint *) rgba;
+   GLuint i;
+   if (mask) {
+      for (i=0;i<n;i++) {
+         if (mask[i]) {
+            ptr4[i] = rgba4[i];
+         }
+      }
+   }
+   else {
+      MEMCPY( ptr4, rgba4, n * 4 );
+   }
+}
+
+
+/* Write RGB pixels to an RGBA (or permuted) buffer. */
+static void write_rgb_span( const GLcontext *ctx,
+                            GLuint n, GLint x, GLint y,
+                            CONST GLubyte rgb[][3], const GLubyte mask[] )
+{
+   OSMesaContext osmesa = (OSMesaContext) ctx;
+   GLuint *ptr4 = PIXELADDR4( x, y );
+   GLuint i;
+   GLint rshift = osmesa->rshift;
+   GLint gshift = osmesa->gshift;
+   GLint bshift = osmesa->bshift;
+   GLint ashift = osmesa->ashift;
+   if (mask) {
+      for (i=0;i<n;i++,ptr4++) {
+         if (mask[i]) {
+            *ptr4 = PACK_RGBA2( rgb[i][RCOMP], rgb[i][GCOMP], rgb[i][BCOMP], 255 );
+         }
+      }
+   }
+   else {
+      for (i=0;i<n;i++,ptr4++) {
+         *ptr4 = PACK_RGBA2( rgb[i][RCOMP], rgb[i][GCOMP], rgb[i][BCOMP], 255);
+      }
+   }
+}
+
+
+
+static void write_monocolor_span( const GLcontext *ctx,
+                                  GLuint n, GLint x, GLint y,
+				  const GLubyte mask[] )
+{
+   OSMesaContext osmesa = (OSMesaContext) ctx;
+   GLuint *ptr4 = PIXELADDR4(x,y);
+   GLuint i;
+   for (i=0;i<n;i++,ptr4++) {
+      if (mask[i]) {
+         *ptr4 = osmesa->pixel;
+      }
+   }
+}
+
+
+
+static void write_rgba_pixels( const GLcontext *ctx,
+                               GLuint n, const GLint x[], const GLint y[],
+                               CONST GLubyte rgba[][4], const GLubyte mask[] )
+{
+   OSMesaContext osmesa = (OSMesaContext) ctx;
+   GLuint i;
+   GLint rshift = osmesa->rshift;
+   GLint gshift = osmesa->gshift;
+   GLint bshift = osmesa->bshift;
+   GLint ashift = osmesa->ashift;
+   for (i=0;i<n;i++) {
+      if (mask[i]) {
+         GLuint *ptr4 = PIXELADDR4(x[i],y[i]);
+         *ptr4 = PACK_RGBA2( rgba[i][RCOMP], rgba[i][GCOMP], rgba[i][BCOMP], rgba[i][ACOMP] );
+      }
+   }
+}
+
+
+
+static void write_monocolor_pixels( const GLcontext *ctx,
+                                    GLuint n, const GLint x[], const GLint y[],
+				    const GLubyte mask[] )
+{
+   OSMesaContext osmesa = (OSMesaContext) ctx;
+   GLuint i;
+   for (i=0;i<n;i++) {
+      if (mask[i]) {
+         GLuint *ptr4 = PIXELADDR4(x[i],y[i]);
+         *ptr4 = osmesa->pixel;
+      }
+   }
+}
+
+
+static void read_rgba_span( const GLcontext *ctx, GLuint n, GLint x, GLint y,
+                             GLubyte rgba[][4] )
+{
+   OSMesaContext osmesa = (OSMesaContext) ctx;
+   GLuint i;
+   GLuint *ptr4 = PIXELADDR4(x,y);
+   for (i=0;i<n;i++) {
+      GLuint pixel = *ptr4++;
+      rgba[i][RCOMP] = UNPACK_RED(pixel);
+      rgba[i][GCOMP] = UNPACK_GREEN(pixel);
+      rgba[i][BCOMP] = UNPACK_BLUE(pixel);
+      rgba[i][ACOMP] = UNPACK_ALPHA(pixel);
+   }
+}
+
+
+/* Read RGBA pixels from an RGBA buffer */
+static void read_rgba_span_rgba( const GLcontext *ctx,
+                                 GLuint n, GLint x, GLint y,
+                                 GLubyte rgba[][4] )
+{
+   OSMesaContext osmesa = (OSMesaContext) ctx;
+   GLuint *ptr4 = PIXELADDR4(x,y);
+   MEMCPY( rgba, ptr4, n * 4 * sizeof(GLubyte) );
+}
+
+
+static void read_rgba_pixels( const GLcontext *ctx,
+                               GLuint n, const GLint x[], const GLint y[],
+			       GLubyte rgba[][4], const GLubyte mask[] )
+{
+   OSMesaContext osmesa = (OSMesaContext) ctx;
+   GLuint i;
+   for (i=0;i<n;i++) {
+      if (mask[i]) {
+         GLuint *ptr4 = PIXELADDR4(x[i],y[i]);
+         GLuint pixel = *ptr4;
+         rgba[i][RCOMP] = UNPACK_RED(pixel);
+         rgba[i][GCOMP] = UNPACK_GREEN(pixel);
+         rgba[i][BCOMP] = UNPACK_BLUE(pixel);
+         rgba[i][ACOMP] = UNPACK_ALPHA(pixel);
+      }
+   }
+}
+
+/**********************************************************************/
+/*****                3 byte RGB pixel support funcs              *****/
+/**********************************************************************/
+
+/* Write RGBA pixels to an RGB or BGR buffer. */
+static void write_rgba_span3( const GLcontext *ctx,
+                              GLuint n, GLint x, GLint y,
+                              CONST GLubyte rgba[][4], const GLubyte mask[] )
+{
+   OSMesaContext osmesa = (OSMesaContext) ctx;
+   GLubyte *ptr3 = PIXELADDR3( x, y);
+   GLuint i;
+   GLint rind = osmesa->rind;
+   GLint gind = osmesa->gind;
+   GLint bind = osmesa->bind;
+   if (mask) {
+      for (i=0;i<n;i++,ptr3+=3) {
+         if (mask[i]) {
+            ptr3[rind] = rgba[i][RCOMP];
+            ptr3[gind] = rgba[i][GCOMP];
+            ptr3[bind] = rgba[i][BCOMP];
+         }
+      }
+   }
+   else {
+      for (i=0;i<n;i++,ptr3+=3) {
+         ptr3[rind] = rgba[i][RCOMP];
+         ptr3[gind] = rgba[i][GCOMP];
+         ptr3[bind] = rgba[i][BCOMP];
+      }
+   }
+}
+
+/* Write RGB pixels to an RGB or BGR buffer. */
+static void write_rgb_span3( const GLcontext *ctx,
+                             GLuint n, GLint x, GLint y,
+                             CONST GLubyte rgb[][3], const GLubyte mask[] )
+{
+   OSMesaContext osmesa = (OSMesaContext) ctx;
+   GLubyte *ptr3 = PIXELADDR3( x, y);
+   GLuint i;
+   GLint rind = osmesa->rind;
+   GLint gind = osmesa->gind;
+   GLint bind = osmesa->bind;
+   if (mask) {
+      for (i=0;i<n;i++,ptr3+=3) {
+         if (mask[i]) {
+            ptr3[rind] = rgb[i][RCOMP];
+            ptr3[gind] = rgb[i][GCOMP];
+            ptr3[bind] = rgb[i][BCOMP];
+         }
+      }
+   }
+   else {
+      for (i=0;i<n;i++,ptr3+=3) {
+         ptr3[rind] = rgb[i][RCOMP];
+         ptr3[gind] = rgb[i][GCOMP];
+         ptr3[bind] = rgb[i][BCOMP];
+      }
+   }
+}
+
+
+static void write_monocolor_span3( const GLcontext *ctx,
+                                  GLuint n, GLint x, GLint y,
+				  const GLubyte mask[] )
+{
+   OSMesaContext osmesa = (OSMesaContext) ctx;
+
+   GLubyte rval = UNPACK_RED(osmesa->pixel);
+   GLubyte gval = UNPACK_GREEN(osmesa->pixel);
+   GLubyte bval = UNPACK_BLUE(osmesa->pixel);
+   GLint   rind = osmesa->rind;
+   GLint   gind = osmesa->gind;
+   GLint   bind = osmesa->bind;
+   GLubyte *ptr3 = PIXELADDR3( x, y);
+   GLuint i;
+   for (i=0;i<n;i++,ptr3+=3) {
+      if (mask[i]) {
+         ptr3[rind] = rval;
+         ptr3[gind] = gval;
+         ptr3[bind] = bval;
+      }
+   }
+}
+
+static void write_rgba_pixels3( const GLcontext *ctx,
+                                GLuint n, const GLint x[], const GLint y[],
+                                CONST GLubyte rgba[][4], const GLubyte mask[] )
+{
+   OSMesaContext osmesa = (OSMesaContext) ctx;
+   GLuint i;
+   GLint rind = osmesa->rind;
+   GLint gind = osmesa->gind;
+   GLint bind = osmesa->bind;
+   for (i=0;i<n;i++) {
+      if (mask[i]) {
+         GLubyte *ptr3 = PIXELADDR3(x[i],y[i]);
+         ptr3[rind] = rgba[i][RCOMP];
+         ptr3[gind] = rgba[i][GCOMP];
+         ptr3[bind] = rgba[i][BCOMP];
+      }
+   }
+}
+
+static void write_monocolor_pixels3( const GLcontext *ctx,
+                                    GLuint n, const GLint x[], const GLint y[],
+				    const GLubyte mask[] )
+{
+   OSMesaContext osmesa = (OSMesaContext) ctx;
+   GLuint i;
+   GLint rind = osmesa->rind;
+   GLint gind = osmesa->gind;
+   GLint bind = osmesa->bind;
+   GLubyte rval = UNPACK_RED(osmesa->pixel);
+   GLubyte gval = UNPACK_GREEN(osmesa->pixel);
+   GLubyte bval = UNPACK_BLUE(osmesa->pixel);
+   for (i=0;i<n;i++) {
+      if (mask[i]) {
+         GLubyte *ptr3 = PIXELADDR3(x[i],y[i]);
+         ptr3[rind] = rval;
+         ptr3[gind] = gval;
+         ptr3[bind] = bval;
+      }
+   }
+}
+
+static void read_rgba_span3( const GLcontext *ctx,
+                             GLuint n, GLint x, GLint y,
+                             GLubyte rgba[][4] )
+{
+   OSMesaContext osmesa = (OSMesaContext) ctx;
+   GLuint i;
+   GLint rind = osmesa->rind;
+   GLint gind = osmesa->gind;
+   GLint bind = osmesa->bind;
+   const GLubyte *ptr3 = PIXELADDR3( x, y);
+   for (i=0;i<n;i++,ptr3+=3) {
+      rgba[i][RCOMP] = ptr3[rind];
+      rgba[i][GCOMP] = ptr3[gind];
+      rgba[i][BCOMP] = ptr3[bind];
+      rgba[i][ACOMP] = 0;
+   }
+}
+
+static void read_rgba_pixels3( const GLcontext *ctx,
+                               GLuint n, const GLint x[], const GLint y[],
+			       GLubyte rgba[][4], const GLubyte mask[] )
+{
+   OSMesaContext osmesa = (OSMesaContext) ctx;
+   GLuint i;
+   GLint rind = osmesa->rind;
+   GLint gind = osmesa->gind;
+   GLint bind = osmesa->bind;
+   for (i=0;i<n;i++) {
+      if (mask[i]) {
+         const GLubyte *ptr3 = PIXELADDR3(x[i],y[i]);
+         rgba[i][RCOMP] = ptr3[rind];
+         rgba[i][GCOMP] = ptr3[gind];
+         rgba[i][BCOMP] = ptr3[bind];
+         rgba[i][ACOMP] = 0;
+      }
+   }
+}
+
+
+/**********************************************************************/
+/*****        Read/write spans/arrays of CI pixels                *****/
+/**********************************************************************/
+
+/* Write 32-bit color index to buffer */
+static void write_index32_span( const GLcontext *ctx,
+                                GLuint n, GLint x, GLint y,
+                                const GLuint index[], const GLubyte mask[] )
+{
+   OSMesaContext osmesa = (OSMesaContext) ctx;
+   GLubyte *ptr1 = PIXELADDR1(x,y);
+   GLuint i;
+   if (mask) {
+      for (i=0;i<n;i++,ptr1++) {
+         if (mask[i]) {
+            *ptr1 = (GLubyte) index[i];
+         }
+      }
+   }
+   else {
+      for (i=0;i<n;i++,ptr1++) {
+         *ptr1 = (GLubyte) index[i];
+      }
+   }
+}
+
+
+/* Write 8-bit color index to buffer */
+static void write_index8_span( const GLcontext *ctx,
+                               GLuint n, GLint x, GLint y,
+                               const GLubyte index[], const GLubyte mask[] )
+{
+   OSMesaContext osmesa = (OSMesaContext) ctx;
+   GLubyte *ptr1 = PIXELADDR1(x,y);
+   GLuint i;
+   if (mask) {
+      for (i=0;i<n;i++,ptr1++) {
+         if (mask[i]) {
+            *ptr1 = (GLubyte) index[i];
+         }
+      }
+   }
+   else {
+      MEMCPY( ptr1, index, n );
+   }
+}
+
+
+static void write_monoindex_span( const GLcontext *ctx,
+                                  GLuint n, GLint x, GLint y,
+				  const GLubyte mask[] )
+{
+   OSMesaContext osmesa = (OSMesaContext) ctx;
+   GLubyte *ptr1 = PIXELADDR1(x,y);
+   GLuint i;
+   for (i=0;i<n;i++,ptr1++) {
+      if (mask[i]) {
+         *ptr1 = (GLubyte) osmesa->pixel;
+      }
+   }
+}
+
+
+static void write_index_pixels( const GLcontext *ctx,
+                                GLuint n, const GLint x[], const GLint y[],
+			        const GLuint index[], const GLubyte mask[] )
+{
+   OSMesaContext osmesa = (OSMesaContext) ctx;
+   GLuint i;
+   for (i=0;i<n;i++) {
+      if (mask[i]) {
+         GLubyte *ptr1 = PIXELADDR1(x[i],y[i]);
+         *ptr1 = (GLubyte) index[i];
+      }
+   }
+}
+
+
+static void write_monoindex_pixels( const GLcontext *ctx,
+                                    GLuint n, const GLint x[], const GLint y[],
+				    const GLubyte mask[] )
+{
+   OSMesaContext osmesa = (OSMesaContext) ctx;
+   GLuint i;
+   for (i=0;i<n;i++) {
+      if (mask[i]) {
+         GLubyte *ptr1 = PIXELADDR1(x[i],y[i]);
+         *ptr1 = (GLubyte) osmesa->pixel;
+      }
+   }
+}
+
+
+static void read_index_span( const GLcontext *ctx,
+                             GLuint n, GLint x, GLint y, GLuint index[] )
+{
+   OSMesaContext osmesa = (OSMesaContext) ctx;
+   GLuint i;
+   const GLubyte *ptr1 = PIXELADDR1(x,y);
+   for (i=0;i<n;i++,ptr1++) {
+      index[i] = (GLuint) *ptr1;
+   }
+}
+
+
+static void read_index_pixels( const GLcontext *ctx,
+                               GLuint n, const GLint x[], const GLint y[],
+			       GLuint index[], const GLubyte mask[] )
+{
+   OSMesaContext osmesa = (OSMesaContext) ctx;
+   GLuint i;
+   for (i=0;i<n;i++) {
+      if (mask[i] ) {
+         const GLubyte *ptr1 = PIXELADDR1(x[i],y[i]);
+         index[i] = (GLuint) *ptr1;
+      }
+   }
+}
+
+
+
+/**********************************************************************/
+/*****                   Optimized line rendering                 *****/
+/**********************************************************************/
+
+
+/*
+ * Draw a flat-shaded, RGB line into an osmesa buffer.
+ */
+static void flat_rgba_line( GLcontext *ctx,
+                            GLuint vert0, GLuint vert1, GLuint pvert )
+{
+   OSMesaContext osmesa = (OSMesaContext) ctx;
+   GLubyte *color = ctx->VB->ColorPtr->data[pvert];
+   unsigned long pixel = PACK_RGBA( color[0], color[1], color[2], color[3] );
+
+#define INTERP_XY 1
+#define CLIP_HACK 1
+#define PLOT(X,Y) { GLuint *ptr4 = PIXELADDR4(X,Y); *ptr4 = pixel; }
+
+#ifdef WIN32
+#include "..\linetemp.h"
+#else
+#include "linetemp.h"
+#endif
+}
+
+
+/*
+ * Draw a flat-shaded, Z-less, RGB line into an osmesa buffer.
+ */
+static void flat_rgba_z_line( GLcontext *ctx,
+                              GLuint vert0, GLuint vert1, GLuint pvert )
+{
+   OSMesaContext osmesa = (OSMesaContext) ctx;
+   GLubyte *color = ctx->VB->ColorPtr->data[pvert];
+   unsigned long pixel = PACK_RGBA( color[0], color[1], color[2], color[3] );
+
+#define INTERP_XY 1
+#define INTERP_Z 1
+#define DEPTH_TYPE DEFAULT_SOFTWARE_DEPTH_TYPE
+#define CLIP_HACK 1
+#define PLOT(X,Y)				\
+	if (Z < *zPtr) {			\
+	   GLuint *ptr4 = PIXELADDR4(X,Y);	\
+	   *ptr4 = pixel;			\
+	   *zPtr = Z;				\
+	}
+
+#ifdef WIN32
+#include "..\linetemp.h"
+#else
+#include "linetemp.h"
+#endif
+}
+
+
+/*
+ * Draw a flat-shaded, alpha-blended, RGB line into an osmesa buffer.
+ */
+static void flat_blend_rgba_line( GLcontext *ctx,
+                                  GLuint vert0, GLuint vert1, GLuint pvert )
+{
+   OSMesaContext osmesa = (OSMesaContext) ctx;
+   struct vertex_buffer *VB = ctx->VB;
+   GLint rshift = osmesa->rshift;
+   GLint gshift = osmesa->gshift;
+   GLint bshift = osmesa->bshift;
+   GLint avalue = VB->ColorPtr->data[pvert][3];
+   GLint msavalue = 255 - avalue;
+   GLint rvalue = VB->ColorPtr->data[pvert][0]*avalue;
+   GLint gvalue = VB->ColorPtr->data[pvert][1]*avalue;
+   GLint bvalue = VB->ColorPtr->data[pvert][2]*avalue;
+
+#define INTERP_XY 1
+#define CLIP_HACK 1
+#define PLOT(X,Y)					\
+   { GLuint *ptr4 = PIXELADDR4(X,Y);			\
+     GLuint  pixel = 0;					\
+     pixel |=((((((*ptr4) >> rshift) & 0xff)*msavalue+rvalue)>>8) << rshift);\
+     pixel |=((((((*ptr4) >> gshift) & 0xff)*msavalue+gvalue)>>8) << gshift);\
+     pixel |=((((((*ptr4) >> bshift) & 0xff)*msavalue+bvalue)>>8) << bshift);\
+     *ptr4 = pixel;					\
+   }
+
+#ifdef WIN32
+#include "..\linetemp.h"
+#else
+#include "linetemp.h"
+#endif
+}
+
+
+/*
+ * Draw a flat-shaded, Z-less, alpha-blended, RGB line into an osmesa buffer.
+ */
+static void flat_blend_rgba_z_line( GLcontext *ctx,
+                                   GLuint vert0, GLuint vert1, GLuint pvert )
+{
+   OSMesaContext osmesa = (OSMesaContext) ctx;
+   struct vertex_buffer *VB = ctx->VB;
+   GLint rshift = osmesa->rshift;
+   GLint gshift = osmesa->gshift;
+   GLint bshift = osmesa->bshift;
+   GLint avalue = VB->ColorPtr->data[pvert][3];
+   GLint msavalue = 256 - avalue;
+   GLint rvalue = VB->ColorPtr->data[pvert][0]*avalue;
+   GLint gvalue = VB->ColorPtr->data[pvert][1]*avalue;
+   GLint bvalue = VB->ColorPtr->data[pvert][2]*avalue;
+
+#define INTERP_XY 1
+#define INTERP_Z 1
+#define DEPTH_TYPE DEFAULT_SOFTWARE_DEPTH_TYPE
+#define CLIP_HACK 1
+#define PLOT(X,Y)							\
+	if (Z < *zPtr) {						\
+	   GLuint *ptr4 = PIXELADDR4(X,Y);				\
+	   GLuint  pixel = 0;						\
+	   pixel |=((((((*ptr4) >> rshift) & 0xff)*msavalue+rvalue)>>8) << rshift);	\
+	   pixel |=((((((*ptr4) >> gshift) & 0xff)*msavalue+gvalue)>>8) << gshift);	\
+	   pixel |=((((((*ptr4) >> bshift) & 0xff)*msavalue+bvalue)>>8) << bshift);	\
+	   *ptr4 = pixel; 						\
+	}
+
+#ifdef WIN32
+#include "..\linetemp.h"
+#else
+#include "linetemp.h"
+#endif
+}
+
+
+/*
+ * Draw a flat-shaded, Z-less, alpha-blended, RGB line into an osmesa buffer.
+ */
+static void flat_blend_rgba_z_line_write( GLcontext *ctx,
+                                   GLuint vert0, GLuint vert1, GLuint pvert )
+{
+   OSMesaContext osmesa = (OSMesaContext) ctx;
+   struct vertex_buffer *VB = ctx->VB;
+   GLint rshift = osmesa->rshift;
+   GLint gshift = osmesa->gshift;
+   GLint bshift = osmesa->bshift;
+   GLint avalue = VB->ColorPtr->data[pvert][3];
+   GLint msavalue = 256 - avalue;
+   GLint rvalue = VB->ColorPtr->data[pvert][0]*avalue;
+   GLint gvalue = VB->ColorPtr->data[pvert][1]*avalue;
+   GLint bvalue = VB->ColorPtr->data[pvert][2]*avalue;
+
+#define INTERP_XY 1
+#define INTERP_Z 1
+#define DEPTH_TYPE DEFAULT_SOFTWARE_DEPTH_TYPE
+#define CLIP_HACK 1
+#define PLOT(X,Y)							\
+	if (Z < *zPtr) {						\
+	   GLuint *ptr4 = PIXELADDR4(X,Y);				\
+	   GLuint  pixel = 0;						\
+	   pixel |=((((((*ptr4) >> rshift) & 0xff)*msavalue+rvalue)>>8) << rshift);	\
+	   pixel |=((((((*ptr4) >> gshift) & 0xff)*msavalue+gvalue)>>8) << gshift);	\
+	   pixel |=((((((*ptr4) >> bshift) & 0xff)*msavalue+bvalue)>>8) << bshift);	\
+	   *ptr4 = pixel;						\
+	   *zPtr = Z;							\
+	}
+
+#ifdef WIN32
+#include "..\linetemp.h"
+#else
+#include "linetemp.h"
+#endif
+}
+
+
+/*
+ * Analyze context state to see if we can provide a fast line drawing
+ * function, like those in lines.c.  Otherwise, return NULL.
+ */
+static line_func choose_line_function( GLcontext *ctx )
+{
+   OSMesaContext osmesa = (OSMesaContext) ctx;
+
+   if (ctx->Line.SmoothFlag)              return NULL;
+   if (ctx->Texture.ReallyEnabled)        return NULL;
+   if (ctx->Light.ShadeModel!=GL_FLAT)    return NULL;
+
+   if (ctx->Line.Width==1.0F
+       && ctx->Line.StippleFlag==GL_FALSE) {
+
+       if (ctx->RasterMask==DEPTH_BIT
+           && ctx->Depth.Func==GL_LESS
+           && ctx->Depth.Mask==GL_TRUE
+           && ctx->Visual->DepthBits == DEFAULT_SOFTWARE_DEPTH_BITS) {
+           switch(osmesa->format) {
+       		case OSMESA_RGBA:
+       		case OSMESA_BGRA:
+       		case OSMESA_ARGB:
+       			return flat_rgba_z_line;
+       		default:
+       			return NULL;
+           }
+       }
+
+       if (ctx->RasterMask==0) {
+           switch(osmesa->format) {
+       		case OSMESA_RGBA:
+       		case OSMESA_BGRA:
+       		case OSMESA_ARGB:
+       			return flat_rgba_line;
+       		default:
+       			return NULL;
+           }
+       }
+
+       if (ctx->RasterMask==(DEPTH_BIT|BLEND_BIT)
+           && ctx->Depth.Func==GL_LESS
+           && ctx->Depth.Mask==GL_TRUE
+           && ctx->Visual->DepthBits == DEFAULT_SOFTWARE_DEPTH_BITS
+           && ctx->Color.BlendSrcRGB==GL_SRC_ALPHA
+           && ctx->Color.BlendDstRGB==GL_ONE_MINUS_SRC_ALPHA
+           && ctx->Color.BlendSrcA==GL_SRC_ALPHA
+           && ctx->Color.BlendDstA==GL_ONE_MINUS_SRC_ALPHA
+           && ctx->Color.BlendEquation==GL_FUNC_ADD_EXT) {
+           switch(osmesa->format) {
+       		case OSMESA_RGBA:
+       		case OSMESA_BGRA:
+       		case OSMESA_ARGB:
+       			return flat_blend_rgba_z_line_write;
+       		default:
+       			return NULL;
+           }
+       }
+
+       if (ctx->RasterMask==(DEPTH_BIT|BLEND_BIT)
+           && ctx->Depth.Func==GL_LESS
+           && ctx->Depth.Mask==GL_FALSE
+           && ctx->Visual->DepthBits == DEFAULT_SOFTWARE_DEPTH_BITS
+           && ctx->Color.BlendSrcRGB==GL_SRC_ALPHA
+           && ctx->Color.BlendDstRGB==GL_ONE_MINUS_SRC_ALPHA
+           && ctx->Color.BlendSrcA==GL_SRC_ALPHA
+           && ctx->Color.BlendDstA==GL_ONE_MINUS_SRC_ALPHA
+           && ctx->Color.BlendEquation==GL_FUNC_ADD_EXT) {
+           switch(osmesa->format) {
+       		case OSMESA_RGBA:
+       		case OSMESA_BGRA:
+       		case OSMESA_ARGB:
+       			return flat_blend_rgba_z_line;
+       		default:
+       			return NULL;
+           }
+       }
+
+       if (ctx->RasterMask==BLEND_BIT
+           && ctx->Color.BlendSrcRGB==GL_SRC_ALPHA
+           && ctx->Color.BlendDstRGB==GL_ONE_MINUS_SRC_ALPHA
+           && ctx->Color.BlendSrcA==GL_SRC_ALPHA
+           && ctx->Color.BlendDstA==GL_ONE_MINUS_SRC_ALPHA
+           && ctx->Color.BlendEquation==GL_FUNC_ADD_EXT) {
+           switch(osmesa->format) {
+       		case OSMESA_RGBA:
+       		case OSMESA_BGRA:
+       		case OSMESA_ARGB:
+       			return flat_blend_rgba_line;
+       		default:
+       			return NULL;
+           }
+       }
+
+   }
+   return NULL;
+}
+
+
+/**********************************************************************/
+/*****                 Optimized triangle rendering               *****/
+/**********************************************************************/
+
+
+/*
+ * Smooth-shaded, z-less triangle, RGBA color.
+ */
+static void smooth_rgba_z_triangle( GLcontext *ctx, GLuint v0, GLuint v1,
+                                    GLuint v2, GLuint pv )
+{
+   OSMesaContext osmesa = (OSMesaContext) ctx;
+   GLint rshift = osmesa->rshift;
+   GLint gshift = osmesa->gshift;
+   GLint bshift = osmesa->bshift;
+   GLint ashift = osmesa->ashift;
+   (void) pv;
+
+#define INTERP_Z 1
+#define DEPTH_TYPE DEFAULT_SOFTWARE_DEPTH_TYPE
+#define INTERP_RGB 1
+#define INTERP_ALPHA 1
+#define INNER_LOOP( LEFT, RIGHT, Y )				\
+{								\
+   GLint i, len = RIGHT-LEFT;					\
+   GLuint *img = PIXELADDR4(LEFT,Y);   				\
+   for (i=0;i<len;i++,img++) {					\
+      GLdepth z = FixedToDepth(ffz);				\
+      if (z < zRow[i]) {					\
+         *img = PACK_RGBA2( FixedToInt(ffr), FixedToInt(ffg),	\
+		            FixedToInt(ffb), FixedToInt(ffa) );	\
+         zRow[i] = z;						\
+      }								\
+      ffr += fdrdx;  ffg += fdgdx;  ffb += fdbdx;  ffa += fdadx;\
+      ffz += fdzdx;						\
+   }								\
+}
+#ifdef WIN32
+#include "..\tritemp.h"
+#else
+#include "tritemp.h"
+#endif
+}
+
+
+
+
+/*
+ * Flat-shaded, z-less triangle, RGBA color.
+ */
+static void flat_rgba_z_triangle( GLcontext *ctx, GLuint v0, GLuint v1,
+                                   GLuint v2, GLuint pv )
+{
+   OSMesaContext osmesa = (OSMesaContext) ctx;
+#define INTERP_Z 1
+#define DEPTH_TYPE DEFAULT_SOFTWARE_DEPTH_TYPE
+#define SETUP_CODE			\
+   GLubyte r = VB->ColorPtr->data[pv][0];	\
+   GLubyte g = VB->ColorPtr->data[pv][1];	\
+   GLubyte b = VB->ColorPtr->data[pv][2];	\
+   GLubyte a = VB->ColorPtr->data[pv][3];	\
+   GLuint pixel = PACK_RGBA(r,g,b,a);
+
+#define INNER_LOOP( LEFT, RIGHT, Y )	\
+{					\
+   GLint i, len = RIGHT-LEFT;		\
+   GLuint *img = PIXELADDR4(LEFT,Y);   	\
+   for (i=0;i<len;i++,img++) {		\
+      GLdepth z = FixedToDepth(ffz);	\
+      if (z < zRow[i]) {		\
+         *img = pixel;			\
+         zRow[i] = z;			\
+      }					\
+      ffz += fdzdx;			\
+   }					\
+}
+#ifdef WIN32
+#include "..\tritemp.h"
+#else
+#include "tritemp.h"
+#endif
+}
+
+
+
+/*
+ * Return pointer to an accelerated triangle function if possible.
+ */
+static triangle_func choose_triangle_function( GLcontext *ctx )
+{
+   OSMesaContext osmesa = (OSMesaContext) ctx;
+
+   if ((osmesa->format==OSMESA_RGB)||(osmesa->format==OSMESA_BGR)) return NULL;
+
+   if (ctx->Polygon.SmoothFlag)     return NULL;
+   if (ctx->Polygon.StippleFlag)    return NULL;
+   if (ctx->Texture.ReallyEnabled)  return NULL;
+
+   if (ctx->RasterMask==DEPTH_BIT
+       && ctx->Depth.Func==GL_LESS
+       && ctx->Depth.Mask==GL_TRUE
+       && ctx->Visual->DepthBits == DEFAULT_SOFTWARE_DEPTH_BITS
+       && osmesa->format!=OSMESA_COLOR_INDEX) {
+      if (ctx->Light.ShadeModel==GL_SMOOTH) {
+         return smooth_rgba_z_triangle;
+      }
+      else {
+         return flat_rgba_z_triangle;
+      }
+   }
+   return NULL;
+}
+
+
+
+static const GLubyte *get_string( GLcontext *ctx, GLenum name )
+{
+   (void) ctx;
+   switch (name) {
+      case GL_RENDERER:
+         return (const GLubyte *) "Mesa OffScreen";
+      default:
+         return NULL;
+   }
+}
+
+
+static void osmesa_update_state( GLcontext *ctx )
+{
+   OSMesaContext osmesa = (OSMesaContext) ctx;
+
+   ASSERT((void *) osmesa == (void *) ctx->DriverCtx);
+
+   ctx->Driver.GetString = get_string;
+   ctx->Driver.UpdateState = osmesa_update_state;
+
+   ctx->Driver.SetDrawBuffer = set_draw_buffer;
+   ctx->Driver.SetReadBuffer = set_read_buffer;
+   ctx->Driver.Color = set_color;
+   ctx->Driver.Index = set_index;
+   ctx->Driver.ClearIndex = clear_index;
+   ctx->Driver.ClearColor = clear_color;
+   ctx->Driver.Clear = clear;
+
+   ctx->Driver.GetBufferSize = buffer_size;
+
+   ctx->Driver.PointsFunc = NULL;
+   ctx->Driver.LineFunc = choose_line_function( ctx );
+   ctx->Driver.TriangleFunc = choose_triangle_function( ctx );
+
+
+   /* RGB(A) span/pixel functions */
+   if ((osmesa->format==OSMESA_RGB) || (osmesa->format==OSMESA_BGR)) {
+      /* 3 bytes / pixel in frame buffer */
+      ctx->Driver.WriteRGBASpan = write_rgba_span3;
+      ctx->Driver.WriteRGBSpan = write_rgb_span3;
+      ctx->Driver.WriteRGBAPixels = write_rgba_pixels3;
+      ctx->Driver.WriteMonoRGBASpan = write_monocolor_span3;
+      ctx->Driver.WriteMonoRGBAPixels = write_monocolor_pixels3;
+      ctx->Driver.ReadRGBASpan = read_rgba_span3;
+      ctx->Driver.ReadRGBAPixels = read_rgba_pixels3;
+   }
+   else {
+      /* 4 bytes / pixel in frame buffer */
+      if (osmesa->format==OSMESA_RGBA
+          && RCOMP==0 && GCOMP==1 && BCOMP==2 && ACOMP==3)
+         ctx->Driver.WriteRGBASpan = write_rgba_span_rgba;
+      else
+         ctx->Driver.WriteRGBASpan = write_rgba_span;
+      ctx->Driver.WriteRGBSpan = write_rgb_span;
+      ctx->Driver.WriteRGBAPixels = write_rgba_pixels;
+      ctx->Driver.WriteMonoRGBASpan = write_monocolor_span;
+      ctx->Driver.WriteMonoRGBAPixels = write_monocolor_pixels;
+      if (osmesa->format==OSMESA_RGBA
+          && RCOMP==0 && GCOMP==1 && BCOMP==2 && ACOMP==3)
+         ctx->Driver.ReadRGBASpan = read_rgba_span_rgba;
+      else
+         ctx->Driver.ReadRGBASpan = read_rgba_span;
+      ctx->Driver.ReadRGBAPixels = read_rgba_pixels;
+   }
+
+   /* CI span/pixel functions */
+   ctx->Driver.WriteCI32Span = write_index32_span;
+   ctx->Driver.WriteCI8Span = write_index8_span;
+   ctx->Driver.WriteMonoCISpan = write_monoindex_span;
+   ctx->Driver.WriteCI32Pixels = write_index_pixels;
+   ctx->Driver.WriteMonoCIPixels = write_monoindex_pixels;
+   ctx->Driver.ReadCI32Span = read_index_span;
+   ctx->Driver.ReadCI32Pixels = read_index_pixels;
+}
+@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@@
+
+
+1.1.9.1
+log
+@OpenBSD just has imported exactly this tree into their vendor branch,
+called the same tag, in XF4/xc
+This is, apparently, the last XFree86 snapshot before the licence change
+(ie, addition of the advertising clause)
+
+Since the developers don't see any problems with that, and we would like
+to integrate improvements done by the remaining one or two (or so) XFree86
+developers (j/k), this prepares enabling us to update X-Window in the future.
+@
+text
+@d1 1
+d4 1
+a4 1
+ * Version:  5.0
+d6 1
+a6 1
+ * Copyright (C) 1999-2002  Brian Paul   All Rights Reserved.
+d25 1
+a25 1
+/* $XFree86: xc/extras/Mesa/src/OSmesa/osmesa.c,v 1.16 2003/12/02 14:28:12 alanh Exp $ */
+d32 1
+a32 1
+ * managed by the core _mesa_make_current() and _mesa_get_current_context()
+d37 3
+a41 1
+#include "buffers.h"
+a42 1
+#include "colormac.h"
+d44 4
+a48 3
+#include "imports.h"
+#include "macros.h"
+#include "matrix.h"
+d50 1
+a50 14
+#include "mtypes.h"
+#include "texformat.h"
+#include "texstore.h"
+#include "array_cache/acache.h"
+#include "swrast/swrast.h"
+#include "swrast_setup/swrast_setup.h"
+#include "swrast/s_context.h"
+#include "swrast/s_depth.h"
+#include "swrast/s_lines.h"
+#include "swrast/s_triangle.h"
+#include "tnl/tnl.h"
+#include "tnl/t_context.h"
+#include "tnl/t_pipeline.h"
+
+d67 2
+d73 2
+a74 2
+   GLint rInd, gInd, bInd, aInd;/* index offsets for RGBA formats */
+   GLchan *rowaddr[MAX_HEIGHT];	/* address of first pixel in each image row */
+d82 1
+a82 6
+static void osmesa_update_state( GLcontext *ctx, GLuint newstate );
+static void osmesa_register_swrast_functions( GLcontext *ctx );
+
+
+
+#define OSMESA_CONTEXT(ctx)  ((OSMesaContext) (ctx->DriverCtx))
+d100 1
+a100 1
+GLAPI OSMesaContext GLAPIENTRY
+a102 16
+   const GLint accumBits = (format == OSMESA_COLOR_INDEX) ? 0 : 16;
+   return OSMesaCreateContextExt(format, DEFAULT_SOFTWARE_DEPTH_BITS,
+                                 8, accumBits, sharelist);
+}
+
+
+
+/*
+ * New in Mesa 3.5
+ *
+ * Create context and specify size of ancillary buffers.
+ */
+GLAPI OSMesaContext GLAPIENTRY
+OSMesaCreateContextExt( GLenum format, GLint depthBits, GLint stencilBits,
+                        GLint accumBits, OSMesaContext sharelist )
+{
+d105 2
+a106 2
+   GLint rind, gind, bind, aind;
+   GLint indexBits = 0, redBits = 0, greenBits = 0, blueBits = 0, alphaBits =0;
+d108 4
+a111 3
+   const GLuint i4 = 1;
+   const GLubyte *i1 = (GLubyte *) &i4;
+   const GLint little_endian = *i1;
+d113 2
+a114 1
+   rind = gind = bind = aind = 0;
+d122 1
+a122 8
+      redBits = CHAN_BITS;
+      greenBits = CHAN_BITS;
+      blueBits = CHAN_BITS;
+      alphaBits = CHAN_BITS;
+      rind = 0;
+      gind = 1;
+      bind = 2;
+      aind = 3;
+d139 1
+a139 8
+      redBits = CHAN_BITS;
+      greenBits = CHAN_BITS;
+      blueBits = CHAN_BITS;
+      alphaBits = CHAN_BITS;
+      bind = 0;
+      gind = 1;
+      rind = 2;
+      aind = 3;
+d141 4
+a144 4
+         bshift = 0;
+         gshift = 8;
+         rshift = 16;
+         ashift = 24;
+d156 1
+a156 8
+      redBits = CHAN_BITS;
+      greenBits = CHAN_BITS;
+      blueBits = CHAN_BITS;
+      alphaBits = CHAN_BITS;
+      aind = 0;
+      rind = 1;
+      gind = 2;
+      bind = 3;
+d158 4
+a161 4
+         ashift = 0;
+         rshift = 8;
+         gshift = 16;
+         bshift = 24;
+a172 3
+      redBits = CHAN_BITS;
+      greenBits = CHAN_BITS;
+      blueBits = CHAN_BITS;
+d178 2
+a180 2
+      gind = 1;
+      bind = 2;
+d182 1
+a185 3
+      redBits = CHAN_BITS;
+      greenBits = CHAN_BITS;
+      blueBits = CHAN_BITS;
+d191 2
+a193 17
+      gind = 1;
+      bind = 0;
+      rgbmode = GL_TRUE;
+   }
+   else if (format==OSMESA_RGB_565) {
+      indexBits = 0;
+      redBits = 5;
+      greenBits = 6;
+      blueBits = 5;
+      alphaBits = 0;
+      rshift = 11;
+      gshift = 5;
+      bshift = 0;
+      ashift = 0;
+      rind = 0; /* not used */
+      gind = 0;
+      bind = 0;
+d195 1
+d204 9
+a212 16
+      osmesa->gl_visual = _mesa_create_visual( rgbmode,
+                                               GL_FALSE,    /* double buffer */
+                                               GL_FALSE,    /* stereo */
+                                               redBits,
+                                               greenBits,
+                                               blueBits,
+                                               alphaBits,
+                                               indexBits,
+                                               depthBits,
+                                               stencilBits,
+                                               accumBits,
+                                               accumBits,
+                                               accumBits,
+                                               alphaBits ? accumBits : 0,
+                                               1            /* num samples */
+                                               );
+d222 1
+a222 2
+                                    (void *) osmesa,
+                                    GL_FALSE)) {
+d227 10
+a236 10
+
+      _mesa_enable_sw_extensions(&(osmesa->gl_ctx));
+      _mesa_enable_1_3_extensions(&(osmesa->gl_ctx));
+      _mesa_enable_1_4_extensions(&(osmesa->gl_ctx));
+
+      osmesa->gl_buffer = _mesa_create_framebuffer( osmesa->gl_visual,
+                           (GLboolean) ( osmesa->gl_visual->depthBits > 0 ),
+                           (GLboolean) ( osmesa->gl_visual->stencilBits > 0 ),
+                           (GLboolean) ( osmesa->gl_visual->accumRedBits > 0 ),
+                           GL_FALSE /* s/w alpha */ );
+d239 2
+a240 2
+         _mesa_destroy_visual( osmesa->gl_visual );
+         _mesa_free_context_data( &osmesa->gl_ctx );
+d248 2
+d257 3
+a259 19
+      osmesa->rInd = rind;
+      osmesa->gInd = gind;
+      osmesa->bInd = bind;
+      osmesa->aInd = aind;
+
+
+      /* Initialize the software rasterizer and helper modules.
+       */
+      {
+	 GLcontext *ctx = &osmesa->gl_ctx;
+
+	 _swrast_CreateContext( ctx );
+	 _ac_CreateContext( ctx );
+	 _tnl_CreateContext( ctx );
+	 _swsetup_CreateContext( ctx );
+	
+	 _swsetup_Wakeup( ctx );
+	 osmesa_register_swrast_functions( ctx );
+      }
+a265 1
+
+d271 1
+a271 1
+GLAPI void GLAPIENTRY OSMesaDestroyContext( OSMesaContext ctx )
+d274 3
+a276 8
+      _swsetup_DestroyContext( &ctx->gl_ctx );
+      _tnl_DestroyContext( &ctx->gl_ctx );
+      _ac_DestroyContext( &ctx->gl_ctx );
+      _swrast_DestroyContext( &ctx->gl_ctx );
+
+      _mesa_destroy_visual( ctx->gl_visual );
+      _mesa_destroy_framebuffer( ctx->gl_buffer );
+      _mesa_free_context_data( &ctx->gl_ctx );
+d288 1
+a288 21
+   GLint bytesPerPixel, bytesPerRow, i;
+   GLubyte *origin = (GLubyte *) ctx->buffer;
+
+   if (ctx->format == OSMESA_COLOR_INDEX) {
+      /* CI mode */
+      bytesPerPixel = 1 * sizeof(GLchan);
+   }
+   else if ((ctx->format == OSMESA_RGB) || (ctx->format == OSMESA_BGR)) {
+      /* RGB mode */
+      bytesPerPixel = 3 * sizeof(GLchan);
+   }
+   else if (ctx->format == OSMESA_RGB_565) {
+      /* 5/6/5 RGB pixel in 16 bits */
+      bytesPerPixel = 2;
+   }
+   else {
+      /* RGBA mode */
+      bytesPerPixel = 4 * sizeof(GLchan);
+   }
+
+   bytesPerRow = ctx->rowlength * bytesPerPixel;
+d292 21
+a312 2
+      for (i = 0; i < MAX_HEIGHT; i++) {
+         ctx->rowaddr[i] = (GLchan *) ((GLubyte *) origin + i * bytesPerRow);
+d317 21
+a337 3
+      for (i = 0; i < MAX_HEIGHT; i++) {
+         GLint j = ctx->height - i - 1;
+         ctx->rowaddr[i] = (GLchan *) ((GLubyte *) origin + j * bytesPerRow);
+d353 5
+d363 2
+a364 5
+ *         type - data type for pixel components
+ *            Normally, only GL_UNSIGNED_BYTE and GL_UNSIGNED_SHORT_5_6_5
+ *            are supported.  But if Mesa's been compiled with CHAN_BITS==16
+ *            then type must be GL_UNSIGNED_SHORT.  And if Mesa's been build
+ *            with CHAN_BITS==32 then type must be GL_FLOAT.
+d367 1
+a367 1
+ *          invalid buffer address, invalid type, width<1, height<1,
+d370 1
+a370 1
+GLAPI GLboolean GLAPIENTRY
+d374 2
+a375 3
+   if (!ctx || !buffer ||
+       width < 1 || height < 1 ||
+       width > MAX_WIDTH || height > MAX_HEIGHT) {
+d379 2
+a380 10
+   if (ctx->format == OSMESA_RGB_565) {
+      if (type != GL_UNSIGNED_SHORT_5_6_5)
+         return GL_FALSE;
+   }
+   else if (type != CHAN_TYPE) {
+      return GL_FALSE;
+   }
+
+   osmesa_update_state( &ctx->gl_ctx, 0 );
+   _mesa_make_current( &ctx->gl_ctx, ctx->gl_buffer );
+d393 1
+a393 1
+   if (ctx->gl_ctx.Viewport.Width == 0) {
+a398 8
+   else {
+      /* this will make ensure we recognize the new buffer size */
+      _mesa_ResizeBuffersMESA();
+   }
+
+   /* Added by Gerk Huisma: */
+   _tnl_MakeCurrent( &ctx->gl_ctx, ctx->gl_ctx.DrawBuffer,
+                     ctx->gl_ctx.ReadBuffer );
+d405 1
+a405 1
+GLAPI OSMesaContext GLAPIENTRY OSMesaGetCurrentContext( void )
+d407 1
+a407 1
+   GLcontext *ctx = _mesa_get_current_context();
+d416 1
+a416 1
+GLAPI void GLAPIENTRY OSMesaPixelStore( GLint pname, GLint value )
+d423 1
+a423 1
+            _mesa_error( &ctx->gl_ctx, GL_INVALID_VALUE,
+d434 1
+a434 1
+         _mesa_error( &ctx->gl_ctx, GL_INVALID_ENUM, "OSMesaPixelStore(pname)" );
+d442 1
+a442 1
+GLAPI void GLAPIENTRY OSMesaGetIntegerv( GLint pname, GLint *value )
+d457 1
+a457 1
+         *value = CHAN_TYPE;
+a464 6
+      case OSMESA_MAX_WIDTH:
+         *value = MAX_WIDTH;
+         return;
+      case OSMESA_MAX_HEIGHT:
+         *value = MAX_HEIGHT;
+         return;
+d466 1
+a466 1
+         _mesa_error(&ctx->gl_ctx, GL_INVALID_ENUM, "OSMesaGetIntergerv(pname)");
+d479 1
+a479 1
+GLAPI GLboolean GLAPIENTRY
+d493 1
+a493 1
+      if (c->gl_visual->depthBits <= 16)
+d510 1
+a510 1
+GLAPI GLboolean GLAPIENTRY
+a529 33
+
+
+struct name_address {
+   const char *Name;
+   GLvoid *Address;
+};
+
+static struct name_address functions[] = {
+   { "OSMesaCreateContext", (void *) OSMesaCreateContext },
+   { "OSMesaCreateContextExt", (void *) OSMesaCreateContextExt },
+   { "OSMesaDestroyContext", (void *) OSMesaDestroyContext },
+   { "OSMesaMakeCurrent", (void *) OSMesaMakeCurrent },
+   { "OSMesaGetCurrentContext", (void *) OSMesaGetCurrentContext },
+   { "OSMesaPixelsStore", (void *) OSMesaPixelStore },
+   { "OSMesaGetIntegerv", (void *) OSMesaGetIntegerv },
+   { "OSMesaGetDepthBuffer", (void *) OSMesaGetDepthBuffer },
+   { "OSMesaGetColorBuffer", (void *) OSMesaGetColorBuffer },
+   { "OSMesaGetProcAddress", (void *) OSMesaGetProcAddress },
+   { NULL, NULL }
+};
+
+GLAPI void * GLAPIENTRY
+OSMesaGetProcAddress( const char *funcName )
+{
+   int i;
+   for (i = 0; functions[i].Name; i++) {
+      if (_mesa_strcmp(functions[i].Name, funcName) == 0)
+         return (void *) functions[i].Address;
+   }
+   return (void *) _glapi_get_proc_address(funcName);
+}
+
+
+d538 4
+d543 4
+a546 17
+#if CHAN_TYPE == GL_FLOAT
+#define PACK_RGBA(DST, R, G, B, A)	\
+do {					\
+   (DST)[0] = MAX2( R, 0.0F );		\
+   (DST)[1] = MAX2( G, 0.0F );		\
+   (DST)[2] = MAX2( B, 0.0F );		\
+   (DST)[3] = CLAMP(A, 0.0F, CHAN_MAXF);\
+} while (0)
+#else
+#define PACK_RGBA(DST, R, G, B, A)	\
+do {					\
+   (DST)[osmesa->rInd] = R;		\
+   (DST)[osmesa->gInd] = G;		\
+   (DST)[osmesa->bInd] = B;		\
+   (DST)[osmesa->aInd] = A;		\
+} while (0)
+#endif
+d548 4
+a551 6
+#define PACK_RGB(DST, R, G, B)  \
+do {				\
+   (DST)[0] = R;		\
+   (DST)[1] = G;		\
+   (DST)[2] = B;		\
+} while (0)
+d553 3
+a555 6
+#define PACK_BGR(DST, R, G, B)  \
+do {				\
+   (DST)[0] = B;		\
+   (DST)[1] = G;		\
+   (DST)[2] = R;		\
+} while (0)
+a556 4
+#define PACK_RGB_565(DST, R, G, B)					\
+do {									\
+   (DST) = (((int) (R) << 8) & 0xf800) | (((int) (G) << 3) & 0x7e0) | ((int) (B) >> 3);\
+} while (0)
+a558 4
+#define UNPACK_RED(P)      ( (P)[osmesa->rInd] )
+#define UNPACK_GREEN(P)    ( (P)[osmesa->gInd] )
+#define UNPACK_BLUE(P)     ( (P)[osmesa->bInd] )
+#define UNPACK_ALPHA(P)    ( (P)[osmesa->aInd] )
+d560 10
+a570 4
+#define PIXELADDR1(X,Y)  (osmesa->rowaddr[Y] + (X))
+#define PIXELADDR2(X,Y)  (osmesa->rowaddr[Y] + 2 * (X))
+#define PIXELADDR3(X,Y)  (osmesa->rowaddr[Y] + 3 * (X))
+#define PIXELADDR4(X,Y)  (osmesa->rowaddr[Y] + 4 * (X))
+d572 6
+d580 1
+a580 1
+static void set_buffer( GLcontext *ctx, GLframebuffer *buffer, GLuint bufferBit )
+d582 11
+a592 3
+   /* separate read buffer not supported */
+   ASSERT(buffer == ctx->DrawBuffer);
+   ASSERT(bufferBit == FRONT_LEFT_BIT);
+d596 3
+a598 2
+static void clear( GLcontext *ctx, GLbitfield mask, GLboolean all,
+		   GLint x, GLint y, GLint width, GLint height )
+d600 1
+a600 1
+   OSMesaContext osmesa = OSMESA_CONTEXT(ctx);
+d603 4
+d609 61
+a669 98
+   if (*colorMask == 0xffffffff && ctx->Color.IndexMask == 0xffffffff) {
+      if (mask & DD_FRONT_LEFT_BIT) {
+	 if (osmesa->format == OSMESA_COLOR_INDEX) {
+	    if (all) {
+	       /* Clear whole CI buffer */
+#if CHAN_TYPE == GL_UNSIGNED_BYTE
+	       MEMSET(osmesa->buffer, ctx->Color.ClearIndex,
+		      osmesa->rowlength * osmesa->height);
+#else
+	       const GLint n = osmesa->rowlength * osmesa->height;
+	       GLchan *buffer = (GLchan *) osmesa->buffer;
+	       GLint i;
+	       for (i = 0; i < n; i ++) {
+		  buffer[i] = ctx->Color.ClearIndex;
+	       }
+#endif
+	    }
+	    else {
+	       /* Clear part of CI buffer */
+	       const GLchan clearIndex = (GLchan) ctx->Color.ClearIndex;
+	       GLint i, j;
+	       for (i = 0; i < height; i++) {
+		  GLchan *ptr1 = PIXELADDR1(x, (y + i));
+		  for (j = 0; j < width; j++) {
+		     *ptr1++ = clearIndex;
+		  }
+	       }
+	    }
+	 }
+	 else if (osmesa->format == OSMESA_RGB) {
+            GLchan r, g, b;
+            CLAMPED_FLOAT_TO_CHAN(r, ctx->Color.ClearColor[0]);
+            CLAMPED_FLOAT_TO_CHAN(g, ctx->Color.ClearColor[1]);
+            CLAMPED_FLOAT_TO_CHAN(b, ctx->Color.ClearColor[2]);
+	    if (all) {
+	       /* Clear whole RGB buffer */
+	       GLuint n = osmesa->rowlength * osmesa->height;
+	       GLchan *ptr3 = (GLchan *) osmesa->buffer;
+	       GLuint i;
+	       for (i = 0; i < n; i++) {
+		  PACK_RGB(ptr3, r, g, b);
+		  ptr3 += 3;
+	       }
+	    }
+	    else {
+	       /* Clear part of RGB buffer */
+	       GLint i, j;
+	       for (i = 0; i < height; i++) {
+		  GLchan *ptr3 = PIXELADDR3(x, (y + i));
+		  for (j = 0; j < width; j++) {
+		     PACK_RGB(ptr3, r, g, b);
+		     ptr3 += 3;
+		  }
+	       }
+	    }
+	 }
+	 else if (osmesa->format == OSMESA_BGR) {
+            GLchan r, g, b;
+            CLAMPED_FLOAT_TO_CHAN(r, ctx->Color.ClearColor[0]);
+            CLAMPED_FLOAT_TO_CHAN(g, ctx->Color.ClearColor[1]);
+            CLAMPED_FLOAT_TO_CHAN(b, ctx->Color.ClearColor[2]);
+	    if (all) {
+	       /* Clear whole RGB buffer */
+	       const GLint n = osmesa->rowlength * osmesa->height;
+	       GLchan *ptr3 = (GLchan *) osmesa->buffer;
+	       GLint i;
+	       for (i = 0; i < n; i++) {
+		  PACK_BGR(ptr3, r, g, b);
+		  ptr3 += 3;
+	       }
+	    }
+	    else {
+	       /* Clear part of RGB buffer */
+	       GLint i, j;
+	       for (i = 0; i < height; i++) {
+		  GLchan *ptr3 = PIXELADDR3(x, (y + i));
+		  for (j = 0; j < width; j++) {
+		     PACK_BGR(ptr3, r, g, b);
+		     ptr3 += 3;
+		  }
+	       }
+	    }
+	 }
+         else if (osmesa->format == OSMESA_RGB_565) {
+            GLushort clearPixel;
+            GLchan r, g, b;
+            CLAMPED_FLOAT_TO_CHAN(r, ctx->Color.ClearColor[0]);
+            CLAMPED_FLOAT_TO_CHAN(g, ctx->Color.ClearColor[1]);
+            CLAMPED_FLOAT_TO_CHAN(b, ctx->Color.ClearColor[2]);
+            PACK_RGB_565(clearPixel, r, g, b);
+            if (all) {
+               /* Clear whole RGB buffer */
+	       const GLuint n = osmesa->rowlength * osmesa->height;
+               GLushort *ptr2 = (GLushort *) osmesa->buffer;
+               GLuint  i;
+               for (i = 0; i < n; i++) {
+                  *ptr2 = clearPixel;
+                  ptr2++;
+d673 10
+a682 8
+               /* clear scissored region */
+               GLint i, j;
+               for (i = 0; i < height; i++) {
+                  GLushort *ptr2 = (GLushort *) PIXELADDR2(x, (y + i));
+                  for (j = 0; j < width; j++) {
+                     *ptr2 = clearPixel;
+                     ptr2++;
+                  }
+a685 64
+	 else {
+#if CHAN_TYPE == GL_UNSIGNED_BYTE
+	    /* 4-byte pixel value */
+	    GLuint clearPixel;
+	    GLchan *clr = (GLchan *) &clearPixel;
+            CLAMPED_FLOAT_TO_CHAN(clr[osmesa->rInd], ctx->Color.ClearColor[0]);
+            CLAMPED_FLOAT_TO_CHAN(clr[osmesa->gInd], ctx->Color.ClearColor[1]);
+            CLAMPED_FLOAT_TO_CHAN(clr[osmesa->bInd], ctx->Color.ClearColor[2]);
+            CLAMPED_FLOAT_TO_CHAN(clr[osmesa->aInd], ctx->Color.ClearColor[3]);
+	    if (all) {
+	       /* Clear whole RGBA buffer */
+	       const GLuint n = osmesa->rowlength * osmesa->height;
+	       GLuint *ptr4 = (GLuint *) osmesa->buffer;
+	       GLuint i;
+	       if (clearPixel) {
+		  for (i = 0; i < n; i++) {
+		     *ptr4++ = clearPixel;
+		  }
+	       }
+	       else {
+		  _mesa_bzero(ptr4, n * sizeof(GLuint));
+	       }
+	    }
+	    else {
+	       /* Clear part of RGBA buffer */
+	       GLint i, j;
+	       for (i = 0; i < height; i++) {
+		  GLuint *ptr4 = (GLuint *) PIXELADDR4(x, (y + i));
+		  for (j = 0; j < width; j++) {
+		     *ptr4++ = clearPixel;
+		  }
+	       }
+	    }
+#else
+            GLchan r, g, b, a;
+            CLAMPED_FLOAT_TO_CHAN(r, ctx->Color.ClearColor[0]);
+            CLAMPED_FLOAT_TO_CHAN(g, ctx->Color.ClearColor[1]);
+            CLAMPED_FLOAT_TO_CHAN(b, ctx->Color.ClearColor[2]);
+            CLAMPED_FLOAT_TO_CHAN(a, ctx->Color.ClearColor[3]);
+	    if (all) {
+	       /* Clear whole RGBA buffer */
+	       const GLuint n = osmesa->rowlength * osmesa->height;
+	       GLchan *p = (GLchan *) osmesa->buffer;
+	       GLuint i;
+	       for (i = 0; i < n; i++) {
+		  PACK_RGBA(p, r, g, b, a);
+		  p += 4;
+	       }
+	    }
+	    else {
+	       /* Clear part of RGBA buffer */
+	       GLint i, j;
+	       for (i = 0; i < height; i++) {
+		  GLchan *p = PIXELADDR4(x, (y + i));
+		  for (j = 0; j < width; j++) {
+		     PACK_RGBA(p, r, g, b, a);
+		     p += 4;
+		  }
+	       }
+	    }
+
+#endif
+	 }
+	 mask &= ~DD_FRONT_LEFT_BIT;
+d688 10
+a697 3
+   
+   if (mask)
+      _swrast_Clear( ctx, mask, all, x, y, width, height );
+d702 2
+a703 1
+static void buffer_size( GLframebuffer *buffer, GLuint *width, GLuint *height )
+d705 11
+a715 8
+   /* don't use GET_CURRENT_CONTEXT(ctx) here - it's a problem on Windows */
+   GLcontext *ctx = (GLcontext *) _glapi_get_context();
+   (void) buffer;
+   if (ctx) {
+      OSMesaContext osmesa = OSMESA_CONTEXT(ctx);
+      *width = osmesa->width;
+      *height = osmesa->height;
+   }
+d724 11
+a734 7
+static void
+write_rgba_span( const GLcontext *ctx, GLuint n, GLint x, GLint y,
+                 CONST GLchan rgba[][4], const GLubyte mask[] )
+{
+   const OSMesaContext osmesa = OSMESA_CONTEXT(ctx);
+   GLchan *p = PIXELADDR4(x, y);
+   GLuint i;
+d736 1
+a736 1
+      for (i = 0; i < n; i++, p += 4) {
+d738 1
+a738 2
+            PACK_RGBA(p, rgba[i][RCOMP], rgba[i][GCOMP],
+                         rgba[i][BCOMP], rgba[i][ACOMP]);
+d743 2
+a744 3
+      for (i = 0; i < n; i++, p += 4) {
+         PACK_RGBA(p, rgba[i][RCOMP], rgba[i][GCOMP],
+                      rgba[i][BCOMP], rgba[i][ACOMP]);
+d751 4
+a754 3
+static void
+write_rgba_span_rgba( const GLcontext *ctx, GLuint n, GLint x, GLint y,
+                      CONST GLchan rgba[][4], const GLubyte mask[] )
+d756 2
+a757 2
+   OSMesaContext osmesa = OSMESA_CONTEXT(ctx);
+   GLuint *ptr4 = (GLuint *) PIXELADDR4(x, y);
+a759 1
+   ASSERT(CHAN_TYPE == GL_UNSIGNED_BYTE);
+d761 1
+a761 1
+      for (i = 0; i < n; i++) {
+d774 11
+a784 7
+static void
+write_rgb_span( const GLcontext *ctx, GLuint n, GLint x, GLint y,
+                CONST GLchan rgb[][3], const GLubyte mask[] )
+{
+   const OSMesaContext osmesa = OSMESA_CONTEXT(ctx);
+   GLchan *p = PIXELADDR4(x, y);
+   GLuint i;
+d786 1
+a786 1
+      for (i = 0; i < n; i++, p+=4) {
+d788 1
+a788 1
+            PACK_RGBA(p, rgb[i][RCOMP], rgb[i][GCOMP], rgb[i][BCOMP], CHAN_MAX);
+d793 2
+a794 2
+      for (i = 0; i < n; i++, p+=4) {
+         PACK_RGBA(p, rgb[i][RCOMP], rgb[i][GCOMP], rgb[i][BCOMP], CHAN_MAX);
+d801 3
+a803 3
+static void
+write_monocolor_span( const GLcontext *ctx, GLuint n, GLint x, GLint y,
+                      const GLchan color[4], const GLubyte mask[] )
+d805 2
+a806 2
+   const OSMesaContext osmesa = OSMESA_CONTEXT(ctx);
+   GLchan *p = PIXELADDR4(x, y);
+d808 1
+a808 1
+   for (i = 0; i < n; i++, p += 4) {
+d810 1
+a810 1
+         PACK_RGBA(p, color[RCOMP], color[GCOMP], color[BCOMP], color[ACOMP]);
+d817 3
+a819 4
+static void
+write_rgba_pixels( const GLcontext *ctx, GLuint n,
+                   const GLint x[], const GLint y[],
+                   CONST GLchan rgba[][4], const GLubyte mask[] )
+d821 1
+a821 1
+   const OSMesaContext osmesa = OSMESA_CONTEXT(ctx);
+d823 5
+a827 1
+   for (i = 0; i < n; i++) {
+d829 2
+a830 3
+         GLchan *p = PIXELADDR4(x[i], y[i]);
+         PACK_RGBA(p, rgba[i][RCOMP], rgba[i][GCOMP],
+                      rgba[i][BCOMP], rgba[i][ACOMP]);
+d837 3
+a839 4
+static void
+write_monocolor_pixels( const GLcontext *ctx, GLuint n,
+                        const GLint x[], const GLint y[],
+                        const GLchan color[4], const GLubyte mask[] )
+d841 1
+a841 1
+   const OSMesaContext osmesa = OSMESA_CONTEXT(ctx);
+d843 1
+a843 1
+   for (i = 0; i < n; i++) {
+d845 2
+a846 2
+         GLchan *p = PIXELADDR4(x[i], y[i]);
+         PACK_RGBA(p, color[RCOMP], color[GCOMP], color[BCOMP], color[ACOMP]);
+d852 2
+a853 3
+static void
+read_rgba_span( const GLcontext *ctx, GLuint n, GLint x, GLint y,
+                GLchan rgba[][4] )
+d855 1
+a855 1
+   const OSMesaContext osmesa = OSMESA_CONTEXT(ctx);
+d857 7
+a863 6
+   GLchan *p = PIXELADDR4(x, y);
+   for (i = 0; i < n; i++, p += 4) {
+      rgba[i][RCOMP] = UNPACK_RED(p);
+      rgba[i][GCOMP] = UNPACK_GREEN(p);
+      rgba[i][BCOMP] = UNPACK_BLUE(p);
+      rgba[i][ACOMP] = UNPACK_ALPHA(p);
+d869 3
+a871 3
+static void
+read_rgba_span_rgba( const GLcontext *ctx, GLuint n, GLint x, GLint y,
+                     GLchan rgba[][4] )
+d873 3
+a875 3
+   OSMesaContext osmesa = OSMESA_CONTEXT(ctx);
+   GLuint *ptr4 = (GLuint *) PIXELADDR4(x, y);
+   MEMCPY( rgba, ptr4, n * 4 * sizeof(GLchan) );
+d879 3
+a881 4
+static void
+read_rgba_pixels( const GLcontext *ctx,
+                  GLuint n, const GLint x[], const GLint y[],
+                  GLchan rgba[][4], const GLubyte mask[] )
+d883 1
+a883 1
+   const OSMesaContext osmesa = OSMESA_CONTEXT(ctx);
+d885 1
+a885 1
+   for (i = 0; i < n; i++) {
+d887 6
+a892 5
+         const GLchan *p = PIXELADDR4(x[i], y[i]);
+         rgba[i][RCOMP] = UNPACK_RED(p);
+         rgba[i][GCOMP] = UNPACK_GREEN(p);
+         rgba[i][BCOMP] = UNPACK_BLUE(p);
+         rgba[i][ACOMP] = UNPACK_ALPHA(p);
+d901 11
+a911 8
+/* Write RGBA pixels to an RGB buffer. */
+static void
+write_rgba_span_RGB( const GLcontext *ctx, GLuint n, GLint x, GLint y,
+                     CONST GLchan rgba[][4], const GLubyte mask[] )
+{
+   const OSMesaContext osmesa = OSMESA_CONTEXT(ctx);
+   GLchan *p = PIXELADDR3(x, y);
+   GLuint i;
+d913 1
+a913 1
+      for (i = 0; i < n; i++, p += 3) {
+d915 3
+a917 1
+            PACK_RGB(p, rgba[i][RCOMP], rgba[i][GCOMP], rgba[i][BCOMP]);
+d922 4
+a925 2
+      for (i = 0; i < n; i++, p += 3) {
+         PACK_RGB(p, rgba[i][RCOMP], rgba[i][GCOMP], rgba[i][BCOMP]);
+d930 4
+a933 4
+/* Write RGBA pixels to an BGR buffer. */
+static void
+write_rgba_span_BGR( const GLcontext *ctx, GLuint n, GLint x, GLint y,
+                     CONST GLchan rgba[][4], const GLubyte mask[] )
+d935 2
+a936 2
+   const OSMesaContext osmesa = OSMESA_CONTEXT(ctx);
+   GLchan *p = PIXELADDR3(x, y);
+d938 3
+d942 1
+a942 1
+      for (i = 0; i < n; i++, p += 3) {
+d944 3
+a946 1
+            PACK_BGR(p, rgba[i][RCOMP], rgba[i][GCOMP], rgba[i][BCOMP]);
+d951 4
+a954 2
+      for (i = 0; i < n; i++, p += 3) {
+         PACK_BGR(p, rgba[i][RCOMP], rgba[i][GCOMP], rgba[i][BCOMP]);
+a958 21
+/* Write RGB pixels to an RGB buffer. */
+static void
+write_rgb_span_RGB( const GLcontext *ctx, GLuint n, GLint x, GLint y,
+                    CONST GLchan rgb[][3], const GLubyte mask[] )
+{
+   const OSMesaContext osmesa = OSMESA_CONTEXT(ctx);
+   GLchan *p = PIXELADDR3(x, y);
+   GLuint i;
+   if (mask) {
+      for (i = 0; i < n; i++, p += 3) {
+         if (mask[i]) {
+            PACK_RGB(p, rgb[i][RCOMP], rgb[i][GCOMP], rgb[i][BCOMP]);
+         }
+      }
+   }
+   else {
+      for (i = 0; i < n; i++, p += 3) {
+         PACK_RGB(p, rgb[i][RCOMP], rgb[i][GCOMP], rgb[i][BCOMP]);
+      }
+   }
+}
+d960 3
+a962 4
+/* Write RGB pixels to an BGR buffer. */
+static void
+write_rgb_span_BGR( const GLcontext *ctx, GLuint n, GLint x, GLint y,
+                    CONST GLchan rgb[][3], const GLubyte mask[] )
+d964 1
+a964 17
+   const OSMesaContext osmesa = OSMESA_CONTEXT(ctx);
+   GLchan *p = PIXELADDR3(x, y);
+   GLuint i;
+   if (mask) {
+      for (i = 0; i < n; i++, p += 3) {
+         if (mask[i]) {
+            PACK_BGR(p, rgb[i][RCOMP], rgb[i][GCOMP], rgb[i][BCOMP]);
+         }
+      }
+   }
+   else {
+      for (i = 0; i < n; i++, p += 3) {
+         PACK_BGR(p, rgb[i][RCOMP], rgb[i][GCOMP], rgb[i][BCOMP]);
+      }
+   }
+}
+
+d966 7
+a972 6
+static void
+write_monocolor_span_RGB( const GLcontext *ctx, GLuint n, GLint x, GLint y,
+                          const GLchan color[4], const GLubyte mask[] )
+{
+   const OSMesaContext osmesa = OSMESA_CONTEXT(ctx);
+   GLchan *p = PIXELADDR3(x, y);
+d974 1
+a974 1
+   for (i = 0; i < n; i++, p += 3) {
+d976 3
+a978 1
+         PACK_RGB(p, color[RCOMP], color[GCOMP], color[BCOMP]);
+d983 3
+a985 3
+static void
+write_monocolor_span_BGR( const GLcontext *ctx, GLuint n, GLint x, GLint y,
+                          const GLchan color[4], const GLubyte mask[] )
+d987 1
+a987 2
+   const OSMesaContext osmesa = OSMESA_CONTEXT(ctx);
+   GLchan *p = PIXELADDR3(x, y);
+d989 4
+a992 1
+   for (i = 0; i < n; i++, p += 3) {
+d994 4
+a997 1
+         PACK_BGR(p, color[RCOMP], color[GCOMP], color[BCOMP]);
+d1002 3
+a1004 4
+static void
+write_rgba_pixels_RGB( const GLcontext *ctx, GLuint n,
+                       const GLint x[], const GLint y[],
+                       CONST GLchan rgba[][4], const GLubyte mask[] )
+d1006 1
+a1006 1
+   const OSMesaContext osmesa = OSMESA_CONTEXT(ctx);
+d1008 7
+a1014 181
+   for (i = 0; i < n; i++) {
+      if (mask[i]) {
+         GLchan *p = PIXELADDR3(x[i], y[i]);
+         PACK_RGB(p, rgba[i][RCOMP], rgba[i][GCOMP], rgba[i][BCOMP]);
+      }
+   }
+}
+
+static void
+write_rgba_pixels_BGR( const GLcontext *ctx, GLuint n,
+                       const GLint x[], const GLint y[],
+                       CONST GLchan rgba[][4], const GLubyte mask[] )
+{
+   const OSMesaContext osmesa = OSMESA_CONTEXT(ctx);
+   GLuint i;
+   for (i = 0; i < n; i++) {
+      if (mask[i]) {
+         GLchan *p = PIXELADDR3(x[i], y[i]);
+         PACK_BGR(p, rgba[i][RCOMP], rgba[i][GCOMP], rgba[i][BCOMP]);
+      }
+   }
+}
+
+static void
+write_monocolor_pixels_RGB( const GLcontext *ctx,
+                            GLuint n, const GLint x[], const GLint y[],
+                            const GLchan color[4], const GLubyte mask[] )
+{
+   const OSMesaContext osmesa = OSMESA_CONTEXT(ctx);
+   GLuint i;
+   for (i = 0; i < n; i++) {
+      if (mask[i]) {
+         GLchan *p = PIXELADDR3(x[i], y[i]);
+         PACK_RGB(p, color[RCOMP], color[GCOMP], color[BCOMP]);
+      }
+   }
+}
+
+static void
+write_monocolor_pixels_BGR( const GLcontext *ctx,
+                            GLuint n, const GLint x[], const GLint y[],
+                            const GLchan color[4], const GLubyte mask[] )
+{
+   const OSMesaContext osmesa = OSMESA_CONTEXT(ctx);
+   GLuint i;
+   for (i = 0; i < n; i++) {
+      if (mask[i]) {
+         GLchan *p = PIXELADDR3(x[i], y[i]);
+         PACK_BGR(p, color[RCOMP], color[GCOMP], color[BCOMP]);
+      }
+   }
+}
+
+static void
+read_rgba_span3( const GLcontext *ctx, GLuint n, GLint x, GLint y,
+                 GLchan rgba[][4] )
+{
+   const OSMesaContext osmesa = OSMESA_CONTEXT(ctx);
+   GLuint i;
+   const GLchan *p = PIXELADDR3(x, y);
+   for (i = 0; i < n; i++, p += 3) {
+      rgba[i][RCOMP] = UNPACK_RED(p);
+      rgba[i][GCOMP] = UNPACK_GREEN(p);
+      rgba[i][BCOMP] = UNPACK_BLUE(p);
+      rgba[i][ACOMP] = CHAN_MAX;
+   }
+}
+
+static void
+read_rgba_pixels3( const GLcontext *ctx,
+                   GLuint n, const GLint x[], const GLint y[],
+                   GLchan rgba[][4], const GLubyte mask[] )
+{
+   const OSMesaContext osmesa = OSMESA_CONTEXT(ctx);
+   GLuint i;
+   for (i = 0; i < n; i++) {
+      if (mask[i]) {
+         const GLchan *p = PIXELADDR3(x[i], y[i]);
+         rgba[i][RCOMP] = UNPACK_RED(p);
+         rgba[i][GCOMP] = UNPACK_GREEN(p);
+         rgba[i][BCOMP] = UNPACK_BLUE(p);
+         rgba[i][ACOMP] = CHAN_MAX;
+      }
+   }
+}
+
+
+/**********************************************************************/
+/*****                2 byte RGB pixel support funcs              *****/
+/**********************************************************************/
+
+/* Write RGBA pixels to an RGB_565 buffer. */
+static void
+write_rgba_span2( const GLcontext *ctx,
+                  GLuint n, GLint x, GLint y,
+                  CONST GLchan rgba[][4], const GLubyte mask[] )
+{
+   OSMesaContext osmesa = OSMESA_CONTEXT(ctx);
+   GLushort *ptr2 = (GLushort *) PIXELADDR2(x, y);
+   GLuint i;
+   if (mask) {
+      for (i = 0; i < n; i++, ptr2++) {
+         if (mask[i]) {
+            PACK_RGB_565(*ptr2, rgba[i][RCOMP], rgba[i][GCOMP], rgba[i][BCOMP]);
+         }
+      }
+   }
+   else {
+      for (i = 0; i < n; i++, ptr2++) {
+         PACK_RGB_565(*ptr2, rgba[i][RCOMP], rgba[i][GCOMP], rgba[i][BCOMP]);
+      }
+   }
+}
+
+
+/* Write RGB pixels to an RGB_565 buffer. */
+static void
+write_rgb_span2( const GLcontext *ctx,
+                 GLuint n, GLint x, GLint y,
+                 CONST GLchan rgb[][3], const GLubyte mask[] )
+{
+   OSMesaContext osmesa = OSMESA_CONTEXT(ctx);
+   GLushort *ptr2 = (GLushort *) PIXELADDR2(x, y);
+   GLuint i;
+   if (mask) {
+      for (i = 0; i < n; i++, ptr2++) {
+         if (mask[i]) {
+            PACK_RGB_565(*ptr2, rgb[i][RCOMP], rgb[i][GCOMP], rgb[i][BCOMP]);
+         }
+      }
+   }
+   else {
+      for (i = 0; i < n; i++, ptr2++) {
+         PACK_RGB_565(*ptr2, rgb[i][RCOMP], rgb[i][GCOMP], rgb[i][BCOMP]);
+      }
+   }
+}
+
+
+static void
+write_monocolor_span2( const GLcontext *ctx, GLuint n, GLint x, GLint y,
+                       const GLchan color[4], const GLubyte mask[] )
+{
+   OSMesaContext osmesa = OSMESA_CONTEXT(ctx);
+   GLushort pixel;
+   GLushort *ptr2 = (GLushort *) PIXELADDR2(x, y);
+   GLuint i;
+   PACK_RGB_565(pixel, color[RCOMP], color[GCOMP], color[BCOMP]);
+   for (i = 0; i < n; i++, ptr2++) {
+      if (mask[i]) {
+         *ptr2 = pixel;
+      }
+   }
+}
+
+
+static void
+write_rgba_pixels2( const GLcontext *ctx,
+                    GLuint n, const GLint x[], const GLint y[],
+                    CONST GLchan rgba[][4], const GLubyte mask[] )
+{
+   OSMesaContext osmesa = OSMESA_CONTEXT(ctx);
+   GLuint i;
+   for (i = 0; i < n; i++) {
+      if (mask[i]) {
+         GLushort *ptr2 = (GLushort *) PIXELADDR2(x[i],y[i]);
+         PACK_RGB_565(*ptr2, rgba[i][RCOMP], rgba[i][GCOMP], rgba[i][BCOMP]);
+      }
+   }
+}
+
+static void
+write_monocolor_pixels2( const GLcontext *ctx,
+                         GLuint n, const GLint x[], const GLint y[],
+                         const GLchan color[4], const GLubyte mask[] )
+{
+   OSMesaContext osmesa = OSMESA_CONTEXT(ctx);
+   GLuint i;
+   GLushort pixel;
+   PACK_RGB_565(pixel, color[RCOMP], color[GCOMP], color[BCOMP]);
+   for (i = 0; i < n; i++) {
+d1016 4
+a1019 2
+         GLushort *ptr2 = (GLushort *) PIXELADDR2(x[i],y[i]);
+         *ptr2 = pixel;
+d1024 3
+a1026 4
+static void
+read_rgba_span2( const GLcontext *ctx,
+                 GLuint n, GLint x, GLint y,
+                 GLchan rgba[][4] )
+d1028 1
+a1028 1
+   OSMesaContext osmesa = OSMESA_CONTEXT(ctx);
+d1030 8
+a1037 6
+   const GLushort *ptr2 = (const GLushort *) PIXELADDR2(x, y);
+   for (i = 0; i < n; i++, ptr2++) {
+      /* This should be fixed to get the low bits right */
+      rgba[i][RCOMP] = (*ptr2 >> 8) & 0xFe;
+      rgba[i][GCOMP] = (*ptr2 >> 3) & 0xFc;
+      rgba[i][BCOMP] = (*ptr2 << 3) & 0xFe;
+d1042 10
+a1051 8
+static void
+read_rgba_pixels2( const GLcontext *ctx,
+                   GLuint n, const GLint x[], const GLint y[],
+                   GLchan rgba[][4], const GLubyte mask[] )
+{
+   OSMesaContext osmesa = OSMESA_CONTEXT(ctx);
+   GLuint i;
+   for (i = 0; i < n; i++) {
+d1053 4
+a1056 5
+         /* This should be fixed to get the low bits right */
+         const GLushort *ptr2 = (const GLushort *) PIXELADDR2(x[i],y[i]);
+         rgba[i][RCOMP] = (*ptr2 >> 8) & 0xFE;
+         rgba[i][GCOMP] = (*ptr2 >> 3) & 0xFC;
+         rgba[i][BCOMP] = (*ptr2 << 3) & 0xFE;
+a1062 1
+
+d1068 3
+a1070 3
+static void
+write_index32_span( const GLcontext *ctx, GLuint n, GLint x, GLint y,
+                    const GLuint index[], const GLubyte mask[] )
+d1072 2
+a1073 2
+   const OSMesaContext osmesa = OSMESA_CONTEXT(ctx);
+   GLchan *ptr1 = PIXELADDR1(x, y);
+d1078 1
+a1078 1
+            *ptr1 = (GLchan) index[i];
+d1084 1
+a1084 1
+         *ptr1 = (GLchan) index[i];
+d1091 3
+a1093 3
+static void
+write_index8_span( const GLcontext *ctx, GLuint n, GLint x, GLint y,
+                   const GLubyte index[], const GLubyte mask[] )
+d1095 2
+a1096 2
+   const OSMesaContext osmesa = OSMESA_CONTEXT(ctx);
+   GLchan *ptr1 = PIXELADDR1(x, y);
+d1101 1
+a1101 1
+            *ptr1 = (GLchan) index[i];
+d1106 1
+a1106 1
+      MEMCPY(ptr1, index, n * sizeof(GLchan));
+d1111 3
+a1113 3
+static void
+write_monoindex_span( const GLcontext *ctx, GLuint n, GLint x, GLint y,
+                      GLuint colorIndex, const GLubyte mask[] )
+d1115 2
+a1116 2
+   const OSMesaContext osmesa = OSMESA_CONTEXT(ctx);
+   GLchan *ptr1 = PIXELADDR1(x, y);
+d1120 1
+a1120 1
+         *ptr1 = (GLchan) colorIndex;
+d1126 3
+a1128 4
+static void
+write_index_pixels( const GLcontext *ctx,
+                    GLuint n, const GLint x[], const GLint y[],
+                    const GLuint index[], const GLubyte mask[] )
+d1130 1
+a1130 1
+   const OSMesaContext osmesa = OSMESA_CONTEXT(ctx);
+d1134 2
+a1135 2
+         GLchan *ptr1 = PIXELADDR1(x[i], y[i]);
+         *ptr1 = (GLchan) index[i];
+d1141 3
+a1143 4
+static void
+write_monoindex_pixels( const GLcontext *ctx,
+                        GLuint n, const GLint x[], const GLint y[],
+                        GLuint colorIndex, const GLubyte mask[] )
+d1145 1
+a1145 1
+   const OSMesaContext osmesa = OSMESA_CONTEXT(ctx);
+d1149 2
+a1150 2
+         GLchan *ptr1 = PIXELADDR1(x[i], y[i]);
+         *ptr1 = (GLchan) colorIndex;
+d1156 2
+a1157 3
+static void
+read_index_span( const GLcontext *ctx,
+                 GLuint n, GLint x, GLint y, GLuint index[] )
+d1159 1
+a1159 1
+   const OSMesaContext osmesa = OSMESA_CONTEXT(ctx);
+d1161 1
+a1161 1
+   const GLchan *ptr1 = (const GLchan *) PIXELADDR1(x, y);
+d1168 3
+a1170 4
+static void
+read_index_pixels( const GLcontext *ctx,
+                   GLuint n, const GLint x[], const GLint y[],
+                   GLuint index[], const GLubyte mask[] )
+d1172 1
+a1172 1
+   const OSMesaContext osmesa = OSMESA_CONTEXT(ctx);
+d1176 1
+a1176 1
+         const GLchan *ptr1 = PIXELADDR1(x[i], y[i]);
+d1192 2
+a1193 2
+static void
+flat_rgba_line( GLcontext *ctx, const SWvertex *vert0, const SWvertex *vert1 )
+d1195 3
+a1197 2
+   const OSMesaContext osmesa = OSMESA_CONTEXT(ctx);
+   const GLchan *color = vert1->color;
+d1201 1
+a1201 5
+#define PLOT(X, Y)						\
+do {								\
+   GLchan *p = PIXELADDR4(X, Y);				\
+   PACK_RGBA(p, color[0], color[1], color[2], color[3]);	\
+} while (0)
+d1204 1
+a1204 1
+#include "..\swrast\s_linetemp.h"
+d1206 1
+a1206 1
+#include "swrast/s_linetemp.h"
+d1214 2
+a1215 2
+static void
+flat_rgba_z_line(GLcontext *ctx, const SWvertex *vert0, const SWvertex *vert1)
+d1217 3
+a1219 2
+   const OSMesaContext osmesa = OSMESA_CONTEXT(ctx);
+   const GLchan *color = vert1->color;
+d1225 6
+a1230 10
+#define PLOT(X, Y)					\
+do {							\
+   if (Z < *zPtr) {					\
+      GLchan *p = PIXELADDR4(X, Y);			\
+      PACK_RGBA(p, color[RCOMP], color[GCOMP],		\
+                   color[BCOMP], color[ACOMP]);		\
+      *zPtr = Z;					\
+   }							\
+} while (0)
+
+d1233 1
+a1233 1
+#include "..\swrast\s_linetemp.h"
+d1235 1
+a1235 1
+#include "swrast/s_linetemp.h"
+a1241 1
+ * XXX update for GLchan
+d1243 13
+a1255 13
+static void
+flat_blend_rgba_line( GLcontext *ctx,
+                      const SWvertex *vert0, const SWvertex *vert1 )
+{
+   const OSMesaContext osmesa = OSMESA_CONTEXT(ctx);
+   const GLint rshift = osmesa->rshift;
+   const GLint gshift = osmesa->gshift;
+   const GLint bshift = osmesa->bshift;
+   const GLint avalue = vert0->color[3];
+   const GLint msavalue = CHAN_MAX - avalue;
+   const GLint rvalue = vert1->color[0]*avalue;
+   const GLint gvalue = vert1->color[1]*avalue;
+   const GLint bvalue = vert1->color[2]*avalue;
+d1260 1
+a1260 1
+   { GLuint *ptr4 = (GLuint *) PIXELADDR4(X, Y);	\
+a1267 11
+#if 0  /* XXX use this in the future */
+#define PLOT(X,Y)							\
+   {									\
+      GLchan *pixel = (GLchan *) PIXELADDR4(X, Y);			\
+      pixel[rInd] = (pixel[rInd] * msavalue + rvalue) >> CHAN_BITS;	\
+      pixel[gInd] = (pixel[gInd] * msavalue + gvalue) >> CHAN_BITS;	\
+      pixel[bInd] = (pixel[bInd] * msavalue + bvalue) >> CHAN_BITS;	\
+      pixel[aInd] = (pixel[aInd] * msavalue + avalue) >> CHAN_BITS;	\
+   }
+#endif
+
+d1269 1
+a1269 1
+#include "..\swrast\s_linetemp.h"
+d1271 1
+a1271 1
+#include "swrast/s_linetemp.h"
+a1277 2
+ * But don't write to Z buffer.
+ * XXX update for GLchan
+d1279 13
+a1291 13
+static void
+flat_blend_rgba_z_line( GLcontext *ctx,
+                        const SWvertex *vert0, const SWvertex *vert1 )
+{
+   const OSMesaContext osmesa = OSMESA_CONTEXT(ctx);
+   const GLint rshift = osmesa->rshift;
+   const GLint gshift = osmesa->gshift;
+   const GLint bshift = osmesa->bshift;
+   const GLint avalue = vert0->color[3];
+   const GLint msavalue = 256 - avalue;
+   const GLint rvalue = vert1->color[0]*avalue;
+   const GLint gvalue = vert1->color[1]*avalue;
+   const GLint bvalue = vert1->color[2]*avalue;
+d1299 1
+a1299 1
+	   GLuint *ptr4 = (GLuint *) PIXELADDR4(X, Y);			\
+a1306 11
+#if 0  /* XXX use this in the future */
+#define PLOT(X,Y)							\
+   if (Z < *zPtr) {							\
+      GLchan *pixel = (GLchan *) PIXELADDR4(X, Y);			\
+      pixel[rInd] = (pixel[rInd] * msavalue + rvalue) >> CHAN_BITS;	\
+      pixel[gInd] = (pixel[gInd] * msavalue + gvalue) >> CHAN_BITS;	\
+      pixel[bInd] = (pixel[bInd] * msavalue + bvalue) >> CHAN_BITS;	\
+      pixel[aInd] = (pixel[aInd] * msavalue + avalue) >> CHAN_BITS;	\
+   }
+#endif
+
+d1308 1
+a1308 1
+#include "..\swrast\s_linetemp.h"
+d1310 1
+a1310 1
+#include "swrast/s_linetemp.h"
+a1316 1
+ * XXX update for GLchan
+d1318 13
+a1330 13
+static void
+flat_blend_rgba_z_line_write( GLcontext *ctx,
+                              const SWvertex *vert0, const SWvertex *vert1 )
+{
+   const OSMesaContext osmesa = OSMESA_CONTEXT(ctx);
+   const GLint rshift = osmesa->rshift;
+   const GLint gshift = osmesa->gshift;
+   const GLint bshift = osmesa->bshift;
+   const GLint avalue = vert0->color[3];
+   const GLint msavalue = 256 - avalue;
+   const GLint rvalue = vert1->color[0]*avalue;
+   const GLint gvalue = vert1->color[1]*avalue;
+   const GLint bvalue = vert1->color[2]*avalue;
+d1338 1
+a1338 1
+	   GLuint *ptr4 = (GLuint *) PIXELADDR4(X, Y);			\
+a1346 12
+#if 0  /* XXX use this in the future */
+#define PLOT(X,Y)							\
+   if (Z < *zPtr) {							\
+      GLchan *pixel = (GLchan *) PIXELADDR4(X, Y);			\
+      pixel[rInd] = (pixel[rInd] * msavalue + rvalue) >> CHAN_BITS;	\
+      pixel[gInd] = (pixel[gInd] * msavalue + gvalue) >> CHAN_BITS;	\
+      pixel[bInd] = (pixel[bInd] * msavalue + bvalue) >> CHAN_BITS;	\
+      pixel[aInd] = (pixel[aInd] * msavalue + avalue) >> CHAN_BITS;	\
+      *zPtr = Z;							\
+   }
+#endif
+
+d1348 1
+a1348 1
+#include "..\swrast\s_linetemp.h"
+d1350 1
+a1350 1
+#include "swrast/s_linetemp.h"
+d1359 1
+a1359 2
+static swrast_line_func
+osmesa_choose_line_function( GLcontext *ctx )
+d1361 1
+a1361 2
+   const OSMesaContext osmesa = OSMESA_CONTEXT(ctx);
+   const SWcontext *swrast = SWRAST_CONTEXT(ctx);
+a1362 7
+   if (CHAN_BITS != 8)                    return NULL;
+   if (ctx->RenderMode != GL_RENDER)      return NULL;
+   if (ctx->Line.SmoothFlag)              return NULL;
+   if (ctx->Texture._EnabledUnits)        return NULL;
+   if (ctx->Light.ShadeModel != GL_FLAT)  return NULL;
+   if (ctx->Line.Width != 1.0F)           return NULL;
+   if (ctx->Line.StippleFlag)             return NULL;
+d1364 2
+a1365 3
+   if (osmesa->format != OSMESA_RGBA &&
+       osmesa->format != OSMESA_BGRA &&
+       osmesa->format != OSMESA_ARGB)     return NULL;
+d1367 2
+a1368 10
+   if (swrast->_RasterMask==DEPTH_BIT
+       && ctx->Depth.Func==GL_LESS
+       && ctx->Depth.Mask==GL_TRUE
+       && ctx->Visual.depthBits == DEFAULT_SOFTWARE_DEPTH_BITS) {
+      return (swrast_line_func) flat_rgba_z_line;
+   }
+
+   if (swrast->_RasterMask == 0) {
+      return (swrast_line_func) flat_rgba_line;
+   }
+d1370 78
+a1447 11
+   if (swrast->_RasterMask==(DEPTH_BIT|BLEND_BIT)
+       && ctx->Depth.Func==GL_LESS
+       && ctx->Depth.Mask==GL_TRUE
+       && ctx->Visual.depthBits == DEFAULT_SOFTWARE_DEPTH_BITS
+       && ctx->Color.BlendSrcRGB==GL_SRC_ALPHA
+       && ctx->Color.BlendDstRGB==GL_ONE_MINUS_SRC_ALPHA
+       && ctx->Color.BlendSrcA==GL_SRC_ALPHA
+       && ctx->Color.BlendDstA==GL_ONE_MINUS_SRC_ALPHA
+       && ctx->Color.BlendEquation==GL_FUNC_ADD_EXT) {
+      return (swrast_line_func) flat_blend_rgba_z_line_write;
+   }
+a1448 19
+   if (swrast->_RasterMask==(DEPTH_BIT|BLEND_BIT)
+       && ctx->Depth.Func==GL_LESS
+       && ctx->Depth.Mask==GL_FALSE
+       && ctx->Visual.depthBits == DEFAULT_SOFTWARE_DEPTH_BITS
+       && ctx->Color.BlendSrcRGB==GL_SRC_ALPHA
+       && ctx->Color.BlendDstRGB==GL_ONE_MINUS_SRC_ALPHA
+       && ctx->Color.BlendSrcA==GL_SRC_ALPHA
+       && ctx->Color.BlendDstA==GL_ONE_MINUS_SRC_ALPHA
+       && ctx->Color.BlendEquation==GL_FUNC_ADD_EXT) {
+      return (swrast_line_func) flat_blend_rgba_z_line;
+   }
+
+   if (swrast->_RasterMask==BLEND_BIT
+       && ctx->Color.BlendSrcRGB==GL_SRC_ALPHA
+       && ctx->Color.BlendDstRGB==GL_ONE_MINUS_SRC_ALPHA
+       && ctx->Color.BlendSrcA==GL_SRC_ALPHA
+       && ctx->Color.BlendDstA==GL_ONE_MINUS_SRC_ALPHA
+       && ctx->Color.BlendEquation==GL_FUNC_ADD_EXT) {
+      return (swrast_line_func) flat_blend_rgba_line;
+d1450 1
+a1450 2
+
+   return (swrast_line_func) NULL;
+d1462 2
+a1463 4
+static void smooth_rgba_z_triangle( GLcontext *ctx,
+				    const SWvertex *v0,
+                                    const SWvertex *v1,
+                                    const SWvertex *v2 )
+d1465 7
+a1471 1
+   const OSMesaContext osmesa = OSMESA_CONTEXT(ctx);
+d1476 6
+a1481 5
+#define RENDER_SPAN( span )					\
+   GLuint i;							\
+   GLchan *img = PIXELADDR4(span.x, span.y); 			\
+   for (i = 0; i < span.end; i++, img += 4) {			\
+      const GLdepth z = FixedToDepth(span.z);			\
+d1483 2
+a1484 3
+         PACK_RGBA(img, FixedToChan(span.red),			\
+            FixedToChan(span.green), FixedToChan(span.blue),	\
+            FixedToChan(span.alpha));				\
+d1487 4
+a1490 7
+      span.red += span.redStep;					\
+      span.green += span.greenStep;				\
+      span.blue += span.blueStep;				\
+      span.alpha += span.alphaStep;				\
+      span.z += span.zStep;					\
+   }
+
+d1492 1
+a1492 1
+#include "..\swrast\s_tritemp.h"
+d1494 1
+a1494 1
+#include "swrast/s_tritemp.h"
+d1504 2
+a1505 4
+static void flat_rgba_z_triangle( GLcontext *ctx,
+				  const SWvertex *v0,
+                                  const SWvertex *v1,
+                                  const SWvertex *v2 )
+d1507 1
+a1507 1
+   const OSMesaContext osmesa = OSMESA_CONTEXT(ctx);
+d1510 20
+a1529 17
+#define SETUP_CODE						\
+   GLuint pixel;						\
+   PACK_RGBA((GLchan *) &pixel, v2->color[0], v2->color[1],	\
+                                v2->color[2], v2->color[3]);
+
+#define RENDER_SPAN( span )				\
+   GLuint i;						\
+   GLuint *img = (GLuint *) PIXELADDR4(span.x, span.y);	\
+   for (i = 0; i < span.end; i++) {			\
+      const GLdepth z = FixedToDepth(span.z);		\
+      if (z < zRow[i]) {				\
+         img[i] = pixel;				\
+         zRow[i] = z;					\
+      }							\
+      span.z += span.zStep;				\
+   }
+
+d1531 1
+a1531 1
+#include "..\swrast\s_tritemp.h"
+d1533 1
+a1533 1
+#include "swrast/s_tritemp.h"
+d1542 1
+a1542 2
+static swrast_tri_func
+osmesa_choose_triangle_function( GLcontext *ctx )
+d1544 7
+a1550 2
+   const OSMesaContext osmesa = OSMESA_CONTEXT(ctx);
+   const SWcontext *swrast = SWRAST_CONTEXT(ctx);
+d1552 7
+a1558 18
+   if (CHAN_BITS != 8)                  return (swrast_tri_func) NULL;
+   if (ctx->RenderMode != GL_RENDER)    return (swrast_tri_func) NULL;
+   if (ctx->Polygon.SmoothFlag)         return (swrast_tri_func) NULL;
+   if (ctx->Polygon.StippleFlag)        return (swrast_tri_func) NULL;
+   if (ctx->Texture._EnabledUnits)      return (swrast_tri_func) NULL;
+   if (osmesa->format != OSMESA_RGBA &&
+       osmesa->format != OSMESA_BGRA &&
+       osmesa->format != OSMESA_ARGB)   return (swrast_tri_func) NULL;
+   if (ctx->Polygon.CullFlag && 
+       ctx->Polygon.CullFaceMode == GL_FRONT_AND_BACK)
+                                        return (swrast_tri_func) NULL;
+
+   if (swrast->_RasterMask == DEPTH_BIT &&
+       ctx->Depth.Func == GL_LESS &&
+       ctx->Depth.Mask == GL_TRUE &&
+       ctx->Visual.depthBits == DEFAULT_SOFTWARE_DEPTH_BITS) {
+      if (ctx->Light.ShadeModel == GL_SMOOTH) {
+         return (swrast_tri_func) smooth_rgba_z_triangle;
+d1561 1
+a1561 1
+         return (swrast_tri_func) flat_rgba_z_triangle;
+d1564 1
+a1564 25
+   return (swrast_tri_func) NULL;
+}
+
+
+
+/* Override for the swrast triangle-selection function.  Try to use one
+ * of our internal triangle functions, otherwise fall back to the
+ * standard swrast functions.
+ */
+static void osmesa_choose_triangle( GLcontext *ctx )
+{
+   SWcontext *swrast = SWRAST_CONTEXT(ctx);
+
+   swrast->Triangle = osmesa_choose_triangle_function( ctx );
+   if (!swrast->Triangle)
+      _swrast_choose_triangle( ctx );
+}
+
+static void osmesa_choose_line( GLcontext *ctx )
+{
+   SWcontext *swrast = SWRAST_CONTEXT(ctx);
+
+   swrast->Line = osmesa_choose_line_function( ctx );
+   if (!swrast->Line)
+      _swrast_choose_line( ctx );
+a1567 29
+#define OSMESA_NEW_LINE   (_NEW_LINE | \
+                           _NEW_TEXTURE | \
+                           _NEW_LIGHT | \
+                           _NEW_DEPTH | \
+                           _NEW_RENDERMODE | \
+                           _SWRAST_NEW_RASTERMASK)
+
+#define OSMESA_NEW_TRIANGLE (_NEW_POLYGON | \
+                             _NEW_TEXTURE | \
+                             _NEW_LIGHT | \
+                             _NEW_DEPTH | \
+                             _NEW_RENDERMODE | \
+                             _SWRAST_NEW_RASTERMASK)
+
+
+/* Extend the software rasterizer with our line and triangle
+ * functions.
+ */
+static void osmesa_register_swrast_functions( GLcontext *ctx )
+{
+   SWcontext *swrast = SWRAST_CONTEXT( ctx );
+
+   swrast->choose_line = osmesa_choose_line;
+   swrast->choose_triangle = osmesa_choose_triangle;
+
+   swrast->invalidate_line |= OSMESA_NEW_LINE;
+   swrast->invalidate_triangle |= OSMESA_NEW_TRIANGLE;
+}
+
+a1573 5
+#if CHAN_BITS == 32
+         return (const GLubyte *) "Mesa OffScreen32";
+#elif CHAN_BITS == 16
+         return (const GLubyte *) "Mesa OffScreen16";
+#else
+a1574 1
+#endif
+d1581 1
+a1581 1
+static void osmesa_update_state( GLcontext *ctx, GLuint new_state )
+d1583 1
+a1583 3
+   OSMesaContext osmesa = OSMESA_CONTEXT(ctx);
+   struct swrast_device_driver *swdd = _swrast_GetDeviceDriverReference( ctx );
+   TNLcontext *tnl = TNL_CONTEXT(ctx);
+a1586 5
+   /*
+    * XXX these function pointers could be initialized just once during
+    * context creation since they don't depend on any state changes.
+    */
+
+d1589 9
+a1597 1
+   ctx->Driver.ResizeBuffers = _swrast_alloc_buffers;
+d1600 3
+a1602 33
+   ctx->Driver.Accum = _swrast_Accum;
+   ctx->Driver.Bitmap = _swrast_Bitmap;
+   ctx->Driver.Clear = clear;
+   ctx->Driver.CopyPixels = _swrast_CopyPixels;
+   ctx->Driver.DrawPixels = _swrast_DrawPixels;
+   ctx->Driver.ReadPixels = _swrast_ReadPixels;
+   ctx->Driver.DrawBuffer = _swrast_DrawBuffer;
+
+   ctx->Driver.ChooseTextureFormat = _mesa_choose_tex_format;
+   ctx->Driver.TexImage1D = _mesa_store_teximage1d;
+   ctx->Driver.TexImage2D = _mesa_store_teximage2d;
+   ctx->Driver.TexImage3D = _mesa_store_teximage3d;
+   ctx->Driver.TexSubImage1D = _mesa_store_texsubimage1d;
+   ctx->Driver.TexSubImage2D = _mesa_store_texsubimage2d;
+   ctx->Driver.TexSubImage3D = _mesa_store_texsubimage3d;
+   ctx->Driver.TestProxyTexImage = _mesa_test_proxy_teximage;
+
+   ctx->Driver.CompressedTexImage1D = _mesa_store_compressed_teximage1d;
+   ctx->Driver.CompressedTexImage2D = _mesa_store_compressed_teximage2d;
+   ctx->Driver.CompressedTexImage3D = _mesa_store_compressed_teximage3d;
+   ctx->Driver.CompressedTexSubImage1D = _mesa_store_compressed_texsubimage1d;
+   ctx->Driver.CompressedTexSubImage2D = _mesa_store_compressed_texsubimage2d;
+   ctx->Driver.CompressedTexSubImage3D = _mesa_store_compressed_texsubimage3d;
+
+   ctx->Driver.CopyTexImage1D = _swrast_copy_teximage1d;
+   ctx->Driver.CopyTexImage2D = _swrast_copy_teximage2d;
+   ctx->Driver.CopyTexSubImage1D = _swrast_copy_texsubimage1d;
+   ctx->Driver.CopyTexSubImage2D = _swrast_copy_texsubimage2d;
+   ctx->Driver.CopyTexSubImage3D = _swrast_copy_texsubimage3d;
+   ctx->Driver.CopyColorTable = _swrast_CopyColorTable;
+   ctx->Driver.CopyColorSubTable = _swrast_CopyColorSubTable;
+   ctx->Driver.CopyConvolutionFilter1D = _swrast_CopyConvolutionFilter1D;
+   ctx->Driver.CopyConvolutionFilter2D = _swrast_CopyConvolutionFilter2D;
+a1603 1
+   swdd->SetBuffer = set_buffer;
+d1606 9
+a1614 26
+   if (osmesa->format == OSMESA_RGB) {
+      swdd->WriteRGBASpan = write_rgba_span_RGB;
+      swdd->WriteRGBSpan = write_rgb_span_RGB;
+      swdd->WriteMonoRGBASpan = write_monocolor_span_RGB;
+      swdd->WriteRGBAPixels = write_rgba_pixels_RGB;
+      swdd->WriteMonoRGBAPixels = write_monocolor_pixels_RGB;
+      swdd->ReadRGBASpan = read_rgba_span3;
+      swdd->ReadRGBAPixels = read_rgba_pixels3;
+   }
+   else if (osmesa->format == OSMESA_BGR) {
+      swdd->WriteRGBASpan = write_rgba_span_BGR;
+      swdd->WriteRGBSpan = write_rgb_span_BGR;
+      swdd->WriteMonoRGBASpan = write_monocolor_span_BGR;
+      swdd->WriteRGBAPixels = write_rgba_pixels_BGR;
+      swdd->WriteMonoRGBAPixels = write_monocolor_pixels_BGR;
+      swdd->ReadRGBASpan = read_rgba_span3;
+      swdd->ReadRGBAPixels = read_rgba_pixels3;
+   }
+   else if (osmesa->format == OSMESA_RGB_565) {
+      swdd->WriteRGBASpan = write_rgba_span2;
+      swdd->WriteRGBSpan = write_rgb_span2;
+      swdd->WriteMonoRGBASpan = write_monocolor_span2;
+      swdd->WriteRGBAPixels = write_rgba_pixels2;
+      swdd->WriteMonoRGBAPixels = write_monocolor_pixels2;
+      swdd->ReadRGBASpan = read_rgba_span2;
+      swdd->ReadRGBAPixels = read_rgba_pixels2;
+d1617 16
+a1632 17
+      /* 4 GLchan / pixel in frame buffer */
+      swdd->WriteRGBSpan = write_rgb_span;
+      swdd->WriteRGBAPixels = write_rgba_pixels;
+      swdd->WriteMonoRGBASpan = write_monocolor_span;
+      swdd->WriteMonoRGBAPixels = write_monocolor_pixels;
+      if (osmesa->format == OSMESA_RGBA &&
+          CHAN_TYPE == GL_UNSIGNED_BYTE &&
+          RCOMP==0 && GCOMP==1 && BCOMP==2 && ACOMP==3) {
+         /* special, fast case */
+         swdd->WriteRGBASpan = write_rgba_span_rgba;
+         swdd->ReadRGBASpan = read_rgba_span_rgba;
+      }
+      else {
+         swdd->WriteRGBASpan = write_rgba_span;
+         swdd->ReadRGBASpan = read_rgba_span;
+      }
+      swdd->ReadRGBAPixels = read_rgba_pixels;
+d1636 7
+a1642 14
+   swdd->WriteCI32Span = write_index32_span;
+   swdd->WriteCI8Span = write_index8_span;
+   swdd->WriteMonoCISpan = write_monoindex_span;
+   swdd->WriteCI32Pixels = write_index_pixels;
+   swdd->WriteMonoCIPixels = write_monoindex_pixels;
+   swdd->ReadCI32Span = read_index_span;
+   swdd->ReadCI32Pixels = read_index_pixels;
+
+   tnl->Driver.RunPipeline = _tnl_run_pipeline;
+
+   _swrast_InvalidateState( ctx, new_state );
+   _swsetup_InvalidateState( ctx, new_state );
+   _ac_InvalidateState( ctx, new_state );
+   _tnl_InvalidateState( ctx, new_state );
+@
+
+
+1.1.1.1
+log
+@Import OpenBSD 3.3 XF4 repository from CTM 3132 the first time
+This finalizes starting an OpenBSD-mirabile (aka MirBSD) repository.
+
+### MirBSD is:
+# Copyright (c) 1982-2003 by Thorsten "mirabile" Glaser <x86@@ePost.de>
+# Copyright © 1968-2003  The authors of And contributors to UNIX®, the
+#       C Language, BSD/Berkeley Unix; 386BSD, NetBSD 1.1 and OpenBSD.
+#
+# Anyone who obtained a copy of this work is hereby permitted to freely use,
+# distribute, modify, merge, sublicence, give away or sell it as long as the
+# authors are given due credit and the following notice is retained:
+#
+# This work is provided "as is", with no explicit or implicit warranty what-
+# soever. Use it only at your own risk. In no event may an author or contri-
+# butor be held liable for any damage, directly or indirectly, that origina-
+# ted through or is caused by creation or modification of this work.
+
+MirBSD is my private tree. MirBSD does not differ very much from OpenBSD
+and intentionally tracks OpenBSD. That's why it _is_ OpenBSD, just not the
+official one. It's like with DarrenBSD.
+
+At time of this writing, no advertising for MirBSD must be done,
+because the advertising clause has not yet been sorted out.
+
+http://templeofhate.com/tglaser/MirBSD/index.php
+@
+text
+@@
+
+
+1.1.1.2
+log
+@The X-Windowing System
+
+Import XFree86 4.3 from OpenBSD by CTM, in the hope it's stable
+@
+text
+@d1 1
+d4 1
+a4 1
+ * Version:  4.0.3
+d6 1
+a6 1
+ * Copyright (C) 1999-2002  Brian Paul   All Rights Reserved.
+d32 1
+a32 1
+ * managed by the core _mesa_make_current() and _mesa_get_current_context()
+d37 3
+a41 1
+#include "buffers.h"
+a42 1
+#include "colormac.h"
+d44 4
+a48 3
+#include "macros.h"
+#include "matrix.h"
+#include "mem.h"
+d50 1
+a50 15
+#include "mtypes.h"
+#include "texformat.h"
+#include "texstore.h"
+#include "array_cache/acache.h"
+#include "swrast/swrast.h"
+#include "swrast_setup/swrast_setup.h"
+#include "swrast/s_context.h"
+#include "swrast/s_depth.h"
+#include "swrast/s_lines.h"
+#include "swrast/s_triangle.h"
+#include "swrast/s_trispan.h"
+#include "tnl/tnl.h"
+#include "tnl/t_context.h"
+#include "tnl/t_pipeline.h"
+
+d67 2
+d73 2
+a74 2
+   GLint rInd, gInd, bInd, aInd;/* index offsets for RGBA formats */
+   GLchan *rowaddr[MAX_HEIGHT];	/* address of first pixel in each image row */
+d82 1
+a82 6
+static void osmesa_update_state( GLcontext *ctx, GLuint newstate );
+static void osmesa_register_swrast_functions( GLcontext *ctx );
+
+
+
+#define OSMESA_CONTEXT(ctx)  ((OSMesaContext) (ctx->DriverCtx))
+d100 1
+a100 1
+GLAPI OSMesaContext GLAPIENTRY
+a102 15
+   return OSMesaCreateContextExt(format, DEFAULT_SOFTWARE_DEPTH_BITS,
+                                 8, 16, sharelist);
+}
+
+
+
+/*
+ * New in Mesa 3.5
+ *
+ * Create context and specify size of ancillary buffers.
+ */
+GLAPI OSMesaContext GLAPIENTRY
+OSMesaCreateContextExt( GLenum format, GLint depthBits, GLint stencilBits,
+                        GLint accumBits, OSMesaContext sharelist )
+{
+d105 2
+a106 2
+   GLint rind, gind, bind, aind;
+   GLint indexBits = 0, redBits = 0, greenBits = 0, blueBits = 0, alphaBits =0;
+d108 4
+a111 3
+   const GLuint i4 = 1;
+   const GLubyte *i1 = (GLubyte *) &i4;
+   const GLint little_endian = *i1;
+d113 2
+a114 1
+   rind = gind = bind = aind = 0;
+d122 1
+a122 8
+      redBits = CHAN_BITS;
+      greenBits = CHAN_BITS;
+      blueBits = CHAN_BITS;
+      alphaBits = CHAN_BITS;
+      rind = 0;
+      gind = 1;
+      bind = 2;
+      aind = 3;
+d139 1
+a139 8
+      redBits = CHAN_BITS;
+      greenBits = CHAN_BITS;
+      blueBits = CHAN_BITS;
+      alphaBits = CHAN_BITS;
+      bind = 0;
+      gind = 1;
+      rind = 2;
+      aind = 3;
+d141 4
+a144 4
+         bshift = 0;
+         gshift = 8;
+         rshift = 16;
+         ashift = 24;
+d156 1
+a156 8
+      redBits = CHAN_BITS;
+      greenBits = CHAN_BITS;
+      blueBits = CHAN_BITS;
+      alphaBits = CHAN_BITS;
+      aind = 0;
+      rind = 1;
+      gind = 2;
+      bind = 3;
+d158 4
+a161 4
+         ashift = 0;
+         rshift = 8;
+         gshift = 16;
+         bshift = 24;
+a172 3
+      redBits = CHAN_BITS;
+      greenBits = CHAN_BITS;
+      blueBits = CHAN_BITS;
+d178 2
+a180 2
+      gind = 1;
+      bind = 2;
+d182 1
+a185 3
+      redBits = CHAN_BITS;
+      greenBits = CHAN_BITS;
+      blueBits = CHAN_BITS;
+d191 2
+a193 17
+      gind = 1;
+      bind = 0;
+      rgbmode = GL_TRUE;
+   }
+   else if (format==OSMESA_RGB_565) {
+      indexBits = 0;
+      redBits = 5;
+      greenBits = 6;
+      blueBits = 5;
+      alphaBits = 0;
+      rshift = 11;
+      gshift = 5;
+      bshift = 0;
+      ashift = 0;
+      rind = 0; /* not used */
+      gind = 0;
+      bind = 0;
+d195 1
+d204 9
+a212 16
+      osmesa->gl_visual = _mesa_create_visual( rgbmode,
+                                               GL_FALSE,    /* double buffer */
+                                               GL_FALSE,    /* stereo */
+                                               redBits,
+                                               greenBits,
+                                               blueBits,
+                                               alphaBits,
+                                               indexBits,
+                                               depthBits,
+                                               stencilBits,
+                                               accumBits,
+                                               accumBits,
+                                               accumBits,
+                                               alphaBits ? accumBits : 0,
+                                               1            /* num samples */
+                                               );
+d227 10
+a236 9
+
+      _mesa_enable_sw_extensions(&(osmesa->gl_ctx));
+      _mesa_enable_1_3_extensions(&(osmesa->gl_ctx));
+
+      osmesa->gl_buffer = _mesa_create_framebuffer( osmesa->gl_visual,
+                           (GLboolean) ( osmesa->gl_visual->depthBits > 0 ),
+                           (GLboolean) ( osmesa->gl_visual->stencilBits > 0 ),
+                           (GLboolean) ( osmesa->gl_visual->accumRedBits > 0 ),
+                           GL_FALSE /* s/w alpha */ );
+d239 2
+a240 2
+         _mesa_destroy_visual( osmesa->gl_visual );
+         _mesa_free_context_data( &osmesa->gl_ctx );
+d248 2
+d257 3
+a259 19
+      osmesa->rInd = rind;
+      osmesa->gInd = gind;
+      osmesa->bInd = bind;
+      osmesa->aInd = aind;
+
+
+      /* Initialize the software rasterizer and helper modules.
+       */
+      {
+	 GLcontext *ctx = &osmesa->gl_ctx;
+
+	 _swrast_CreateContext( ctx );
+	 _ac_CreateContext( ctx );
+	 _tnl_CreateContext( ctx );
+	 _swsetup_CreateContext( ctx );
+	
+	 _swsetup_Wakeup( ctx );
+	 osmesa_register_swrast_functions( ctx );
+      }
+a265 1
+
+d271 1
+a271 1
+GLAPI void GLAPIENTRY OSMesaDestroyContext( OSMesaContext ctx )
+d274 3
+a276 8
+      _swsetup_DestroyContext( &ctx->gl_ctx );
+      _tnl_DestroyContext( &ctx->gl_ctx );
+      _ac_DestroyContext( &ctx->gl_ctx );
+      _swrast_DestroyContext( &ctx->gl_ctx );
+
+      _mesa_destroy_visual( ctx->gl_visual );
+      _mesa_destroy_framebuffer( ctx->gl_buffer );
+      _mesa_free_context_data( &ctx->gl_ctx );
+d288 1
+a288 21
+   GLint bytesPerPixel, bytesPerRow, i;
+   GLubyte *origin = (GLubyte *) ctx->buffer;
+
+   if (ctx->format == OSMESA_COLOR_INDEX) {
+      /* CI mode */
+      bytesPerPixel = 1 * sizeof(GLchan);
+   }
+   else if ((ctx->format == OSMESA_RGB) || (ctx->format == OSMESA_BGR)) {
+      /* RGB mode */
+      bytesPerPixel = 3 * sizeof(GLchan);
+   }
+   else if (ctx->format == OSMESA_RGB_565) {
+      /* 5/6/5 RGB pixel in 16 bits */
+      bytesPerPixel = 2;
+   }
+   else {
+      /* RGBA mode */
+      bytesPerPixel = 4 * sizeof(GLchan);
+   }
+
+   bytesPerRow = ctx->rowlength * bytesPerPixel;
+d292 21
+a312 2
+      for (i = 0; i < MAX_HEIGHT; i++) {
+         ctx->rowaddr[i] = (GLchan *) ((GLubyte *) origin + i * bytesPerRow);
+d317 21
+a337 3
+      for (i = 0; i < MAX_HEIGHT; i++) {
+         GLint j = ctx->height - i - 1;
+         ctx->rowaddr[i] = (GLchan *) ((GLubyte *) origin + j * bytesPerRow);
+d353 5
+d363 2
+a364 5
+ *         type - data type for pixel components
+ *            Normally, only GL_UNSIGNED_BYTE and GL_UNSIGNED_SHORT_5_6_5
+ *            are supported.  But if Mesa's been compiled with CHAN_BITS==16
+ *            then type must be GL_UNSIGNED_SHORT.  And if Mesa's been build
+ *            with CHAN_BITS==32 then type must be GL_FLOAT.
+d367 1
+a367 1
+ *          invalid buffer address, invalid type, width<1, height<1,
+d370 1
+a370 1
+GLAPI GLboolean GLAPIENTRY
+d374 2
+a375 11
+   if (!ctx || !buffer ||
+       width < 1 || height < 1 ||
+       width > MAX_WIDTH || height > MAX_HEIGHT) {
+      return GL_FALSE;
+   }
+
+   if (ctx->format == OSMESA_RGB_565) {
+      if (type != GL_UNSIGNED_SHORT_5_6_5)
+         return GL_FALSE;
+   }
+   else if (type != CHAN_TYPE) {
+d379 2
+a380 2
+   osmesa_update_state( &ctx->gl_ctx, 0 );
+   _mesa_make_current( &ctx->gl_ctx, ctx->gl_buffer );
+a398 8
+   else {
+      /* this will make ensure we recognize the new buffer size */
+      _mesa_ResizeBuffersMESA();
+   }
+
+   /* Added by Gerk Huisma: */
+   _tnl_MakeCurrent( &ctx->gl_ctx, ctx->gl_ctx.DrawBuffer,
+                     ctx->gl_ctx.ReadBuffer );
+d405 1
+a405 1
+GLAPI OSMesaContext GLAPIENTRY OSMesaGetCurrentContext( void )
+d407 1
+a407 1
+   GLcontext *ctx = _mesa_get_current_context();
+d416 1
+a416 1
+GLAPI void GLAPIENTRY OSMesaPixelStore( GLint pname, GLint value )
+d423 1
+a423 1
+            _mesa_error( &ctx->gl_ctx, GL_INVALID_VALUE,
+d434 1
+a434 1
+         _mesa_error( &ctx->gl_ctx, GL_INVALID_ENUM, "OSMesaPixelStore(pname)" );
+d442 1
+a442 1
+GLAPI void GLAPIENTRY OSMesaGetIntegerv( GLint pname, GLint *value )
+d457 1
+a457 1
+         *value = CHAN_TYPE;
+a464 6
+      case OSMESA_MAX_WIDTH:
+         *value = MAX_WIDTH;
+         return;
+      case OSMESA_MAX_HEIGHT:
+         *value = MAX_HEIGHT;
+         return;
+d466 1
+a466 1
+         _mesa_error(&ctx->gl_ctx, GL_INVALID_ENUM, "OSMesaGetIntergerv(pname)");
+d479 1
+a479 1
+GLAPI GLboolean GLAPIENTRY
+d493 1
+a493 1
+      if (c->gl_visual->depthBits <= 16)
+d510 1
+a510 1
+GLAPI GLboolean GLAPIENTRY
+d538 4
+d543 4
+a546 36
+#if CHAN_TYPE == GL_FLOAT
+#define PACK_RGBA(DST, R, G, B, A)				\
+do {								\
+   (DST)[0] = (R < 0.0f) ? 0.0f : ((R > 1.0f) ? 1.0f : R);	\
+   (DST)[1] = (G < 0.0f) ? 0.0f : ((G > 1.0f) ? 1.0f : G);	\
+   (DST)[2] = (B < 0.0f) ? 0.0f : ((B > 1.0f) ? 1.0f : B);	\
+   (DST)[3] = (A < 0.0f) ? 0.0f : ((A > 1.0f) ? 1.0f : A);	\
+} while (0)
+#else
+#define PACK_RGBA(DST, R, G, B, A)	\
+do {					\
+   (DST)[osmesa->rInd] = R;		\
+   (DST)[osmesa->gInd] = G;		\
+   (DST)[osmesa->bInd] = B;		\
+   (DST)[osmesa->aInd] = A;		\
+} while (0)
+#endif
+
+#define PACK_RGB(DST, R, G, B)  \
+do {				\
+   (DST)[0] = R;		\
+   (DST)[1] = G;		\
+   (DST)[2] = B;		\
+} while (0)
+
+#define PACK_BGR(DST, R, G, B)  \
+do {				\
+   (DST)[0] = B;		\
+   (DST)[1] = G;		\
+   (DST)[2] = R;		\
+} while (0)
+
+#define PACK_RGB_565(DST, R, G, B)					\
+do {									\
+   (DST) = (((int) (R) << 8) & 0xf800) | (((int) (G) << 3) & 0x7e0) | ((int) (B) >> 3);\
+} while (0)
+d548 4
+d553 3
+a555 4
+#define UNPACK_RED(P)      ( (P)[osmesa->rInd] )
+#define UNPACK_GREEN(P)    ( (P)[osmesa->gInd] )
+#define UNPACK_BLUE(P)     ( (P)[osmesa->bInd] )
+#define UNPACK_ALPHA(P)    ( (P)[osmesa->aInd] )
+a557 4
+#define PIXELADDR1(X,Y)  (osmesa->rowaddr[Y] + (X))
+#define PIXELADDR2(X,Y)  (osmesa->rowaddr[Y] + 2 * (X))
+#define PIXELADDR3(X,Y)  (osmesa->rowaddr[Y] + 3 * (X))
+#define PIXELADDR4(X,Y)  (osmesa->rowaddr[Y] + 4 * (X))
+d560 1
+a560 2
+
+static void set_draw_buffer( GLcontext *ctx, GLenum mode )
+a561 1
+   /* A no-op since there's only one color buffer! */
+d563 6
+a568 1
+   (void) mode;
+d580 19
+a598 2
+static void clear( GLcontext *ctx, GLbitfield mask, GLboolean all,
+		   GLint x, GLint y, GLint width, GLint height )
+d600 1
+a600 1
+   OSMesaContext osmesa = OSMESA_CONTEXT(ctx);
+d603 4
+d609 61
+a669 95
+   if (*colorMask == 0xffffffff && ctx->Color.IndexMask == 0xffffffff) {
+      if (mask & DD_FRONT_LEFT_BIT) {
+	 if (osmesa->format == OSMESA_COLOR_INDEX) {
+	    if (all) {
+	       /* Clear whole CI buffer */
+#if CHAN_TYPE == GL_UNSIGNED_BYTE
+	       MEMSET(osmesa->buffer, ctx->Color.ClearIndex,
+		      osmesa->rowlength * osmesa->height);
+#else
+	       const GLint n = osmesa->rowlength * osmesa->height;
+	       GLchan *buffer = (GLchan *) osmesa->buffer;
+	       GLint i;
+	       for (i = 0; i < n; i ++) {
+		  buffer[i] = ctx->Color.ClearIndex;
+	       }
+#endif
+	    }
+	    else {
+	       /* Clear part of CI buffer */
+	       const GLchan clearIndex = (GLchan) ctx->Color.ClearIndex;
+	       GLint i, j;
+	       for (i = 0; i < height; i++) {
+		  GLchan *ptr1 = PIXELADDR1(x, (y + i));
+		  for (j = 0; j < width; j++) {
+		     *ptr1++ = clearIndex;
+		  }
+	       }
+	    }
+	 }
+	 else if (osmesa->format == OSMESA_RGB) {
+	    const GLchan r = ctx->Color.ClearColor[0];
+	    const GLchan g = ctx->Color.ClearColor[1];
+	    const GLchan b = ctx->Color.ClearColor[2];
+	    if (all) {
+	       /* Clear whole RGB buffer */
+	       GLuint n = osmesa->rowlength * osmesa->height;
+	       GLchan *ptr3 = (GLchan *) osmesa->buffer;
+	       GLuint i;
+	       for (i = 0; i < n; i++) {
+		  PACK_RGB(ptr3, r, g, b);
+		  ptr3 += 3;
+	       }
+	    }
+	    else {
+	       /* Clear part of RGB buffer */
+	       GLint i, j;
+	       for (i = 0; i < height; i++) {
+		  GLchan *ptr3 = PIXELADDR3(x, (y + i));
+		  for (j = 0; j < width; j++) {
+		     PACK_RGB(ptr3, r, g, b);
+		     ptr3 += 3;
+		  }
+	       }
+	    }
+	 }
+	 else if (osmesa->format == OSMESA_BGR) {
+	    const GLchan r = ctx->Color.ClearColor[0];
+	    const GLchan g = ctx->Color.ClearColor[1];
+	    const GLchan b = ctx->Color.ClearColor[2];
+	    if (all) {
+	       /* Clear whole RGB buffer */
+	       const GLint n = osmesa->rowlength * osmesa->height;
+	       GLchan *ptr3 = (GLchan *) osmesa->buffer;
+	       GLint i;
+	       for (i = 0; i < n; i++) {
+		  PACK_BGR(ptr3, r, g, b);
+		  ptr3 += 3;
+	       }
+	    }
+	    else {
+	       /* Clear part of RGB buffer */
+	       GLint i, j;
+	       for (i = 0; i < height; i++) {
+		  GLchan *ptr3 = PIXELADDR3(x, (y + i));
+		  for (j = 0; j < width; j++) {
+		     PACK_BGR(ptr3, r, g, b);
+		     ptr3 += 3;
+		  }
+	       }
+	    }
+	 }
+         else if (osmesa->format == OSMESA_RGB_565) {
+	    const GLchan r = ctx->Color.ClearColor[0];
+	    const GLchan g = ctx->Color.ClearColor[1];
+	    const GLchan b = ctx->Color.ClearColor[2];
+            GLushort clearPixel;
+            PACK_RGB_565(clearPixel, r, g, b);
+            if (all) {
+               /* Clear whole RGB buffer */
+	       const GLuint n = osmesa->rowlength * osmesa->height;
+               GLushort *ptr2 = (GLushort *) osmesa->buffer;
+               GLuint  i;
+               for (i = 0; i < n; i++) {
+                  *ptr2 = clearPixel;
+                  ptr2++;
+d673 10
+a682 8
+               /* clear scissored region */
+               GLint i, j;
+               for (i = 0; i < height; i++) {
+                  GLushort *ptr2 = (GLushort *) PIXELADDR2(x, (y + i));
+                  for (j = 0; j < width; j++) {
+                     *ptr2 = clearPixel;
+                     ptr2++;
+                  }
+a685 63
+	 else {
+#if CHAN_TYPE == GL_UNSIGNED_BYTE
+	    /* 4-byte pixel value */
+	    GLuint clearPixel;
+	    GLchan *clr = (GLchan *) &clearPixel;
+	    clr[osmesa->rInd] = ctx->Color.ClearColor[0];
+	    clr[osmesa->gInd] = ctx->Color.ClearColor[1];
+	    clr[osmesa->bInd] = ctx->Color.ClearColor[2];
+	    clr[osmesa->aInd] = ctx->Color.ClearColor[3];
+	    if (all) {
+	       /* Clear whole RGBA buffer */
+	       const GLuint n = osmesa->rowlength * osmesa->height;
+	       GLuint *ptr4 = (GLuint *) osmesa->buffer;
+	       GLuint i;
+	       if (clearPixel) {
+		  for (i = 0; i < n; i++) {
+		     *ptr4++ = clearPixel;
+		  }
+	       }
+	       else {
+		  BZERO(ptr4, n * sizeof(GLuint));
+	       }
+	    }
+	    else {
+	       /* Clear part of RGBA buffer */
+	       GLint i, j;
+	       for (i = 0; i < height; i++) {
+		  GLuint *ptr4 = (GLuint *) PIXELADDR4(x, (y + i));
+		  for (j = 0; j < width; j++) {
+		     *ptr4++ = clearPixel;
+		  }
+	       }
+	    }
+#else
+	    const GLchan r = ctx->Color.ClearColor[0];
+	    const GLchan g = ctx->Color.ClearColor[1];
+	    const GLchan b = ctx->Color.ClearColor[2];
+	    const GLchan a = ctx->Color.ClearColor[3];
+	    if (all) {
+	       /* Clear whole RGBA buffer */
+	       const GLuint n = osmesa->rowlength * osmesa->height;
+	       GLchan *p = (GLchan *) osmesa->buffer;
+	       GLuint i;
+	       for (i = 0; i < n; i++) {
+		  PACK_RGBA(p, r, g, b, a);
+		  p += 4;
+	       }
+	    }
+	    else {
+	       /* Clear part of RGBA buffer */
+	       GLint i, j;
+	       for (i = 0; i < height; i++) {
+		  GLchan *p = PIXELADDR4(x, (y + i));
+		  for (j = 0; j < width; j++) {
+		     PACK_RGBA(p, r, g, b, a);
+		     p += 4;
+		  }
+	       }
+	    }
+
+#endif
+	 }
+	 mask &= ~DD_FRONT_LEFT_BIT;
+d688 2
+a689 3
+   
+   if (mask)
+      _swrast_Clear( ctx, mask, all, x, y, width, height );
+d694 1
+a694 1
+static void buffer_size( GLframebuffer *buffer, GLuint *width, GLuint *height )
+d696 20
+a715 13
+#ifdef WIN32
+   /* Hack to get around problems with exporting glapi_Context from Mesa
+      and importing into OSMesa. */
+   GLcontext *ctx = (GLcontext *) _glapi_get_context();
+#else
+   GET_CURRENT_CONTEXT(ctx);
+#endif
+   (void) buffer;
+   if (ctx) {
+      OSMesaContext osmesa = OSMESA_CONTEXT(ctx);
+      *width = osmesa->width;
+      *height = osmesa->height;
+   }
+d724 11
+a734 7
+static void
+write_rgba_span( const GLcontext *ctx, GLuint n, GLint x, GLint y,
+                 CONST GLchan rgba[][4], const GLubyte mask[] )
+{
+   const OSMesaContext osmesa = OSMESA_CONTEXT(ctx);
+   GLchan *p = PIXELADDR4(x, y);
+   GLuint i;
+d736 1
+a736 1
+      for (i = 0; i < n; i++, p += 4) {
+d738 1
+a738 2
+            PACK_RGBA(p, rgba[i][RCOMP], rgba[i][GCOMP],
+                         rgba[i][BCOMP], rgba[i][ACOMP]);
+d743 2
+a744 3
+      for (i = 0; i < n; i++, p += 4) {
+         PACK_RGBA(p, rgba[i][RCOMP], rgba[i][GCOMP],
+                      rgba[i][BCOMP], rgba[i][ACOMP]);
+d751 4
+a754 3
+static void
+write_rgba_span_rgba( const GLcontext *ctx, GLuint n, GLint x, GLint y,
+                      CONST GLchan rgba[][4], const GLubyte mask[] )
+d756 2
+a757 2
+   OSMesaContext osmesa = OSMESA_CONTEXT(ctx);
+   GLuint *ptr4 = (GLuint *) PIXELADDR4(x, y);
+a759 1
+   ASSERT(CHAN_TYPE == GL_UNSIGNED_BYTE);
+d761 1
+a761 1
+      for (i = 0; i < n; i++) {
+d774 11
+a784 7
+static void
+write_rgb_span( const GLcontext *ctx, GLuint n, GLint x, GLint y,
+                CONST GLchan rgb[][3], const GLubyte mask[] )
+{
+   const OSMesaContext osmesa = OSMESA_CONTEXT(ctx);
+   GLchan *p = PIXELADDR4(x, y);
+   GLuint i;
+d786 1
+a786 1
+      for (i = 0; i < n; i++, p+=4) {
+d788 1
+a788 1
+            PACK_RGBA(p, rgb[i][RCOMP], rgb[i][GCOMP], rgb[i][BCOMP], CHAN_MAX);
+d793 2
+a794 2
+      for (i = 0; i < n; i++, p+=4) {
+         PACK_RGBA(p, rgb[i][RCOMP], rgb[i][GCOMP], rgb[i][BCOMP], CHAN_MAX);
+d801 3
+a803 3
+static void
+write_monocolor_span( const GLcontext *ctx, GLuint n, GLint x, GLint y,
+                      const GLchan color[4], const GLubyte mask[] )
+d805 2
+a806 2
+   const OSMesaContext osmesa = OSMESA_CONTEXT(ctx);
+   GLchan *p = PIXELADDR4(x, y);
+d808 1
+a808 1
+   for (i = 0; i < n; i++, p += 4) {
+d810 1
+a810 1
+         PACK_RGBA(p, color[RCOMP], color[GCOMP], color[BCOMP], color[ACOMP]);
+d817 3
+a819 4
+static void
+write_rgba_pixels( const GLcontext *ctx, GLuint n,
+                   const GLint x[], const GLint y[],
+                   CONST GLchan rgba[][4], const GLubyte mask[] )
+d821 1
+a821 1
+   const OSMesaContext osmesa = OSMESA_CONTEXT(ctx);
+d823 5
+a827 1
+   for (i = 0; i < n; i++) {
+d829 2
+a830 3
+         GLchan *p = PIXELADDR4(x[i], y[i]);
+         PACK_RGBA(p, rgba[i][RCOMP], rgba[i][GCOMP],
+                      rgba[i][BCOMP], rgba[i][ACOMP]);
+d837 3
+a839 4
+static void
+write_monocolor_pixels( const GLcontext *ctx, GLuint n,
+                        const GLint x[], const GLint y[],
+                        const GLchan color[4], const GLubyte mask[] )
+d841 1
+a841 1
+   const OSMesaContext osmesa = OSMESA_CONTEXT(ctx);
+d843 1
+a843 1
+   for (i = 0; i < n; i++) {
+d845 2
+a846 2
+         GLchan *p = PIXELADDR4(x[i], y[i]);
+         PACK_RGBA(p, color[RCOMP], color[GCOMP], color[BCOMP], color[ACOMP]);
+d852 2
+a853 3
+static void
+read_rgba_span( const GLcontext *ctx, GLuint n, GLint x, GLint y,
+                GLchan rgba[][4] )
+d855 1
+a855 1
+   const OSMesaContext osmesa = OSMESA_CONTEXT(ctx);
+d857 7
+a863 6
+   GLchan *p = PIXELADDR4(x, y);
+   for (i = 0; i < n; i++, p += 4) {
+      rgba[i][RCOMP] = UNPACK_RED(p);
+      rgba[i][GCOMP] = UNPACK_GREEN(p);
+      rgba[i][BCOMP] = UNPACK_BLUE(p);
+      rgba[i][ACOMP] = UNPACK_ALPHA(p);
+d869 3
+a871 3
+static void
+read_rgba_span_rgba( const GLcontext *ctx, GLuint n, GLint x, GLint y,
+                     GLchan rgba[][4] )
+d873 3
+a875 3
+   OSMesaContext osmesa = OSMESA_CONTEXT(ctx);
+   GLuint *ptr4 = (GLuint *) PIXELADDR4(x, y);
+   MEMCPY( rgba, ptr4, n * 4 * sizeof(GLchan) );
+d879 3
+a881 4
+static void
+read_rgba_pixels( const GLcontext *ctx,
+                  GLuint n, const GLint x[], const GLint y[],
+                  GLchan rgba[][4], const GLubyte mask[] )
+d883 1
+a883 1
+   const OSMesaContext osmesa = OSMESA_CONTEXT(ctx);
+d885 1
+a885 1
+   for (i = 0; i < n; i++) {
+d887 6
+a892 5
+         const GLchan *p = PIXELADDR4(x[i], y[i]);
+         rgba[i][RCOMP] = UNPACK_RED(p);
+         rgba[i][GCOMP] = UNPACK_GREEN(p);
+         rgba[i][BCOMP] = UNPACK_BLUE(p);
+         rgba[i][ACOMP] = UNPACK_ALPHA(p);
+d901 11
+a911 8
+/* Write RGBA pixels to an RGB buffer. */
+static void
+write_rgba_span_RGB( const GLcontext *ctx, GLuint n, GLint x, GLint y,
+                     CONST GLchan rgba[][4], const GLubyte mask[] )
+{
+   const OSMesaContext osmesa = OSMESA_CONTEXT(ctx);
+   GLchan *p = PIXELADDR3(x, y);
+   GLuint i;
+d913 1
+a913 1
+      for (i = 0; i < n; i++, p += 3) {
+d915 3
+a917 1
+            PACK_RGB(p, rgba[i][RCOMP], rgba[i][GCOMP], rgba[i][BCOMP]);
+d922 4
+a925 2
+      for (i = 0; i < n; i++, p += 3) {
+         PACK_RGB(p, rgba[i][RCOMP], rgba[i][GCOMP], rgba[i][BCOMP]);
+d930 4
+a933 4
+/* Write RGBA pixels to an BGR buffer. */
+static void
+write_rgba_span_BGR( const GLcontext *ctx, GLuint n, GLint x, GLint y,
+                     CONST GLchan rgba[][4], const GLubyte mask[] )
+d935 2
+a936 2
+   const OSMesaContext osmesa = OSMESA_CONTEXT(ctx);
+   GLchan *p = PIXELADDR3(x, y);
+d938 3
+d942 1
+a942 1
+      for (i = 0; i < n; i++, p += 3) {
+d944 3
+a946 1
+            PACK_BGR(p, rgba[i][RCOMP], rgba[i][GCOMP], rgba[i][BCOMP]);
+d951 4
+a954 2
+      for (i = 0; i < n; i++, p += 3) {
+         PACK_BGR(p, rgba[i][RCOMP], rgba[i][GCOMP], rgba[i][BCOMP]);
+a958 21
+/* Write RGB pixels to an RGB buffer. */
+static void
+write_rgb_span_RGB( const GLcontext *ctx, GLuint n, GLint x, GLint y,
+                    CONST GLchan rgb[][3], const GLubyte mask[] )
+{
+   const OSMesaContext osmesa = OSMESA_CONTEXT(ctx);
+   GLchan *p = PIXELADDR3(x, y);
+   GLuint i;
+   if (mask) {
+      for (i = 0; i < n; i++, p += 3) {
+         if (mask[i]) {
+            PACK_RGB(p, rgb[i][RCOMP], rgb[i][GCOMP], rgb[i][BCOMP]);
+         }
+      }
+   }
+   else {
+      for (i = 0; i < n; i++, p += 3) {
+         PACK_RGB(p, rgb[i][RCOMP], rgb[i][GCOMP], rgb[i][BCOMP]);
+      }
+   }
+}
+d960 3
+a962 4
+/* Write RGB pixels to an BGR buffer. */
+static void
+write_rgb_span_BGR( const GLcontext *ctx, GLuint n, GLint x, GLint y,
+                    CONST GLchan rgb[][3], const GLubyte mask[] )
+d964 1
+a964 17
+   const OSMesaContext osmesa = OSMESA_CONTEXT(ctx);
+   GLchan *p = PIXELADDR3(x, y);
+   GLuint i;
+   if (mask) {
+      for (i = 0; i < n; i++, p += 3) {
+         if (mask[i]) {
+            PACK_BGR(p, rgb[i][RCOMP], rgb[i][GCOMP], rgb[i][BCOMP]);
+         }
+      }
+   }
+   else {
+      for (i = 0; i < n; i++, p += 3) {
+         PACK_BGR(p, rgb[i][RCOMP], rgb[i][GCOMP], rgb[i][BCOMP]);
+      }
+   }
+}
+
+d966 7
+a972 6
+static void
+write_monocolor_span_RGB( const GLcontext *ctx, GLuint n, GLint x, GLint y,
+                          const GLchan color[4], const GLubyte mask[] )
+{
+   const OSMesaContext osmesa = OSMESA_CONTEXT(ctx);
+   GLchan *p = PIXELADDR3(x, y);
+d974 1
+a974 1
+   for (i = 0; i < n; i++, p += 3) {
+d976 3
+a978 1
+         PACK_RGB(p, color[RCOMP], color[GCOMP], color[BCOMP]);
+d983 3
+a985 3
+static void
+write_monocolor_span_BGR( const GLcontext *ctx, GLuint n, GLint x, GLint y,
+                          const GLchan color[4], const GLubyte mask[] )
+d987 1
+a987 2
+   const OSMesaContext osmesa = OSMESA_CONTEXT(ctx);
+   GLchan *p = PIXELADDR3(x, y);
+d989 4
+a992 1
+   for (i = 0; i < n; i++, p += 3) {
+d994 4
+a997 1
+         PACK_BGR(p, color[RCOMP], color[GCOMP], color[BCOMP]);
+d1002 3
+a1004 4
+static void
+write_rgba_pixels_RGB( const GLcontext *ctx, GLuint n,
+                       const GLint x[], const GLint y[],
+                       CONST GLchan rgba[][4], const GLubyte mask[] )
+d1006 1
+a1006 1
+   const OSMesaContext osmesa = (const OSMesaContext) ctx;
+d1008 7
+a1014 31
+   for (i = 0; i < n; i++) {
+      if (mask[i]) {
+         GLchan *p = PIXELADDR3(x[i], y[i]);
+         PACK_RGB(p, rgba[i][RCOMP], rgba[i][GCOMP], rgba[i][BCOMP]);
+      }
+   }
+}
+
+static void
+write_rgba_pixels_BGR( const GLcontext *ctx, GLuint n,
+                       const GLint x[], const GLint y[],
+                       CONST GLchan rgba[][4], const GLubyte mask[] )
+{
+   const OSMesaContext osmesa = (const OSMesaContext) ctx;
+   GLuint i;
+   for (i = 0; i < n; i++) {
+      if (mask[i]) {
+         GLchan *p = PIXELADDR3(x[i], y[i]);
+         PACK_BGR(p, rgba[i][RCOMP], rgba[i][GCOMP], rgba[i][BCOMP]);
+      }
+   }
+}
+
+static void
+write_monocolor_pixels_RGB( const GLcontext *ctx,
+                            GLuint n, const GLint x[], const GLint y[],
+                            const GLchan color[4], const GLubyte mask[] )
+{
+   const OSMesaContext osmesa = OSMESA_CONTEXT(ctx);
+   GLuint i;
+   for (i = 0; i < n; i++) {
+d1016 4
+a1019 2
+         GLchan *p = PIXELADDR3(x[i], y[i]);
+         PACK_RGB(p, color[RCOMP], color[GCOMP], color[BCOMP]);
+d1024 3
+a1026 4
+static void
+write_monocolor_pixels_BGR( const GLcontext *ctx,
+                            GLuint n, const GLint x[], const GLint y[],
+                            const GLchan color[4], const GLubyte mask[] )
+d1028 1
+a1028 1
+   const OSMesaContext osmesa = OSMESA_CONTEXT(ctx);
+d1030 8
+a1037 156
+   for (i = 0; i < n; i++) {
+      if (mask[i]) {
+         GLchan *p = PIXELADDR3(x[i], y[i]);
+         PACK_BGR(p, color[RCOMP], color[GCOMP], color[BCOMP]);
+      }
+   }
+}
+
+static void
+read_rgba_span3( const GLcontext *ctx, GLuint n, GLint x, GLint y,
+                 GLchan rgba[][4] )
+{
+   const OSMesaContext osmesa = OSMESA_CONTEXT(ctx);
+   GLuint i;
+   const GLchan *p = PIXELADDR3(x, y);
+   for (i = 0; i < n; i++, p += 3) {
+      rgba[i][RCOMP] = UNPACK_RED(p);
+      rgba[i][GCOMP] = UNPACK_GREEN(p);
+      rgba[i][BCOMP] = UNPACK_BLUE(p);
+      rgba[i][ACOMP] = CHAN_MAX;
+   }
+}
+
+static void
+read_rgba_pixels3( const GLcontext *ctx,
+                   GLuint n, const GLint x[], const GLint y[],
+                   GLchan rgba[][4], const GLubyte mask[] )
+{
+   const OSMesaContext osmesa = OSMESA_CONTEXT(ctx);
+   GLuint i;
+   for (i = 0; i < n; i++) {
+      if (mask[i]) {
+         const GLchan *p = PIXELADDR3(x[i], y[i]);
+         rgba[i][RCOMP] = UNPACK_RED(p);
+         rgba[i][GCOMP] = UNPACK_GREEN(p);
+         rgba[i][BCOMP] = UNPACK_BLUE(p);
+         rgba[i][ACOMP] = CHAN_MAX;
+      }
+   }
+}
+
+
+/**********************************************************************/
+/*****                2 byte RGB pixel support funcs              *****/
+/**********************************************************************/
+
+/* Write RGBA pixels to an RGB_565 buffer. */
+static void
+write_rgba_span2( const GLcontext *ctx,
+                  GLuint n, GLint x, GLint y,
+                  CONST GLchan rgba[][4], const GLubyte mask[] )
+{
+   OSMesaContext osmesa = OSMESA_CONTEXT(ctx);
+   GLushort *ptr2 = (GLushort *) PIXELADDR2(x, y);
+   GLuint i;
+   if (mask) {
+      for (i = 0; i < n; i++, ptr2++) {
+         if (mask[i]) {
+            PACK_RGB_565(*ptr2, rgba[i][RCOMP], rgba[i][GCOMP], rgba[i][BCOMP]);
+         }
+      }
+   }
+   else {
+      for (i = 0; i < n; i++, ptr2++) {
+         PACK_RGB_565(*ptr2, rgba[i][RCOMP], rgba[i][GCOMP], rgba[i][BCOMP]);
+      }
+   }
+}
+
+
+/* Write RGB pixels to an RGB_565 buffer. */
+static void
+write_rgb_span2( const GLcontext *ctx,
+                 GLuint n, GLint x, GLint y,
+                 CONST GLchan rgb[][3], const GLubyte mask[] )
+{
+   OSMesaContext osmesa = OSMESA_CONTEXT(ctx);
+   GLushort *ptr2 = (GLushort *) PIXELADDR2(x, y);
+   GLuint i;
+   if (mask) {
+      for (i = 0; i < n; i++, ptr2++) {
+         if (mask[i]) {
+            PACK_RGB_565(*ptr2, rgb[i][RCOMP], rgb[i][GCOMP], rgb[i][BCOMP]);
+         }
+      }
+   }
+   else {
+      for (i = 0; i < n; i++, ptr2++) {
+         PACK_RGB_565(*ptr2, rgb[i][RCOMP], rgb[i][GCOMP], rgb[i][BCOMP]);
+      }
+   }
+}
+
+
+static void
+write_monocolor_span2( const GLcontext *ctx, GLuint n, GLint x, GLint y,
+                       const GLchan color[4], const GLubyte mask[] )
+{
+   OSMesaContext osmesa = OSMESA_CONTEXT(ctx);
+   GLushort pixel;
+   GLushort *ptr2 = (GLushort *) PIXELADDR2(x, y);
+   GLuint i;
+   PACK_RGB_565(pixel, color[RCOMP], color[GCOMP], color[BCOMP]);
+   for (i = 0; i < n; i++, ptr2++) {
+      if (mask[i]) {
+         *ptr2 = pixel;
+      }
+   }
+}
+
+
+static void
+write_rgba_pixels2( const GLcontext *ctx,
+                    GLuint n, const GLint x[], const GLint y[],
+                    CONST GLchan rgba[][4], const GLubyte mask[] )
+{
+   OSMesaContext osmesa = OSMESA_CONTEXT(ctx);
+   GLuint i;
+   for (i = 0; i < n; i++) {
+      if (mask[i]) {
+         GLushort *ptr2 = (GLushort *) PIXELADDR2(x[i],y[i]);
+         PACK_RGB_565(*ptr2, rgba[i][RCOMP], rgba[i][GCOMP], rgba[i][BCOMP]);
+      }
+   }
+}
+
+static void
+write_monocolor_pixels2( const GLcontext *ctx,
+                         GLuint n, const GLint x[], const GLint y[],
+                         const GLchan color[4], const GLubyte mask[] )
+{
+   OSMesaContext osmesa = OSMESA_CONTEXT(ctx);
+   GLuint i;
+   GLushort pixel;
+   PACK_RGB_565(pixel, color[RCOMP], color[GCOMP], color[BCOMP]);
+   for (i = 0; i < n; i++) {
+      if (mask[i]) {
+         GLushort *ptr2 = (GLushort *) PIXELADDR2(x[i],y[i]);
+         *ptr2 = pixel;
+      }
+   }
+}
+
+static void
+read_rgba_span2( const GLcontext *ctx,
+                 GLuint n, GLint x, GLint y,
+                 GLchan rgba[][4] )
+{
+   OSMesaContext osmesa = OSMESA_CONTEXT(ctx);
+   GLuint i;
+   const GLushort *ptr2 = (const GLushort *) PIXELADDR2(x, y);
+   for (i = 0; i < n; i++, ptr2++) {
+      /* This should be fixed to get the low bits right */
+      rgba[i][RCOMP] = (*ptr2 >> 8) & 0xFe;
+      rgba[i][GCOMP] = (*ptr2 >> 3) & 0xFc;
+      rgba[i][BCOMP] = (*ptr2 << 3) & 0xFe;
+d1042 10
+a1051 8
+static void
+read_rgba_pixels2( const GLcontext *ctx,
+                   GLuint n, const GLint x[], const GLint y[],
+                   GLchan rgba[][4], const GLubyte mask[] )
+{
+   OSMesaContext osmesa = OSMESA_CONTEXT(ctx);
+   GLuint i;
+   for (i = 0; i < n; i++) {
+d1053 4
+a1056 5
+         /* This should be fixed to get the low bits right */
+         const GLushort *ptr2 = (const GLushort *) PIXELADDR2(x[i],y[i]);
+         rgba[i][RCOMP] = (*ptr2 >> 8) & 0xFE;
+         rgba[i][GCOMP] = (*ptr2 >> 3) & 0xFC;
+         rgba[i][BCOMP] = (*ptr2 << 3) & 0xFE;
+a1062 1
+
+d1068 3
+a1070 3
+static void
+write_index32_span( const GLcontext *ctx, GLuint n, GLint x, GLint y,
+                    const GLuint index[], const GLubyte mask[] )
+d1072 2
+a1073 2
+   const OSMesaContext osmesa = OSMESA_CONTEXT(ctx);
+   GLchan *ptr1 = PIXELADDR1(x, y);
+d1078 1
+a1078 1
+            *ptr1 = (GLchan) index[i];
+d1084 1
+a1084 1
+         *ptr1 = (GLchan) index[i];
+d1091 3
+a1093 3
+static void
+write_index8_span( const GLcontext *ctx, GLuint n, GLint x, GLint y,
+                   const GLubyte index[], const GLubyte mask[] )
+d1095 2
+a1096 2
+   const OSMesaContext osmesa = OSMESA_CONTEXT(ctx);
+   GLchan *ptr1 = PIXELADDR1(x, y);
+d1101 1
+a1101 1
+            *ptr1 = (GLchan) index[i];
+d1106 1
+a1106 1
+      MEMCPY(ptr1, index, n * sizeof(GLchan));
+d1111 3
+a1113 3
+static void
+write_monoindex_span( const GLcontext *ctx, GLuint n, GLint x, GLint y,
+                      GLuint colorIndex, const GLubyte mask[] )
+d1115 2
+a1116 2
+   const OSMesaContext osmesa = OSMESA_CONTEXT(ctx);
+   GLchan *ptr1 = PIXELADDR1(x, y);
+d1120 1
+a1120 1
+         *ptr1 = (GLchan) colorIndex;
+d1126 3
+a1128 4
+static void
+write_index_pixels( const GLcontext *ctx,
+                    GLuint n, const GLint x[], const GLint y[],
+                    const GLuint index[], const GLubyte mask[] )
+d1130 1
+a1130 1
+   const OSMesaContext osmesa = OSMESA_CONTEXT(ctx);
+d1134 2
+a1135 2
+         GLchan *ptr1 = PIXELADDR1(x[i], y[i]);
+         *ptr1 = (GLchan) index[i];
+d1141 3
+a1143 4
+static void
+write_monoindex_pixels( const GLcontext *ctx,
+                        GLuint n, const GLint x[], const GLint y[],
+                        GLuint colorIndex, const GLubyte mask[] )
+d1145 1
+a1145 1
+   const OSMesaContext osmesa = OSMESA_CONTEXT(ctx);
+d1149 2
+a1150 2
+         GLchan *ptr1 = PIXELADDR1(x[i], y[i]);
+         *ptr1 = (GLchan) colorIndex;
+d1156 2
+a1157 3
+static void
+read_index_span( const GLcontext *ctx,
+                 GLuint n, GLint x, GLint y, GLuint index[] )
+d1159 1
+a1159 1
+   const OSMesaContext osmesa = OSMESA_CONTEXT(ctx);
+d1161 1
+a1161 1
+   const GLchan *ptr1 = (const GLchan *) PIXELADDR1(x, y);
+d1168 3
+a1170 4
+static void
+read_index_pixels( const GLcontext *ctx,
+                   GLuint n, const GLint x[], const GLint y[],
+                   GLuint index[], const GLubyte mask[] )
+d1172 1
+a1172 1
+   const OSMesaContext osmesa = OSMESA_CONTEXT(ctx);
+d1176 1
+a1176 1
+         const GLchan *ptr1 = PIXELADDR1(x[i], y[i]);
+d1192 2
+a1193 2
+static void
+flat_rgba_line( GLcontext *ctx, const SWvertex *vert0, const SWvertex *vert1 )
+d1195 3
+a1197 2
+   const OSMesaContext osmesa = OSMESA_CONTEXT(ctx);
+   const GLchan *color = vert1->color;
+d1201 1
+a1201 5
+#define PLOT(X, Y)						\
+do {								\
+   GLchan *p = PIXELADDR4(X, Y);				\
+   PACK_RGBA(p, color[0], color[1], color[2], color[3]);	\
+} while (0)
+d1204 1
+a1204 1
+#include "..\swrast\s_linetemp.h"
+d1206 1
+a1206 1
+#include "swrast/s_linetemp.h"
+d1214 2
+a1215 2
+static void
+flat_rgba_z_line(GLcontext *ctx, const SWvertex *vert0, const SWvertex *vert1)
+d1217 3
+a1219 2
+   const OSMesaContext osmesa = OSMESA_CONTEXT(ctx);
+   const GLchan *color = vert1->color;
+d1225 6
+a1230 10
+#define PLOT(X, Y)					\
+do {							\
+   if (Z < *zPtr) {					\
+      GLchan *p = PIXELADDR4(X, Y);			\
+      PACK_RGBA(p, color[RCOMP], color[GCOMP],		\
+                   color[BCOMP], color[ACOMP]);		\
+      *zPtr = Z;					\
+   }							\
+} while (0)
+
+d1233 1
+a1233 1
+#include "..\swrast\s_linetemp.h"
+d1235 1
+a1235 1
+#include "swrast/s_linetemp.h"
+a1241 1
+ * XXX update for GLchan
+d1243 13
+a1255 13
+static void
+flat_blend_rgba_line( GLcontext *ctx,
+                      const SWvertex *vert0, const SWvertex *vert1 )
+{
+   const OSMesaContext osmesa = OSMESA_CONTEXT(ctx);
+   const GLint rshift = osmesa->rshift;
+   const GLint gshift = osmesa->gshift;
+   const GLint bshift = osmesa->bshift;
+   const GLint avalue = vert0->color[3];
+   const GLint msavalue = CHAN_MAX - avalue;
+   const GLint rvalue = vert1->color[0]*avalue;
+   const GLint gvalue = vert1->color[1]*avalue;
+   const GLint bvalue = vert1->color[2]*avalue;
+d1260 1
+a1260 1
+   { GLuint *ptr4 = (GLuint *) PIXELADDR4(X, Y);	\
+a1267 11
+#if 0  /* XXX use this in the future */
+#define PLOT(X,Y)							\
+   {									\
+      GLchan *pixel = (GLchan *) PIXELADDR4(X, Y);			\
+      pixel[rInd] = (pixel[rInd] * msavalue + rvalue) >> CHAN_BITS;	\
+      pixel[gInd] = (pixel[gInd] * msavalue + gvalue) >> CHAN_BITS;	\
+      pixel[bInd] = (pixel[bInd] * msavalue + bvalue) >> CHAN_BITS;	\
+      pixel[aInd] = (pixel[aInd] * msavalue + avalue) >> CHAN_BITS;	\
+   }
+#endif
+
+d1269 1
+a1269 1
+#include "..\swrast\s_linetemp.h"
+d1271 1
+a1271 1
+#include "swrast/s_linetemp.h"
+a1277 2
+ * But don't write to Z buffer.
+ * XXX update for GLchan
+d1279 13
+a1291 13
+static void
+flat_blend_rgba_z_line( GLcontext *ctx,
+                        const SWvertex *vert0, const SWvertex *vert1 )
+{
+   const OSMesaContext osmesa = OSMESA_CONTEXT(ctx);
+   const GLint rshift = osmesa->rshift;
+   const GLint gshift = osmesa->gshift;
+   const GLint bshift = osmesa->bshift;
+   const GLint avalue = vert0->color[3];
+   const GLint msavalue = 256 - avalue;
+   const GLint rvalue = vert1->color[0]*avalue;
+   const GLint gvalue = vert1->color[1]*avalue;
+   const GLint bvalue = vert1->color[2]*avalue;
+d1299 1
+a1299 1
+	   GLuint *ptr4 = (GLuint *) PIXELADDR4(X, Y);			\
+a1306 11
+#if 0  /* XXX use this in the future */
+#define PLOT(X,Y)							\
+   if (Z < *zPtr) {							\
+      GLchan *pixel = (GLchan *) PIXELADDR4(X, Y);			\
+      pixel[rInd] = (pixel[rInd] * msavalue + rvalue) >> CHAN_BITS;	\
+      pixel[gInd] = (pixel[gInd] * msavalue + gvalue) >> CHAN_BITS;	\
+      pixel[bInd] = (pixel[bInd] * msavalue + bvalue) >> CHAN_BITS;	\
+      pixel[aInd] = (pixel[aInd] * msavalue + avalue) >> CHAN_BITS;	\
+   }
+#endif
+
+d1308 1
+a1308 1
+#include "..\swrast\s_linetemp.h"
+d1310 1
+a1310 1
+#include "swrast/s_linetemp.h"
+a1316 1
+ * XXX update for GLchan
+d1318 13
+a1330 13
+static void
+flat_blend_rgba_z_line_write( GLcontext *ctx,
+                              const SWvertex *vert0, const SWvertex *vert1 )
+{
+   const OSMesaContext osmesa = OSMESA_CONTEXT(ctx);
+   const GLint rshift = osmesa->rshift;
+   const GLint gshift = osmesa->gshift;
+   const GLint bshift = osmesa->bshift;
+   const GLint avalue = vert0->color[3];
+   const GLint msavalue = 256 - avalue;
+   const GLint rvalue = vert1->color[0]*avalue;
+   const GLint gvalue = vert1->color[1]*avalue;
+   const GLint bvalue = vert1->color[2]*avalue;
+d1338 1
+a1338 1
+	   GLuint *ptr4 = (GLuint *) PIXELADDR4(X, Y);			\
+a1346 12
+#if 0  /* XXX use this in the future */
+#define PLOT(X,Y)							\
+   if (Z < *zPtr) {							\
+      GLchan *pixel = (GLchan *) PIXELADDR4(X, Y);			\
+      pixel[rInd] = (pixel[rInd] * msavalue + rvalue) >> CHAN_BITS;	\
+      pixel[gInd] = (pixel[gInd] * msavalue + gvalue) >> CHAN_BITS;	\
+      pixel[bInd] = (pixel[bInd] * msavalue + bvalue) >> CHAN_BITS;	\
+      pixel[aInd] = (pixel[aInd] * msavalue + avalue) >> CHAN_BITS;	\
+      *zPtr = Z;							\
+   }
+#endif
+
+d1348 1
+a1348 1
+#include "..\swrast\s_linetemp.h"
+d1350 1
+a1350 1
+#include "swrast/s_linetemp.h"
+d1359 1
+a1359 2
+static swrast_line_func
+osmesa_choose_line_function( GLcontext *ctx )
+d1361 1
+a1361 2
+   const OSMesaContext osmesa = OSMESA_CONTEXT(ctx);
+   const SWcontext *swrast = SWRAST_CONTEXT(ctx);
+a1362 7
+   if (CHAN_BITS != 8)                    return NULL;
+   if (ctx->RenderMode != GL_RENDER)      return NULL;
+   if (ctx->Line.SmoothFlag)              return NULL;
+   if (ctx->Texture._ReallyEnabled)       return NULL;
+   if (ctx->Light.ShadeModel != GL_FLAT)  return NULL;
+   if (ctx->Line.Width != 1.0F)           return NULL;
+   if (ctx->Line.StippleFlag)             return NULL;
+d1364 2
+a1365 3
+   if (osmesa->format != OSMESA_RGBA &&
+       osmesa->format != OSMESA_BGRA &&
+       osmesa->format != OSMESA_ARGB)     return NULL;
+d1367 2
+d1370 78
+a1447 22
+   if (swrast->_RasterMask==DEPTH_BIT
+       && ctx->Depth.Func==GL_LESS
+       && ctx->Depth.Mask==GL_TRUE
+       && ctx->Visual.depthBits == DEFAULT_SOFTWARE_DEPTH_BITS) {
+      return (swrast_line_func) flat_rgba_z_line;
+   }
+
+   if (swrast->_RasterMask == 0) {
+      return (swrast_line_func) flat_rgba_line;
+   }
+
+   if (swrast->_RasterMask==(DEPTH_BIT|BLEND_BIT)
+       && ctx->Depth.Func==GL_LESS
+       && ctx->Depth.Mask==GL_TRUE
+       && ctx->Visual.depthBits == DEFAULT_SOFTWARE_DEPTH_BITS
+       && ctx->Color.BlendSrcRGB==GL_SRC_ALPHA
+       && ctx->Color.BlendDstRGB==GL_ONE_MINUS_SRC_ALPHA
+       && ctx->Color.BlendSrcA==GL_SRC_ALPHA
+       && ctx->Color.BlendDstA==GL_ONE_MINUS_SRC_ALPHA
+       && ctx->Color.BlendEquation==GL_FUNC_ADD_EXT) {
+      return (swrast_line_func) flat_blend_rgba_z_line_write;
+   }
+a1448 19
+   if (swrast->_RasterMask==(DEPTH_BIT|BLEND_BIT)
+       && ctx->Depth.Func==GL_LESS
+       && ctx->Depth.Mask==GL_FALSE
+       && ctx->Visual.depthBits == DEFAULT_SOFTWARE_DEPTH_BITS
+       && ctx->Color.BlendSrcRGB==GL_SRC_ALPHA
+       && ctx->Color.BlendDstRGB==GL_ONE_MINUS_SRC_ALPHA
+       && ctx->Color.BlendSrcA==GL_SRC_ALPHA
+       && ctx->Color.BlendDstA==GL_ONE_MINUS_SRC_ALPHA
+       && ctx->Color.BlendEquation==GL_FUNC_ADD_EXT) {
+      return (swrast_line_func) flat_blend_rgba_z_line;
+   }
+
+   if (swrast->_RasterMask==BLEND_BIT
+       && ctx->Color.BlendSrcRGB==GL_SRC_ALPHA
+       && ctx->Color.BlendDstRGB==GL_ONE_MINUS_SRC_ALPHA
+       && ctx->Color.BlendSrcA==GL_SRC_ALPHA
+       && ctx->Color.BlendDstA==GL_ONE_MINUS_SRC_ALPHA
+       && ctx->Color.BlendEquation==GL_FUNC_ADD_EXT) {
+      return (swrast_line_func) flat_blend_rgba_line;
+d1450 1
+a1450 2
+
+   return (swrast_line_func) NULL;
+d1462 2
+a1463 4
+static void smooth_rgba_z_triangle( GLcontext *ctx,
+				    const SWvertex *v0,
+                                    const SWvertex *v1,
+                                    const SWvertex *v2 )
+d1465 6
+a1470 1
+   const OSMesaContext osmesa = OSMESA_CONTEXT(ctx);
+d1476 6
+a1481 5
+#define RENDER_SPAN( span )					\
+   GLuint i;							\
+   GLchan *img = PIXELADDR4(span.x, span.y); 			\
+   for (i = 0; i < span.count; i++, img += 4) {			\
+      const GLdepth z = FixedToDepth(span.z);			\
+d1483 2
+a1484 3
+         PACK_RGBA(img, FixedToChan(span.red),			\
+            FixedToChan(span.green), FixedToChan(span.blue),	\
+            FixedToChan(span.alpha));				\
+d1487 4
+a1490 7
+      span.red += span.redStep;					\
+      span.green += span.greenStep;				\
+      span.blue += span.blueStep;				\
+      span.alpha += span.alphaStep;				\
+      span.z += span.zStep;					\
+   }
+
+d1492 1
+a1492 1
+#include "..\swrast\s_tritemp.h"
+d1494 1
+a1494 1
+#include "swrast/s_tritemp.h"
+d1504 2
+a1505 4
+static void flat_rgba_z_triangle( GLcontext *ctx,
+				  const SWvertex *v0,
+                                  const SWvertex *v1,
+                                  const SWvertex *v2 )
+d1507 1
+a1507 1
+   const OSMesaContext osmesa = OSMESA_CONTEXT(ctx);
+d1510 20
+a1529 17
+#define SETUP_CODE						\
+   GLuint pixel;						\
+   PACK_RGBA((GLchan *) &pixel, v2->color[0], v2->color[1],	\
+                                v2->color[2], v2->color[3]);
+
+#define RENDER_SPAN( span )				\
+   GLuint i;						\
+   GLuint *img = (GLuint *) PIXELADDR4(span.x, span.y);	\
+   for (i = 0; i < span.count; i++) {			\
+      const GLdepth z = FixedToDepth(span.z);		\
+      if (z < zRow[i]) {				\
+         img[i] = pixel;				\
+         zRow[i] = z;					\
+      }							\
+      span.z += span.zStep;				\
+   }
+
+d1531 1
+a1531 1
+#include "..\swrast\s_tritemp.h"
+d1533 1
+a1533 1
+#include "swrast/s_tritemp.h"
+d1542 1
+a1542 2
+static swrast_tri_func
+osmesa_choose_triangle_function( GLcontext *ctx )
+d1544 3
+a1546 2
+   const OSMesaContext osmesa = OSMESA_CONTEXT(ctx);
+   const SWcontext *swrast = SWRAST_CONTEXT(ctx);
+d1548 11
+a1558 18
+   if (CHAN_BITS != 8)                  return (swrast_tri_func) NULL;
+   if (ctx->RenderMode != GL_RENDER)    return (swrast_tri_func) NULL;
+   if (ctx->Polygon.SmoothFlag)         return (swrast_tri_func) NULL;
+   if (ctx->Polygon.StippleFlag)        return (swrast_tri_func) NULL;
+   if (ctx->Texture._ReallyEnabled)     return (swrast_tri_func) NULL;
+   if (osmesa->format != OSMESA_RGBA &&
+       osmesa->format != OSMESA_BGRA &&
+       osmesa->format != OSMESA_ARGB)   return (swrast_tri_func) NULL;
+   if (ctx->Polygon.CullFlag && 
+       ctx->Polygon.CullFaceMode == GL_FRONT_AND_BACK)
+                                        return (swrast_tri_func) NULL;
+
+   if (swrast->_RasterMask == DEPTH_BIT &&
+       ctx->Depth.Func == GL_LESS &&
+       ctx->Depth.Mask == GL_TRUE &&
+       ctx->Visual.depthBits == DEFAULT_SOFTWARE_DEPTH_BITS) {
+      if (ctx->Light.ShadeModel == GL_SMOOTH) {
+         return (swrast_tri_func) smooth_rgba_z_triangle;
+d1561 1
+a1561 1
+         return (swrast_tri_func) flat_rgba_z_triangle;
+d1564 1
+a1564 1
+   return (swrast_tri_func) NULL;
+a1568 53
+/* Override for the swrast triangle-selection function.  Try to use one
+ * of our internal triangle functions, otherwise fall back to the
+ * standard swrast functions.
+ */
+static void osmesa_choose_triangle( GLcontext *ctx )
+{
+   SWcontext *swrast = SWRAST_CONTEXT(ctx);
+
+   swrast->Triangle = osmesa_choose_triangle_function( ctx );
+   if (!swrast->Triangle)
+      _swrast_choose_triangle( ctx );
+}
+
+static void osmesa_choose_line( GLcontext *ctx )
+{
+   SWcontext *swrast = SWRAST_CONTEXT(ctx);
+
+   swrast->Line = osmesa_choose_line_function( ctx );
+   if (!swrast->Line)
+      _swrast_choose_line( ctx );
+}
+
+
+#define OSMESA_NEW_LINE   (_NEW_LINE | \
+                           _NEW_TEXTURE | \
+                           _NEW_LIGHT | \
+                           _NEW_DEPTH | \
+                           _NEW_RENDERMODE | \
+                           _SWRAST_NEW_RASTERMASK)
+
+#define OSMESA_NEW_TRIANGLE (_NEW_POLYGON | \
+                             _NEW_TEXTURE | \
+                             _NEW_LIGHT | \
+                             _NEW_DEPTH | \
+                             _NEW_RENDERMODE | \
+                             _SWRAST_NEW_RASTERMASK)
+
+
+/* Extend the software rasterizer with our line and triangle
+ * functions.
+ */
+static void osmesa_register_swrast_functions( GLcontext *ctx )
+{
+   SWcontext *swrast = SWRAST_CONTEXT( ctx );
+
+   swrast->choose_line = osmesa_choose_line;
+   swrast->choose_triangle = osmesa_choose_triangle;
+
+   swrast->invalidate_line |= OSMESA_NEW_LINE;
+   swrast->invalidate_triangle |= OSMESA_NEW_TRIANGLE;
+}
+
+
+a1573 5
+#if CHAN_BITS == 32
+         return (const GLubyte *) "Mesa OffScreen32";
+#elif CHAN_BITS == 16
+         return (const GLubyte *) "Mesa OffScreen16";
+#else
+a1574 1
+#endif
+d1581 1
+a1581 1
+static void osmesa_update_state( GLcontext *ctx, GLuint new_state )
+d1583 1
+a1583 3
+   OSMesaContext osmesa = OSMESA_CONTEXT(ctx);
+   struct swrast_device_driver *swdd = _swrast_GetDeviceDriverReference( ctx );
+   TNLcontext *tnl = TNL_CONTEXT(ctx);
+a1586 5
+   /*
+    * XXX these function pointers could be initialized just once during
+    * context creation since they don't depend on any state changes.
+    */
+
+d1589 1
+d1591 7
+a1598 1
+   ctx->Driver.ResizeBuffers = _swrast_alloc_buffers;
+d1600 4
+a1603 29
+   ctx->Driver.Accum = _swrast_Accum;
+   ctx->Driver.Bitmap = _swrast_Bitmap;
+   ctx->Driver.Clear = clear;
+   ctx->Driver.CopyPixels = _swrast_CopyPixels;
+   ctx->Driver.DrawPixels = _swrast_DrawPixels;
+   ctx->Driver.ReadPixels = _swrast_ReadPixels;
+
+   ctx->Driver.ChooseTextureFormat = _mesa_choose_tex_format;
+   ctx->Driver.TexImage1D = _mesa_store_teximage1d;
+   ctx->Driver.TexImage2D = _mesa_store_teximage2d;
+   ctx->Driver.TexImage3D = _mesa_store_teximage3d;
+   ctx->Driver.TexSubImage1D = _mesa_store_texsubimage1d;
+   ctx->Driver.TexSubImage2D = _mesa_store_texsubimage2d;
+   ctx->Driver.TexSubImage3D = _mesa_store_texsubimage3d;
+   ctx->Driver.TestProxyTexImage = _mesa_test_proxy_teximage;
+
+   ctx->Driver.CopyTexImage1D = _swrast_copy_teximage1d;
+   ctx->Driver.CopyTexImage2D = _swrast_copy_teximage2d;
+   ctx->Driver.CopyTexSubImage1D = _swrast_copy_texsubimage1d;
+   ctx->Driver.CopyTexSubImage2D = _swrast_copy_texsubimage2d;
+   ctx->Driver.CopyTexSubImage3D = _swrast_copy_texsubimage3d;
+   ctx->Driver.CopyColorTable = _swrast_CopyColorTable;
+   ctx->Driver.CopyColorSubTable = _swrast_CopyColorSubTable;
+   ctx->Driver.CopyConvolutionFilter1D = _swrast_CopyConvolutionFilter1D;
+   ctx->Driver.CopyConvolutionFilter2D = _swrast_CopyConvolutionFilter2D;
+
+   ctx->Driver.BaseCompressedTexFormat = _mesa_base_compressed_texformat;
+   ctx->Driver.CompressedTextureSize = _mesa_compressed_texture_size;
+   ctx->Driver.GetCompressedTexImage = _mesa_get_compressed_teximage;
+d1606 9
+a1614 26
+   if (osmesa->format == OSMESA_RGB) {
+      swdd->WriteRGBASpan = write_rgba_span_RGB;
+      swdd->WriteRGBSpan = write_rgb_span_RGB;
+      swdd->WriteMonoRGBASpan = write_monocolor_span_RGB;
+      swdd->WriteRGBAPixels = write_rgba_pixels_RGB;
+      swdd->WriteMonoRGBAPixels = write_monocolor_pixels_RGB;
+      swdd->ReadRGBASpan = read_rgba_span3;
+      swdd->ReadRGBAPixels = read_rgba_pixels3;
+   }
+   else if (osmesa->format == OSMESA_BGR) {
+      swdd->WriteRGBASpan = write_rgba_span_BGR;
+      swdd->WriteRGBSpan = write_rgb_span_BGR;
+      swdd->WriteMonoRGBASpan = write_monocolor_span_BGR;
+      swdd->WriteRGBAPixels = write_rgba_pixels_BGR;
+      swdd->WriteMonoRGBAPixels = write_monocolor_pixels_BGR;
+      swdd->ReadRGBASpan = read_rgba_span3;
+      swdd->ReadRGBAPixels = read_rgba_pixels3;
+   }
+   else if (osmesa->format == OSMESA_RGB_565) {
+      swdd->WriteRGBASpan = write_rgba_span2;
+      swdd->WriteRGBSpan = write_rgb_span2;
+      swdd->WriteMonoRGBASpan = write_monocolor_span2;
+      swdd->WriteRGBAPixels = write_rgba_pixels2;
+      swdd->WriteMonoRGBAPixels = write_monocolor_pixels2;
+      swdd->ReadRGBASpan = read_rgba_span2;
+      swdd->ReadRGBAPixels = read_rgba_pixels2;
+d1617 16
+a1632 17
+      /* 4 GLchan / pixel in frame buffer */
+      swdd->WriteRGBSpan = write_rgb_span;
+      swdd->WriteRGBAPixels = write_rgba_pixels;
+      swdd->WriteMonoRGBASpan = write_monocolor_span;
+      swdd->WriteMonoRGBAPixels = write_monocolor_pixels;
+      if (osmesa->format == OSMESA_RGBA &&
+          CHAN_TYPE == GL_UNSIGNED_BYTE &&
+          RCOMP==0 && GCOMP==1 && BCOMP==2 && ACOMP==3) {
+         /* special, fast case */
+         swdd->WriteRGBASpan = write_rgba_span_rgba;
+         swdd->ReadRGBASpan = read_rgba_span_rgba;
+      }
+      else {
+         swdd->WriteRGBASpan = write_rgba_span;
+         swdd->ReadRGBASpan = read_rgba_span;
+      }
+      swdd->ReadRGBAPixels = read_rgba_pixels;
+d1636 7
+a1642 16
+   swdd->WriteCI32Span = write_index32_span;
+   swdd->WriteCI8Span = write_index8_span;
+   swdd->WriteMonoCISpan = write_monoindex_span;
+   swdd->WriteCI32Pixels = write_index_pixels;
+   swdd->WriteMonoCIPixels = write_monoindex_pixels;
+   swdd->ReadCI32Span = read_index_span;
+   swdd->ReadCI32Pixels = read_index_pixels;
+
+   swdd->SetReadBuffer = set_read_buffer;
+
+   tnl->Driver.RunPipeline = _tnl_run_pipeline;
+
+   _swrast_InvalidateState( ctx, new_state );
+   _swsetup_InvalidateState( ctx, new_state );
+   _ac_InvalidateState( ctx, new_state );
+   _tnl_InvalidateState( ctx, new_state );
+@
+
+
+1.1.1.3
+log
+@That's what OpenBSD will, probably, ship as XF4 in 3.5
+their last sync against XFree86 4.3-current has been
+imported into our vendor branch, too
+@
+text
+@d3 1
+a3 1
+ * Version:  5.0
+d24 1
+a24 1
+/* $XFree86: xc/extras/Mesa/src/OSmesa/osmesa.c,v 1.16 2003/12/02 14:28:12 alanh Exp $ */
+a42 1
+#include "imports.h"
+d45 1
+d57 1
+a116 1
+   const GLint accumBits = (format == OSMESA_COLOR_INDEX) ? 0 : 16;
+d118 1
+a118 1
+                                 8, accumBits, sharelist);
+d296 1
+a296 2
+                                    (void *) osmesa,
+                                    GL_FALSE)) {
+a303 1
+      _mesa_enable_1_4_extensions(&(osmesa->gl_ctx));
+d476 1
+a476 1
+   if (ctx->gl_ctx.Viewport.Width == 0) {
+a626 33
+
+
+struct name_address {
+   const char *Name;
+   GLvoid *Address;
+};
+
+static struct name_address functions[] = {
+   { "OSMesaCreateContext", (void *) OSMesaCreateContext },
+   { "OSMesaCreateContextExt", (void *) OSMesaCreateContextExt },
+   { "OSMesaDestroyContext", (void *) OSMesaDestroyContext },
+   { "OSMesaMakeCurrent", (void *) OSMesaMakeCurrent },
+   { "OSMesaGetCurrentContext", (void *) OSMesaGetCurrentContext },
+   { "OSMesaPixelsStore", (void *) OSMesaPixelStore },
+   { "OSMesaGetIntegerv", (void *) OSMesaGetIntegerv },
+   { "OSMesaGetDepthBuffer", (void *) OSMesaGetDepthBuffer },
+   { "OSMesaGetColorBuffer", (void *) OSMesaGetColorBuffer },
+   { "OSMesaGetProcAddress", (void *) OSMesaGetProcAddress },
+   { NULL, NULL }
+};
+
+GLAPI void * GLAPIENTRY
+OSMesaGetProcAddress( const char *funcName )
+{
+   int i;
+   for (i = 0; functions[i].Name; i++) {
+      if (_mesa_strcmp(functions[i].Name, funcName) == 0)
+         return (void *) functions[i].Address;
+   }
+   return (void *) _glapi_get_proc_address(funcName);
+}
+
+
+d637 6
+a642 6
+#define PACK_RGBA(DST, R, G, B, A)	\
+do {					\
+   (DST)[0] = MAX2( R, 0.0F );		\
+   (DST)[1] = MAX2( G, 0.0F );		\
+   (DST)[2] = MAX2( B, 0.0F );		\
+   (DST)[3] = CLAMP(A, 0.0F, CHAN_MAXF);\
+d687 9
+a695 1
+static void set_buffer( GLcontext *ctx, GLframebuffer *buffer, GLuint bufferBit )
+d699 1
+a699 1
+   ASSERT(bufferBit == FRONT_LEFT_BIT);
+d741 3
+a743 4
+            GLchan r, g, b;
+            CLAMPED_FLOAT_TO_CHAN(r, ctx->Color.ClearColor[0]);
+            CLAMPED_FLOAT_TO_CHAN(g, ctx->Color.ClearColor[1]);
+            CLAMPED_FLOAT_TO_CHAN(b, ctx->Color.ClearColor[2]);
+d767 3
+a769 4
+            GLchan r, g, b;
+            CLAMPED_FLOAT_TO_CHAN(r, ctx->Color.ClearColor[0]);
+            CLAMPED_FLOAT_TO_CHAN(g, ctx->Color.ClearColor[1]);
+            CLAMPED_FLOAT_TO_CHAN(b, ctx->Color.ClearColor[2]);
+d793 3
+a796 4
+            GLchan r, g, b;
+            CLAMPED_FLOAT_TO_CHAN(r, ctx->Color.ClearColor[0]);
+            CLAMPED_FLOAT_TO_CHAN(g, ctx->Color.ClearColor[1]);
+            CLAMPED_FLOAT_TO_CHAN(b, ctx->Color.ClearColor[2]);
+d825 4
+a828 4
+            CLAMPED_FLOAT_TO_CHAN(clr[osmesa->rInd], ctx->Color.ClearColor[0]);
+            CLAMPED_FLOAT_TO_CHAN(clr[osmesa->gInd], ctx->Color.ClearColor[1]);
+            CLAMPED_FLOAT_TO_CHAN(clr[osmesa->bInd], ctx->Color.ClearColor[2]);
+            CLAMPED_FLOAT_TO_CHAN(clr[osmesa->aInd], ctx->Color.ClearColor[3]);
+d840 1
+a840 1
+		  _mesa_bzero(ptr4, n * sizeof(GLuint));
+d854 4
+a857 5
+            GLchan r, g, b, a;
+            CLAMPED_FLOAT_TO_CHAN(r, ctx->Color.ClearColor[0]);
+            CLAMPED_FLOAT_TO_CHAN(g, ctx->Color.ClearColor[1]);
+            CLAMPED_FLOAT_TO_CHAN(b, ctx->Color.ClearColor[2]);
+            CLAMPED_FLOAT_TO_CHAN(a, ctx->Color.ClearColor[3]);
+d894 3
+a896 1
+   /* don't use GET_CURRENT_CONTEXT(ctx) here - it's a problem on Windows */
+d898 3
+d1207 1
+a1207 1
+   const OSMesaContext osmesa = OSMESA_CONTEXT(ctx);
+d1222 1
+a1222 1
+   const OSMesaContext osmesa = OSMESA_CONTEXT(ctx);
+d1788 1
+a1788 1
+   if (ctx->Texture._EnabledUnits)        return NULL;
+d1797 1
+d1860 1
+d1868 1
+a1868 1
+   for (i = 0; i < span.end; i++, img += 4) {			\
+d1912 1
+a1912 1
+   for (i = 0; i < span.end; i++) {			\
+d1943 1
+a1943 1
+   if (ctx->Texture._EnabledUnits)      return (swrast_tri_func) NULL;
+d2053 2
+a2055 1
+   ctx->Driver.GetBufferSize = buffer_size;
+a2062 1
+   ctx->Driver.DrawBuffer = _swrast_DrawBuffer;
+a2072 7
+   ctx->Driver.CompressedTexImage1D = _mesa_store_compressed_teximage1d;
+   ctx->Driver.CompressedTexImage2D = _mesa_store_compressed_teximage2d;
+   ctx->Driver.CompressedTexImage3D = _mesa_store_compressed_teximage3d;
+   ctx->Driver.CompressedTexSubImage1D = _mesa_store_compressed_texsubimage1d;
+   ctx->Driver.CompressedTexSubImage2D = _mesa_store_compressed_texsubimage2d;
+   ctx->Driver.CompressedTexSubImage3D = _mesa_store_compressed_texsubimage3d;
+
+d2083 3
+a2085 1
+   swdd->SetBuffer = set_buffer;
+d2143 2
+@
+
+

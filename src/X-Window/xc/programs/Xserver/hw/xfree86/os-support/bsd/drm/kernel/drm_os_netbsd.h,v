@@ -1,0 +1,921 @@
+head	1.1;
+branch	1.1.1;
+access;
+symbols
+	tg-mergetmp-2:1.1.1.2
+	cvs-200410241530:1.1.1.2
+	cvs-200410012000:1.1.1.2
+	cvs-200407221130:1.1.1.2
+	cvs-200407141120:1.1.1.2
+	cvs-200406231010:1.1.1.2
+	cvs-200406052200:1.1.1.2
+	MIRBSD_7quater:1.1.1.1
+	cvs-200405271510:1.1.1.2
+	XFree86_4_4_0:1.1.9.1
+	cvs-200403021700:1.1.1.2
+	XFREE86_20040213:1.1.9.1
+	xc:1.1.9
+	cvs-200401291925:1.1.1.1
+	MIRBSD_7_ALPHA:1.1.1.1.0.4
+	MIRBSD_7:1.1.1.1.0.2
+	MIRBSD_7ter:1.1.1.1
+	cvs-20011091815:1.1.1.1
+	cvs-200309162130:1.1.1.1
+	cvs-200308302005:1.1.1.1
+	ctmx-0387:1.1.1.1
+	ctmx-0384:1.1.1.1
+	MIRBSD_5:1.1.1.1
+	ctmx-0375:1.1.1.1
+	ctmx-0373:1.1.1.1
+	ctm-0371:1.1.1.1
+	ctm-0370:1.1.1.1
+	MIRBSD_4:1.1.1.1
+	ctm-0363:1.1.1.1
+	ctm-0359:1.1.1.1
+	openbsd:1.1.1;
+locks; strict;
+comment	@ * @;
+
+
+1.1
+date	2003.04.08.18.37.30;	author tg;	state Exp;
+branches
+	1.1.1.1
+	1.1.9.1;
+next	;
+
+1.1.1.1
+date	2003.04.08.18.37.30;	author tg;	state Exp;
+branches;
+next	1.1.1.2;
+
+1.1.1.2
+date	2004.03.02.18.24.40;	author tg;	state Stab;
+branches;
+next	;
+
+1.1.9.1
+date	2004.02.14.19.25.05;	author tg;	state Exp;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@#include <sys/param.h>
+#include <sys/queue.h>
+#include <sys/malloc.h>
+#include <sys/kernel.h>
+#include <sys/systm.h>
+#include <sys/conf.h>
+#include <sys/stat.h>
+#include <sys/proc.h>
+#include <sys/lock.h>
+#include <sys/fcntl.h>
+#include <sys/uio.h>
+#include <sys/filio.h>
+#include <sys/sysctl.h>
+#include <sys/select.h>
+#include <sys/device.h>
+#include <sys/mman.h>
+#include <uvm/uvm.h>
+#include <sys/vnode.h>
+#include <sys/poll.h>
+/* For TIOCSPGRP/TIOCGPGRP */
+#include <sys/ttycom.h>
+
+#include <uvm/uvm.h>
+
+#include <machine/pmap.h>
+#include <machine/bus.h>
+#include <sys/resourcevar.h>
+#include <machine/sysarch.h>
+#include <machine/mtrr.h>
+
+#include <dev/pci/pcireg.h>
+#include <dev/pci/pcivar.h>
+ 
+#include "drmvar.h"
+
+#define __REALLY_HAVE_AGP	__HAVE_AGP
+
+#define __REALLY_HAVE_MTRR	0
+#define __REALLY_HAVE_SG	0
+
+#if __REALLY_HAVE_AGP
+#include <dev/pci/agpvar.h>
+#include <sys/agpio.h>
+#endif
+
+#define device_t struct device *
+extern struct cfdriver DRM(_cd);
+
+#if DRM_DEBUG
+#undef  DRM_DEBUG_CODE
+#define DRM_DEBUG_CODE 2
+#endif
+#undef DRM_DEBUG
+
+#define DRM_TIME_SLICE	      (hz/20)  /* Time slice for GLXContexts	  */
+
+#define DRM_DEV_MODE	(S_IRUSR|S_IWUSR|S_IRGRP|S_IWGRP)
+#define DRM_DEV_UID	0
+#define DRM_DEV_GID	0
+#define CDEV_MAJOR	90
+
+#define DRM_CURPROC		curproc
+#define DRM_STRUCTPROC		struct proc
+#define DRM_SPINTYPE		struct simplelock
+#define DRM_SPININIT(l,name)	simple_lock_init(&l)
+#define DRM_SPINUNINIT(l)
+#define DRM_SPINLOCK(l)		simple_lock(l)
+#define DRM_SPINUNLOCK(u)	simple_unlock(u);
+#define DRM_CURRENTPID		curproc->p_pid
+
+#define DRM_IOCTL_ARGS		dev_t kdev, u_long cmd, caddr_t data, int flags, DRM_STRUCTPROC *p
+#define DRM_LOCK		lockmgr(&dev->dev_lock, LK_EXCLUSIVE, NULL)
+#define DRM_UNLOCK 		lockmgr(&dev->dev_lock, LK_RELEASE, NULL)
+#define DRM_SUSER(p)		suser(p->p_ucred, &p->p_acflag)
+#define DRM_TASKQUEUE_ARGS	void *dev, int pending
+#define DRM_IRQ_ARGS		void *device
+#define DRM_DEVICE		drm_device_t *dev = device_lookup(&DRM(_cd), minor(kdev))
+#define DRM_MALLOC(size)	malloc( size, DRM(M_DRM), M_NOWAIT )
+#define DRM_FREE(pt)		free( pt, DRM(M_DRM) )
+#define DRM_VTOPHYS(addr)	vtophys(addr)
+#define DRM_READ8(addr)	*((volatile char *)(addr))
+#define DRM_READ32(addr)	*((volatile long *)(addr))
+#define DRM_WRITE8(addr, val)	*((volatile char *)(addr)) = (val)
+#define DRM_WRITE32(addr, val)	*((volatile long *)(addr)) = (val)
+#define DRM_AGP_FIND_DEVICE()
+
+#define DRM_PRIV					\
+	drm_file_t	*priv	= (drm_file_t *) DRM(find_file_by_proc)(dev, p); \
+	if (!priv) {						\
+		DRM_DEBUG("can't find authenticator\n");	\
+		return EINVAL;					\
+	}
+
+#define DRM_UDELAY( udelay )					\
+do {								\
+	struct timeval tv1, tv2;				\
+	microtime(&tv1);					\
+	do {							\
+		microtime(&tv2);				\
+	}							\
+	while (((tv2.tv_sec-tv1.tv_sec)*1000000 + tv2.tv_usec - tv1.tv_usec) < udelay ); \
+} while (0)
+
+#define DRM_GETSAREA()					\
+do {								\
+	drm_map_list_entry_t *listentry;			\
+	TAILQ_FOREACH(listentry, dev->maplist, link) {		\
+		drm_map_t *map = listentry->map;		\
+		if (map->type == _DRM_SHM &&			\
+			map->flags & _DRM_CONTAINS_LOCK) {	\
+			dev_priv->sarea = map;			\
+			break;					\
+		}						\
+	}							\
+} while (0)
+
+#define return DRM_ERR(v)	return v;
+#define DRM_ERR(v)		v
+
+#define DRM_COPY_TO_USER_IOCTL(arg1, arg2, arg3) \
+	*arg1 = arg2
+#define DRM_COPY_FROM_USER_IOCTL(arg1, arg2, arg3) \
+	arg1 = *arg2
+#define DRM_COPY_TO_USER(arg1, arg2, arg3) \
+	copyout(arg2, arg1, arg3)
+#define DRM_COPY_FROM_USER(arg1, arg2, arg3) \
+	copyin(arg2, arg1, arg3)
+
+#define DRM_READMEMORYBARRIER \
+{												\
+   	int xchangeDummy;									\
+	DRM_DEBUG("%s\n", __FUNCTION__);							\
+   	__asm__ volatile(" push %%eax ; xchg %%eax, %0 ; pop %%eax" : : "m" (xchangeDummy));	\
+   	__asm__ volatile(" push %%eax ; push %%ebx ; push %%ecx ; push %%edx ;"			\
+			 " movl $0,%%eax ; cpuid ; pop %%edx ; pop %%ecx ; pop %%ebx ;"		\
+			 " pop %%eax" : /* no outputs */ :  /* no inputs */ );			\
+} while (0);
+
+#define DRM_WRITEMEMORYBARRIER DRM_READMEMORYBARRIER
+
+#define DRM_WAKEUP(w) wakeup(w)
+#define DRM_WAKEUP_INT(w) wakeup(w)
+
+#define PAGE_ALIGN(addr) (((addr)+PAGE_SIZE-1)&PAGE_MASK)
+
+typedef struct drm_chipinfo
+{
+	int vendor;
+	int device;
+	int supported;
+	char *name;
+} drm_chipinfo_t;
+
+typedef u_int32_t dma_addr_t;
+typedef volatile u_int32_t atomic_t;
+typedef u_int32_t cycles_t;
+typedef u_int32_t spinlock_t;
+typedef u_int32_t u32;
+typedef u_int16_t u16;
+typedef u_int8_t u8;
+typedef dev_type_ioctl(d_ioctl_t);
+typedef vaddr_t vm_offset_t;
+
+#define atomic_set(p, v)	(*(p) = (v))
+#define atomic_read(p)		(*(p))
+#define atomic_inc(p)		atomic_add_int(p, 1)
+#define atomic_dec(p)		atomic_subtract_int(p, 1)
+#define atomic_add(n, p)	atomic_add_int(p, n)
+#define atomic_sub(n, p)	atomic_subtract_int(p, n)
+
+/* FIXME: Is NetBSD's kernel non-reentrant? */
+#define atomic_add_int(p, v)      *(p) += v
+#define atomic_subtract_int(p, v) *(p) -= v
+#define atomic_set_int(p, bits)   *(p) |= (bits)
+#define atomic_clear_int(p, bits) *(p) &= ~(bits)
+
+/* Fake this */
+static __inline atomic_t
+test_and_set_bit(int b, atomic_t *p)
+{
+	int s = splhigh();
+	unsigned int m = 1<<b;
+	unsigned int r = *p & m;
+	*p |= m;
+	splx(s);
+	return r;
+}
+
+static __inline void
+clear_bit(int b, atomic_t *p)
+{
+    atomic_clear_int(p + (b >> 5), 1 << (b & 0x1f));
+}
+
+static __inline void
+set_bit(int b, atomic_t *p)
+{
+    atomic_set_int(p + (b >> 5), 1 << (b & 0x1f));
+}
+
+static __inline int
+test_bit(int b, atomic_t *p)
+{
+    return p[b >> 5] & (1 << (b & 0x1f));
+}
+
+static __inline int
+find_first_zero_bit(atomic_t *p, int max)
+{
+    int b;
+
+    for (b = 0; b < max; b += 32) {
+	if (p[b >> 5] != ~0) {
+	    for (;;) {
+		if ((p[b >> 5] & (1 << (b & 0x1f))) == 0)
+		    return b;
+		b++;
+	    }
+	}
+    }
+    return max;
+}
+
+#define spldrm()		spltty()
+#define jiffies			hardclock_ticks
+
+#define __drm_dummy_lock(lock) (*(__volatile__ unsigned int *)lock)
+#define _DRM_CAS(lock,old,new,__ret)				       \
+	do {							       \
+		int __dummy;	/* Can't mark eax as clobbered */      \
+		__asm__ __volatile__(				       \
+			"lock ; cmpxchg %4,%1\n\t"		       \
+			"setnz %0"				       \
+			: "=d" (__ret),				       \
+			  "=m" (__drm_dummy_lock(lock)),	       \
+			  "=a" (__dummy)			       \
+			: "2" (old),				       \
+			  "r" (new));				       \
+	} while (0)
+
+/* Redefinitions to make templating easy */
+#define wait_queue_head_t	atomic_t
+#define agp_memory		void
+
+				/* Macros to make printf easier */
+#define DRM_ERROR(fmt, arg...) \
+do { \
+	printf("error: [" DRM_NAME ":%s] *ERROR* ", __func__ ); \
+	printf( fmt,## arg ); \
+} while (0)
+
+#define DRM_MEM_ERROR(area, fmt, arg...) \
+	printf("error: [" DRM_NAME ":%s:%s] *ERROR* " fmt , \
+		__func__, DRM(mem_stats)[area].name ,## arg)
+#define DRM_INFO(fmt, arg...)  printf("info: " "[" DRM_NAME "] " fmt ,## arg)
+
+#if DRM_DEBUG_CODE
+#define DRM_DEBUG(fmt, arg...)						  \
+	do {								  \
+		if (DRM(flags) & DRM_FLAG_DEBUG)			  \
+			printf("[" DRM_NAME ":%s] " fmt , __FUNCTION__,## arg); \
+	} while (0)
+#else
+#define DRM_DEBUG(fmt, arg...)		 do { } while (0)
+#endif
+
+#define DRM_PROC_LIMIT (PAGE_SIZE-80)
+
+#define DRM_SYSCTL_PRINT(fmt, arg...)		\
+  snprintf(buf, sizeof(buf), fmt, ##arg);	\
+  error = SYSCTL_OUT(req, buf, strlen(buf));	\
+  if (error) return error;
+
+#define DRM_SYSCTL_PRINT_RET(ret, fmt, arg...)	\
+  snprintf(buf, sizeof(buf), fmt, ##arg);	\
+  error = SYSCTL_OUT(req, buf, strlen(buf));	\
+  if (error) { ret; return error; }
+
+
+#define DRM_FIND_MAP(dest, o)						\
+	do {								\
+		drm_map_list_entry_t *listentry;			\
+		TAILQ_FOREACH(listentry, dev->maplist, link) {		\
+			if ( listentry->map->offset == o ) {		\
+				dest = listentry->map;			\
+				break;					\
+			}						\
+		}							\
+	} while (0)
+
+/* Internal functions */
+
+/* drm_drv.h */
+extern dev_type_ioctl(DRM(ioctl));
+extern dev_type_ioctl(DRM(lock));
+extern dev_type_ioctl(DRM(unlock));
+extern dev_type_open(DRM(open));
+extern dev_type_close(DRM(close));
+extern dev_type_read(DRM(read));
+extern dev_type_write(DRM(write));
+extern dev_type_poll(DRM(poll));
+extern dev_type_mmap(DRM(mmap));
+extern int		DRM(open_helper)(dev_t kdev, int flags, int fmt, 
+					 DRM_STRUCTPROC *p, drm_device_t *dev);
+extern drm_file_t	*DRM(find_file_by_proc)(drm_device_t *dev, 
+					 DRM_STRUCTPROC *p);
+
+/* Misc. IOCTL support (drm_ioctl.h) */
+extern dev_type_ioctl(DRM(irq_busid));
+extern dev_type_ioctl(DRM(getunique));
+extern dev_type_ioctl(DRM(setunique));
+extern dev_type_ioctl(DRM(getmap));
+extern dev_type_ioctl(DRM(getclient));
+extern dev_type_ioctl(DRM(getstats));
+
+/* Context IOCTL support (drm_context.h) */
+extern dev_type_ioctl(DRM(resctx));
+extern dev_type_ioctl(DRM(addctx));
+extern dev_type_ioctl(DRM(modctx));
+extern dev_type_ioctl(DRM(getctx));
+extern dev_type_ioctl(DRM(switchctx));
+extern dev_type_ioctl(DRM(newctx));
+extern dev_type_ioctl(DRM(rmctx));
+extern dev_type_ioctl(DRM(setsareactx));
+extern dev_type_ioctl(DRM(getsareactx));
+
+/* Drawable IOCTL support (drm_drawable.h) */
+extern dev_type_ioctl(DRM(adddraw));
+extern dev_type_ioctl(DRM(rmdraw));
+
+/* Authentication IOCTL support (drm_auth.h) */
+extern dev_type_ioctl(DRM(getmagic));
+extern dev_type_ioctl(DRM(authmagic));
+
+/* Locking IOCTL support (drm_lock.h) */
+extern dev_type_ioctl(DRM(block));
+extern dev_type_ioctl(DRM(unblock));
+extern dev_type_ioctl(DRM(finish));
+
+/* Buffer management support (drm_bufs.h) */
+extern dev_type_ioctl(DRM(addmap));
+extern dev_type_ioctl(DRM(rmmap));
+#if __HAVE_DMA
+extern dev_type_ioctl(DRM(addbufs_agp));
+extern dev_type_ioctl(DRM(addbufs_pci));
+extern dev_type_ioctl(DRM(addbufs_sg));
+extern dev_type_ioctl(DRM(addbufs));
+extern dev_type_ioctl(DRM(infobufs));
+extern dev_type_ioctl(DRM(markbufs));
+extern dev_type_ioctl(DRM(freebufs));
+extern dev_type_ioctl(DRM(mapbufs));
+#endif
+
+/* DMA support (drm_dma.h) */
+#if __HAVE_DMA
+extern dev_type_ioctl(DRM(control));
+#endif
+
+/* AGP/GART support (drm_agpsupport.h) */
+#if __REALLY_HAVE_AGP
+extern dev_type_ioctl(DRM(agp_acquire));
+extern dev_type_ioctl(DRM(agp_release));
+extern dev_type_ioctl(DRM(agp_enable));
+extern dev_type_ioctl(DRM(agp_info));
+extern dev_type_ioctl(DRM(agp_alloc));
+extern dev_type_ioctl(DRM(agp_free));
+extern dev_type_ioctl(DRM(agp_unbind));
+extern dev_type_ioctl(DRM(agp_bind));
+#endif
+
+/* Scatter Gather Support (drm_scatter.h) */
+#if __HAVE_SG
+extern dev_type_ioctl(DRM(sg_alloc));
+extern dev_type_ioctl(DRM(sg_free));
+#endif
+
+/* SysCtl Support (drm_sysctl.h) */
+extern int		DRM(sysctl_init)(drm_device_t *dev);
+extern int		DRM(sysctl_cleanup)(drm_device_t *dev);
+@
+
+
+1.1.9.1
+log
+@OpenBSD just has imported exactly this tree into their vendor branch,
+called the same tag, in XF4/xc
+This is, apparently, the last XFree86 snapshot before the licence change
+(ie, addition of the advertising clause)
+
+Since the developers don't see any problems with that, and we would like
+to integrate improvements done by the remaining one or two (or so) XFree86
+developers (j/k), this prepares enabling us to update X-Window in the future.
+@
+text
+@a0 32
+/**
+ * \file drm_os_netbsd.h
+ * OS-specific #defines for NetBSD
+ * 
+ * \author Eric Anholt <anholt@@FreeBSD.org>
+ * \author Erik Reid <reide@@canuck.com>
+ */
+
+/*
+ * Copyright 2003 Eric Anholt
+ * All Rights Reserved.
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a
+ * copy of this software and associated documentation files (the "Software"),
+ * to deal in the Software without restriction, including without limitation
+ * the rights to use, copy, modify, merge, publish, distribute, sublicense,
+ * and/or sell copies of the Software, and to permit persons to whom the
+ * Software is furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice (including the next
+ * paragraph) shall be included in all copies or substantial portions of the
+ * Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL
+ * VA LINUX SYSTEMS AND/OR ITS SUPPLIERS BE LIABLE FOR ANY CLAIM, DAMAGES OR
+ * OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE,
+ * ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR
+ * OTHER DEALINGS IN THE SOFTWARE.
+ */
+
+a19 1
+#include <sys/lkm.h>
+a21 1
+#include <sys/endian.h>
+d34 2
+d38 1
+a38 1
+#define __REALLY_HAVE_MTRR	1
+d46 2
+a47 1
+#include <opt_drm.h>
+a54 8
+#if DRM_LINUX
+#undef DRM_LINUX	/* FIXME: Linux compat has not been ported yet */
+#endif
+
+typedef drm_device_t *device_t;
+
+extern struct cfdriver DRM(cd);
+
+d60 1
+a60 1
+#define CDEV_MAJOR	34
+d65 1
+a65 1
+#define DRM_SPININIT(l,name)
+d67 2
+a68 2
+#define DRM_SPINLOCK(l)	
+#define DRM_SPINUNLOCK(u)
+d71 3
+a73 7
+/* Currently our DRMFILE (filp) is a void * which is actually the pid
+ * of the current process.  It should be a per-open unique pointer, but
+ * code for that is not yet written */
+#define DRMFILE			void *
+#define DRM_IOCTL_ARGS		dev_t kdev, u_long cmd, caddr_t data, int flags, DRM_STRUCTPROC *p, DRMFILE filp
+#define DRM_LOCK()
+#define DRM_UNLOCK()
+d76 2
+a77 12
+#define DRM_IRQ_ARGS		void *arg
+typedef int			irqreturn_t;
+#define IRQ_NONE		/* FIXME */
+#define IRQ_HANDLED		/* FIXME */
+#define DRM_DEVICE		drm_device_t *dev = device_lookup(&DRM(cd), minor(kdev))
+/* XXX Not sure if this is the 'right' version.. */
+#if __NetBSD_Version__ >= 106140000
+MALLOC_DECLARE(DRM(M_DRM));
+#else
+/* XXX Make sure this works */
+extern const int DRM(M_DRM) = M_DEVBUF;
+#endif /* __NetBSD_Version__ */
+d79 12
+a90 15
+#define DRM_FREE(pt,size)		free( pt, DRM(M_DRM) )
+
+#define DRM_READ8(map, offset)		bus_space_read_1(  (map)->iot, (map)->ioh, (offset) )
+#define DRM_READ32(map, offset)		bus_space_read_4(  (map)->iot, (map)->ioh, (offset) )
+#define DRM_WRITE8(map, offset, val)	bus_space_write_1( (map)->iot, (map)->ioh, (offset), (val) )
+#define DRM_WRITE32(map, offset, val)	bus_space_write_4( (map)->iot, (map)->ioh, (offset), (val) )
+
+#define DRM_MTRR_WC	MTRR_TYPE_WC
+
+#define DRM_AGP_FIND_DEVICE()	agp_find_device(0)
+
+#define DRM_GET_PRIV_WITH_RETURN(_priv, _filp)			\
+do {								\
+	if (_filp != (DRMFILE)DRM_CURRENTPID) {			\
+		DRM_ERROR("filp doesn't match curproc\n");	\
+d92 1
+a92 17
+	}							\
+	_priv = DRM(find_file_by_proc)(dev, DRM_CURPROC);	\
+	if (_priv == NULL) {					\
+		DRM_ERROR("can't find authenticator\n");	\
+		return EINVAL;					\
+	}							\
+} while (0)
+
+#define LOCK_TEST_WITH_RETURN(dev, filp)				\
+do {									\
+	if (!_DRM_LOCK_IS_HELD(dev->lock.hw_lock->lock) ||		\
+	     dev->lock.filp != filp) {					\
+		DRM_ERROR("%s called without lock held\n",		\
+			   __FUNCTION__);				\
+		return EINVAL;						\
+	}								\
+} while (0)
+d108 1
+a108 1
+		drm_local_map_t *map = listentry->map;		\
+d117 1
+a117 11
+#define DRM_HZ hz
+
+#define DRM_WAIT_ON( ret, queue, timeout, condition )		\
+while (!condition) {						\
+	int s = spldrm();					\
+	ret = tsleep( (void *)&(queue), PZERO | PCATCH, "drmwtq", (timeout) ); \
+	if ( ret )						\
+		return ret;					\
+	splx(s);					\
+}
+
+a127 12
+/* Macros for userspace access with checking readability once */
+/* FIXME: can't find equivalent functionality for nocheck yet.
+ * It'll be slower than linux, but should be correct.
+ */
+#define DRM_VERIFYAREA_READ( uaddr, size )		\
+	(!uvm_useracc((caddr_t)uaddr, size, VM_PROT_READ))
+#define DRM_COPY_FROM_USER_UNCHECKED(arg1, arg2, arg3) 	\
+	copyin(arg2, arg1, arg3)
+#define DRM_COPY_TO_USER_UNCHECKED(arg1, arg2, arg3)	\
+	copyout(arg2, arg1, arg3)
+#define DRM_GET_USER_UNCHECKED(val, uaddr)			\
+	((val) = fuword(uaddr), 0)
+d129 11
+a139 15
+/* DRM_READMEMORYBARRIER() prevents reordering of reads.
+ * DRM_WRITEMEMORYBARRIER() prevents reordering of writes.
+ * DRM_MEMORYBARRIER() prevents reordering of reads and writes.
+ */
+#if defined(__i386__)
+#define DRM_READMEMORYBARRIER()		__asm __volatile( \
+					"lock; addl $0,0(%%esp)" : : : "memory");
+#define DRM_WRITEMEMORYBARRIER()	__asm __volatile("" : : : "memory");
+#define DRM_MEMORYBARRIER()		__asm __volatile( \
+					"lock; addl $0,0(%%esp)" : : : "memory");
+#elif defined(__alpha__)
+#define DRM_READMEMORYBARRIER()		alpha_mb();
+#define DRM_WRITEMEMORYBARRIER()	alpha_wmb();
+#define DRM_MEMORYBARRIER()		alpha_mb();
+#endif
+d141 1
+a141 1
+#define DRM_WAKEUP(w) wakeup((void *)w)
+a142 1
+#define DRM_INIT_WAITQUEUE( queue )  do {} while (0)
+d146 7
+a152 2
+#define cpu_to_le32(x) htole32(x)
+#define le32_to_cpu(x) le32toh(x)
+d155 3
+a157 1
+typedef volatile long atomic_t;
+a163 1
+/* FIXME */
+d166 4
+a169 4
+#define atomic_inc(p)		(*(p) += 1)
+#define atomic_dec(p)		(*(p) -= 1)
+#define atomic_add(n, p)	(*(p) += (n))
+#define atomic_sub(n, p)	(*(p) -= (n))
+d171 1
+a171 1
+/* FIXME */
+a177 14
+
+static __inline int
+atomic_cmpset_int(__volatile__ int *dst, int old, int new)
+{
+	int s = splhigh();
+	if (*dst==old) {
+		*dst = new;
+		splx(s);
+		return 1;
+	}
+	splx(s);
+	return 0;
+}
+
+d227 14
+d242 1
+a242 1
+#define wait_queue_head_t	int
+d261 1
+a261 1
+			printf("[" DRM_NAME ":%s] " fmt , __FUNCTION__ ,## arg); \
+d267 13
+d295 2
+d300 1
+d308 70
+@
+
+
+1.1.1.1
+log
+@The X-Windowing System
+
+Import XFree86 4.3 from OpenBSD by CTM, in the hope it's stable
+@
+text
+@@
+
+
+1.1.1.2
+log
+@That's what OpenBSD will, probably, ship as XF4 in 3.5
+their last sync against XFree86 4.3-current has been
+imported into our vendor branch, too
+@
+text
+@a0 32
+/**
+ * \file drm_os_netbsd.h
+ * OS-specific #defines for NetBSD
+ * 
+ * \author Eric Anholt <anholt@@FreeBSD.org>
+ * \author Erik Reid <reide@@canuck.com>
+ */
+
+/*
+ * Copyright 2003 Eric Anholt
+ * All Rights Reserved.
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a
+ * copy of this software and associated documentation files (the "Software"),
+ * to deal in the Software without restriction, including without limitation
+ * the rights to use, copy, modify, merge, publish, distribute, sublicense,
+ * and/or sell copies of the Software, and to permit persons to whom the
+ * Software is furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice (including the next
+ * paragraph) shall be included in all copies or substantial portions of the
+ * Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL
+ * VA LINUX SYSTEMS AND/OR ITS SUPPLIERS BE LIABLE FOR ANY CLAIM, DAMAGES OR
+ * OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE,
+ * ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR
+ * OTHER DEALINGS IN THE SOFTWARE.
+ */
+
+a19 1
+#include <sys/lkm.h>
+a21 1
+#include <sys/endian.h>
+d34 2
+d38 1
+a38 1
+#define __REALLY_HAVE_MTRR	1
+d46 2
+a47 1
+#include <opt_drm.h>
+a54 8
+#if DRM_LINUX
+#undef DRM_LINUX	/* FIXME: Linux compat has not been ported yet */
+#endif
+
+typedef drm_device_t *device_t;
+
+extern struct cfdriver DRM(cd);
+
+d60 1
+a60 1
+#define CDEV_MAJOR	34
+d65 1
+a65 1
+#define DRM_SPININIT(l,name)
+d67 2
+a68 2
+#define DRM_SPINLOCK(l)	
+#define DRM_SPINUNLOCK(u)
+d71 3
+a73 7
+/* Currently our DRMFILE (filp) is a void * which is actually the pid
+ * of the current process.  It should be a per-open unique pointer, but
+ * code for that is not yet written */
+#define DRMFILE			void *
+#define DRM_IOCTL_ARGS		dev_t kdev, u_long cmd, caddr_t data, int flags, DRM_STRUCTPROC *p, DRMFILE filp
+#define DRM_LOCK()
+#define DRM_UNLOCK()
+d76 2
+a77 12
+#define DRM_IRQ_ARGS		void *arg
+typedef int			irqreturn_t;
+#define IRQ_NONE		/* FIXME */
+#define IRQ_HANDLED		/* FIXME */
+#define DRM_DEVICE		drm_device_t *dev = device_lookup(&DRM(cd), minor(kdev))
+/* XXX Not sure if this is the 'right' version.. */
+#if __NetBSD_Version__ >= 106140000
+MALLOC_DECLARE(DRM(M_DRM));
+#else
+/* XXX Make sure this works */
+extern const int DRM(M_DRM) = M_DEVBUF;
+#endif /* __NetBSD_Version__ */
+d79 12
+a90 15
+#define DRM_FREE(pt,size)		free( pt, DRM(M_DRM) )
+
+#define DRM_READ8(map, offset)		bus_space_read_1(  (map)->iot, (map)->ioh, (offset) )
+#define DRM_READ32(map, offset)		bus_space_read_4(  (map)->iot, (map)->ioh, (offset) )
+#define DRM_WRITE8(map, offset, val)	bus_space_write_1( (map)->iot, (map)->ioh, (offset), (val) )
+#define DRM_WRITE32(map, offset, val)	bus_space_write_4( (map)->iot, (map)->ioh, (offset), (val) )
+
+#define DRM_MTRR_WC	MTRR_TYPE_WC
+
+#define DRM_AGP_FIND_DEVICE()	agp_find_device(0)
+
+#define DRM_GET_PRIV_WITH_RETURN(_priv, _filp)			\
+do {								\
+	if (_filp != (DRMFILE)DRM_CURRENTPID) {			\
+		DRM_ERROR("filp doesn't match curproc\n");	\
+d92 1
+a92 17
+	}							\
+	_priv = DRM(find_file_by_proc)(dev, DRM_CURPROC);	\
+	if (_priv == NULL) {					\
+		DRM_ERROR("can't find authenticator\n");	\
+		return EINVAL;					\
+	}							\
+} while (0)
+
+#define LOCK_TEST_WITH_RETURN(dev, filp)				\
+do {									\
+	if (!_DRM_LOCK_IS_HELD(dev->lock.hw_lock->lock) ||		\
+	     dev->lock.filp != filp) {					\
+		DRM_ERROR("%s called without lock held\n",		\
+			   __FUNCTION__);				\
+		return EINVAL;						\
+	}								\
+} while (0)
+d108 1
+a108 1
+		drm_local_map_t *map = listentry->map;		\
+d117 1
+a117 11
+#define DRM_HZ hz
+
+#define DRM_WAIT_ON( ret, queue, timeout, condition )		\
+while (!condition) {						\
+	int s = spldrm();					\
+	ret = tsleep( (void *)&(queue), PZERO | PCATCH, "drmwtq", (timeout) ); \
+	if ( ret )						\
+		return ret;					\
+	splx(s);					\
+}
+
+a127 12
+/* Macros for userspace access with checking readability once */
+/* FIXME: can't find equivalent functionality for nocheck yet.
+ * It'll be slower than linux, but should be correct.
+ */
+#define DRM_VERIFYAREA_READ( uaddr, size )		\
+	(!uvm_useracc((caddr_t)uaddr, size, VM_PROT_READ))
+#define DRM_COPY_FROM_USER_UNCHECKED(arg1, arg2, arg3) 	\
+	copyin(arg2, arg1, arg3)
+#define DRM_COPY_TO_USER_UNCHECKED(arg1, arg2, arg3)	\
+	copyout(arg2, arg1, arg3)
+#define DRM_GET_USER_UNCHECKED(val, uaddr)			\
+	((val) = fuword(uaddr), 0)
+d129 11
+a139 15
+/* DRM_READMEMORYBARRIER() prevents reordering of reads.
+ * DRM_WRITEMEMORYBARRIER() prevents reordering of writes.
+ * DRM_MEMORYBARRIER() prevents reordering of reads and writes.
+ */
+#if defined(__i386__)
+#define DRM_READMEMORYBARRIER()		__asm __volatile( \
+					"lock; addl $0,0(%%esp)" : : : "memory");
+#define DRM_WRITEMEMORYBARRIER()	__asm __volatile("" : : : "memory");
+#define DRM_MEMORYBARRIER()		__asm __volatile( \
+					"lock; addl $0,0(%%esp)" : : : "memory");
+#elif defined(__alpha__)
+#define DRM_READMEMORYBARRIER()		alpha_mb();
+#define DRM_WRITEMEMORYBARRIER()	alpha_wmb();
+#define DRM_MEMORYBARRIER()		alpha_mb();
+#endif
+d141 1
+a141 1
+#define DRM_WAKEUP(w) wakeup((void *)w)
+a142 1
+#define DRM_INIT_WAITQUEUE( queue )  do {} while (0)
+d146 7
+a152 2
+#define cpu_to_le32(x) htole32(x)
+#define le32_to_cpu(x) le32toh(x)
+d155 3
+a157 1
+typedef volatile long atomic_t;
+a163 1
+/* FIXME */
+d166 4
+a169 4
+#define atomic_inc(p)		(*(p) += 1)
+#define atomic_dec(p)		(*(p) -= 1)
+#define atomic_add(n, p)	(*(p) += (n))
+#define atomic_sub(n, p)	(*(p) -= (n))
+d171 1
+a171 1
+/* FIXME */
+a177 14
+
+static __inline int
+atomic_cmpset_int(__volatile__ int *dst, int old, int new)
+{
+	int s = splhigh();
+	if (*dst==old) {
+		*dst = new;
+		splx(s);
+		return 1;
+	}
+	splx(s);
+	return 0;
+}
+
+d227 14
+d242 1
+a242 1
+#define wait_queue_head_t	int
+d261 1
+a261 1
+			printf("[" DRM_NAME ":%s] " fmt , __FUNCTION__ ,## arg); \
+d267 13
+d295 2
+d300 1
+d308 70
+@
+

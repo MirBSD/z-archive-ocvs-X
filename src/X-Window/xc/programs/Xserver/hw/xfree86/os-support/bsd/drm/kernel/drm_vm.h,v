@@ -1,0 +1,445 @@
+head	1.1;
+branch	1.1.1;
+access;
+symbols
+	tg-mergetmp-2:1.1.1.3
+	cvs-200410241530:1.1.1.3
+	cvs-200410012000:1.1.1.3
+	cvs-200407221130:1.1.1.3
+	cvs-200407141120:1.1.1.3
+	cvs-200406231010:1.1.1.3
+	cvs-200406052200:1.1.1.3
+	MIRBSD_7quater:1.1.1.2
+	cvs-200405271510:1.1.1.3
+	XFree86_4_4_0:1.1.9.1
+	cvs-200403021700:1.1.1.3
+	XFREE86_20040213:1.1.9.1
+	xc:1.1.9
+	cvs-200401291925:1.1.1.2
+	MIRBSD_7_ALPHA:1.1.1.2.0.4
+	MIRBSD_7:1.1.1.2.0.2
+	MIRBSD_7ter:1.1.1.2
+	cvs-20011091815:1.1.1.2
+	cvs-200309162130:1.1.1.2
+	cvs-200308302005:1.1.1.2
+	ctmx-0387:1.1.1.2
+	ctmx-0384:1.1.1.2
+	MIRBSD_5:1.1.1.2
+	ctmx-0375:1.1.1.2
+	ctmx-0373:1.1.1.2
+	ctm-0371:1.1.1.2
+	ctm-0370:1.1.1.2
+	MIRBSD_4:1.1.1.2
+	ctm-0363:1.1.1.2
+	ctm-0359:1.1.1.2
+	ctm-0349:1.1.1.1
+	openbsd:1.1.1;
+locks; strict;
+comment	@ * @;
+
+
+1.1
+date	2003.03.22.20.08.33;	author tg;	state Exp;
+branches
+	1.1.1.1
+	1.1.9.1;
+next	;
+
+1.1.1.1
+date	2003.03.22.20.08.33;	author tg;	state Exp;
+branches;
+next	1.1.1.2;
+
+1.1.1.2
+date	2003.04.08.18.37.30;	author tg;	state Exp;
+branches;
+next	1.1.1.3;
+
+1.1.1.3
+date	2004.03.02.18.24.40;	author tg;	state Stab;
+branches;
+next	;
+
+1.1.9.1
+date	2004.02.14.19.25.06;	author tg;	state Exp;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@#include <vm/vm.h>
+#include <vm/pmap.h>
+
+static int DRM(dma_mmap)(dev_t kdev, vm_offset_t offset, int prot)
+{
+	drm_device_t	 *dev	 = kdev->si_drv1;
+	drm_device_dma_t *dma	 = dev->dma;
+	unsigned long	 physical;
+	unsigned long	 page;
+
+	if (!dma)		   return -1; /* Error */
+	if (!dma->pagelist)	   return -1; /* Nothing allocated */
+
+	page	 = offset >> PAGE_SHIFT;
+	physical = dma->pagelist[page];
+
+	DRM_DEBUG("0x%08x (page %lu) => 0x%08lx\n", offset, page, physical);
+	return atop(physical);
+}
+
+int DRM(mmap)(dev_t kdev, vm_offset_t offset, int prot)
+{
+	drm_device_t	*dev	= kdev->si_drv1;
+	drm_map_t	*map	= NULL;
+	drm_map_list_entry_t *listentry=NULL;
+	/*drm_file_t *priv;*/
+
+/*	DRM_DEBUG("offset = 0x%x\n", offset);*/
+
+	/*XXX Fixme */
+	/*priv = DRM(find_file_by_proc)(dev, p);
+	if (!priv) {
+		DRM_DEBUG("can't find authenticator\n");
+		return EINVAL;
+	}
+
+	if (!priv->authenticated) DRM_OS_RETURN(EACCES);*/
+
+	if (dev->dma
+	    && offset >= 0
+	    && offset < ptoa(dev->dma->page_count))
+		return DRM(dma_mmap)(kdev, offset, prot);
+
+				/* A sequential search of a linked list is
+				   fine here because: 1) there will only be
+				   about 5-10 entries in the list and, 2) a
+				   DRI client only has to do this mapping
+				   once, so it doesn't have to be optimized
+				   for performance, even if the list was a
+				   bit longer. */
+	TAILQ_FOREACH(listentry, dev->maplist, link) {
+		map = listentry->map;
+/*		DRM_DEBUG("considering 0x%x..0x%x\n", map->offset, map->offset + map->size - 1);*/
+		if (offset >= map->offset
+		    && offset < map->offset + map->size) break;
+	}
+	
+	if (!listentry) {
+		DRM_DEBUG("can't find map\n");
+		return -1;
+	}
+	if (((map->flags&_DRM_RESTRICTED) && suser(curproc))) {
+		DRM_DEBUG("restricted map\n");
+		return -1;
+	}
+
+	switch (map->type) {
+	case _DRM_FRAME_BUFFER:
+	case _DRM_REGISTERS:
+	case _DRM_AGP:
+		return atop(offset);
+	case _DRM_SHM:
+		return atop(vtophys(offset));
+	default:
+		return -1;	/* This should never happen. */
+	}
+	DRM_DEBUG("bailing out\n");
+	
+	return -1;
+}
+
+@
+
+
+1.1.9.1
+log
+@OpenBSD just has imported exactly this tree into their vendor branch,
+called the same tag, in XF4/xc
+This is, apparently, the last XFree86 snapshot before the licence change
+(ie, addition of the advertising clause)
+
+Since the developers don't see any problems with that, and we would like
+to integrate improvements done by the remaining one or two (or so) XFree86
+developers (j/k), this prepares enabling us to update X-Window in the future.
+@
+text
+@d1 3
+a3 28
+/* 
+ * Copyright 2003 Eric Anholt
+ * All Rights Reserved.
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a
+ * copy of this software and associated documentation files (the "Software"),
+ * to deal in the Software without restriction, including without limitation
+ * the rights to use, copy, modify, merge, publish, distribute, sublicense,
+ * and/or sell copies of the Software, and to permit persons to whom the
+ * Software is furnished to do so, subject to the following conditions:
+ * 
+ * The above copyright notice and this permission notice (including the next
+ * paragraph) shall be included in all copies or substantial portions of the
+ * Software.
+ * 
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL
+ * PRECISION INSIGHT AND/OR ITS SUPPLIERS BE LIABLE FOR ANY CLAIM, DAMAGES OR
+ * OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE,
+ * ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+ * DEALINGS IN THE SOFTWARE.
+ */
+
+#if defined(__FreeBSD__) && __FreeBSD_version >= 500102
+static int DRM(dma_mmap)(dev_t kdev, vm_offset_t offset, vm_paddr_t *paddr, 
+    int prot)
+#elif defined(__FreeBSD__)
+a4 3
+#elif defined(__NetBSD__)
+static paddr_t DRM(dma_mmap)(dev_t kdev, vm_offset_t offset, int prot)
+#endif
+d6 4
+a9 4
+	DRM_DEVICE;
+	drm_device_dma_t *dma = dev->dma;
+	unsigned long physical;
+	unsigned long page;
+d11 2
+a12 2
+	if (dma == NULL || dma->pagelist == NULL)
+		return -1;
+d17 1
+a17 5
+	DRM_DEBUG("0x%08lx (page %lu) => 0x%08lx\n", (long)offset, page, physical);
+#if defined(__FreeBSD__) && __FreeBSD_version >= 500102
+	*paddr = physical;
+	return 0;
+#else
+a18 1
+#endif
+a20 4
+#if defined(__FreeBSD__) && __FreeBSD_version >= 500102
+int DRM(mmap)(dev_t kdev, vm_offset_t offset, vm_paddr_t *paddr, 
+    int prot)
+#elif defined(__FreeBSD__)
+a21 3
+#elif defined(__NetBSD__)
+paddr_t DRM(mmap)(dev_t kdev, off_t offset, int prot)
+#endif
+d23 13
+a35 6
+	DRM_DEVICE;
+	drm_local_map_t *map = NULL;
+	drm_map_list_entry_t *listentry = NULL;
+	drm_file_t *priv;
+
+	DRM_GET_PRIV_WITH_RETURN(priv, (DRMFILE)DRM_CURRENTPID);
+d37 1
+a37 2
+	if (!priv->authenticated)
+		return DRM_ERR(EACCES);
+a41 3
+#if defined(__FreeBSD__) && __FreeBSD_version >= 500102
+		return DRM(dma_mmap)(kdev, offset, paddr, prot);
+#else
+a42 1
+#endif
+d62 1
+a62 1
+	if (((map->flags&_DRM_RESTRICTED) && DRM_SUSER(DRM_CURPROC))) {
+a70 4
+#if defined(__FreeBSD__) && __FreeBSD_version >= 500102
+		*paddr = offset;
+		return 0;
+#else
+a71 2
+#endif
+	case _DRM_SCATTER_GATHER:
+a72 4
+#if defined(__FreeBSD__) && __FreeBSD_version >= 500102
+		*paddr = vtophys(offset);
+		return 0;
+#else
+a73 1
+#endif
+@
+
+
+1.1.1.1
+log
+@Import OpenBSD 3.3 XF4 repository from CTM 3132 the first time
+This finalizes starting an OpenBSD-mirabile (aka MirBSD) repository.
+
+### MirBSD is:
+# Copyright (c) 1982-2003 by Thorsten "mirabile" Glaser <x86@@ePost.de>
+# Copyright © 1968-2003  The authors of And contributors to UNIX®, the
+#       C Language, BSD/Berkeley Unix; 386BSD, NetBSD 1.1 and OpenBSD.
+#
+# Anyone who obtained a copy of this work is hereby permitted to freely use,
+# distribute, modify, merge, sublicence, give away or sell it as long as the
+# authors are given due credit and the following notice is retained:
+#
+# This work is provided "as is", with no explicit or implicit warranty what-
+# soever. Use it only at your own risk. In no event may an author or contri-
+# butor be held liable for any damage, directly or indirectly, that origina-
+# ted through or is caused by creation or modification of this work.
+
+MirBSD is my private tree. MirBSD does not differ very much from OpenBSD
+and intentionally tracks OpenBSD. That's why it _is_ OpenBSD, just not the
+official one. It's like with DarrenBSD.
+
+At time of this writing, no advertising for MirBSD must be done,
+because the advertising clause has not yet been sorted out.
+
+http://templeofhate.com/tglaser/MirBSD/index.php
+@
+text
+@@
+
+
+1.1.1.2
+log
+@The X-Windowing System
+
+Import XFree86 4.3 from OpenBSD by CTM, in the hope it's stable
+@
+text
+@d1 2
+a3 1
+#ifdef __FreeBSD__
+a4 3
+#elif defined(__NetBSD__)
+static paddr_t DRM(dma_mmap)(dev_t kdev, vm_offset_t offset, int prot)
+#endif
+d6 1
+a6 1
+	DRM_DEVICE;
+d17 1
+a17 1
+	DRM_DEBUG("0x%08lx (page %lu) => 0x%08lx\n", (long)offset, page, physical);
+a20 1
+#ifdef __FreeBSD__
+a21 3
+#elif defined(__NetBSD__)
+paddr_t DRM(mmap)(dev_t kdev, off_t offset, int prot)
+#endif
+d23 1
+a23 1
+	DRM_DEVICE;
+d26 1
+a26 1
+	drm_file_t *priv;
+d30 2
+a31 1
+	priv = DRM(find_file_by_proc)(dev, DRM_CURPROC);
+d37 1
+a37 1
+	if (!priv->authenticated) return DRM_ERR(EACCES);
+d62 1
+a62 1
+	if (((map->flags&_DRM_RESTRICTED) && DRM_SUSER(DRM_CURPROC))) {
+a71 1
+	case _DRM_SCATTER_GATHER:
+@
+
+
+1.1.1.3
+log
+@That's what OpenBSD will, probably, ship as XF4 in 3.5
+their last sync against XFree86 4.3-current has been
+imported into our vendor branch, too
+@
+text
+@d1 2
+a2 28
+/* 
+ * Copyright 2003 Eric Anholt
+ * All Rights Reserved.
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a
+ * copy of this software and associated documentation files (the "Software"),
+ * to deal in the Software without restriction, including without limitation
+ * the rights to use, copy, modify, merge, publish, distribute, sublicense,
+ * and/or sell copies of the Software, and to permit persons to whom the
+ * Software is furnished to do so, subject to the following conditions:
+ * 
+ * The above copyright notice and this permission notice (including the next
+ * paragraph) shall be included in all copies or substantial portions of the
+ * Software.
+ * 
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL
+ * PRECISION INSIGHT AND/OR ITS SUPPLIERS BE LIABLE FOR ANY CLAIM, DAMAGES OR
+ * OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE,
+ * ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+ * DEALINGS IN THE SOFTWARE.
+ */
+
+#if defined(__FreeBSD__) && __FreeBSD_version >= 500102
+static int DRM(dma_mmap)(dev_t kdev, vm_offset_t offset, vm_paddr_t *paddr, 
+    int prot)
+#elif defined(__FreeBSD__)
+d9 3
+a11 3
+	drm_device_dma_t *dma = dev->dma;
+	unsigned long physical;
+	unsigned long page;
+d13 2
+a14 2
+	if (dma == NULL || dma->pagelist == NULL)
+		return -1;
+a19 4
+#if defined(__FreeBSD__) && __FreeBSD_version >= 500102
+	*paddr = physical;
+	return 0;
+#else
+a20 1
+#endif
+d23 1
+a23 4
+#if defined(__FreeBSD__) && __FreeBSD_version >= 500102
+int DRM(mmap)(dev_t kdev, vm_offset_t offset, vm_paddr_t *paddr, 
+    int prot)
+#elif defined(__FreeBSD__)
+d30 2
+a31 2
+	drm_local_map_t *map = NULL;
+	drm_map_list_entry_t *listentry = NULL;
+d34 7
+a40 1
+	DRM_GET_PRIV_WITH_RETURN(priv, (DRMFILE)DRM_CURRENTPID);
+d42 1
+a42 2
+	if (!priv->authenticated)
+		return DRM_ERR(EACCES);
+a46 3
+#if defined(__FreeBSD__) && __FreeBSD_version >= 500102
+		return DRM(dma_mmap)(kdev, offset, paddr, prot);
+#else
+a47 1
+#endif
+a75 4
+#if defined(__FreeBSD__) && __FreeBSD_version >= 500102
+		*paddr = offset;
+		return 0;
+#else
+a76 1
+#endif
+a78 4
+#if defined(__FreeBSD__) && __FreeBSD_version >= 500102
+		*paddr = vtophys(offset);
+		return 0;
+#else
+a79 1
+#endif
+@
+
+

@@ -1,0 +1,319 @@
+head	1.2;
+access;
+symbols
+	cvs-200410241530:1.1.1.1
+	cvs-200410012000:1.1.1.1
+	cvs-200407141120:1.1.1.1
+	cvs-200406231010:1.1.1.1
+	MIRBSD_7quater:1.1.1.1
+	cvs-200405271510:1.1.1.1
+	XFree86_4_4_0:1.1.9.1
+	cvs-200403021700:1.1.1.1
+	XFREE86_20040213:1.1.9.1
+	xc:1.1.9
+	cvs-200401291925:1.1.1.1
+	MIRBSD_7_ALPHA:1.1.1.1.0.4
+	MIRBSD_7:1.1.1.1.0.2
+	MIRBSD_7ter:1.1.1.1
+	cvs-20011091815:1.1.1.1
+	cvs-200309162130:1.1.1.1
+	cvs-200308302005:1.1.1.1
+	ctmx-0387:1.1.1.1
+	ctmx-0384:1.1.1.1
+	MIRBSD_5:1.1.1.1
+	ctmx-0375:1.1.1.1
+	ctmx-0373:1.1.1.1
+	ctm-0371:1.1.1.1
+	ctm-0370:1.1.1.1
+	MIRBSD_4:1.1.1.1
+	ctm-0363:1.1.1.1
+	ctm-0359:1.1.1.1
+	ctm-0349:1.1.1.1
+	openbsd:1.1.1;
+locks; strict;
+comment	@ * @;
+
+
+1.2
+date	2004.03.07.17.46.19;	author tg;	state dead;
+branches;
+next	1.1;
+
+1.1
+date	2003.03.22.20.11.15;	author tg;	state Exp;
+branches
+	1.1.1.1
+	1.1.9.1;
+next	;
+
+1.1.1.1
+date	2003.03.22.20.11.15;	author tg;	state Exp;
+branches;
+next	;
+
+1.1.9.1
+date	2004.02.14.19.29.56;	author tg;	state Exp;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.2
+log
+@pretty much merge these two directories. i have read the diffs.
+@
+text
+@/*
+ * $Xorg: getretmips.c,v 1.4 2001/02/09 02:06:19 xorgcvs Exp $
+ *
+Copyright 1992, 1998  The Open Group
+
+Permission to use, copy, modify, distribute, and sell this software and its
+documentation for any purpose is hereby granted without fee, provided that
+the above copyright notice appear in all copies and that both that
+copyright notice and this permission notice appear in supporting
+documentation.
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
+OPEN GROUP BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN
+AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
+CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+Except as contained in this notice, the name of The Open Group shall not be
+used in advertising or otherwise to promote the sale, use or other dealings
+in this Software without prior written authorization from The Open Group.
+ *
+ * Author:  Keith Packard, MIT X Consortium
+ */
+
+/* Return stack generation for MIPS processors
+ * This is tricky as MIPS stack frames aren't
+ * easily unrolled -- we look for pc restoration
+ * and stack adjustment instructions beyond the return
+ * address to discover the correct values
+ */
+
+/* lw $31,const($sp) is : 100 011 11101 11111 const */
+/*                        1000 1111 1011 1111       */
+
+#define RESTORE_RETURNVAL	0x8fbf0000
+#define RESTORE_RETURNVAL_MASK	0xffff0000
+
+/* addiu $sp, $sp, const is 001 001 11101 11101 const */
+/*                          0010 0111 1011 1101 const */
+
+#define ADJUST_STACKP_C		0x27bd0000
+#define ADJUST_STACKP_C_MASK	0xffff0000
+
+/* addu $sp, $sp, $at is 000 000 11101 00001 11101 00000 100 001  */
+/*                       0000 0011 1010 0001 1110 1000 0010 0001 */
+
+#define ADJUST_STACKP_V		0x03a1e821
+#define ADJUST_STACKP_V_MASK	0xffffffff
+
+/* lui $at, const is 001 111 00000 00001 const */
+/*		     0011 1100 0000 0001 const */
+
+#define SET_UPPER_C		0x3c010000
+#define SET_UPPER_C_MASK	0xffff0000
+
+/* ori $at, $at, const is 001 101 00001 00001 const */
+/*                        0011 0100 0010 0001 const */
+
+#define OR_LOWER_C		0x34210000
+#define OR_LOWER_C_MASK		0xffff0000
+
+/* ori $at, $zero, const is 001 101 00000 00001 const */
+/*                          0011 0100 0000 0001 const */
+
+#define SET_LOWER_C		0x34010000
+#define SET_LOWER_C_MASK	0xffff0000
+
+/* jr $ra */
+#define RETURN	    0x03e00008
+
+#define CALL(f)	    (0x0c000000 | (((int) (f)) >> 2))
+
+/*
+ * This computation is expensive, so we cache the results;
+ * a simple hash function and straight-forward replacement.
+ */
+
+#define HASH_SIZE   256
+
+typedef struct _returnCache {
+    unsigned long   *returnAddress;
+    long	    raOffset;
+    long	    spAdjust;
+} ReturnCacheRec, *ReturnCachePtr;
+
+static ReturnCacheRec	returnCache[HASH_SIZE];
+
+#define HASH(ra)    ((((int) (ra)) >> 2) & (HASH_SIZE - 1))
+
+typedef int Bool;
+
+#define TRUE 1
+#define FALSE 0
+
+getStackTrace (results, max)
+    unsigned long   *results;
+    int		    max;
+{
+    extern unsigned long    *getReturnAddress (), *getStackPointer ();
+    extern int	    main ();
+    unsigned long   *ra, *ra_limit;
+    unsigned long   *sp;
+    unsigned long   inst;
+    unsigned long   mainCall;
+    unsigned short  const_upper;
+    unsigned short  const_lower;
+    long	    ra_offset;
+    long	    sp_adjust;
+    Bool	    found_ra_offset, found_sp_adjust;
+    Bool	    found_const_upper, found_const_lower;
+    ReturnCachePtr  rc;
+
+    ra = getReturnAddress ();
+    sp = getStackPointer ();
+    mainCall = CALL(main);
+    while (ra && max) {
+	rc = &returnCache[HASH(ra)];
+	if (rc->returnAddress != ra)
+	{
+	    found_ra_offset = FALSE;
+	    found_sp_adjust = FALSE;
+	    found_const_upper = FALSE;
+	    found_const_lower = FALSE;
+	    const_upper = 0;
+	    const_lower = 0;
+	    rc->returnAddress = ra;
+	    ra_limit = (unsigned long *) 0x10000000;
+	    ra_offset = 0;
+	    sp_adjust = -1;
+	    while ((!found_ra_offset || !found_sp_adjust) && ra < ra_limit)
+	    {
+	    	inst = *ra;
+		/* look for the offset of the PC in the stack frame */
+	    	if ((inst & RESTORE_RETURNVAL_MASK) == RESTORE_RETURNVAL)
+	    	{
+	    	    ra_offset = inst & ~RESTORE_RETURNVAL_MASK;
+		    found_ra_offset = TRUE;
+	    	}
+	    	else if ((inst & ADJUST_STACKP_C_MASK) == ADJUST_STACKP_C)
+	    	{
+	    	    sp_adjust = inst & ~ADJUST_STACKP_C_MASK;
+		    found_sp_adjust = TRUE;
+	    	}
+		else if ((inst & ADJUST_STACKP_V_MASK) == ADJUST_STACKP_V)
+		{
+		    sp_adjust = 0;
+		    found_sp_adjust = TRUE;
+		}
+		else if ((inst & SET_UPPER_C_MASK) == SET_UPPER_C)
+		{
+		    const_upper = inst & ~SET_UPPER_C_MASK;
+		    const_lower = 0;
+		    found_const_upper = TRUE;
+		}
+		else if ((inst & OR_LOWER_C_MASK) == OR_LOWER_C)
+		{
+		    const_lower = inst & ~OR_LOWER_C_MASK;
+		    found_const_lower = TRUE;
+		}
+		else if ((inst & SET_LOWER_C_MASK) == SET_LOWER_C)
+		{
+		    const_lower = inst & ~SET_LOWER_C_MASK;
+		    const_upper = 0;
+		    found_const_lower = TRUE;
+		}
+		else if (inst == RETURN)
+		    ra_limit = ra + 2;
+	    	ra++;
+	    }
+	    if (sp_adjust == 0 && (found_const_upper || found_const_lower))
+		sp_adjust = (const_upper << 16) | const_lower;
+	    rc->raOffset = ra_offset;
+	    rc->spAdjust = sp_adjust;
+	}
+	/* if something went wrong, punt */
+	if (rc->spAdjust <= 0) 
+	{
+	    *results++ = 0;
+	    break;
+	}
+	ra = (unsigned long *) sp[rc->raOffset>>2];
+	sp += rc->spAdjust >> 2;
+	*results++ = ((unsigned long) ra) - 8;
+	if (ra[-2] == mainCall)
+	{
+	    *results++ = 0;
+	    break;
+	}
+	max--;
+    }
+}
+@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@@
+
+
+1.1.9.1
+log
+@OpenBSD just has imported exactly this tree into their vendor branch,
+called the same tag, in XF4/xc
+This is, apparently, the last XFree86 snapshot before the licence change
+(ie, addition of the advertising clause)
+
+Since the developers don't see any problems with that, and we would like
+to integrate improvements done by the remaining one or two (or so) XFree86
+developers (j/k), this prepares enabling us to update X-Window in the future.
+@
+text
+@@
+
+
+1.1.1.1
+log
+@Import OpenBSD 3.3 XF4 repository from CTM 3132 the first time
+This finalizes starting an OpenBSD-mirabile (aka MirBSD) repository.
+
+### MirBSD is:
+# Copyright (c) 1982-2003 by Thorsten "mirabile" Glaser <x86@@ePost.de>
+# Copyright © 1968-2003  The authors of And contributors to UNIX®, the
+#       C Language, BSD/Berkeley Unix; 386BSD, NetBSD 1.1 and OpenBSD.
+#
+# Anyone who obtained a copy of this work is hereby permitted to freely use,
+# distribute, modify, merge, sublicence, give away or sell it as long as the
+# authors are given due credit and the following notice is retained:
+#
+# This work is provided "as is", with no explicit or implicit warranty what-
+# soever. Use it only at your own risk. In no event may an author or contri-
+# butor be held liable for any damage, directly or indirectly, that origina-
+# ted through or is caused by creation or modification of this work.
+
+MirBSD is my private tree. MirBSD does not differ very much from OpenBSD
+and intentionally tracks OpenBSD. That's why it _is_ OpenBSD, just not the
+official one. It's like with DarrenBSD.
+
+At time of this writing, no advertising for MirBSD must be done,
+because the advertising clause has not yet been sorted out.
+
+http://templeofhate.com/tglaser/MirBSD/index.php
+@
+text
+@@

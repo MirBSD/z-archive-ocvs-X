@@ -1,0 +1,187 @@
+head	1.1;
+branch	1.1.1;
+access;
+symbols
+	cvs-200405281530:1.1.1.1
+	cvs-200402211630:1.1.1.1
+	cvs-200401261625:1.1.1.1
+	cvs-200401162142:1.1.1.1
+	cvs-200301141450:1.1.1.1
+	cvs-200312021610:1.1.1.1
+	cvs-200311151930:1.1.1.1
+	cvs-200310311830:1.1.1.1
+	cvs-200310021000:1.1.1.1
+	cvs-200309281111:1.1.1.1
+	cvs-200309171515:1.1.1.1
+	cvs-200308302005:1.1.1.1
+	cvs-200308171200:1.1.1.1
+	ctm-3449:1.1.1.1
+	cvs-200307191610:1.1.1.1
+	ctm-3416:1.1.1.1
+	cvs-200307091500:1.1.1.1
+	ctm-3389:1.1.1.1
+	cvs-200306291800:1.1.1.1
+	ctm-3369:1.1.1.1
+	ctm-3341:1.1.1.1
+	MIRBSD_5:1.1.1.1
+	cvs-200306082100:1.1.1.1
+	ctm-3316:1.1.1.1
+	ctm-3272:1.1.1.1
+	ctm-3264:1.1.1.1
+	ctm-3258:1.1.1.1
+	MIRBSD_4:1.1.1.1
+	ctm-3200:1.1.1.1
+	ctm-3188:1.1.1.1
+	ctm-3155:1.1.1.1
+	ctm-3132:1.1.1.1
+	openbsd:1.1.1;
+locks; strict;
+comment	@# @;
+
+
+1.1
+date	2003.03.22.19.53.45;	author tg;	state Exp;
+branches
+	1.1.1.1;
+next	;
+
+1.1.1.1
+date	2003.03.22.19.53.45;	author tg;	state Stab;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@$OpenBSD: patch-lib_pgp_helper_pgpMem_c,v 1.1 2002/04/23 06:38:48 fgsch Exp $
+$NetBSD: patch-ag,v 1.1 1999/01/05 14:31:01 frueauf Exp $
+
+From Julian Coleman <J.D.Coleman@@newcastle.ac.uk> posted to
+netbsd-bugs@@netbsd.org:
+
+The memory alignment strategy for PGP 5.0i causes bus errors on NetBSD/Sparc
+because 8 byte variables are not aligned on an 8 byte boundary.
+
+In src/lib/pgp/helper/pgpMem.c:PGP_INTERNAL_ALLOC(), a header is added to
+all malloc()'ed memory and the pointer returned is incremented by the size
+of the header.  However, there are no constraints to see if this increment
+is correctly aligned.
+
+The problem might also occur on other OS's running on the Sparc.  A patch
+is appended (based on one used for the Chimera web browser).
+
+J
+
+PS.  The exact problem is that 'off_t' is an 8 byte value, but the header
+length is only a mulitple of 4.  Pgpe crashes at pgpFileMod.c:333, when it
+tries to modify 'context->filesize'.
+
+PPS.  Maybe 'long long' should also be in the union (e.g. for Solaris 2).
+
+--- lib/pgp/helper/pgpMem.c.orig	Sun Aug 10 21:05:32 1997
++++ lib/pgp/helper/pgpMem.c	Tue Apr 23 03:06:29 2002
+@@@@ -19,6 +19,20 @@@@
+ #include "pgpDebug.h"
+ #include "pgpLeaks.h"
+ 
++/*
++ * Make sure any memory chunks are correctly aligned.
++ * This can be forced by defining ALIGNSIZE (in bytes).
++ */
++#ifndef ALIGNSIZE
++typedef struct Alignment
++{
++  union { int a; char *b; size_t c; off_t d; long e; } Align;
++} Alignment;
++#define MEMALIGN(x) ((x / sizeof(Alignment) + 1) * sizeof(Alignment))
++#else
++#define MEMALIGN(x) ((x / ALIGNSIZE + 1) * ALIGNSIZE)
++#endif
++
+ /* Fills allocated/deallocated memory with 0xDD's */
+ #ifndef DEBUG_FILL_MEM
+ #define DEBUG_FILL_MEM			DEBUG
+@@@@ -69,11 +83,11 @@@@ struct MemHeader
+ };
+ 
+ #define UserPtrToMemHeader(userPtr)		\
+-		((MemHeader *)((char *)(userPtr) - sizeof(MemHeader)))
++		((MemHeader *)((char *)(userPtr) - MEMALIGN(sizeof(MemHeader))))
+ #define MemHeaderToUserPtr(hdrPtr)		\
+- 	((void *)((char *)(hdrPtr) + sizeof(MemHeader)))
++ 	((void *)((char *)(hdrPtr) + MEMALIGN(sizeof(MemHeader))))
+ #define FullBlockSize(userSize)			\
+-		(sizeof(MemHeader) + (userSize) + DEBUG_MEM_TAIL_MAGIC)
++		(MEMALIGN(sizeof(MemHeader)) + (userSize) + DEBUG_MEM_TAIL_MAGIC)
+ 
+ /*
+ * Defines the sequence of tail magic bytes. We want every byte to be
+@@@@ -269,7 +283,7 @@@@ pgpMemSetTailMagic(
+ 	MemHeader *	header)
+ {
+ #if DEBUG_MEM_TAIL_MAGIC
+-	char *		tailMagic = (char *)header + sizeof(MemHeader) + header->size;
++	char *		tailMagic = (char *)header + MEMALIGN(sizeof(MemHeader)) + header->size;
+ 	int			i;
+ 	
+ 	for (i = 0; i < DEBUG_MEM_TAIL_MAGIC; i++)
+@@@@ -287,8 +301,9 @@@@ PGP_INTERNAL_ALLOC(
+ 	MemHeader *		header;
+ 	void *			userPtr;
+ 	
++	size += (MEMALIGN(sizeof(MemHeader)) - (sizeof(MemHeader)));
+ 	header = (MemHeader *)pgpPlatformAlloc(FullBlockSize(size));
+-if (header == NULL)
++	if (header == NULL)
+ 		return NULL;
+ 
+ 	MaybeFillMem(header, FullBlockSize(size));
+@@@@ -352,7 +367,7 @@@@ pgpRealloc(
+ 		if (newHeader == NULL)
+ 			return PGPERR_NOMEM;
+ 		pgpCopyMemory((void *)oldHeader, (void *)newHeader,
+-					sizeof(MemHeader) + oldSize);
++					MEMALIGN(sizeof(MemHeader)) + oldSize);
+ 		MaybeFillMem(oldHeader, FullBlockSize(oldSize));
+ 		pgpPlatformFree(oldHeader);
+ 	}
+@
+
+
+1.1.1.1
+log
+@Import OpenBSD 3.3 ports repository from CTM 3132 the first time
+This continues opening an OpenBSD-mirabile (aka MirBSD) repository.
+
+### MirBSD is:
+# Copyright (c) 1982-2003 by Thorsten "mirabile" Glaser <x86@@ePost.de>
+# Copyright © 1968-2003  The authors of And contributors to UNIX®, the
+#       C Language, BSD/Berkeley Unix; 386BSD, NetBSD 1.1 and OpenBSD.
+#
+# Anyone who obtained a copy of this work is hereby permitted to freely use,
+# distribute, modify, merge, sublicence, give away or sell it as long as the
+# authors are given due credit and the following notice is retained:
+#
+# This work is provided "as is", with no explicit or implicit warranty what-
+# soever. Use it only at your own risk. In no event may an author or contri-
+# butor be held liable for any damage, directly or indirectly, that origina-
+# ted through or is caused by creation or modification of this work.
+
+MirBSD is my private tree. MirBSD does not differ very much from OpenBSD
+and intentionally tracks OpenBSD. That's why it _is_ OpenBSD, just not the
+official one. It's like with DarrenBSD.
+
+At time of this writing, no advertising for MirBSD must be done,
+because the advertising clause has not yet been sorted out.
+
+http://templeofhate.com/tglaser/MirBSD/index.php
+@
+text
+@@

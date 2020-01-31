@@ -1,0 +1,428 @@
+head	1.1;
+branch	1.1.1;
+access;
+symbols
+	tg-mergetmp-2:1.1.1.3
+	cvs-200410241530:1.1.1.3
+	cvs-200410012000:1.1.1.3
+	cvs-200407141120:1.1.1.3
+	cvs-200406231010:1.1.1.3
+	MIRBSD_7quater:1.1.1.2
+	cvs-200405271510:1.1.1.3
+	XFree86_4_4_0:1.1.9.1
+	cvs-200403021700:1.1.1.3
+	XFREE86_20040213:1.1.9.1
+	xc:1.1.9
+	cvs-200401291925:1.1.1.2
+	MIRBSD_7_ALPHA:1.1.1.2.0.4
+	MIRBSD_7:1.1.1.2.0.2
+	MIRBSD_7ter:1.1.1.2
+	cvs-20011091815:1.1.1.2
+	cvs-200309162130:1.1.1.2
+	cvs-200308302005:1.1.1.2
+	ctmx-0387:1.1.1.2
+	ctmx-0384:1.1.1.2
+	MIRBSD_5:1.1.1.2
+	ctmx-0375:1.1.1.2
+	ctmx-0373:1.1.1.2
+	ctm-0371:1.1.1.2
+	ctm-0370:1.1.1.2
+	MIRBSD_4:1.1.1.2
+	ctm-0363:1.1.1.2
+	ctm-0359:1.1.1.2
+	ctm-0349:1.1.1.1
+	openbsd:1.1.1;
+locks; strict;
+comment	@ * @;
+
+
+1.1
+date	2003.03.22.20.04.16;	author tg;	state Exp;
+branches
+	1.1.1.1
+	1.1.9.1;
+next	;
+
+1.1.1.1
+date	2003.03.22.20.04.16;	author tg;	state Exp;
+branches;
+next	1.1.1.2;
+
+1.1.1.2
+date	2003.04.08.18.31.31;	author tg;	state Exp;
+branches;
+next	1.1.1.3;
+
+1.1.1.3
+date	2004.03.02.17.58.39;	author tg;	state Stab;
+branches;
+next	;
+
+1.1.9.1
+date	2004.02.14.19.18.00;	author tg;	state Exp;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@/*
+ * Copyright 2000-2001 VA Linux Systems, Inc.
+ * All Rights Reserved.
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a
+ * copy of this software and associated documentation files (the "Software"),
+ * to deal in the Software without restriction, including without limitation
+ * on the rights to use, copy, modify, merge, publish, distribute, sub
+ * license, and/or sell copies of the Software, and to permit persons to whom
+ * the Software is furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice (including the next
+ * paragraph) shall be included in all copies or substantial portions of the
+ * Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NON-INFRINGEMENT.  IN NO EVENT SHALL
+ * VA LINUX SYSTEMS AND/OR ITS SUPPLIERS BE LIABLE FOR ANY CLAIM, DAMAGES OR
+ * OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE,
+ * ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR
+ * OTHER DEALINGS IN THE SOFTWARE.
+ *
+ * Authors:
+ *    Keith Whitwell <keithw@@valinux.com>
+ */
+/* $XFree86: xc/lib/GL/mesa/src/drv/mga/mgatris.h,v 1.8 2001/04/10 16:07:51 dawes Exp $ */
+
+#ifndef MGATRIS_INC
+#define MGATRIS_INC
+
+#include "types.h"
+#include "mgaioctl.h"
+
+extern void mgaDDChooseRenderState(GLcontext *ctx);
+extern void mgaDDTrifuncInit( void );
+
+
+#define MGA_FLAT_BIT	    0x1
+#define MGA_OFFSET_BIT	    0x2
+#define MGA_TWOSIDE_BIT	    0x4
+#define MGA_FALLBACK_BIT    0x8
+
+static __inline void mga_draw_triangle( mgaContextPtr mmesa,
+				      mgaVertex *v0,
+				      mgaVertex *v1,
+				      mgaVertex *v2 )
+{
+   GLuint vertsize = mmesa->vertsize;
+   GLuint *wv = mgaAllocVertexDwordsInline( mmesa, 3 * vertsize );
+   int j;
+
+#if defined (USE_X86_ASM)
+   /* GTH: We can safely assume the vertex stride is some number of
+    * dwords, and thus a "rep movsd" is okay.  The vb pointer is
+    * automagically updated with this instruction, so we don't have
+    * to manually take care of incrementing it.
+    */
+      __asm__ __volatile__( "rep ; movsl"
+			    : "=%c" (j)
+			    : "0" (vertsize), "D" ((long)wv), "S" ((long)v0)
+			    : "memory" );
+      __asm__ __volatile__( "rep ; movsl"
+			    : "=%c" (j)
+			    : "0" (vertsize), "S" ((long)v1)
+			    : "memory" );
+      __asm__ __volatile__( "rep ; movsl"
+			    : "=%c" (j)
+			    : "0" (vertsize), "S" ((long)v2)
+			    : "memory" );
+#else
+   {
+      for (j = 0 ; j < vertsize ; j++)
+	 wv[j] = v0->ui[j];
+
+      wv += vertsize;
+      for (j = 0 ; j < vertsize ; j++)
+	 wv[j] = v1->ui[j];
+
+      wv += vertsize;
+      for (j = 0 ; j < vertsize ; j++)
+	 wv[j] = v2->ui[j];
+   }
+#endif
+}
+
+
+static __inline void mga_draw_point( mgaContextPtr mmesa,
+				   mgaVertex *tmp, float sz )
+{
+   GLuint vertsize = mmesa->vertsize;
+   GLuint *wv = mgaAllocVertexDwords( mmesa, 6*vertsize);
+   GLuint j;
+   const GLfloat x = tmp->v.x + 0.125;
+   const GLfloat y = tmp->v.y - 0.125;
+
+   *(float *)&wv[0] = x - sz;
+   *(float *)&wv[1] = y - sz;
+   for (j = 2 ; j < vertsize ; j++)
+      wv[j] = tmp->ui[j];
+   wv += vertsize;
+
+   *(float *)&wv[0] = x + sz;
+   *(float *)&wv[1] = y - sz;
+   for (j = 2 ; j < vertsize ; j++)
+      wv[j] = tmp->ui[j];
+   wv += vertsize;
+
+   *(float *)&wv[0] = x + sz;
+   *(float *)&wv[1] = y + sz;
+   for (j = 2 ; j < vertsize ; j++)
+      wv[j] = tmp->ui[j];
+   wv += vertsize;
+
+   *(float *)&wv[0] = x + sz;
+   *(float *)&wv[1] = y + sz;
+   for (j = 2 ; j < vertsize ; j++)
+      wv[j] = tmp->ui[j];
+   wv += vertsize;
+
+   *(float *)&wv[0] = x - sz;
+   *(float *)&wv[1] = y + sz;
+   for (j = 2 ; j < vertsize ; j++)
+      wv[j] = tmp->ui[j];
+   wv += vertsize;
+
+   *(float *)&wv[0] = x - sz;
+   *(float *)&wv[1] = y - sz;
+   for (j = 2 ; j < vertsize ; j++)
+      wv[j] = tmp->ui[j];
+}
+
+
+static __inline void mga_draw_line( mgaContextPtr mmesa,
+				  const mgaVertex *tmp0,
+				  const mgaVertex *tmp1,
+				  float width )
+{
+   const GLuint vertsize = mmesa->vertsize;
+   GLuint *wv = mgaAllocVertexDwords( mmesa, 6 * vertsize );
+   GLuint j;
+   GLfloat x0 = tmp0->v.x;
+   GLfloat y0 = tmp0->v.y;
+   GLfloat x1 = tmp1->v.x;
+   GLfloat y1 = tmp1->v.y;
+   GLfloat dx, dy, ix, iy;
+   GLfloat hw;
+
+   hw = 0.5F * width;
+   if (hw > 0.1F && hw < 0.5F) {
+      hw = 0.5F;
+   }
+
+   /* adjust vertices depending on line direction */
+   dx = tmp0->v.x - tmp1->v.x;
+   dy = tmp0->v.y - tmp1->v.y;
+   if (dx * dx > dy * dy) {
+      /* X-major line */
+      ix = 0.0F;
+      iy = hw;
+      if (x1 < x0) {
+         x0 += 0.5F;
+         x1 += 0.5F;
+      }
+      y0 -= 0.5F;
+      y1 -= 0.5F;
+   }
+   else {
+      /* Y-major line */
+      ix = hw;
+      iy = 0.0F;
+      if (y1 > y0) {
+         y0 -= 0.5F;
+         y1 -= 0.5F;
+      }
+      x0 += 0.5F;
+      x1 += 0.5F;
+   }
+
+   *(float *)&wv[0] = x0 - ix;
+   *(float *)&wv[1] = y0 - iy;
+   for (j = 2 ; j < vertsize ; j++)
+      wv[j] = tmp0->ui[j];
+   wv += vertsize;
+
+   *(float *)&wv[0] = x1 + ix;
+   *(float *)&wv[1] = y1 + iy;
+   for (j = 2 ; j < vertsize ; j++)
+      wv[j] = tmp1->ui[j];
+   wv += vertsize;
+
+   *(float *)&wv[0] = x0 + ix;
+   *(float *)&wv[1] = y0 + iy;
+   for (j = 2 ; j < vertsize ; j++)
+      wv[j] = tmp0->ui[j];
+   wv += vertsize;
+
+   *(float *)&wv[0] = x0 - ix;
+   *(float *)&wv[1] = y0 - iy;
+   for (j = 2 ; j < vertsize ; j++)
+      wv[j] = tmp0->ui[j];
+   wv += vertsize;
+
+   *(float *)&wv[0] = x1 - ix;
+   *(float *)&wv[1] = y1 - iy;
+   for (j = 2 ; j < vertsize ; j++)
+      wv[j] = tmp1->ui[j];
+   wv += vertsize;
+
+   *(float *)&wv[0] = x1 + ix;
+   *(float *)&wv[1] = y1 + iy;
+   for (j = 2 ; j < vertsize ; j++)
+      wv[j] = tmp1->ui[j];
+   wv += vertsize;
+}
+
+
+
+
+#endif
+@
+
+
+1.1.9.1
+log
+@OpenBSD just has imported exactly this tree into their vendor branch,
+called the same tag, in XF4/xc
+This is, apparently, the last XFree86 snapshot before the licence change
+(ie, addition of the advertising clause)
+
+Since the developers don't see any problems with that, and we would like
+to integrate improvements done by the remaining one or two (or so) XFree86
+developers (j/k), this prepares enabling us to update X-Window in the future.
+@
+text
+@d25 1
+a25 1
+ *    Keith Whitwell <keith@@tungstengraphics.com>
+d27 1
+a27 1
+/* $XFree86: xc/lib/GL/mesa/src/drv/mga/mgatris.h,v 1.12 2003/12/02 13:02:38 alanh Exp $ */
+d32 186
+a217 1
+#include "mtypes.h"
+a218 17
+extern void mgaDDInitTriFuncs( GLcontext *ctx );
+extern void mgaChooseRenderState( GLcontext *ctx );
+extern void mgaRasterPrimitive( GLcontext *ctx, GLenum prim, GLuint hwprim );
+
+extern void mgaFallback( GLcontext *ctx, GLuint bit, GLboolean mode );
+#define FALLBACK( ctx, bit, mode ) mgaFallback( ctx, bit, mode )
+
+#define _MGA_NEW_RENDERSTATE (_DD_NEW_POINT_SMOOTH |		\
+			      _DD_NEW_LINE_SMOOTH |		\
+			      _DD_NEW_LINE_STIPPLE |		\
+			      _DD_NEW_TRI_SMOOTH |		\
+			      _DD_NEW_FLATSHADE |		\
+			      _DD_NEW_TRI_LIGHT_TWOSIDE |	\
+			      _DD_NEW_TRI_OFFSET |		\
+			      _DD_NEW_TRI_UNFILLED |		\
+			      _DD_NEW_TRI_STIPPLE |		\
+			      _NEW_POLYGONSTIPPLE)
+@
+
+
+1.1.1.1
+log
+@Import OpenBSD 3.3 XF4 repository from CTM 3132 the first time
+This finalizes starting an OpenBSD-mirabile (aka MirBSD) repository.
+
+### MirBSD is:
+# Copyright (c) 1982-2003 by Thorsten "mirabile" Glaser <x86@@ePost.de>
+# Copyright © 1968-2003  The authors of And contributors to UNIX®, the
+#       C Language, BSD/Berkeley Unix; 386BSD, NetBSD 1.1 and OpenBSD.
+#
+# Anyone who obtained a copy of this work is hereby permitted to freely use,
+# distribute, modify, merge, sublicence, give away or sell it as long as the
+# authors are given due credit and the following notice is retained:
+#
+# This work is provided "as is", with no explicit or implicit warranty what-
+# soever. Use it only at your own risk. In no event may an author or contri-
+# butor be held liable for any damage, directly or indirectly, that origina-
+# ted through or is caused by creation or modification of this work.
+
+MirBSD is my private tree. MirBSD does not differ very much from OpenBSD
+and intentionally tracks OpenBSD. That's why it _is_ OpenBSD, just not the
+official one. It's like with DarrenBSD.
+
+At time of this writing, no advertising for MirBSD must be done,
+because the advertising clause has not yet been sorted out.
+
+http://templeofhate.com/tglaser/MirBSD/index.php
+@
+text
+@@
+
+
+1.1.1.2
+log
+@The X-Windowing System
+
+Import XFree86 4.3 from OpenBSD by CTM, in the hope it's stable
+@
+text
+@d25 1
+a25 1
+ *    Keith Whitwell <keith@@tungstengraphics.com>
+d27 1
+a27 1
+/* $XFree86: xc/lib/GL/mesa/src/drv/mga/mgatris.h,v 1.10 2002/10/30 12:51:36 alanh Exp $ */
+d32 2
+a33 1
+#include "mtypes.h"
+d35 2
+a36 1
+extern void mgaDDInitTriFuncs( GLcontext *ctx );
+a37 1
+extern void mgaRasterPrimitive( GLcontext *ctx, GLenum prim, GLuint hwprim );
+d39 178
+a216 2
+extern void mgaFallback( GLcontext *ctx, GLuint bit, GLboolean mode );
+#define FALLBACK( ctx, bit, mode ) mgaFallback( ctx, bit, mode )
+@
+
+
+1.1.1.3
+log
+@That's what OpenBSD will, probably, ship as XF4 in 3.5
+their last sync against XFree86 4.3-current has been
+imported into our vendor branch, too
+@
+text
+@d27 1
+a27 1
+/* $XFree86: xc/lib/GL/mesa/src/drv/mga/mgatris.h,v 1.12 2003/12/02 13:02:38 alanh Exp $ */
+d35 1
+a35 1
+extern void mgaChooseRenderState( GLcontext *ctx );
+d41 1
+a41 10
+#define _MGA_NEW_RENDERSTATE (_DD_NEW_POINT_SMOOTH |		\
+			      _DD_NEW_LINE_SMOOTH |		\
+			      _DD_NEW_LINE_STIPPLE |		\
+			      _DD_NEW_TRI_SMOOTH |		\
+			      _DD_NEW_FLATSHADE |		\
+			      _DD_NEW_TRI_LIGHT_TWOSIDE |	\
+			      _DD_NEW_TRI_OFFSET |		\
+			      _DD_NEW_TRI_UNFILLED |		\
+			      _DD_NEW_TRI_STIPPLE |		\
+			      _NEW_POLYGONSTIPPLE)
+@
+
+

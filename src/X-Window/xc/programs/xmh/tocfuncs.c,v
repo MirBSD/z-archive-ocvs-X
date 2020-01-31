@@ -1,0 +1,1878 @@
+head	1.1;
+branch	1.1.1;
+access;
+symbols
+	tg-mergetmp-2:1.1.1.2
+	cvs-200410241530:1.1.1.2
+	cvs-200410012000:1.1.1.2
+	cvs-200407141120:1.1.1.2
+	cvs-200406231010:1.1.1.2
+	MIRBSD_7quater:1.1.1.2
+	cvs-200405271510:1.1.1.2
+	XFree86_4_4_0:1.1.9.1
+	cvs-200403021700:1.1.1.2
+	XFREE86_20040213:1.1.9.1
+	xc:1.1.9
+	cvs-200401291925:1.1.1.2
+	MIRBSD_7_ALPHA:1.1.1.2.0.4
+	MIRBSD_7:1.1.1.2.0.2
+	MIRBSD_7ter:1.1.1.2
+	cvs-20011091815:1.1.1.2
+	cvs-200309162130:1.1.1.2
+	cvs-200308302005:1.1.1.2
+	ctmx-0387:1.1.1.2
+	ctmx-0384:1.1.1.2
+	MIRBSD_5:1.1.1.2
+	ctmx-0375:1.1.1.2
+	ctmx-0373:1.1.1.2
+	ctm-0371:1.1.1.2
+	ctm-0370:1.1.1.2
+	MIRBSD_4:1.1.1.2
+	ctm-0363:1.1.1.2
+	ctm-0359:1.1.1.2
+	ctm-0349:1.1.1.1
+	openbsd:1.1.1;
+locks; strict;
+comment	@ * @;
+
+
+1.1
+date	2003.03.22.20.11.01;	author tg;	state Exp;
+branches
+	1.1.1.1
+	1.1.9.1;
+next	;
+
+1.1.1.1
+date	2003.03.22.20.11.01;	author tg;	state Exp;
+branches;
+next	1.1.1.2;
+
+1.1.1.2
+date	2003.04.08.18.41.02;	author tg;	state Stab;
+branches;
+next	;
+
+1.1.9.1
+date	2004.02.14.19.29.25;	author tg;	state Exp;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@/*
+ * $XConsortium: tocfuncs.c /main/36 1996/02/02 14:27:42 kaleb $
+ *
+ *
+ *			COPYRIGHT 1987, 1989
+ *		   DIGITAL EQUIPMENT CORPORATION
+ *		       MAYNARD, MASSACHUSETTS
+ *			ALL RIGHTS RESERVED.
+ *
+ * THE INFORMATION IN THIS SOFTWARE IS SUBJECT TO CHANGE WITHOUT NOTICE AND
+ * SHOULD NOT BE CONSTRUED AS A COMMITMENT BY DIGITAL EQUIPMENT CORPORATION.
+ * DIGITAL MAKES NO REPRESENTATIONS ABOUT THE SUITABILITY OF THIS SOFTWARE FOR
+ * ANY PURPOSE.  IT IS SUPPLIED "AS IS" WITHOUT EXPRESS OR IMPLIED WARRANTY.
+ *
+ * IF THE SOFTWARE IS MODIFIED IN A MANNER CREATING DERIVATIVE COPYRIGHT
+ * RIGHTS, APPROPRIATE LEGENDS MAY BE PLACED ON THE DERIVATIVE WORK IN
+ * ADDITION TO THAT SET FORTH ABOVE.
+ *
+ * Permission to use, copy, modify, and distribute this software and its
+ * documentation for any purpose and without fee is hereby granted, provided
+ * that the above copyright notice appear in all copies and that both that
+ * copyright notice and this permission notice appear in supporting
+ * documentation, and that the name of Digital Equipment Corporation not be
+ * used in advertising or publicity pertaining to distribution of the software
+ * without specific, written prior permission.
+ */
+/* $XFree86: xc/programs/xmh/tocfuncs.c,v 1.3 2001/10/28 03:34:39 tsi Exp $ */
+
+/* tocfuncs.c -- action procedures concerning things in the toc widget. */
+
+#include "xmh.h"
+#include "tocutil.h"
+
+#define MAX_SYSTEM_LEN 510
+
+Boolean UserWantsAction(w, scrn) /* general action procedure "filter" */
+    Widget	w;
+    Scrn	scrn;
+{
+    /* Commands in the command menus invoke callbacks directly. 
+     * Keyboard accelerators use the command menus as source widgets.
+     * Actions can also be specified in the translations for menu buttons.
+     * Actions can also be specified in the translations for menus.
+     * In fact, the user can attach actions to any (reasonable) widget.
+     *
+     * The purpose of this check is to prevent actions specified as
+     * translations for folder menus and for folder buttons from executing
+     * after the mouse pointer has left the folder button or the when the
+     * mouse button is released outside of the folder menu.
+     *
+     * The side effect of this routine is that it restricts keyboard 
+     * accelerators from originating from folder buttons or folder menus.
+     */
+       
+    if (XtIsSubclass(w, menuButtonWidgetClass) && /* w is a menu button */
+	w != LastMenuButtonPressed)		  /* pointer left the window */
+	return False;
+
+    if (XtIsSubclass(w, simpleMenuWidgetClass) &&	/* w is a menu */
+	(! XawSimpleMenuGetActiveEntry(w)) &&	/* no entry was selected */
+	(BBoxIsGrandparent(scrn->folderbuttons, w)))  /* w is a folder menu */
+	return False;
+
+    return True;
+}
+
+
+/*ARGSUSED*/
+static void NextAndPreviousView(scrn, next)
+    Scrn	scrn;
+    Boolean	next;	/* if true, next or forward; if false, previous */
+{
+    Toc		toc = scrn->toc;
+    MsgList	mlist;
+    FateType	fate = Fignore;
+    Msg		msg;
+
+    if (toc == NULL) return;
+    mlist = TocCurMsgList(toc);
+    if (mlist->nummsgs) 
+	msg = (next ? mlist->msglist[0] : mlist->msglist[mlist->nummsgs - 1]);
+    else {
+	msg = TocGetCurMsg(toc);
+	if (msg && msg == scrn->msg) 
+	    msg = (next ? TocMsgAfter(toc, msg) : TocMsgBefore(toc, msg));
+	if (msg) fate = MsgGetFate(msg, (Toc *)NULL);
+	while (msg && ((app_resources.skip_deleted && fate == Fdelete)
+		|| (app_resources.skip_moved && fate == Fmove)
+		|| (app_resources.skip_copied && fate == Fcopy))) {
+	    msg = (next ? TocMsgAfter(toc, msg) : TocMsgBefore(toc, msg));
+	    if (msg) fate = MsgGetFate(msg, (Toc *)NULL);
+	}
+    }
+
+    if (msg) {
+	XtCallbackRec	confirms[2];
+	if (next)
+	    confirms[0].callback = (XtCallbackProc) DoNextView;
+	else
+	    confirms[0].callback = (XtCallbackProc) DoPrevView;
+	confirms[0].closure = (XtPointer) scrn;
+	confirms[1].callback = (XtCallbackProc) NULL;
+	confirms[1].closure = (XtPointer) NULL;
+	if (MsgSetScrn(msg, scrn, confirms, (XtCallbackList) NULL) !=
+	    NEEDS_CONFIRMATION) {
+	    TocUnsetSelection(toc);
+	    TocSetCurMsg(toc, msg);
+	}
+    }
+    FreeMsgList(mlist);
+}
+
+
+/*ARGSUSED*/
+void DoReverseReadOrder(widget, client_data, call_data)
+    Widget	widget;		/* the menu entry widget */
+    XtPointer	client_data;
+    XtPointer	call_data;
+{
+    app_resources.reverse_read_order =
+	(app_resources.reverse_read_order ? False : True);
+    ToggleMenuItem(widget, app_resources.reverse_read_order);
+}
+
+
+/*ARGSUSED*/
+void DoNextView(widget, client_data, call_data)
+    Widget	widget;		/* unused */
+    XtPointer	client_data;
+    XtPointer	call_data;	/* unused */
+{
+    NextAndPreviousView((Scrn) client_data,
+			(app_resources.reverse_read_order ? False : True));
+}
+
+/*ARGSUSED*/
+void XmhViewNextMessage(w, event, params, num_params)
+    Widget	w;
+    XEvent	*event;
+    String	*params;
+    Cardinal	*num_params;
+{
+    Scrn scrn = ScrnFromWidget(w);
+    if (UserWantsAction(w, scrn))
+	DoNextView(w, (XtPointer) scrn, (XtPointer) NULL);
+}
+
+/*ARGSUSED*/
+void DoPrevView(widget, client_data, call_data)
+    Widget	widget;		/* unused */
+    XtPointer	client_data;	
+    XtPointer	call_data;	/* unused */
+{
+    NextAndPreviousView((Scrn) client_data, 
+			(app_resources.reverse_read_order ? True : False));
+}
+
+/*ARGSUSED*/
+void XmhViewPreviousMessage(w, event, params, num_params)
+    Widget	w;
+    XEvent	*event;
+    String	*params;
+    Cardinal	*num_params;
+{
+    Scrn scrn = ScrnFromWidget(w);
+    if (UserWantsAction(w, scrn))
+	DoPrevView(w, (XtPointer) scrn, (XtPointer) NULL);
+}
+
+
+/*ARGSUSED*/
+void DoViewNew(w, client_data, call_data)
+    Widget	w;
+    XtPointer	client_data;
+    XtPointer	call_data;
+{
+    Scrn	scrn = (Scrn) client_data;
+    Toc		toc = scrn->toc;
+    Scrn	vscrn;
+    MsgList	mlist;
+
+    if (toc == NULL) return;
+    mlist = CurMsgListOrCurMsg(toc);
+    if (mlist->nummsgs) {
+	vscrn = NewViewScrn();
+	(void) MsgSetScrn(mlist->msglist[0], vscrn, (XtCallbackList) NULL,
+			  (XtCallbackList) NULL);
+	MapScrn(vscrn);
+    }
+    FreeMsgList(mlist);
+}
+
+
+/*ARGSUSED*/
+void XmhViewInNewWindow(w, event, params, num_params)
+    Widget	w;
+    XEvent	*event;
+    String	*params;
+    Cardinal	*num_params;
+{
+    Scrn scrn = ScrnFromWidget(w);
+    if (UserWantsAction(w, scrn))
+	DoViewNew(w, (XtPointer) scrn, (XtPointer) NULL);
+}
+
+
+void DoForwardMsg(scrn, params, num_params)
+    Scrn	scrn;
+    String	*params;
+    Cardinal	num_params;
+{
+    Toc		toc = scrn->toc;
+    MsgList	mlist;
+
+    if (toc == NULL) return;
+    mlist = CurMsgListOrCurMsg(toc);
+    if (mlist->nummsgs)
+	CreateForward(mlist, params, num_params);
+    FreeMsgList(mlist);
+}
+
+
+/*ARGSUSED*/
+void DoForward(w, client_data, call_data)
+    Widget	w;
+    XtPointer	client_data;
+    XtPointer	call_data;
+{
+    DoForwardMsg((Scrn) client_data, (String *)NULL, (Cardinal)0);
+}
+
+
+/*ARGSUSED*/
+void XmhForward(w, event, params, num_params)
+    Widget	w;
+    XEvent	*event;
+    String	*params;
+    Cardinal	*num_params;
+{
+    Scrn scrn = ScrnFromWidget(w);
+    if (UserWantsAction(w, scrn))
+	DoForwardMsg(scrn, params, *num_params);
+}
+
+
+/*ARGSUSED*/
+void DoTocUseAsComp(w, client_data, call_data)
+    Widget	w;
+    XtPointer	client_data;
+    XtPointer	call_data;
+{
+    Scrn	scrn = (Scrn) client_data;
+    Toc		toc = scrn->toc;
+    Scrn	vscrn;
+    MsgList	mlist;
+    Msg		msg;
+
+    if (toc == NULL) return;
+    mlist = CurMsgListOrCurMsg(toc);
+    if (mlist->nummsgs) {
+	vscrn = NewCompScrn();
+	if (DraftsFolder == toc) {
+	    msg = mlist->msglist[0];
+	} else {
+	    msg = TocMakeNewMsg(DraftsFolder);
+	    MsgLoadCopy(msg, mlist->msglist[0]);
+	    MsgSetTemporary(msg);
+	}
+	MsgSetScrnForComp(msg, vscrn);
+	MapScrn(vscrn);
+    }
+    FreeMsgList(mlist);
+}
+
+
+/*ARGSUSED*/
+void XmhUseAsComposition(w, event, params, num_params)
+    Widget	w;
+    XEvent	*event;
+    String	*params;
+    Cardinal	*num_params;
+{
+    Scrn scrn = ScrnFromWidget(w);
+    if (UserWantsAction(w, scrn))
+	DoTocUseAsComp(w, (XtPointer) scrn, (XtPointer) NULL);
+}
+
+
+/* Utility: change the fate of a set of messages. */
+
+static void MarkMessages(scrn, fate, skip)
+Scrn scrn;
+FateType fate;
+int skip;
+{
+    Toc toc = scrn->toc;
+    Toc desttoc;
+    int i;
+    MsgList mlist;
+    Msg msg;
+    if (toc == NULL) return;
+    if (fate == Fcopy || fate == Fmove)
+	desttoc = SelectedToc(scrn);
+    else
+	desttoc = NULL;
+    if (desttoc == toc)
+	Feep(XkbBI_MinorError,0,None);
+    else {
+	mlist = TocCurMsgList(toc);
+	if (mlist->nummsgs == 0) {
+	    msg = TocGetCurMsg(toc);
+	    if (msg) {
+		MsgSetFate(msg, fate, desttoc);
+		if (skip)
+		    DoNextView(scrn->widget, (XtPointer) scrn,
+			       (XtPointer) NULL);
+	    }
+	} else {
+	    for (i = 0; i < mlist->nummsgs; i++)
+		MsgSetFate(mlist->msglist[i], fate, desttoc);
+	}
+	FreeMsgList(mlist);
+    }
+}
+
+
+/*ARGSUSED*/
+void XmhMarkDelete(w, event, params, num_params)
+    Widget	w;
+    XEvent	*event;
+    String	*params;
+    Cardinal	*num_params;
+{
+    Scrn scrn = ScrnFromWidget(w);
+    if (UserWantsAction(w, scrn))
+	DoDelete(w, (XtPointer) scrn, (XtPointer) NULL);
+}
+
+
+/*ARGSUSED*/
+void DoDelete(w, client_data, call_data)
+    Widget	w;
+    XtPointer	client_data;
+    XtPointer	call_data;
+{
+    Scrn scrn = (Scrn) client_data;
+    MarkMessages(scrn, Fdelete, app_resources.skip_deleted);
+}
+
+
+/*ARGSUSED*/
+void DoCopy(w, client_data, call_data)
+    Widget	w;
+    XtPointer	client_data;
+    XtPointer	call_data;
+{
+    Scrn scrn = (Scrn) client_data;
+    MarkMessages(scrn, Fcopy, app_resources.skip_copied);
+}
+
+
+/*ARGSUSED*/
+void XmhMarkCopy(w, event, params, num_params)
+    Widget	w;
+    XEvent	*event;
+    String	*params;
+    Cardinal	*num_params;
+{
+    Scrn scrn = ScrnFromWidget(w);
+    if (UserWantsAction(w, scrn))
+	DoCopy(w, (XtPointer) scrn, (XtPointer) NULL);
+}
+
+
+/*ARGSUSED*/
+void DoMove(w, client_data, call_data)
+    Widget	w;
+    XtPointer	client_data;
+    XtPointer	call_data;
+{
+    Scrn scrn = (Scrn) client_data;
+    MarkMessages(scrn, Fmove, app_resources.skip_moved);
+}
+
+
+/*ARGSUSED*/
+void XmhMarkMove(w, event, params, num_params)
+    Widget	w;
+    XEvent	*event;
+    String	*params;
+    Cardinal	*num_params;
+{
+    Scrn scrn = ScrnFromWidget(w);
+    if (UserWantsAction(w, scrn))
+	DoMove(w, (XtPointer) scrn, (XtPointer) NULL);
+}
+
+
+/*ARGSUSED*/
+void DoUnmark(w, client_data, call_data)
+    Widget	w;
+    XtPointer	client_data;
+    XtPointer	call_data;
+{
+    Scrn scrn = (Scrn) client_data;
+    MarkMessages(scrn, Fignore, FALSE);
+}
+
+
+/*ARGSUSED*/
+void XmhUnmark(w, event, params, num_params)
+    Widget	w;
+    XEvent	*event;
+    String	*params;
+    Cardinal	*num_params;
+{
+    Scrn scrn = ScrnFromWidget(w);
+    if (UserWantsAction(w, scrn))
+	DoUnmark(w, (XtPointer) scrn, (XtPointer) NULL);
+}
+
+
+/*ARGSUSED*/
+void DoCommit(w, client_data, call_data)
+    Widget	w;
+    XtPointer	client_data;
+    XtPointer	 call_data;
+{
+    Scrn	scrn = (Scrn) client_data;
+    TocCommitChanges(w, (XtPointer) scrn->toc, (XtPointer) NULL);
+}
+
+
+/*ARGSUSED*/
+void XmhCommitChanges(w, event, params, num_params)
+    Widget	w;
+    XEvent	*event;
+    String	*params;
+    Cardinal	*num_params;
+{
+    Scrn scrn = ScrnFromWidget(w);
+    if (UserWantsAction(w, scrn))
+	TocCommitChanges(w, (XtPointer) scrn->toc, (XtPointer) NULL);
+}
+
+
+/*ARGSUSED*/
+void XmhShellCommand(w, event, params, num_params)
+    Widget	w;	 /* any widget on same scrn as the messages */
+    XEvent	*event;	 /* unused */
+    String	*params; /* shell command to execute with msgs appended */
+    Cardinal	*num_params;
+{
+    int		i, len, used;
+    MsgList	mlist;
+    String	*p;
+    Scrn 	scrn = ScrnFromWidget(w);
+    char	str[MAX_SYSTEM_LEN];
+
+    if (! UserWantsAction(w, scrn) || ! scrn->toc)
+	return;
+    if (! *num_params) {
+	PopupError(scrn->parent, "XmhShellCommand: no command given.");
+	return;
+    }
+    used = 0;
+    p = params;
+    for (i = *num_params; --i >= 0; p++) {
+	len = strlen(*p);
+	if ((used + len + 1) >= MAX_SYSTEM_LEN) {
+	    PopupError(scrn->parent, "XmhShellCommand: command too long.");
+	    return;
+	}
+	strncpy(&str[used], *p, len);
+	str[(used += len)] = ' ';
+	used++;
+    }
+    str[used] = '\0';
+
+    mlist = CurMsgListOrCurMsg(scrn->toc);
+    if (mlist->nummsgs) {
+	char *msg;
+	int prefix = used;
+	i = 0;
+	while (i < mlist->nummsgs) {
+	    used = prefix;
+	    while (i < mlist->nummsgs &&
+		   (msg = MsgFileName(mlist->msglist[i])) &&
+		   (used + (len = strlen(msg)) + 1) < MAX_SYSTEM_LEN) {
+		strncpy(&str[used], msg, len);
+		str[(used += len)] = ' ';
+		used++;
+		i++;
+	    }
+	    if (used != prefix) {
+		char **argv;
+		str[used] = '\0';
+		DEBUG( str );
+		argv = MakeArgv(3);
+		argv[0] = "/bin/sh";
+		argv[1] = "-c";	/* commands are read from the next argument */
+		argv[2] = str;
+		(void) DoCommand(argv, (char*)NULL, (char*)NULL);
+		/* a "notice" popup should appear with stderr output */
+		XtFree((char*)argv);
+	    }
+	}
+    } else
+	PopupError(scrn->parent, "XmhShellCommand: no messages selected.");
+
+    FreeMsgList(mlist);
+}
+
+
+void XmhPrint(w, event, params, num_params)
+    Widget	w;
+    XEvent	*event;
+    String	*params;
+    Cardinal	*num_params;
+{
+    if (! num_params || ! *num_params) {
+	/* use the print command specified in application resources */
+	Cardinal argc = 1;
+	String *argv = MakeArgv(argc);
+	argv[0] = app_resources.print_command;
+	XmhShellCommand(w, event, argv, &argc);
+	XtFree((char *) argv);
+    } else {
+	/* do whatever the user has specified as action parameters */
+	XmhShellCommand(w, event, params, num_params);
+    }
+}
+
+
+/*ARGSUSED*/
+void DoPrint(w, client_data, call_data)
+    Widget	w;
+    XtPointer	client_data;
+    XtPointer	call_data;	/* unused */
+{
+    Scrn	scrn = (Scrn) client_data;
+    Cardinal	num_params = 0;
+    /* The callback interface will not be entered unless the user requested
+     * the action, so pass a widget which will succeed the test in 
+     * UserWantsAction.
+     */
+    XmhPrint(scrn->parent, (XEvent*)NULL, (String*)NULL, &num_params);
+}
+
+
+/*ARGSUSED*/
+void DoPack(widget, client_data, call_data)
+    Widget	widget;
+    XtPointer	client_data;
+    XtPointer	call_data;	/* unused */
+{
+    Scrn	scrn = (Scrn) client_data;
+    Toc		toc = scrn->toc;
+    XtCallbackRec confirms[2];
+    char	**argv;
+    
+    if (toc == NULL) return;
+    confirms[0].callback = (XtCallbackProc) DoPack;
+    confirms[0].closure = (XtPointer) scrn;
+    confirms[1].callback = (XtCallbackProc) NULL;
+    confirms[1].closure = (XtPointer) NULL;
+    if (TocConfirmCataclysm(toc, confirms, (XtCallbackRec *) NULL))
+	return;
+    argv = MakeArgv(4);
+    argv[0] = "folder";
+    argv[1] = TocMakeFolderName(toc);
+    argv[2] = "-pack";
+    argv[3] = "-fast";
+    if (app_resources.block_events_on_busy) ShowBusyCursor();
+
+    DoCommand(argv, (char *) NULL, (char *) NULL);
+    XtFree(argv[1]);
+    XtFree((char *) argv);
+    TocForceRescan(toc);
+
+    if (app_resources.block_events_on_busy) UnshowBusyCursor();
+
+}
+
+
+/*ARGSUSED*/
+void XmhPackFolder(w, event, params, num_params)
+    Widget	w;
+    XEvent	*event;
+    String	*params;
+    Cardinal	*num_params;
+{
+    Scrn scrn = ScrnFromWidget(w);
+    if (UserWantsAction(w, scrn))
+	DoPack(w, (XtPointer) scrn, (XtPointer) NULL);
+}
+
+
+/*ARGSUSED*/
+void DoSort(widget, client_data, call_data)
+    Widget	widget;
+    XtPointer	client_data;
+    XtPointer	call_data;	/* unused */
+{
+    Scrn	scrn = (Scrn) client_data;
+    Toc		toc = scrn->toc;
+    char **	argv;
+    XtCallbackRec confirms[2];
+
+    if (toc == NULL) return;
+    confirms[0].callback = (XtCallbackProc) DoSort;
+    confirms[0].closure = (XtPointer) scrn;
+    confirms[1].callback = (XtCallbackProc) NULL;
+    confirms[1].closure = (XtPointer) NULL;
+    if (TocConfirmCataclysm(toc, confirms, (XtCallbackRec *) NULL))
+	return;
+    argv = MakeArgv(3);
+    argv[0] = "sortm";
+    argv[1] = TocMakeFolderName(toc);
+    argv[2] = "-noverbose";
+    if (app_resources.block_events_on_busy) ShowBusyCursor();
+
+    DoCommand(argv, (char *) NULL, (char *) NULL);
+    XtFree(argv[1]);
+    XtFree((char *) argv);
+    TocForceRescan(toc);
+
+    if (app_resources.block_events_on_busy) UnshowBusyCursor();
+}
+
+
+/*ARGSUSED*/
+void XmhSortFolder(w, event, params, num_params)
+    Widget	w;
+    XEvent	*event;
+    String	*params;
+    Cardinal	*num_params;
+{
+    Scrn scrn = ScrnFromWidget(w);
+    if (UserWantsAction(w, scrn))
+	DoSort(w, (XtPointer) scrn, (XtPointer) NULL);
+}
+
+
+/*ARGSUSED*/
+void XmhForceRescan(w, event, params, num_params)
+    Widget	w;
+    XEvent	*event;
+    String	*params;
+    Cardinal	*num_params;
+{
+    Scrn scrn = ScrnFromWidget(w);
+    if (UserWantsAction(w, scrn))
+	DoForceRescan(w, (XtPointer) scrn, (XtPointer) NULL);
+}
+
+/*ARGSUSED*/
+void DoForceRescan(w, client_data, call_data)
+    Widget	w;
+    XtPointer	client_data;
+    XtPointer	call_data;
+{
+    Scrn	scrn = (Scrn) client_data;
+    Toc		toc = scrn->toc;
+    if (toc == NULL) return;
+    if (app_resources.block_events_on_busy) ShowBusyCursor();
+
+    TocForceRescan(toc);
+    
+    if (app_resources.block_events_on_busy) UnshowBusyCursor();
+}
+
+/*ARGSUSED*/
+void XmhCheckForNewMail(w, e, p, n)
+    Widget w;
+    XEvent *e;
+    String *p;
+    Cardinal *n;
+{
+    TocCheckForNewMail(True);
+}
+
+/* Incorporate new mail. */
+
+/*ARGSUSED*/
+void XmhIncorporateNewMail(w, event, params, num_params)
+    Widget	w;
+    XEvent	*event;
+    String	*params;
+    Cardinal	*num_params;
+{
+    Scrn scrn = ScrnFromWidget(w);
+    if (UserWantsAction(w, scrn)) {
+	if (TocCanIncorporate(scrn->toc))
+	    DoIncorporateNewMail(w, (XtPointer) scrn, (XtPointer) NULL);
+    }
+}
+
+
+void DoIncorporateNewMail(w, client_data, call_data)
+    Widget	w;		/* unused */
+    XtPointer	client_data;	/* screen */
+    XtPointer	call_data;	/* unused */
+{
+    Scrn scrn = (Scrn) client_data;
+    Toc toc = scrn->toc;
+    int i;
+    int newmail;
+
+    if (! toc) return;
+    newmail = TocIncorporate(toc);
+
+    if (app_resources.show_on_inc && newmail)
+	DoNextView(w, client_data, call_data);
+
+    if (app_resources.new_mail_check)
+	/* update the folder button */
+	for (i=0; i < numScrns; i++) {
+	    scrn = scrnList[i];
+	    if (scrn->kind == STtocAndView)
+		/* give visual indication of no mail waiting */
+		BBoxMailFlag(scrn->folderbuttons, TocName(toc), False);
+	}
+
+    if (app_resources.mail_waiting_flag)
+	/* update the icon */
+	TocCheckForNewMail(False);
+}
+
+
+void DoReplyMsg(scrn, params, num_params)
+    Scrn	scrn;
+    String	*params;
+    Cardinal	num_params;
+{
+    Toc		toc = scrn->toc;
+    Scrn	nscrn;
+    MsgList	mlist;
+    Msg		msg;
+
+    if (toc == NULL) return;
+    mlist = CurMsgListOrCurMsg(toc);
+    if (mlist->nummsgs) {
+	nscrn = NewCompScrn();
+	ScreenSetAssocMsg(nscrn, mlist->msglist[0]);
+	msg = TocMakeNewMsg(DraftsFolder);
+	MsgSetTemporary(msg);
+	MsgLoadReply(msg, mlist->msglist[0], params, num_params);
+	MsgSetScrnForComp(msg, nscrn);
+	MapScrn(nscrn);
+    }
+    FreeMsgList(mlist);
+}
+    
+
+/*ARGSUSED*/
+void DoReply(w, client_data, call_data)
+    Widget	w;
+    XtPointer	client_data;
+    XtPointer	call_data;
+{
+    DoReplyMsg((Scrn) client_data, (String *)NULL, (Cardinal)0);
+}
+    
+
+/*ARGSUSED*/
+void XmhReply(w, event, params, num_params)
+    Widget	w;
+    XEvent	*event;
+    String	*params;
+    Cardinal	*num_params;
+{
+    Scrn scrn = ScrnFromWidget(w);
+    if (UserWantsAction(w, scrn))
+	DoReplyMsg(scrn, params, *num_params);
+}
+
+
+/*ARGSUSED*/
+void DoPickMessages(w, client_data, call_data)
+    Widget	w;
+    XtPointer	client_data;
+    XtPointer	call_data;
+{
+    Scrn	scrn = (Scrn) client_data;
+    Toc		toc = scrn->toc;
+    Scrn	nscrn;
+    char *	toseq;
+    Sequence	selectedseq;
+    Boolean	recycled;
+
+    if (toc == NULL) return;
+    if ((selectedseq = TocSelectedSequence(toc)) == NULL)
+	toseq = "temp";
+    else {
+	toseq = selectedseq->name;
+	if (strcmp(toseq, "all") == 0)
+	    toseq = "temp";
+    }
+    nscrn = CreateNewScrn(STpick);
+    recycled = (nscrn->pick) ? True : False;
+    AddPick(nscrn, toc, (TocViewedSequence(toc))->name, toseq);
+    DEBUG("Realizing Pick...")
+    XtRealizeWidget(nscrn->parent);
+    DEBUG(" done.\n")
+    if (! recycled) {
+	InitBusyCursor(nscrn);
+	XDefineCursor(XtDisplay(nscrn->parent), XtWindow(nscrn->parent),
+		      app_resources.cursor);
+	(void) XSetWMProtocols(XtDisplay(toplevel), XtWindow(nscrn->parent),
+			       protocolList, XtNumber(protocolList));
+    }
+    MapScrn(nscrn);
+}
+
+
+/*ARGSUSED*/
+void XmhPickMessages(w, event, params, num_params)
+    Widget	w;
+    XEvent	*event;
+    String	*params;
+    Cardinal	*num_params;
+{
+    Scrn scrn = ScrnFromWidget(w);
+    if (UserWantsAction(w, scrn))
+	DoPickMessages(w, (XtPointer) scrn, (XtPointer) NULL);
+}
+
+
+/*ARGSUSED*/
+void DoSelectSequence(widget, client_data, call_data)
+    Widget	widget;		/* sequence menu entry object */
+    XtPointer	client_data;	/* the screen */
+    XtPointer	call_data;
+{
+    Scrn	scrn = (Scrn) client_data;
+    Toc		toc  = (Toc) scrn->toc;
+    Sequence	seq;
+
+    if ((seq = TocSelectedSequence(toc)) != NULL) {
+	Widget	item, menu;
+	Button	button;
+
+	button = BBoxFindButtonNamed
+	    (scrn->mainbuttons, MenuBoxButtons[XMH_SEQUENCE].button_name);
+	menu = BBoxMenuOfButton(button);
+	if ((item = XtNameToWidget(menu, seq->name)) != NULL)
+	    ToggleMenuItem(item, False);
+    }
+
+    ToggleMenuItem(widget, True);
+    TocSetSelectedSequence(toc, TocGetSeqNamed(toc, XtName(widget)));
+}
+
+
+/*ARGSUSED*/
+void DoOpenSeq(w, client_data, call_data)
+    Widget	w;
+    XtPointer	client_data;
+    XtPointer	call_data;
+{
+    Scrn	scrn = (Scrn) client_data;
+    Toc		toc = scrn->toc;
+    if (toc == NULL) return;
+    TocChangeViewedSeq(toc, TocSelectedSequence(toc));
+}
+
+
+/*ARGSUSED*/
+void XmhOpenSequence(w, event, params, num_params)
+    Widget	w;
+    XEvent	*event;
+    String	*params;
+    Cardinal	*num_params;
+{
+    Widget	entry_object;
+    Scrn	scrn = ScrnFromWidget(w);
+    Sequence	selected_sequence;
+
+    /* In case this action is called from translations defined by the
+     * user on folder menu buttons or on folder menu widgets.
+     */
+    if (! UserWantsAction(w, scrn))
+	return;
+
+    /* In case there is nothing to do anyway. */
+    if (! TocHasSequences(scrn->toc))
+	return;
+
+    /* In case the action was given the name of a sequence to open. */
+    if (*num_params) {
+	Toc	toc = scrn->toc;
+	if ((selected_sequence = TocGetSeqNamed(toc, params[0]))) {
+	    TocSetSelectedSequence(toc, selected_sequence);
+	    TocChangeViewedSeq(toc, selected_sequence);
+	}
+	return;
+    }
+
+    /* In case this action is a translation on the sequence menu.  */
+
+    if ((strcmp(XtName(w), "sequenceMenu") == 0) &&
+	(event->type == ButtonRelease)) {
+
+	/* The user released the mouse button.  We must distinguish between
+	 * a button release on a selectable menu entry, and a button release
+	 * occuring elsewhere.  The button releases occuring elsewhere are 
+	 * either outside of the menu, or on unselectable menu entries.
+	 */
+
+	if ((entry_object = XawSimpleMenuGetActiveEntry(w)) == NULL)
+	    return;
+
+	/* Some entry in the menu was selected.  The menu entry's callback
+	 * procedure has already executed.  If a sequence name was selected,
+	 * the callback procedure has caused that sequence to become the
+	 * currently selected sequence.  If selected menu entry object's 
+	 * name matches the currently selected sequence, we should open
+	 * that sequence.  Otherwise, the user must have selected a sequence
+	 * manipulation command, such as Pick.  The assumptions here are that
+	 * the name of a menu entry object which represents a sequence is
+	 * identical to the name of the sequence, and in the translations,
+	 * that the notify() action was specified before this action.
+	 */
+
+	if ((selected_sequence = TocSelectedSequence(scrn->toc)) &&
+	    (strcmp(XtName(entry_object), selected_sequence->name) == 0))
+	    DoOpenSeq(w, (XtPointer) scrn, (XtPointer) NULL);
+	return;
+    }
+    
+    /* An accelerator open sequence function */
+
+    DoOpenSeq(w, (XtPointer) scrn, (XtPointer) NULL);
+}
+
+
+typedef enum {ADD, REMOVE, DELETE} TwiddleOperation;
+
+static void TwiddleSequence(scrn, op)
+Scrn scrn;
+TwiddleOperation op;
+{
+    Toc toc = scrn->toc;
+    char **argv, str[100];
+    int i;
+    MsgList mlist;
+    Sequence	selectedseq;
+
+    if (toc == NULL || ((selectedseq = TocSelectedSequence(toc)) == NULL))
+	return;
+    if (strcmp(selectedseq->name, "all") == 0) {
+	Feep(XkbBI_MinorError,0,None);
+	return;
+    }
+    if (op == DELETE)
+	mlist = MakeNullMsgList();
+    else {
+	mlist = CurMsgListOrCurMsg(toc);
+	if (mlist->nummsgs == 0) {
+	    FreeMsgList(mlist);
+	    Feep(XkbBI_MinorError,0,None);
+	    return;
+	}
+    }
+    argv = MakeArgv(6 + mlist->nummsgs);
+    argv[0] = "mark";
+    argv[1] = TocMakeFolderName(toc);
+    argv[2] = "-sequence";
+    argv[3] = selectedseq->name;
+    switch (op) {
+      case ADD:
+	argv[4] = "-add";
+	argv[5] = "-nozero";
+	break;
+      case REMOVE:
+	argv[4] = "-delete";
+	argv[5] = "-nozero";
+	break;
+      case DELETE:
+	argv[4] = "-delete";
+	argv[5] = "all";
+	break;
+    }
+    for (i = 0; i < mlist->nummsgs; i++) {
+	(void) sprintf(str, "%d", MsgGetId(mlist->msglist[i]));
+	argv[6 + i] = XtNewString(str);
+    }
+    DoCommand(argv, (char *) NULL, (char *) NULL);
+    for (i = 0; i < mlist->nummsgs; i++)
+        XtFree((char *) argv[6 + i]);
+    XtFree(argv[1]);
+    XtFree((char *) argv);
+    FreeMsgList(mlist);
+    TocReloadSeqLists(toc);
+}
+
+
+/*ARGSUSED*/
+void DoAddToSeq(w, client_data, call_data)
+    Widget	w;
+    XtPointer	client_data;
+    XtPointer	call_data;
+{
+    Scrn	scrn = (Scrn) client_data;
+    TwiddleSequence(scrn, ADD);
+}
+
+
+/*ARGSUSED*/
+void XmhAddToSequence(w, event, params, num_params)
+    Widget	w;
+    XEvent	*event;
+    String	*params;
+    Cardinal	*num_params;
+{
+    Scrn scrn = ScrnFromWidget(w);
+    if (! UserWantsAction(w, scrn))
+	return;
+    if ((strcmp(XtName(w), "sequenceMenu") == 0) &&
+	(event->type == ButtonRelease) &&
+	(XawSimpleMenuGetActiveEntry(w) == NULL))
+	return;
+    if (TocHasSequences(scrn->toc))
+	TwiddleSequence(scrn, ADD);
+}
+
+
+/*ARGSUSED*/
+void DoRemoveFromSeq(w, client_data, call_data)
+    Widget	w;
+    XtPointer	client_data;
+    XtPointer	call_data;
+{
+    Scrn	scrn = (Scrn) client_data;
+    TwiddleSequence(scrn, REMOVE);
+}
+
+
+/*ARGSUSED*/
+void XmhRemoveFromSequence(w, event, params, num_params)
+    Widget	w;
+    XEvent	*event;
+    String	*params;
+    Cardinal	*num_params;
+{
+    Scrn scrn = ScrnFromWidget(w);
+    if (UserWantsAction(w, scrn))
+	if (TocHasSequences(scrn->toc))
+	    TwiddleSequence(scrn, REMOVE);
+}
+
+
+/*ARGSUSED*/
+void DoDeleteSeq(w, client_data, call_data)
+    Widget	w;
+    XtPointer	client_data;
+    XtPointer	call_data;
+{
+    Scrn	scrn = (Scrn) client_data;
+    TwiddleSequence(scrn, DELETE);
+    TUCheckSequenceMenu(scrn->toc);
+}
+
+
+/*ARGSUSED*/
+void XmhDeleteSequence(w, event, params, num_params)
+    Widget	w;
+    XEvent	*event;
+    String	*params;
+    Cardinal	*num_params;
+{
+    Scrn scrn = ScrnFromWidget(w);
+    if (! UserWantsAction(w, scrn))
+	return;
+    if ((strcmp(XtName(w), "sequenceMenu") == 0) &&
+	(event->type == ButtonRelease) &&
+	(XawSimpleMenuGetActiveEntry(w) == NULL))
+	return;
+    if (TocHasSequences(scrn->toc))
+	DoDeleteSeq(w, (XtPointer) scrn, (XtPointer) NULL);
+}
+
+@
+
+
+1.1.9.1
+log
+@OpenBSD just has imported exactly this tree into their vendor branch,
+called the same tag, in XF4/xc
+This is, apparently, the last XFree86 snapshot before the licence change
+(ie, addition of the advertising clause)
+
+Since the developers don't see any problems with that, and we would like
+to integrate improvements done by the remaining one or two (or so) XFree86
+developers (j/k), this prepares enabling us to update X-Window in the future.
+@
+text
+@d27 1
+a27 1
+/* $XFree86: xc/programs/xmh/tocfuncs.c,v 1.4 2002/04/05 21:06:29 dickey Exp $ */
+a32 1
+#include "actions.h"
+d36 3
+a38 3
+Boolean UserWantsAction(
+    Widget	w,
+    Scrn	scrn)
+d69 3
+a71 3
+static void NextAndPreviousView(
+    Scrn	scrn,
+    Boolean	next)	/* if true, next or forward; if false, previous */
+d115 4
+a118 4
+void DoReverseReadOrder(
+    Widget	widget,		/* the menu entry widget */
+    XtPointer	client_data,
+    XtPointer	call_data)
+d127 4
+a130 4
+void DoNextView(
+    Widget	widget,		/* unused */
+    XtPointer	client_data,
+    XtPointer	call_data)	/* unused */
+d137 5
+a141 5
+void XmhViewNextMessage(
+    Widget	w,
+    XEvent	*event,
+    String	*params,
+    Cardinal	*num_params)
+d149 4
+a152 4
+void DoPrevView(
+    Widget	widget,		/* unused */
+    XtPointer	client_data,
+    XtPointer	call_data)	/* unused */
+d159 5
+a163 5
+void XmhViewPreviousMessage(
+    Widget	w,
+    XEvent	*event,
+    String	*params,
+    Cardinal	*num_params)
+d172 4
+a175 4
+void DoViewNew(
+    Widget	w,
+    XtPointer	client_data,
+    XtPointer	call_data)
+d195 5
+a199 5
+void XmhViewInNewWindow(
+    Widget	w,
+    XEvent	*event,
+    String	*params,
+    Cardinal	*num_params)
+d207 4
+a210 4
+static void DoForwardMsg(
+    Scrn	scrn,
+    String	*params,
+    Cardinal	num_params)
+d224 4
+a227 4
+void DoForward(
+    Widget	w,
+    XtPointer	client_data,
+    XtPointer	call_data)
+d234 5
+a238 5
+void XmhForward(
+    Widget	w,
+    XEvent	*event,
+    String	*params,
+    Cardinal	*num_params)
+d247 4
+a250 4
+void DoTocUseAsComp(
+    Widget	w,
+    XtPointer	client_data,
+    XtPointer	call_data)
+d277 5
+a281 5
+void XmhUseAsComposition(
+    Widget	w,
+    XEvent	*event,
+    String	*params,
+    Cardinal	*num_params)
+d291 4
+a294 1
+static void MarkMessages(Scrn scrn, FateType fate, int skip)
+d328 5
+a332 5
+void XmhMarkDelete(
+    Widget	w,
+    XEvent	*event,
+    String	*params,
+    Cardinal	*num_params)
+d341 4
+a344 4
+void DoDelete(
+    Widget	w,
+    XtPointer	client_data,
+    XtPointer	call_data)
+d352 4
+a355 4
+void DoCopy(
+    Widget	w,
+    XtPointer	client_data,
+    XtPointer	call_data)
+d363 5
+a367 5
+void XmhMarkCopy(
+    Widget	w,
+    XEvent	*event,
+    String	*params,
+    Cardinal	*num_params)
+d376 4
+a379 4
+void DoMove(
+    Widget	w,
+    XtPointer	client_data,
+    XtPointer	call_data)
+d387 5
+a391 5
+void XmhMarkMove(
+    Widget	w,
+    XEvent	*event,
+    String	*params,
+    Cardinal	*num_params)
+d400 4
+a403 4
+void DoUnmark(
+    Widget	w,
+    XtPointer	client_data,
+    XtPointer	call_data)
+d411 5
+a415 5
+void XmhUnmark(
+    Widget	w,
+    XEvent	*event,
+    String	*params,
+    Cardinal	*num_params)
+d424 4
+a427 4
+void DoCommit(
+    Widget	w,
+    XtPointer	client_data,
+    XtPointer	 call_data)
+d435 5
+a439 5
+void XmhCommitChanges(
+    Widget	w,
+    XEvent	*event,
+    String	*params,
+    Cardinal	*num_params)
+d448 5
+a452 5
+void XmhShellCommand(
+    Widget	w,	 /* any widget on same scrn as the messages */
+    XEvent	*event,	 /* unused */
+    String	*params, /* shell command to execute with msgs appended */
+    Cardinal	*num_params)
+d515 5
+a519 5
+void XmhPrint(
+    Widget	w,
+    XEvent	*event,
+    String	*params,
+    Cardinal	*num_params)
+d536 4
+a539 4
+void DoPrint(
+    Widget	w,
+    XtPointer	client_data,
+    XtPointer	call_data)	/* unused */
+d552 4
+a555 4
+void DoPack(
+    Widget	widget,
+    XtPointer	client_data,
+    XtPointer	call_data)	/* unused */
+d587 5
+a591 5
+void XmhPackFolder(
+    Widget	w,
+    XEvent	*event,
+    String	*params,
+    Cardinal	*num_params)
+d600 4
+a603 4
+void DoSort(
+    Widget	widget,
+    XtPointer	client_data,
+    XtPointer	call_data)	/* unused */
+d633 5
+a637 5
+void XmhSortFolder(
+    Widget	w,
+    XEvent	*event,
+    String	*params,
+    Cardinal	*num_params)
+d646 5
+a650 5
+void XmhForceRescan(
+    Widget	w,
+    XEvent	*event,
+    String	*params,
+    Cardinal	*num_params)
+d658 4
+a661 4
+void DoForceRescan(
+    Widget	w,
+    XtPointer	client_data,
+    XtPointer	call_data)
+d674 5
+a678 5
+void XmhCheckForNewMail(
+    Widget w,
+    XEvent *e,
+    String *p,
+    Cardinal *n)
+d686 5
+a690 5
+void XmhIncorporateNewMail(
+    Widget	w,
+    XEvent	*event,
+    String	*params,
+    Cardinal	*num_params)
+d700 4
+a703 4
+void DoIncorporateNewMail(
+    Widget	w,		/* unused */
+    XtPointer	client_data,	/* screen */
+    XtPointer	call_data)	/* unused */
+d731 4
+a734 4
+static void DoReplyMsg(
+    Scrn	scrn,
+    String	*params,
+    Cardinal	num_params)
+d757 4
+a760 4
+void DoReply(
+    Widget	w,
+    XtPointer	client_data,
+    XtPointer	call_data)
+d767 5
+a771 5
+void XmhReply(
+    Widget	w,
+    XEvent	*event,
+    String	*params,
+    Cardinal	*num_params)
+d780 4
+a783 4
+void DoPickMessages(
+    Widget	w,
+    XtPointer	client_data,
+    XtPointer	call_data)
+d818 5
+a822 5
+void XmhPickMessages(
+    Widget	w,
+    XEvent	*event,
+    String	*params,
+    Cardinal	*num_params)
+d831 4
+a834 4
+void DoSelectSequence(
+    Widget	widget,		/* sequence menu entry object */
+    XtPointer	client_data,	/* the screen */
+    XtPointer	call_data)
+d857 4
+a860 4
+void DoOpenSeq(
+    Widget	w,
+    XtPointer	client_data,
+    XtPointer	call_data)
+d870 5
+a874 5
+void XmhOpenSequence(
+    Widget	w,
+    XEvent	*event,
+    String	*params,
+    Cardinal	*num_params)
+d940 3
+a942 1
+static void TwiddleSequence(Scrn scrn, TwiddleOperation op)
+d1000 4
+a1003 4
+void DoAddToSeq(
+    Widget	w,
+    XtPointer	client_data,
+    XtPointer	call_data)
+d1011 5
+a1015 5
+void XmhAddToSequence(
+    Widget	w,
+    XEvent	*event,
+    String	*params,
+    Cardinal	*num_params)
+d1030 4
+a1033 4
+void DoRemoveFromSeq(
+    Widget	w,
+    XtPointer	client_data,
+    XtPointer	call_data)
+d1041 5
+a1045 5
+void XmhRemoveFromSequence(
+    Widget	w,
+    XEvent	*event,
+    String	*params,
+    Cardinal	*num_params)
+d1055 4
+a1058 4
+void DoDeleteSeq(
+    Widget	w,
+    XtPointer	client_data,
+    XtPointer	call_data)
+d1067 5
+a1071 5
+void XmhDeleteSequence(
+    Widget	w,
+    XEvent	*event,
+    String	*params,
+    Cardinal	*num_params)
+d1083 1
+@
+
+
+1.1.1.1
+log
+@Import OpenBSD 3.3 XF4 repository from CTM 3132 the first time
+This finalizes starting an OpenBSD-mirabile (aka MirBSD) repository.
+
+### MirBSD is:
+# Copyright (c) 1982-2003 by Thorsten "mirabile" Glaser <x86@@ePost.de>
+# Copyright © 1968-2003  The authors of And contributors to UNIX®, the
+#       C Language, BSD/Berkeley Unix; 386BSD, NetBSD 1.1 and OpenBSD.
+#
+# Anyone who obtained a copy of this work is hereby permitted to freely use,
+# distribute, modify, merge, sublicence, give away or sell it as long as the
+# authors are given due credit and the following notice is retained:
+#
+# This work is provided "as is", with no explicit or implicit warranty what-
+# soever. Use it only at your own risk. In no event may an author or contri-
+# butor be held liable for any damage, directly or indirectly, that origina-
+# ted through or is caused by creation or modification of this work.
+
+MirBSD is my private tree. MirBSD does not differ very much from OpenBSD
+and intentionally tracks OpenBSD. That's why it _is_ OpenBSD, just not the
+official one. It's like with DarrenBSD.
+
+At time of this writing, no advertising for MirBSD must be done,
+because the advertising clause has not yet been sorted out.
+
+http://templeofhate.com/tglaser/MirBSD/index.php
+@
+text
+@@
+
+
+1.1.1.2
+log
+@The X-Windowing System
+
+Import XFree86 4.3 from OpenBSD by CTM, in the hope it's stable
+@
+text
+@d27 1
+a27 1
+/* $XFree86: xc/programs/xmh/tocfuncs.c,v 1.4 2002/04/05 21:06:29 dickey Exp $ */
+a32 1
+#include "actions.h"
+d36 3
+a38 3
+Boolean UserWantsAction(
+    Widget	w,
+    Scrn	scrn)
+d69 3
+a71 3
+static void NextAndPreviousView(
+    Scrn	scrn,
+    Boolean	next)	/* if true, next or forward; if false, previous */
+d115 4
+a118 4
+void DoReverseReadOrder(
+    Widget	widget,		/* the menu entry widget */
+    XtPointer	client_data,
+    XtPointer	call_data)
+d127 4
+a130 4
+void DoNextView(
+    Widget	widget,		/* unused */
+    XtPointer	client_data,
+    XtPointer	call_data)	/* unused */
+d137 5
+a141 5
+void XmhViewNextMessage(
+    Widget	w,
+    XEvent	*event,
+    String	*params,
+    Cardinal	*num_params)
+d149 4
+a152 4
+void DoPrevView(
+    Widget	widget,		/* unused */
+    XtPointer	client_data,
+    XtPointer	call_data)	/* unused */
+d159 5
+a163 5
+void XmhViewPreviousMessage(
+    Widget	w,
+    XEvent	*event,
+    String	*params,
+    Cardinal	*num_params)
+d172 4
+a175 4
+void DoViewNew(
+    Widget	w,
+    XtPointer	client_data,
+    XtPointer	call_data)
+d195 5
+a199 5
+void XmhViewInNewWindow(
+    Widget	w,
+    XEvent	*event,
+    String	*params,
+    Cardinal	*num_params)
+d207 4
+a210 4
+static void DoForwardMsg(
+    Scrn	scrn,
+    String	*params,
+    Cardinal	num_params)
+d224 4
+a227 4
+void DoForward(
+    Widget	w,
+    XtPointer	client_data,
+    XtPointer	call_data)
+d234 5
+a238 5
+void XmhForward(
+    Widget	w,
+    XEvent	*event,
+    String	*params,
+    Cardinal	*num_params)
+d247 4
+a250 4
+void DoTocUseAsComp(
+    Widget	w,
+    XtPointer	client_data,
+    XtPointer	call_data)
+d277 5
+a281 5
+void XmhUseAsComposition(
+    Widget	w,
+    XEvent	*event,
+    String	*params,
+    Cardinal	*num_params)
+d291 4
+a294 1
+static void MarkMessages(Scrn scrn, FateType fate, int skip)
+d328 5
+a332 5
+void XmhMarkDelete(
+    Widget	w,
+    XEvent	*event,
+    String	*params,
+    Cardinal	*num_params)
+d341 4
+a344 4
+void DoDelete(
+    Widget	w,
+    XtPointer	client_data,
+    XtPointer	call_data)
+d352 4
+a355 4
+void DoCopy(
+    Widget	w,
+    XtPointer	client_data,
+    XtPointer	call_data)
+d363 5
+a367 5
+void XmhMarkCopy(
+    Widget	w,
+    XEvent	*event,
+    String	*params,
+    Cardinal	*num_params)
+d376 4
+a379 4
+void DoMove(
+    Widget	w,
+    XtPointer	client_data,
+    XtPointer	call_data)
+d387 5
+a391 5
+void XmhMarkMove(
+    Widget	w,
+    XEvent	*event,
+    String	*params,
+    Cardinal	*num_params)
+d400 4
+a403 4
+void DoUnmark(
+    Widget	w,
+    XtPointer	client_data,
+    XtPointer	call_data)
+d411 5
+a415 5
+void XmhUnmark(
+    Widget	w,
+    XEvent	*event,
+    String	*params,
+    Cardinal	*num_params)
+d424 4
+a427 4
+void DoCommit(
+    Widget	w,
+    XtPointer	client_data,
+    XtPointer	 call_data)
+d435 5
+a439 5
+void XmhCommitChanges(
+    Widget	w,
+    XEvent	*event,
+    String	*params,
+    Cardinal	*num_params)
+d448 5
+a452 5
+void XmhShellCommand(
+    Widget	w,	 /* any widget on same scrn as the messages */
+    XEvent	*event,	 /* unused */
+    String	*params, /* shell command to execute with msgs appended */
+    Cardinal	*num_params)
+d515 5
+a519 5
+void XmhPrint(
+    Widget	w,
+    XEvent	*event,
+    String	*params,
+    Cardinal	*num_params)
+d536 4
+a539 4
+void DoPrint(
+    Widget	w,
+    XtPointer	client_data,
+    XtPointer	call_data)	/* unused */
+d552 4
+a555 4
+void DoPack(
+    Widget	widget,
+    XtPointer	client_data,
+    XtPointer	call_data)	/* unused */
+d587 5
+a591 5
+void XmhPackFolder(
+    Widget	w,
+    XEvent	*event,
+    String	*params,
+    Cardinal	*num_params)
+d600 4
+a603 4
+void DoSort(
+    Widget	widget,
+    XtPointer	client_data,
+    XtPointer	call_data)	/* unused */
+d633 5
+a637 5
+void XmhSortFolder(
+    Widget	w,
+    XEvent	*event,
+    String	*params,
+    Cardinal	*num_params)
+d646 5
+a650 5
+void XmhForceRescan(
+    Widget	w,
+    XEvent	*event,
+    String	*params,
+    Cardinal	*num_params)
+d658 4
+a661 4
+void DoForceRescan(
+    Widget	w,
+    XtPointer	client_data,
+    XtPointer	call_data)
+d674 5
+a678 5
+void XmhCheckForNewMail(
+    Widget w,
+    XEvent *e,
+    String *p,
+    Cardinal *n)
+d686 5
+a690 5
+void XmhIncorporateNewMail(
+    Widget	w,
+    XEvent	*event,
+    String	*params,
+    Cardinal	*num_params)
+d700 4
+a703 4
+void DoIncorporateNewMail(
+    Widget	w,		/* unused */
+    XtPointer	client_data,	/* screen */
+    XtPointer	call_data)	/* unused */
+d731 4
+a734 4
+static void DoReplyMsg(
+    Scrn	scrn,
+    String	*params,
+    Cardinal	num_params)
+d757 4
+a760 4
+void DoReply(
+    Widget	w,
+    XtPointer	client_data,
+    XtPointer	call_data)
+d767 5
+a771 5
+void XmhReply(
+    Widget	w,
+    XEvent	*event,
+    String	*params,
+    Cardinal	*num_params)
+d780 4
+a783 4
+void DoPickMessages(
+    Widget	w,
+    XtPointer	client_data,
+    XtPointer	call_data)
+d818 5
+a822 5
+void XmhPickMessages(
+    Widget	w,
+    XEvent	*event,
+    String	*params,
+    Cardinal	*num_params)
+d831 4
+a834 4
+void DoSelectSequence(
+    Widget	widget,		/* sequence menu entry object */
+    XtPointer	client_data,	/* the screen */
+    XtPointer	call_data)
+d857 4
+a860 4
+void DoOpenSeq(
+    Widget	w,
+    XtPointer	client_data,
+    XtPointer	call_data)
+d870 5
+a874 5
+void XmhOpenSequence(
+    Widget	w,
+    XEvent	*event,
+    String	*params,
+    Cardinal	*num_params)
+d940 3
+a942 1
+static void TwiddleSequence(Scrn scrn, TwiddleOperation op)
+d1000 4
+a1003 4
+void DoAddToSeq(
+    Widget	w,
+    XtPointer	client_data,
+    XtPointer	call_data)
+d1011 5
+a1015 5
+void XmhAddToSequence(
+    Widget	w,
+    XEvent	*event,
+    String	*params,
+    Cardinal	*num_params)
+d1030 4
+a1033 4
+void DoRemoveFromSeq(
+    Widget	w,
+    XtPointer	client_data,
+    XtPointer	call_data)
+d1041 5
+a1045 5
+void XmhRemoveFromSequence(
+    Widget	w,
+    XEvent	*event,
+    String	*params,
+    Cardinal	*num_params)
+d1055 4
+a1058 4
+void DoDeleteSeq(
+    Widget	w,
+    XtPointer	client_data,
+    XtPointer	call_data)
+d1067 5
+a1071 5
+void XmhDeleteSequence(
+    Widget	w,
+    XEvent	*event,
+    String	*params,
+    Cardinal	*num_params)
+d1083 1
+@
+

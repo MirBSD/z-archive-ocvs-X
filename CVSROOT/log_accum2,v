@@ -1,0 +1,1157 @@
+head	1.20;
+access;
+symbols;
+locks; strict;
+comment	@# @;
+
+
+1.20
+date	2004.12.03.20.08.55;	author tg;	state Exp;
+branches;
+next	1.19;
+
+1.19
+date	2004.12.03.18.04.29;	author tg;	state Exp;
+branches;
+next	1.18;
+
+1.18
+date	2004.12.03.17.59.13;	author tg;	state Exp;
+branches;
+next	1.17;
+
+1.17
+date	2004.12.03.17.25.42;	author tg;	state Exp;
+branches;
+next	1.16;
+
+1.16
+date	2004.12.03.16.44.23;	author tg;	state Exp;
+branches;
+next	1.15;
+
+1.15
+date	2004.09.15.19.49.56;	author tg;	state Exp;
+branches;
+next	1.14;
+
+1.14
+date	2004.08.06.00.14.53;	author tg;	state Exp;
+branches;
+next	1.13;
+
+1.13
+date	2004.08.06.00.14.13;	author tg;	state Exp;
+branches;
+next	1.12;
+
+1.12
+date	2004.08.06.00.05.21;	author tg;	state Exp;
+branches;
+next	1.11;
+
+1.11
+date	2004.08.05.23.58.39;	author tg;	state Exp;
+branches;
+next	1.10;
+
+1.10
+date	2004.05.22.23.56.17;	author tg;	state Exp;
+branches;
+next	1.9;
+
+1.9
+date	2003.10.21.17.54.54;	author tg;	state Exp;
+branches;
+next	1.8;
+
+1.8
+date	2003.10.21.14.54.33;	author tg;	state Exp;
+branches;
+next	1.7;
+
+1.7
+date	2003.09.29.19.38.46;	author tg;	state Exp;
+branches;
+next	1.6;
+
+1.6
+date	2003.08.19.19.43.42;	author tg;	state Exp;
+branches;
+next	1.5;
+
+1.5
+date	2003.06.29.19.14.19;	author tg;	state Exp;
+branches;
+next	1.4;
+
+1.4
+date	2003.06.28.15.06.11;	author tg;	state Exp;
+branches;
+next	1.3;
+
+1.3
+date	2003.06.28.14.54.50;	author tg;	state Exp;
+branches;
+next	1.2;
+
+1.2
+date	2003.03.22.17.24.47;	author tg;	state Exp;
+branches;
+next	1.1;
+
+1.1
+date	2003.03.22.17.03.32;	author tg;	state Exp;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.20
+log
+@fix ncvs import and ncvs add
+@
+text
+@#!/usr/bin/perl
+# $MirBSD: CVSROOT/log_accum2,v 1.12 2004/12/03 20:04:54 tg Exp $
+#-
+# Copyright (c) 2002, 2003, 2004
+#	Thorsten "mirabile" Glaser <tg@@66h.42h.de>
+#
+# Licensee is hereby permitted to deal in this work without restric-
+# tion, including unlimited rights to use, publicly perform, modify,
+# merge, distribute, sell, give away or sublicence, provided all co-
+# pyright notices above, these terms and the disclaimer are retained
+# in all redistributions or reproduced in accompanying documentation
+# or other materials provided with binary redistributions.
+#
+# All advertising materials mentioning features or use of this soft-
+# ware must display the following acknowledgement:
+#	This product includes material provided by Thorsten Glaser.
+#
+# Licensor hereby provides this work "AS IS" and WITHOUT WARRANTY of
+# any kind, expressed or implied, to the maximum extent permitted by
+# applicable law, but with the warranty of being written without ma-
+# licious intent or gross negligence; in no event shall licensor, an
+# author or contributor be held liable for any damage, direct, indi-
+# rect or other, however caused, arising in any way out of the usage
+# of this work, even if advised of the possibility of such damage.
+#-
+# Original authors:
+#	Contributed by David Hampton <hampton@@cisco.com>
+#	hacked greatly by Greg A. Woods <woods@@web.net>
+#-
+# Perl filter to handle the log messages from the checkin of files in
+# a directory.  This script will group the lists of files by log
+# message, and mail a single consolidated log message at the end of
+# the commit.
+#
+# This file assumes a pre-commit checking program that leaves the
+# names of the first and last commit directories in a temporary file.
+#-
+# Usage: log_accum2 [-d] [-M module] [[-m mailto] ...] [-R reply-to]
+#		[-f logfile] [-I changelogpath] [-s] [-N]
+#	-d		- turn on debugging
+#	-m mailto	- send mail to "mailto" (multiple)
+#	-R replyto	- add "Reply-To: replyto" header
+#	-M modulename	- set module name to "modulename"
+#	-I logpath	- reduce size of cvs import mails and tell
+#			  user to look at logpath (must be an URI)
+#	-f logfile	- write commit messages to logfile too
+#	-s		- *don't* run "cvs status -v" for each file
+#	-N		- UseNewInfoFmtStrings=yes mode (%p %{sVv})
+
+# Configurable options
+#
+$MAILER        = "/usr/sbin/sendmail";		# something with UCB sendmail syntax
+
+# Constants (don't change these!)
+#
+$STATE_NONE    = 0;
+$STATE_CHANGED = 1;
+$STATE_ADDED   = 2;
+$STATE_REMOVED = 3;
+$STATE_LOG     = 4;
+
+$LAST_FILE     = "/tmp/#cvs.lastdir";
+
+$CHANGED_FILE  = "/tmp/#cvs.files.changed";
+$ADDED_FILE    = "/tmp/#cvs.files.added";
+$REMOVED_FILE  = "/tmp/#cvs.files.removed";
+$DIFF_FILE     = "/tmp/#cvs.files.diff";
+$LOG_FILE      = "/tmp/#cvs.files.log";
+
+$FILE_PREFIX   = "#cvs.files";
+
+#
+#	Subroutines
+#
+
+sub cleanup_tmpfiles {
+    local($wd, @@files);
+
+    $wd = `pwd`;
+    chdir("/tmp") || die("Can't chdir('/tmp')\n");
+    opendir(DIR, ".");
+    push(@@files, grep(/^$FILE_PREFIX\..*\.$id$/, readdir(DIR)));
+    closedir(DIR);
+    foreach (@@files) {
+	unlink $_;
+    }
+    unlink $LAST_FILE . "." . $id;
+
+    chdir($wd);
+}
+
+sub write_logfile {
+    local($filename, @@lines) = @@_;
+
+    open(FILE, ">$filename") || die("Cannot open log file $filename.\n");
+    print FILE join("\n", @@lines), "\n";
+    close(FILE);
+}
+
+sub format_names {
+    local($dir, @@files) = @@_;
+    local(@@lines);
+
+    if ($dir =~ /^\.\//) {
+	$dir = $';
+    }
+    if ($dir =~ /\/$/) {
+	$dir = $`;
+    }
+    if ($dir eq "") {
+	$dir = ".";
+    }
+
+    $format = "\t%-" . sprintf("%d", length($dir) > 15 ? length($dir) : 15) . "s%s ";
+
+    $lines[0] = sprintf($format, $dir, ":");
+
+    if ($debug) {
+	print STDERR "format_names(): dir = ", $dir, "; files = ", join(":", @@files), ".\n";
+    }
+    foreach $file (@@files) {
+	if (length($lines[$#lines]) + length($file) > 65) {
+	    $lines[++$#lines] = sprintf($format, " ", " ");
+	}
+	$lines[$#lines] .= $file . " ";
+    }
+
+    @@lines;
+}
+
+sub format_lists {
+    local(@@lines) = @@_;
+    local(@@text, @@files, $lastdir);
+
+    if ($debug) {
+	print STDERR "format_lists(): ", join(":", @@lines), "\n";
+    }
+    @@text = ();
+    @@files = ();
+    $lastdir = shift @@lines;	# first thing is always a directory
+    if ($lastdir !~ /.*\/$/) {
+	die("Damn, $lastdir doesn't look like a directory!\n");
+    }
+    foreach $line (@@lines) {
+	if ($line =~ /.*\/$/) {
+	    push(@@text, &format_names($lastdir, @@files));
+	    $lastdir = $line;
+	    @@files = ();
+	} else {
+	    push(@@files, $line);
+	}
+    }
+    push(@@text, &format_names($lastdir, @@files));
+
+    @@text;
+}
+
+sub append_names_to_file {
+    local($filename, $dir, @@files) = @@_;
+
+    if (@@files) {
+	open(FILE, ">>$filename") || die("Cannot open file $filename.\n");
+	print FILE $dir, "\n";
+	print FILE join("\n", @@files), "\n";
+	close(FILE);
+    }
+}
+
+sub read_line {
+    local($line);
+    local($filename) = @@_;
+
+    open(FILE, "<$filename") || die("Cannot open file $filename.\n");
+    $line = <FILE>;
+    close(FILE);
+    chop($line);
+    $line;
+}
+
+sub read_logfile {
+    local(@@text);
+    local($filename, $leader) = @@_;
+
+    open(FILE, "<$filename");
+    while (<FILE>) {
+	chop;
+	push(@@text, $leader.$_);
+    }
+    close(FILE);
+    @@text;
+}
+
+sub build_header {
+    local($header);
+    local($sec,$min,$hour,$mday,$mon,$year) = gmtime(time);
+    $year = 1900 + $year;
+    $header .= sprintf("CVSROOT:\t%s\nModule name:\t%s\n",
+		      $cvsroot,
+		      $modulename);
+    if (defined($branch)) {
+	$header .= sprintf("Branch: \t%s\n",
+		      $branch);
+    }
+    $header .= sprintf("Changes by:\t%s@@%s\t%04d/%02d/%02d %02d:%02d:%02d UTC",
+		      $login, $hostdomain,
+		      $year, $mon+1, $mday,
+		      $hour, $min, $sec);
+}
+
+sub mail_notification {
+    local($name, $rpl, @@text) = @@_;
+    if (! $name) {
+	return;
+    }
+    open(MAIL, "| $MAILER -t");
+    if ($rpl ne "NO") {
+	print MAIL "Mail-Followup-To: ", $rpl, "\n";
+	print MAIL "Reply-To: ", $rpl, "\n";
+    }
+    print MAIL <<EOF ;
+To: $name
+Subject: CVS: $hostdomain: $modulename
+
+EOF
+    print MAIL join("\n", @@text), "\n";
+    close(MAIL);
+}
+
+sub write_commitlog {
+    local($logfile, @@text) = @@_;
+
+    open(FILE, ">>$logfile");
+    print FILE join("\n", @@text), "\n\n";
+    close(FILE);
+}
+
+#
+#	Main Body
+#
+
+# Initialize basic variables
+#
+$debug = 0;
+$id = getpgrp();	# note, you *must* use a shell which does setpgrp()
+$state = $STATE_NONE;
+$login = getlogin || (getpwuid($<))[0] || "nobody";
+chop($hostname = `hostname`);
+if ($hostname !~ /\./) {
+    chop($domainname = `domainname`);
+    $hostdomain = $hostname . "." . $domainname;
+} else {
+    $hostdomain = $hostname;
+}
+$cvsroot = $ENV{'CVSROOT'};
+$do_status = 1;
+$modulename = "";
+$do_replyto = "NO";
+$mailto = "";
+$import_cloguri = "NO";
+$use_newinfo = 0;
+$has_newinfo = 0;
+@@files = ();
+@@fold = ();
+@@fnew = ();
+
+# parse command line arguments (file list is seen as one arg)
+#
+while (@@ARGV) {
+    $arg = shift @@ARGV;
+
+    if ($arg eq '-d') {
+	$debug = 1;
+	print STDERR "Debug turned on...\n";
+    } elsif ($arg eq '-m') {
+	$mailto = "$mailto " . shift @@ARGV;
+    } elsif ($arg eq '-R') {
+	$do_replyto = shift @@ARGV;
+    } elsif ($arg eq '-M') {
+	$modulename = shift @@ARGV;
+    } elsif ($arg eq '-I') {
+	$import_cloguri = shift @@ARGV;
+    } elsif ($arg eq '-s') {
+	$do_status = 0;
+    } elsif ($arg eq '-f') {
+	($commitlog) && die("Too many '-f' args\n");
+	$commitlog = shift @@ARGV;
+    } elsif ($arg eq '-N') {
+	$use_newinfo = 1;
+    } elsif ($use_newinfo) {
+	# this muse be second-to-last
+	if ($has_newinfo) {
+	    push(@@files, $arg);
+	    push(@@fold, shift @@ARGV);
+	    push(@@fnew, shift @@ARGV);
+	} else {
+	    push(@@files, $arg);
+	    push(@@fold, 0);
+	    push(@@fnew, 0);
+	    $has_newinfo = 1;
+	}
+    } else {
+	# this must be last
+	($donefiles) && die("Too many arguments!  Check usage.\n");
+	$donefiles = 1;
+	@@files = split(/ /, $arg);
+    }
+}
+
+# for now, the first "file" is the repository directory being committed,
+# relative to the $CVSROOT location
+#
+@@path = split('/', $files[0]);
+
+# XXX there are some ugly assumptions in here about module names and
+# XXX directories relative to the $CVSROOT location -- really should
+# XXX read $CVSROOT/CVSROOT/modules, but that's not so easy to do, since
+# XXX we have to parse it backwards.
+#
+if ($modulename eq "") {
+    $modulename = $path[0];	# i.e. the module name == top-level dir
+}
+if ($commitlog ne "") {
+    $commitlog = $cvsroot . "/" . $modulename . "/" . $commitlog
+	unless ($commitlog =~ /^\//);
+}
+if ($#path == 0) {
+    $dir = ".";
+} else {
+    $dir = join('/', @@path[1..$#path]);
+}
+$dir = $dir . "/";
+
+if ($debug) {
+    print STDERR "module - ", $modulename, "\n";
+    print STDERR "dir    - ", $dir, "\n";
+    print STDERR "path   - ", join(":", @@path), "\n";
+    print STDERR "files  - ", join(":", @@files), "\n";
+    print STDERR "id     - ", $id, "\n";
+}
+
+# Check for a new directory first.  This appears with files set as follows:
+#
+#    files[0] - "path/name/newdir"
+#    files[1] - "-"
+#    files[2] - "New"
+#    files[3] - "directory"
+#
+if (($files[2] =~ /New/ && $files[3] =~ /directory/)
+ || ($files[1] eq '- New directory')) {
+    local(@@text);
+
+    @@text = ();
+    push(@@text, &build_header());
+    push(@@text, "");
+    push(@@text, $files[0]);
+    push(@@text, "");
+
+    while (<STDIN>) {
+	chop;			# Drop the newline
+	push(@@text, $_);
+    }
+
+    &mail_notification($mailto, $do_replyto, @@text);
+
+    if ($commitlog) {
+	&write_commitlog($commitlog, @@text);
+    }
+
+    exit 0;
+}
+
+# Iterate over the body of the message collecting information.
+#
+while (<STDIN>) {
+    chop;			# Drop the newline
+
+    if (/^Modified Files/) { $state = $STATE_CHANGED; next; }
+    if (/^Added Files/)    { $state = $STATE_ADDED;   next; }
+    if (/^Removed Files/)  { $state = $STATE_REMOVED; next; }
+    if (/^Log Message/)    { $state = $STATE_LOG;     next; }
+    if (/^Revision\/Branch/) { /^[^:]+:\s*(.*)/; $branch = $+; next; }
+
+    s/^[ \t\n]+// if $state != $STATE_LOG;	# delete leading whitespace
+    s/[ \t\n]+$//;				# delete trailing whitespace
+
+    if ($state == $STATE_CHANGED) { push(@@changed_files, split); }
+    if ($state == $STATE_ADDED)   { push(@@added_files,   split); }
+    if ($state == $STATE_REMOVED) { push(@@removed_files, split); }
+    if ($state == $STATE_LOG)     { push(@@log_lines,     $_); }
+}
+
+# Strip leading and trailing blank lines from the log message.  Also
+# compress multiple blank lines in the body of the message down to a
+# single blank line.
+#
+while ($#log_lines > -1) {
+    last if ($log_lines[0] ne "");
+    shift(@@log_lines);
+}
+while ($#log_lines > -1) {
+    last if ($log_lines[$#log_lines] ne "");
+    pop(@@log_lines);
+}
+for ($i = $#log_lines; $i > 0; $i--) {
+    if (($log_lines[$i - 1] eq "") && ($log_lines[$i] eq "")) {
+	splice(@@log_lines, $i, 1);
+    }
+}
+
+# Check for an import command.  This appears with files set as follows:
+#
+#    files[0] - "path/name"
+#    files[1] - "-"
+#    files[2] - "Imported"
+#    files[3] - "sources"
+#
+if (($files[2] =~ /Imported/ && $files[3] =~ /sources/)
+ || ($files[1] eq '- Imported sources')) {
+    local(@@textm);
+    local(@@textl);
+    local($skp);
+
+    $skp = 0;
+    @@textl = ();
+    push(@@textl, &build_header());
+    push(@@textl, "");
+    push(@@textl, "Log message:");
+    @@textm = @@textl;
+
+    while ($#log_lines > -1) {
+	push (@@textl, "    " . $log_lines[0]);
+	push (@@textm, "    " . $log_lines[0]) unless ($skp > 0);
+	if ($log_lines[0] =~ /^Release Tags/) {
+	    $skp = 1;
+	}
+	shift(@@log_lines);
+    }
+
+    push(@@textm, "\nTo reduce mail sizes, imports only send out the log message\nand tags; the (rather large) ChangeLog data can be found at\n${import_cloguri}");
+    push(@@textm, "\nPlease remember that it can take some time for the servers to synchronise.");
+    if ($import_cloguri ne 'NO') {
+	&mail_notification($mailto, $do_replyto, @@textm);
+    } else {
+	&mail_notification($mailto, $do_replyto, @@textl);
+    }
+
+    if ($commitlog) {
+	&write_commitlog($commitlog, @@textl);
+    }
+
+    exit 0;
+}
+
+if ($debug) {
+    print STDERR "Searching for log file index...";
+}
+# Find an index to a log file that matches this log message
+#
+for ($i = 0; ; $i++) {
+    local(@@text);
+
+    last if (! -e "$LOG_FILE.$i.$id"); # the next available one
+    @@text = &read_logfile("$LOG_FILE.$i.$id", "");
+    last if ($#text == -1);	# nothing in this file, use it
+    last if (join(" ", @@log_lines) eq join(" ", @@text)); # it's the same log message as another
+}
+if ($debug) {
+    print STDERR " found log file at $i.$id, now writing tmp files.\n";
+}
+
+# Spit out the information gathered in this pass.
+#
+&append_names_to_file("$CHANGED_FILE.$i.$id", $dir, @@changed_files);
+&append_names_to_file("$ADDED_FILE.$i.$id",   $dir, @@added_files);
+&append_names_to_file("$REMOVED_FILE.$i.$id", $dir, @@removed_files);
+&write_logfile("$LOG_FILE.$i.$id", @@log_lines);
+
+# Collect diff information
+#
+if ($has_newinfo) {
+    local($filename);
+    $filename = "$DIFF_FILE.$id";
+    open(FILE, ">>$filename") || die("Cannot open diff file $filename.\n");
+    $has_newinfo = 0;
+    foreach (@@files) {
+	if ($has_newinfo) {
+	    $fn = $files[0] . '/' . $_;
+	    $old = $fold[$has_newinfo];
+	    if ($old eq 'NONE') {
+		$old = '0';
+	    }
+	    $new = $fnew[$has_newinfo];
+	    if ($new eq 'NONE') {
+		$new = '0';
+	    }
+	    print FILE "cvs rdiff -ur$old -r$new $fn\n";
+	}
+	$has_newinfo++;
+    }
+    close(FILE);
+}
+
+# Check whether this is the last directory.  If not, quit.
+#
+if ($debug) {
+    print STDERR "Checking current dir against last dir.\n";
+}
+$_ = &read_line("$LAST_FILE.$id");
+
+if ($_ ne $cvsroot . "/" . $files[0]) {
+    if ($debug) {
+	print STDERR sprintf("Current directory %s is not last directory %s.\n", $cvsroot . "/" .$files[0], $_);
+    }
+    exit 0;
+}
+if ($debug) {
+    print STDERR sprintf("Current directory %s is last directory %s -- all commits done.\n", $files[0], $_);
+}
+
+#
+#	End Of Commits!
+#
+
+# This is it.  The commits are all finished.  Lump everything together
+# into a single message, fire a copy off to the mailing list, and drop
+# it on the end of the Changes file.
+#
+
+#
+# Produce the final compilation of the log messages
+#
+@@text = ();
+@@status_txt = ();
+push(@@text, &build_header());
+push(@@text, "");
+
+for ($i = 0; ; $i++) {
+    last if (! -e "$LOG_FILE.$i.$id"); # we're done them all!
+    @@lines = &read_logfile("$CHANGED_FILE.$i.$id", "");
+    if ($#lines >= 0) {
+	push(@@text, "Modified files:");
+	push(@@text, &format_lists(@@lines));
+    }
+    @@lines = &read_logfile("$ADDED_FILE.$i.$id", "");
+    if ($#lines >= 0) {
+	push(@@text, "Added files:");
+	push(@@text, &format_lists(@@lines));
+    }
+    @@lines = &read_logfile("$REMOVED_FILE.$i.$id", "");
+    if ($#lines >= 0) {
+	push(@@text, "Removed files:");
+	push(@@text, &format_lists(@@lines));
+    }
+    if ($#text >= 0) {
+	push(@@text, "");
+    }
+    @@lines = &read_logfile("$LOG_FILE.$i.$id", "");
+    if ($#lines >= 0) {
+	push(@@text, "Log message:");
+	push(@@text, @@lines);
+	push(@@text, "");
+    }
+    if ($do_status) {
+	local(@@changed_files);
+
+	@@changed_files = ();
+	push(@@changed_files, &read_logfile("$CHANGED_FILE.$i.$id", ""));
+	push(@@changed_files, &read_logfile("$ADDED_FILE.$i.$id", ""));
+	push(@@changed_files, &read_logfile("$REMOVED_FILE.$i.$id", ""));
+
+	if ($debug) {
+	    print STDERR "main: pre-sort changed_files = ", join(":", @@changed_files), ".\n";
+	}
+	sort(@@changed_files);
+	if ($debug) {
+	    print STDERR "main: post-sort changed_files = ", join(":", @@changed_files), ".\n";
+	}
+
+	foreach $dofile (@@changed_files) {
+	    if ($dofile =~ /\/$/) {
+		next;		# ignore the silly "dir" entries
+	    }
+	    if ($debug) {
+		print STDERR "main(): doing status on $dofile\n";
+	    }
+	    open(STATUS, "-|") || exec 'cvs', '-n', 'status', '-Qqv', $dofile;
+	    while (<STATUS>) {
+		chop;
+		push(@@status_txt, $_);
+	    }
+	}
+    }
+}
+
+# Read back in diff information
+#
+if ($use_newinfo) {
+    push(@@text, "To generate a diff of this changeset, execute the following commands:");
+    push(@@text, &read_logfile("$DIFF_FILE.$id", ""));
+}
+
+# Write to the commitlog file
+#
+if ($commitlog) {
+    my @@logtext = @@text;
+    if ($use_newinfo) {
+	push(@@logtext, "________________________________________________________________________");
+    }
+    &write_commitlog($commitlog, @@logtext);
+}
+
+if ($#status_txt >= 0) {
+    push(@@text, @@status_txt);
+}
+
+# Mailout the notification.
+#
+&mail_notification($mailto, $do_replyto, @@text);
+
+# cleanup
+#
+if (! $debug) {
+    &cleanup_tmpfiles();
+}
+
+exit 0;
+@
+
+
+1.19
+log
+@optimise by using the $_ variable
+only append the _____ separator to ChangeLog, not the eMail
+@
+text
+@d2 1
+a2 1
+# $MirBSD: CVSROOT/log_accum2,v 1.18 2004/12/03 17:59:13 tg Exp $
+d348 2
+a349 1
+if ($files[2] =~ /New/ && $files[3] =~ /directory/) {
+d417 2
+a418 1
+if ($files[2] =~ /Imported/ && $files[3] =~ /sources/) {
+d439 1
+a439 1
+    push(@@textm, "\nTo reduce mail sizes, imports only send out the log message;\nthe (rather large) ChangeLogs can be found at\n${import_cloguri}");
+@
+
+
+1.18
+log
+@prepare for ncvs to take over: add changesets to the changelog entries
+and generated eMails
+@
+text
+@d2 1
+a2 1
+# $MirBSD: CVSROOT/log_accum2,v 1.17 2004/12/03 17:25:42 tg Exp $
+d483 1
+a483 1
+    foreach $dofile (@@files) {
+d485 1
+d494 1
+a494 1
+	    print FILE "cvs rdiff -ur$old -r$new ${files[0]}/${dofile}\n";
+a597 1
+    push(@@text, "________________________________________________________________________");
+d603 5
+a607 1
+    &write_commitlog($commitlog, @@text);
+@
+
+
+1.17
+log
+@make -m mailto optional, as per docs
+@
+text
+@d2 1
+a2 1
+# $MirBSD: CVSROOT/log_accum2,v 1.16 2004/12/03 16:44:23 tg Exp $
+d39 1
+a39 1
+#		[-f logfile] [-I changelogpath] [-s]
+d48 1
+d67 1
+d260 5
+d287 14
+d302 1
+d476 24
+d590 8
+@
+
+
+1.16
+log
+@update licence; clean up the *2 scripts; speed up commit_prep2
+@
+text
+@d2 1
+a2 1
+# $MirBSD: src/share/misc/licence.template,v 1.20 2004/12/03 16:18:37 tg Rel $
+d38 2
+a39 2
+# Usage: log_accum2 [-d] [-s] [-M module] [[-m mailto] ...]
+#		[-R reply-to] [-I changelogpath] [-f logfile]
+d210 3
+d256 1
+a285 1
+($mailto) || die("No -m mail recipient specified\n");
+@
+
+
+1.15
+log
+@back out from refraining to send mail instantly
+this is better for real-time source changes tracking
+@
+text
+@d2 1
+a2 1
+# $MirBSD: CVSROOT/log_accum2,v 1.14 2004/08/06 00:14:53 tg Exp $
+a5 3
+# Original authors:
+#	Contributed by David Hampton <hampton@@cisco.com>
+#	hacked greatly by Greg A. Woods <woods@@web.net>
+d8 9
+a16 5
+# tion, including unlimited rights to use, publically perform, modi-
+# fy, merge, distribute, sell, give away or sublicence, provided the
+# above copyright notices, these terms and the disclaimer are retai-
+# ned in all redistributions, or reproduced in accompanying documen-
+# tation or other materials provided with binary redistributions.
+d24 5
+a28 1
+# of covered work, even if advised of the possibility of such damage.
+d37 3
+a39 5
+# Contributed by David Hampton <hampton@@cisco.com>
+# hacked greatly by Greg A. Woods <woods@@web.net>
+
+# Usage: log_accum.pl [-d] [-s] [-M module] [[-m mailto] ...]
+#		[-R reply-to] [-I server cvsweb cvslog] [-f logfile]
+d44 2
+a45 3
+#	-I s cw cl	- CVSWEB mode: reduce size of cvs import mails,
+#			  hint user to ${s}${cw}path/ and unless cl='-'
+#			  say the changelog file is ${s}${cl}
+d49 1
+d51 1
+a51 4
+#	Configurable options
+#
+
+$MAILER      = "/usr/sbin/sendmail";		 # something with UCB sendmail syntax
+d239 1
+a239 1
+$id = getpgrp();		# note, you *must* use a shell which does setpgrp()
+d253 1
+d270 1
+a270 4
+	$cvsweb_import = 1;
+	$cvsweb_import_server = shift @@ARGV;
+	$cvsweb_import_cvsweb = shift @@ARGV;
+	$cvsweb_import_cvslog = shift @@ARGV;
+d295 1
+a295 1
+    $modulename = $path[0];	# I.e. the module name == top-level dir
+d298 2
+a299 1
+    $commitlog = $cvsroot . "/" . $modulename . "/" . $commitlog unless ($commitlog =~ /^\//);
+d412 3
+a414 5
+    push(@@textm, "\nIn order to reduce the size of messages sent out, and\nbecause 'cvs import' messages are usually quite long, the CVS\nadministrator has decided to only send out the log message and would\nlike you to go to the following hypertext reference for cvsweb:");
+    push(@@textm, "${cvsweb_import_server}${cvsweb_import_cvsweb}${files[0]}/");
+    push(@@textm, "The changelogs, which can be rather large files, can be found at\n${cvsweb_import_server}${cvsweb_import_cvslog}") unless ($cvsweb_import_cvslog eq '-');
+    push(@@textm, "\nPlease remember that it can take fairly some time for the\nservers to synchronize, until then you can't find them there.");
+    if ($cvsweb_import > 0) {
+@
+
+
+1.14
+log
+@move original authors to top
+@
+text
+@d2 1
+a2 1
+# $MirBSD: CVSROOT/log_accum2,v 1.13 2004/08/06 00:14:13 tg Exp $
+d210 1
+a210 1
+    open(MAIL, "| $MAILER -odd -t");
+@
+
+
+1.13
+log
+@fix perlish string compare
+add djbish Mail-Followup-To
+@
+text
+@d2 1
+a2 1
+# $MirBSD: CVSROOT/log_accum2,v 1.12 2004/08/06 00:05:21 tg Exp $
+d6 3
+a31 1
+#
+@
+
+
+1.12
+log
+@obviously, it was garbled.
+@
+text
+@d2 1
+a2 1
+# $MirBSD: CVSROOT/log_accum2,v 1.11 2004/08/05 23:58:39 tg Exp $
+d209 2
+a210 1
+    if ($rpl != "NO") {
+@
+
+
+1.11
+log
+@here comes the perl-hater guy who would like to have it removed,
+but still thought it would be useful to have a Reply-To: header
+added to CVS mails, in order to avoid confusion.
+@
+text
+@d2 1
+a2 1
+# $MirBSD: src/share/misc/licence.template,v 1.11 2004/05/28 15:34:01 tg Rel $
+d207 1
+a207 1
+    local($name, @@text, $rpl) = @@_;
+d335 1
+a335 1
+    &mail_notification($mailto, @@text);
+d415 1
+a415 1
+	&mail_notification($mailto, @@textm);
+d417 1
+a417 1
+	&mail_notification($mailto, @@textl);
+d555 1
+a555 1
+&mail_notification($mailto, @@text, $do_replyto);
+@
+
+
+1.10
+log
+@* log_accum2: don't deliver mails immediately,
+  just queue them up until the next queue run
+* modules: add source-without-X11-and-gcc3
+@
+text
+@d2 20
+a21 2
+# $Id: log_accum2,v 1.9 2003/10/21 17:54:54 tg Exp $
+#
+a30 1
+#
+a31 1
+# Even more hacked by Thorsten Glaser <x86@@ePost.de>
+d34 1
+a34 1
+#		[-I server cvsweb cvslog] [-f logfile]
+d37 1
+d207 1
+a207 1
+    local($name, @@text) = @@_;
+d209 3
+d249 1
+d261 2
+d555 1
+a555 1
+&mail_notification($mailto, @@text);
+@
+
+
+1.9
+log
+@whitespace and tag cleanup
+nuke unused comments
+@
+text
+@d2 1
+a2 1
+# $Id: log_accum2,v 1.8 2003/10/21 14:54:33 tg Exp $
+d191 1
+a191 1
+    open(MAIL, "| $MAILER -t");
+@
+
+
+1.8
+log
+@- whitespace cleanup
+- document new vendor branches (wbx, netbsd, freebsd)
+- document cvs user's behaviour expectations
+- document cvs rtag breakage in config
+@
+text
+@d2 2
+a3 2
+# -*-Perl-*-
+# $Id: log_accum2,v 1.7 2003/09/29 19:38:46 tg Exp $
+@
+
+
+1.7
+log
+@don't remove leading whitespace (vulgo "indentation") from
+commit messages. From Tom Cosgrove <tom.cosgrove@@arches-consulting.com>
+@
+text
+@d3 1
+a3 1
+# $Id: log_accum2,v 1.6 2003/08/19 19:43:42 tg Exp $
+d175 1
+a175 1
+    $year= 1900 + $year;
+@
+
+
+1.6
+log
+@remove two lines long annoying licence warning
+I got tired of it, and it just sucks cnuke's bits
+@
+text
+@d3 1
+a3 1
+# $Id: log_accum2,v 1.5 2003/06/29 19:14:19 tg Exp $
+d332 3
+a334 3
+    s/^[ \t\n]+//;		# delete leading whitespace
+    s/[ \t\n]+$//;		# delete trailing whitespace
+    
+@
+
+
+1.5
+log
+@fix spelling
+thanks dondy@@gmx.de
+@
+text
+@d3 1
+a3 1
+# $Id: log_accum2,v 1.4 2003/06/28 15:06:11 tg Exp $
+a175 1
+    $header = "| Please remember that these eMails, patches, diffs and any piece of\n| source code and other work are copyrighted, not public domain!\n\n";
+@
+
+
+1.4
+log
+@copyright remark
+use gmtime, which ought to return UTC (isdst=0)
+@
+text
+@d3 1
+a3 1
+# $Id: log_accum2,v 1.3 2003/06/28 14:54:50 tg Exp $
+d391 1
+a391 1
+    push(@@textm, "\nPlease remember that it can take fairly some time for the\nservers to synchronize, until then, you will not found the logs there.");
+@
+
+
+1.3
+log
+@Reduce the size of 'cvs import' messages.
+Work done by me, public domain.
+
+Perl hackery - I still don't speak perl...
+@
+text
+@d3 1
+a3 1
+# $Id$
+d174 1
+a174 1
+    local($sec,$min,$hour,$mday,$mon,$year) = localtime(time);
+d176 2
+a177 1
+    $header = sprintf("CVSROOT:\t%s\nModule name:\t%s\n",
+d184 1
+a184 1
+    $header .= sprintf("Changes by:\t%s@@%s\t%04d/%02d/%02d %02d:%02d:%02d",
+@
+
+
+1.2
+log
+@Add RCSId
+@
+text
+@d15 1
+d17 2
+a18 1
+# Usage: log_accum.pl [-d] [-s] [-M module] [[-m mailto] ...] [-f logfile]
+d22 3
+d242 5
+d367 10
+a376 5
+    local(@@text);
+
+    @@text = ();
+    push(@@text, &build_header());
+    push(@@text, "");
+a377 1
+    push(@@text, "Log message:");
+d379 5
+a383 1
+	push (@@text, "    " . $log_lines[0]);
+d387 9
+a395 1
+    &mail_notification($mailto, @@text);
+d398 1
+a398 1
+	&write_commitlog($commitlog, @@text);
+@
+
+
+1.1
+log
+@add ChangeLog driver from OpenBSD
+@
+text
+@d3 1
+a3 1
+#
+@
+

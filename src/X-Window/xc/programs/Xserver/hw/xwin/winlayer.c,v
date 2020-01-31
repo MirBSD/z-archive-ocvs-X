@@ -1,0 +1,443 @@
+head	1.1;
+branch	1.1.1;
+access;
+symbols
+	tg-mergetmp-2:1.1.1.2
+	cvs-200410241530:1.1.1.2
+	cvs-200410012000:1.1.1.2
+	cvs-200407141120:1.1.1.2
+	cvs-200406231010:1.1.1.2
+	MIRBSD_7quater:1.1.1.2
+	cvs-200405271510:1.1.1.2
+	XFree86_4_4_0:1.1.9.1
+	cvs-200403021700:1.1.1.2
+	XFREE86_20040213:1.1.9.1
+	xc:1.1.9
+	cvs-200401291925:1.1.1.2
+	MIRBSD_7_ALPHA:1.1.1.2.0.4
+	MIRBSD_7:1.1.1.2.0.2
+	MIRBSD_7ter:1.1.1.2
+	cvs-20011091815:1.1.1.2
+	cvs-200309162130:1.1.1.2
+	cvs-200308302005:1.1.1.2
+	ctmx-0387:1.1.1.2
+	ctmx-0384:1.1.1.2
+	MIRBSD_5:1.1.1.2
+	ctmx-0375:1.1.1.2
+	ctmx-0373:1.1.1.2
+	ctm-0371:1.1.1.2
+	ctm-0370:1.1.1.2
+	MIRBSD_4:1.1.1.2
+	ctm-0363:1.1.1.2
+	ctm-0359:1.1.1.2
+	ctm-0349:1.1.1.1
+	openbsd:1.1.1;
+locks; strict;
+comment	@ * @;
+
+
+1.1
+date	2003.03.22.20.09.25;	author tg;	state Exp;
+branches
+	1.1.1.1
+	1.1.9.1;
+next	;
+
+1.1.1.1
+date	2003.03.22.20.09.25;	author tg;	state Exp;
+branches;
+next	1.1.1.2;
+
+1.1.1.2
+date	2003.04.08.18.38.01;	author tg;	state Stab;
+branches;
+next	;
+
+1.1.9.1
+date	2004.02.14.19.26.07;	author tg;	state Exp;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@/*
+ *Copyright (C) 1994-2000 The XFree86 Project, Inc. All Rights Reserved.
+ *
+ *Permission is hereby granted, free of charge, to any person obtaining
+ * a copy of this software and associated documentation files (the
+ *"Software"), to deal in the Software without restriction, including
+ *without limitation the rights to use, copy, modify, merge, publish,
+ *distribute, sublicense, and/or sell copies of the Software, and to
+ *permit persons to whom the Software is furnished to do so, subject to
+ *the following conditions:
+ *
+ *The above copyright notice and this permission notice shall be
+ *included in all copies or substantial portions of the Software.
+ *
+ *THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+ *EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+ *MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
+ *NONINFRINGEMENT. IN NO EVENT SHALL THE XFREE86 PROJECT BE LIABLE FOR
+ *ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF
+ *CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
+ *WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+ *
+ *Except as contained in this notice, the name of the XFree86 Project
+ *shall not be used in advertising or otherwise to promote the sale, use
+ *or other dealings in this Software without prior written authorization
+ *from the XFree86 Project.
+ *
+ * Authors:	Harold L Hunt II
+ */
+/* $XFree86: xc/programs/Xserver/hw/xwin/winlayer.c,v 1.6 2001/08/16 08:23:36 alanh Exp $ */
+
+#include "win.h"
+
+
+/*
+ * Create initial layer.  Cygwin only needs one initial layer.
+ */
+
+LayerPtr
+winLayerCreate (ScreenPtr pScreen)
+{
+  winScreenPriv(pScreen);
+  winScreenInfo		*pScreenInfo = pScreenPriv->pScreenInfo;
+  PixmapPtr		pPixmap = NULL;
+  DWORD			dwLayerKind;
+
+  ErrorF ("winLayerCreate () - dwDepth %d\n",
+	  pScreenInfo->dwDepth);
+
+  /* We only need a single layer kind: shadow */
+  dwLayerKind = LAYER_SHADOW;
+  pPixmap = LAYER_SCREEN_PIXMAP;
+
+  return LayerCreate (pScreen,
+		      dwLayerKind,
+		      pScreenInfo->dwDepth,
+		      pPixmap,
+		      pScreenPriv->pwinShadowUpdate,
+		      NULL, /* No ShadowWindowProc */
+		      0, /* Rotate */
+		      0);
+}
+
+#ifdef RANDR
+/*
+ * Used as a function parameter to WalkTree.
+ */
+
+int
+winLayerAdd (WindowPtr pWindow, pointer value)
+{
+  ScreenPtr		pScreen = pWindow->drawable.pScreen;
+  LayerPtr		pLayer = (LayerPtr) value;
+  
+  ErrorF ("winLayerAdd ()\n");
+
+  if (!LayerWindowAdd (pScreen, pLayer, pWindow))
+    return WT_STOPWALKING;
+  
+  return WT_WALKCHILDREN;
+}
+
+
+/*
+ * Used as a function parameter to WalkTree.
+ */
+
+int
+winLayerRemove (WindowPtr pWindow, pointer value)
+{
+  ScreenPtr		pScreen = pWindow->drawable.pScreen;
+  LayerPtr		pLayer = (LayerPtr) value;
+  
+  ErrorF ("winLayerRemove ()\n");
+
+  LayerWindowRemove (pScreen, pLayer, pWindow);
+
+  return WT_WALKCHILDREN;
+}
+
+
+/*
+ * Answer queries about the RandR features supported.
+ */
+
+Bool
+winRandRGetInfo (ScreenPtr pScreen, Rotation *pRotations)
+{
+  winScreenPriv(pScreen);
+  winScreenInfo			*pScreenInfo = pScreenPriv->pScreenInfo;
+  int				n;
+  RRVisualGroupPtr		pVisualGroup;
+  RRGroupOfVisualGroupPtr	pGroupOfVisualGroup = NULL;
+  Rotation			rotateKind;
+  RRScreenSizePtr		pSize;
+
+  ErrorF ("winRandRGetInfo ()\n");
+
+  /* Don't support rotations, yet */
+  *pRotations = RR_Rotate_0; /* | RR_Rotate_90 | RR_Rotate_180 | ... */
+  
+  /* Check for something naughty.  Don't know what exactly... */
+  for (n = 0; n < pScreen->numDepths; n++)
+    if (pScreen->allowedDepths[n].numVids)
+      break;
+  if (n == pScreen->numDepths)
+    return FALSE;
+  
+  /* Create an RandR visual group */
+  pVisualGroup = RRCreateVisualGroup (pScreen);
+  if (!pVisualGroup)
+    return FALSE;
+  
+
+  /* Not sure what this does */
+  if (!RRAddDepthToVisualGroup (pScreen,
+				pVisualGroup,
+				&pScreen->allowedDepths[n]))
+    {
+      RRDestroyVisualGroup (pScreen, pVisualGroup);
+      return FALSE;
+    }
+
+  /* Register the RandR visual group */
+  pVisualGroup = RRRegisterVisualGroup (pScreen, pVisualGroup);
+  if (!pVisualGroup)
+    return FALSE;
+  
+  pGroupOfVisualGroup = RRRegisterGroupOfVisualGroup (pScreen,
+						      pGroupOfVisualGroup);
+  
+  /* You have to be kidding */
+  if (!RRAddVisualGroupToGroupOfVisualGroup (pScreen,
+					     pGroupOfVisualGroup,
+					     pVisualGroup))
+    {
+      RRDestroyGroupOfVisualGroup (pScreen, pGroupOfVisualGroup);
+      /* pVisualGroup left until screen closed */
+      return FALSE;
+    }
+  
+  /* I can't afford a clue */
+  pGroupOfVisualGroup = RRRegisterGroupOfVisualGroup (pScreen, 
+						      pGroupOfVisualGroup);
+  if (!pGroupOfVisualGroup)
+    return FALSE;
+  
+  /*
+   * Register supported sizes.  This can be called many times, but
+   * we only support one size for now.
+   */
+  pSize = RRRegisterSize (pScreen,
+			  pScreenInfo->dwWidth,
+			  pScreenInfo->dwHeight,
+			  pScreenInfo->dwWidth_mm,
+			  pScreenInfo->dwHeight_mm,
+			  pGroupOfVisualGroup);
+  
+  /* Only one allowed rotation for now */
+  rotateKind = RR_Rotate_0;
+  
+  /* Tell RandR what the current config is */
+  RRSetCurrentConfig (pScreen, rotateKind, pSize, pVisualGroup);
+  
+  return TRUE;
+}
+
+
+/*
+ * Configure which RandR features are supported.
+ */
+
+Bool
+winRandRSetConfig (ScreenPtr		pScreen,
+		   Rotation		rotateKind,
+		   RRScreenSizePtr	pSize,
+		   RRVisualGroupPtr	pVisualGroup)
+{
+  ErrorF ("winRandRSetConfig ()\n");
+
+  /*
+   * Apparently the only thing that can change is rotation.
+   * We don't support rotation, so that means nothing can change, right?
+   */
+  
+  assert (rotateKind == RR_Rotate_0);
+
+  return TRUE;
+}
+
+
+/*
+ * Initialize the RandR layer.
+ */
+
+Bool
+winRandRInit (ScreenPtr pScreen)
+{
+  rrScrPrivPtr		pRRScrPriv;
+
+  ErrorF ("winRandRInit ()\n");
+
+  if (!RRScreenInit (pScreen))
+    {
+      ErrorF ("winRandRInit () - RRScreenInit () failed\n");
+      return FALSE;
+    }
+
+  /* Set some RandR function pointers */
+  pRRScrPriv = rrGetScrPriv (pScreen);
+  pRRScrPriv->rrGetInfo = winRandRGetInfo;
+  pRRScrPriv->rrSetConfig = winRandRSetConfig;
+
+  return TRUE;
+}
+#endif
+@
+
+
+1.1.9.1
+log
+@OpenBSD just has imported exactly this tree into their vendor branch,
+called the same tag, in XF4/xc
+This is, apparently, the last XFree86 snapshot before the licence change
+(ie, addition of the advertising clause)
+
+Since the developers don't see any problems with that, and we would like
+to integrate improvements done by the remaining one or two (or so) XFree86
+developers (j/k), this prepares enabling us to update X-Window in the future.
+@
+text
+@d30 1
+a30 1
+/* $XFree86: xc/programs/Xserver/hw/xwin/winlayer.c,v 1.9 2002/10/31 23:04:39 alanh Exp $ */
+d34 1
+a34 1
+#if WIN_LAYER_SUPPORT
+d47 2
+a48 2
+  ErrorF ("winLayerCreate - dwDepth: %d dwBPP %d\n",
+	  pScreenInfo->dwDepth, pScreenInfo->dwBPP);
+d56 1
+a56 1
+		      pScreenInfo->dwBPP,
+d64 1
+a64 1
+
+d101 1
+a101 1
+#ifdef RANDR
+d112 2
+a121 1
+#if 0
+d128 39
+a166 1
+#endif
+d176 2
+a177 1
+			  pScreenInfo->dwHeight_mm);
+d181 1
+a181 1
+
+d183 1
+a183 1
+  RRSetCurrentConfig (pScreen, rotateKind, pSize);
+d196 2
+a197 1
+		   RRScreenSizePtr	pSize)
+a235 1
+#endif
+@
+
+
+1.1.1.1
+log
+@Import OpenBSD 3.3 XF4 repository from CTM 3132 the first time
+This finalizes starting an OpenBSD-mirabile (aka MirBSD) repository.
+
+### MirBSD is:
+# Copyright (c) 1982-2003 by Thorsten "mirabile" Glaser <x86@@ePost.de>
+# Copyright © 1968-2003  The authors of And contributors to UNIX®, the
+#       C Language, BSD/Berkeley Unix; 386BSD, NetBSD 1.1 and OpenBSD.
+#
+# Anyone who obtained a copy of this work is hereby permitted to freely use,
+# distribute, modify, merge, sublicence, give away or sell it as long as the
+# authors are given due credit and the following notice is retained:
+#
+# This work is provided "as is", with no explicit or implicit warranty what-
+# soever. Use it only at your own risk. In no event may an author or contri-
+# butor be held liable for any damage, directly or indirectly, that origina-
+# ted through or is caused by creation or modification of this work.
+
+MirBSD is my private tree. MirBSD does not differ very much from OpenBSD
+and intentionally tracks OpenBSD. That's why it _is_ OpenBSD, just not the
+official one. It's like with DarrenBSD.
+
+At time of this writing, no advertising for MirBSD must be done,
+because the advertising clause has not yet been sorted out.
+
+http://templeofhate.com/tglaser/MirBSD/index.php
+@
+text
+@@
+
+
+1.1.1.2
+log
+@The X-Windowing System
+
+Import XFree86 4.3 from OpenBSD by CTM, in the hope it's stable
+@
+text
+@d30 1
+a30 1
+/* $XFree86: xc/programs/Xserver/hw/xwin/winlayer.c,v 1.9 2002/10/31 23:04:39 alanh Exp $ */
+d34 1
+a34 1
+#if WIN_LAYER_SUPPORT
+d47 2
+a48 2
+  ErrorF ("winLayerCreate - dwDepth: %d dwBPP %d\n",
+	  pScreenInfo->dwDepth, pScreenInfo->dwBPP);
+d56 1
+a56 1
+		      pScreenInfo->dwBPP,
+d64 1
+a64 1
+
+d101 1
+a101 1
+#ifdef RANDR
+d112 2
+a121 1
+#if 0
+d128 39
+a166 1
+#endif
+d176 2
+a177 1
+			  pScreenInfo->dwHeight_mm);
+d181 1
+a181 1
+
+d183 1
+a183 1
+  RRSetCurrentConfig (pScreen, rotateKind, pSize);
+d196 2
+a197 1
+		   RRScreenSizePtr	pSize)
+a235 1
+#endif
+@
+

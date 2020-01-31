@@ -1,0 +1,207 @@
+head	1.1;
+branch	1.1.1;
+access;
+symbols
+	cvs-200405281530:1.1.1.1
+	cvs-200402211630:1.1.1.1
+	cvs-200401261625:1.1.1.1
+	cvs-200401162142:1.1.1.1
+	cvs-200301141450:1.1.1.1
+	cvs-200312021610:1.1.1.1
+	cvs-200311151930:1.1.1.1
+	cvs-200310311830:1.1.1.1
+	cvs-200310021000:1.1.1.1
+	cvs-200309281111:1.1.1.1
+	cvs-200309171515:1.1.1.1
+	cvs-200308302005:1.1.1.1
+	cvs-200308171200:1.1.1.1
+	ctm-3449:1.1.1.1
+	cvs-200307191610:1.1.1.1
+	ctm-3416:1.1.1.1
+	cvs-200307091500:1.1.1.1
+	ctm-3389:1.1.1.1
+	cvs-200306291800:1.1.1.1
+	ctm-3369:1.1.1.1
+	ctm-3341:1.1.1.1
+	MIRBSD_5:1.1.1.1
+	cvs-200306082100:1.1.1.1
+	ctm-3316:1.1.1.1
+	ctm-3272:1.1.1.1
+	ctm-3264:1.1.1.1
+	ctm-3258:1.1.1.1
+	MIRBSD_4:1.1.1.1
+	ctm-3200:1.1.1.1
+	ctm-3188:1.1.1.1
+	ctm-3155:1.1.1.1
+	ctm-3132:1.1.1.1
+	openbsd:1.1.1;
+locks; strict;
+comment	@# @;
+
+
+1.1
+date	2003.03.22.19.53.25;	author tg;	state Exp;
+branches
+	1.1.1.1;
+next	;
+
+1.1.1.1
+date	2003.03.22.19.53.25;	author tg;	state Stab;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@$OpenBSD: patch-Ghostview_c,v 1.1 2002/04/26 01:44:08 espie Exp $
+--- Ghostview.c.orig	Sat Jul 24 04:29:12 1993
++++ Ghostview.c	Fri Apr 26 02:49:35 2002
+@@@@ -30,6 +30,9 @@@@
+ #include <X11/Xos.h>
+ #include "GhostviewP.h"
+ #include <ctype.h>
++#include <stdlib.h>
++#include <sys/types.h>
++#include <sys/wait.h>
+ 
+ #ifndef XlibSpecificationRelease
+ typedef char *XPointer;
+@@@@ -74,8 +77,8 @@@@ extern int errno;
+ #define GV_BUFSIZ 1024
+ #endif /* VMS */
+ 
+-static void ComputeXdpi();
+-static void ComputeYdpi();
++static void ComputeXdpi(Widget, int, XrmValue *);
++static void ComputeYdpi(Widget, int, XrmValue *);
+ 
+ static XtResource resources[] = {
+ #define offset(field) XtOffsetOf(GhostviewRec, ghostview.field)
+@@@@ -131,27 +134,32 @@@@ static XtResource resources[] = {
+ #undef offset
+ };
+ 
+-static void Message();
+-static void Notify();
+-static void Input();
+-static void Output();
+-
+-static void ClassInitialize();
+-static void ClassPartInitialize();
+-static void Initialize();
+-static void Realize();
+-static void Destroy();
+-static void Resize();
+-static Boolean SetValues();
+-static XtGeometryResult QueryGeometry();
+-
+-static void Layout();
+-static Boolean ComputeSize();
+-static void ChangeSize();
+-static Boolean Setup();
+-static void StartInterpreter();
+-static void StopInterpreter();
+-static void InterpreterFailed();
++static void Message(Widget, XEvent *, String *, Cardinal *);
++static void Notify(Widget, XEvent *, String *, Cardinal *);
++static void Input(XtPointer, int *, XtInputId *);
++static void Output(XtPointer, int *, XtInputId *);
++
++static void ClassInitialize(void);
++static void ClassPartInitialize(WidgetClass);
++static void Initialize(Widget, Widget, ArgList, Cardinal *);
++static void Realize(Widget, Mask *, XSetWindowAttributes *);
++static void Destroy(Widget);
++static void Resize(Widget);
++static Boolean SetValues(Widget, Widget, Widget);
++static XtGeometryResult QueryGeometry(Widget, XtWidgetGeometry *, XtWidgetGeometry *);
++
++static void Layout(Widget, Boolean, Boolean);
++static Boolean ComputeSize(Widget, Boolean, Boolean, Dimension *, Dimension *);
++static void ChangeSize(Widget, Dimension, Dimension);
++static Boolean Setup(Widget);
++static void StartInterpreter(Widget);
++static void StopInterpreter(Widget);
++static void InterpreterFailed(Widget);
++
++Boolean XmuCvtStringToPageOrientation(Display *, XrmValue *, Cardinal *,
++    XrmValue *, XrmValue *, XtPointer *);
++Boolean XmuCvtStringToPalette(Display *, XrmValue *, Cardinal *, 
++    XrmValue *, XrmValue *, XtPointer *);
+ 
+ static XtActionsRec actions[] =
+ {
+@@@@ -1043,8 +1051,8 @@@@ Setup(w)
+     gvw->ghostview.gs_width = gvw->core.width;
+     gvw->ghostview.gs_height = gvw->core.height;
+ 
+-    sprintf(buf, "%d %d %d %d %d %d %g %g %d %d %d %d",
+-	    bpixmap, gvw->ghostview.orientation,
++    sprintf(buf, "%ld %d %d %d %d %d %g %g %d %d %d %d",
++	    (long)bpixmap, gvw->ghostview.orientation,
+ 	    gvw->ghostview.llx, gvw->ghostview.lly,
+ 	    gvw->ghostview.urx, gvw->ghostview.ury,
+ 	    gvw->ghostview.xdpi, gvw->ghostview.ydpi,
+@@@@ -1055,11 +1063,11 @@@@ Setup(w)
+ 		   XA_STRING, 8, PropModeReplace,
+ 		   (unsigned char *)buf, strlen(buf));
+ 
+-    sprintf(buf, "%s %d %d",
++    sprintf(buf, "%s %ld %ld",
+ 	    gvw->ghostview.palette == XtPaletteMonochrome ? "Monochrome" :
+ 	    gvw->ghostview.palette == XtPaletteGrayscale  ? "Grayscale" :
+ 	    gvw->ghostview.palette == XtPaletteColor      ? "Color" : "?",
+-	    gvw->ghostview.foreground, gvw->core.background_pixel);
++	    (long)gvw->ghostview.foreground, (long)gvw->core.background_pixel);
+     XChangeProperty(XtDisplay(w), XtWindow(w),
+ 		   XmuInternAtom(XtDisplay(w), gvc->ghostview_class.gv_colors),
+ 		   XA_STRING, 8, PropModeReplace,
+@@@@ -1168,7 +1176,7 @@@@ StartInterpreter(w)
+ 	close(std_out[1]);
+ 	dup2(std_err[1], 2);
+ 	close(std_err[1]);
+-	sprintf(buf, "%d", XtWindow(w));
++	sprintf(buf, "%ld", (long int)(XtWindow(w)));
+ 	setenv("GHOSTVIEW", buf, True);
+ 	setenv("DISPLAY", XDisplayString(XtDisplay(w)), True);
+ 	if (gvw->ghostview.filename == NULL) {
+@
+
+
+1.1.1.1
+log
+@Import OpenBSD 3.3 ports repository from CTM 3132 the first time
+This continues opening an OpenBSD-mirabile (aka MirBSD) repository.
+
+### MirBSD is:
+# Copyright (c) 1982-2003 by Thorsten "mirabile" Glaser <x86@@ePost.de>
+# Copyright © 1968-2003  The authors of And contributors to UNIX®, the
+#       C Language, BSD/Berkeley Unix; 386BSD, NetBSD 1.1 and OpenBSD.
+#
+# Anyone who obtained a copy of this work is hereby permitted to freely use,
+# distribute, modify, merge, sublicence, give away or sell it as long as the
+# authors are given due credit and the following notice is retained:
+#
+# This work is provided "as is", with no explicit or implicit warranty what-
+# soever. Use it only at your own risk. In no event may an author or contri-
+# butor be held liable for any damage, directly or indirectly, that origina-
+# ted through or is caused by creation or modification of this work.
+
+MirBSD is my private tree. MirBSD does not differ very much from OpenBSD
+and intentionally tracks OpenBSD. That's why it _is_ OpenBSD, just not the
+official one. It's like with DarrenBSD.
+
+At time of this writing, no advertising for MirBSD must be done,
+because the advertising clause has not yet been sorted out.
+
+http://templeofhate.com/tglaser/MirBSD/index.php
+@
+text
+@@

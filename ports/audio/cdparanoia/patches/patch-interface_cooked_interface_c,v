@@ -1,0 +1,202 @@
+head	1.1;
+branch	1.1.1;
+access;
+symbols
+	cvs-200405281530:1.1.1.1
+	cvs-200402211630:1.1.1.1
+	cvs-200401261625:1.1.1.1
+	cvs-200401162142:1.1.1.1
+	cvs-200301141450:1.1.1.1
+	cvs-200312021610:1.1.1.1
+	cvs-200311151930:1.1.1.1
+	cvs-200310311830:1.1.1.1
+	cvs-200310021000:1.1.1.1
+	cvs-200309281111:1.1.1.1
+	cvs-200309171515:1.1.1.1
+	cvs-200308302005:1.1.1.1
+	cvs-200308171200:1.1.1.1
+	ctm-3449:1.1.1.1
+	cvs-200307191610:1.1.1.1
+	ctm-3416:1.1.1.1
+	cvs-200307091500:1.1.1.1
+	ctm-3389:1.1.1.1
+	cvs-200306291800:1.1.1.1
+	ctm-3369:1.1.1.1
+	ctm-3341:1.1.1.1
+	MIRBSD_5:1.1.1.1
+	cvs-200306082100:1.1.1.1
+	ctm-3316:1.1.1.1
+	ctm-3272:1.1.1.1
+	ctm-3264:1.1.1.1
+	ctm-3258:1.1.1.1
+	MIRBSD_4:1.1.1.1
+	ctm-3200:1.1.1.1
+	ctm-3188:1.1.1.1
+	ctm-3155:1.1.1.1
+	ctm-3132:1.1.1.1
+	openbsd:1.1.1;
+locks; strict;
+comment	@# @;
+
+
+1.1
+date	2003.03.22.19.48.59;	author tg;	state Exp;
+branches
+	1.1.1.1;
+next	;
+
+1.1.1.1
+date	2003.03.22.19.48.59;	author tg;	state Stab;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@$OpenBSD: patch-interface_cooked_interface_c,v 1.2 2002/09/16 13:35:52 lebel Exp $
+--- interface/cooked_interface.c.orig	Thu Apr 20 00:41:04 2000
++++ interface/cooked_interface.c	Mon Sep 16 12:47:11 2002
+@@@@ -13,6 +13,7 @@@@
+ static int cooked_readtoc (cdrom_drive *d){
+   int i;
+   int tracks;
++#ifdef __linux__
+   struct cdrom_tochdr hdr;
+   struct cdrom_tocentry entry;
+ 
+@@@@ -52,6 +53,45 @@@@ static int cooked_readtoc (cdrom_drive *
+   d->disc_toc[i].dwStartSector = entry.cdte_addr.lba;
+ 
+   tracks=hdr.cdth_trk1+1;
++#endif
++
++#if defined (__NetBSD__) || defined (__OpenBSD__)
++  struct ioc_read_toc_entry hdr;
++  struct cd_toc_entry entries[MAXTRK + 1];	/* + 1 for leadout */
++
++  hdr.address_format = CD_LBA_FORMAT;
++  hdr.starting_track = 1;
++  hdr.data_len = sizeof entries;
++  hdr.data = entries;
++  memset(entries, 0, sizeof entries);
++
++  /* get all TOC entries at once */
++#ifndef CDIOREADTOCENTRIES
++#define CDIOREADTOCENTRIES CDIOREADTOCENTRYS
++#endif
++  if(ioctl(d->ioctl_fd, CDIOREADTOCENTRIES, &hdr))
++    switch(errno){
++    case EPERM:
++      cderror(d,"102: Permision denied on cdrom (ioctl) device\n");
++      return(-102);
++    default:
++      cderror(d,"004: Unable to read table of contents header\n");
++      return(-4);
++    }
++
++  for(i = 0; i < MAXTRK + 1; i++) {
++    d->disc_toc[i].bFlags = (entries[i].addr_type << 4) | (entries[i].control & 0x0f);
++    d->disc_toc[i].bTrack = entries[i].track;
++    d->disc_toc[i].dwStartSector = entries[i].addr.lba;
++    if (entries[i].track == 0) {
++      cderror(d,"005: Unable to read table of contents entry\n");
++      return(-5);
++    }
++    if (entries[i].track >= 100)
++      break;	/* leadout */
++  }
++  tracks = i;
++#endif
+   d->cd_extra=FixupTOC(d,tracks);
+   return(--tracks);  /* without lead-out */
+ }
+@@@@ -60,10 +100,14 @@@@ static int cooked_readtoc (cdrom_drive *
+ /* Set operating speed */
+ static int cooked_setspeed(cdrom_drive *d, int speed)
+ {
++#ifdef __linux__
+   if(d->ioctl_fd!=-1)
+     return ioctl(d->ioctl_fd, CDROM_SELECT_SPEED, speed);
+   else
+     return 0;
++#else
++  errx(1, "cooked_setspeed: not implemented");
++#endif
+ }
+ 
+ 
+@@@@ -72,6 +116,7 @@@@ static int cooked_setspeed(cdrom_drive *
+  */
+ 
+ static long cooked_read (cdrom_drive *d, void *p, long begin, long sectors){
++#ifdef __linux__
+   int retry_count,err;
+   struct cdrom_read_audio arg;
+   char *buffer=(char *)p;
+@@@@ -127,6 +172,9 @@@@ static long cooked_read (cdrom_drive *d,
+   } while (err);
+   
+   return(sectors);
++#else
++  errx(1, "cooked_read: not implemented");
++#endif
+ }
+ 
+ /* hook */
+@@@@ -191,6 +239,7 @@@@ static void check_exceptions(cdrom_drive
+ 
+ /* set function pointers to use the ioctl routines */
+ int cooked_init_drive (cdrom_drive *d){
++#ifdef __linux__
+   int ret;
+ 
+   switch(d->drive_type){
+@@@@ -255,5 +304,8 @@@@ int cooked_init_drive (cdrom_drive *d){
+   if((ret=verify_read_command(d)))return(ret);
+   d->error_retry=1;
+   return(0);
++#else
++  errx(1, "cooked_init_drive: not implemented");
++#endif
+ }
+ 
+@
+
+
+1.1.1.1
+log
+@Import OpenBSD 3.3 ports repository from CTM 3132 the first time
+This continues opening an OpenBSD-mirabile (aka MirBSD) repository.
+
+### MirBSD is:
+# Copyright (c) 1982-2003 by Thorsten "mirabile" Glaser <x86@@ePost.de>
+# Copyright © 1968-2003  The authors of And contributors to UNIX®, the
+#       C Language, BSD/Berkeley Unix; 386BSD, NetBSD 1.1 and OpenBSD.
+#
+# Anyone who obtained a copy of this work is hereby permitted to freely use,
+# distribute, modify, merge, sublicence, give away or sell it as long as the
+# authors are given due credit and the following notice is retained:
+#
+# This work is provided "as is", with no explicit or implicit warranty what-
+# soever. Use it only at your own risk. In no event may an author or contri-
+# butor be held liable for any damage, directly or indirectly, that origina-
+# ted through or is caused by creation or modification of this work.
+
+MirBSD is my private tree. MirBSD does not differ very much from OpenBSD
+and intentionally tracks OpenBSD. That's why it _is_ OpenBSD, just not the
+official one. It's like with DarrenBSD.
+
+At time of this writing, no advertising for MirBSD must be done,
+because the advertising clause has not yet been sorted out.
+
+http://templeofhate.com/tglaser/MirBSD/index.php
+@
+text
+@@

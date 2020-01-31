@@ -1,0 +1,375 @@
+head	1.1;
+branch	1.1.1;
+access;
+symbols
+	tg-mergetmp-2:1.1.1.1
+	cvs-200410241530:1.1.1.1
+	cvs-200410012000:1.1.1.1
+	cvs-200407141120:1.1.1.1
+	cvs-200406231010:1.1.1.1
+	MIRBSD_7quater:1.1.1.1
+	cvs-200405271510:1.1.1.1
+	XFree86_4_4_0:1.1.9.1
+	cvs-200403021700:1.1.1.1
+	XFREE86_20040213:1.1.9.1
+	xc:1.1.9
+	cvs-200401291925:1.1.1.1
+	MIRBSD_7_ALPHA:1.1.1.1.0.4
+	MIRBSD_7:1.1.1.1.0.2
+	MIRBSD_7ter:1.1.1.1
+	cvs-20011091815:1.1.1.1
+	cvs-200309162130:1.1.1.1
+	cvs-200308302005:1.1.1.1
+	ctmx-0387:1.1.1.1
+	ctmx-0384:1.1.1.1
+	MIRBSD_5:1.1.1.1
+	ctmx-0375:1.1.1.1
+	ctmx-0373:1.1.1.1
+	ctm-0371:1.1.1.1
+	ctm-0370:1.1.1.1
+	MIRBSD_4:1.1.1.1
+	ctm-0363:1.1.1.1
+	ctm-0359:1.1.1.1
+	ctm-0349:1.1.1.1
+	openbsd:1.1.1;
+locks; strict;
+comment	@ * @;
+
+
+1.1
+date	2003.03.22.20.10.14;	author tg;	state Exp;
+branches
+	1.1.1.1
+	1.1.9.1;
+next	;
+
+1.1.1.1
+date	2003.03.22.20.10.14;	author tg;	state Stab;
+branches;
+next	;
+
+1.1.9.1
+date	2004.02.14.19.28.19;	author tg;	state Exp;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@/* $XFree86: xc/programs/xditview/XFontName.c,v 1.3 2001/08/27 23:35:12 dawes Exp $ */
+/*
+ * XFontName.c
+ *
+ * build/parse X Font name strings
+ */
+
+# include	<X11/Xlib.h>
+# include	<X11/Intrinsic.h>
+# include	"XFontName.h"
+#include	<ctype.h>
+
+static char *
+extractStringField (
+	char		*name,
+	char		*buffer,
+	int		size,
+	unsigned int	*attrp,
+	unsigned int	bit)
+{
+	char	*buf = buffer;
+
+	if (!*name)
+		return 0;
+	while (*name && *name != '-' && size > 0) {
+		*buf++ = *name++;
+		--size;
+	}
+	if (size <= 0)
+		return 0;
+	*buf = '\0';
+	if (buffer[0] != '*' || buffer[1] != '\0')
+		*attrp |= bit;
+	if (*name == '-')
+		return name+1;
+	return name;
+}
+
+static char *
+extractUnsignedField (
+	char		*name,
+	unsigned int	*result,
+	unsigned int	*attrp,
+	unsigned int	bit)
+{
+	char		buf[256];
+	char		*c;
+	unsigned int	i;
+
+	name = extractStringField (name, buf, sizeof (buf), attrp, bit);
+	if (!name)
+		return 0;
+	if (!(*attrp & bit))
+		return name;
+	i = 0;
+	for (c = buf; *c; c++) {
+		if (!isdigit (*c))
+			return 0;
+		i = i * 10 + (*c - '0');
+	}
+	*result = i;
+	return name;
+}
+
+Bool
+XParseFontName (fontNameString, fontName, fontNameAttributes)
+	XFontNameString	fontNameString;
+	XFontName	*fontName;
+	unsigned int	*fontNameAttributes;
+{
+	char		*name = fontNameString;
+	XFontName	temp;
+	unsigned int	attributes = 0;
+
+#define GetString(field,bit)\
+	if (!(name = extractStringField \
+		(name, temp.field, sizeof (temp.field),\
+		&attributes, bit))) \
+		return False;
+
+#define GetUnsigned(field,bit)\
+	if (!(name = extractUnsignedField \
+		(name, &temp.field, \
+		&attributes, bit))) \
+		return False;
+
+	GetString (Registry, FontNameRegistry)
+	GetString (Foundry, FontNameFoundry)
+	GetString (FamilyName, FontNameFamilyName)
+	GetString (WeightName, FontNameWeightName)
+	GetString (Slant, FontNameSlant)
+	GetString (SetwidthName, FontNameSetwidthName)
+	GetString (AddStyleName, FontNameAddStyleName)
+	GetUnsigned (PixelSize, FontNamePixelSize)
+	GetUnsigned (PointSize, FontNamePointSize)
+	GetUnsigned (ResolutionX, FontNameResolutionX)
+	GetUnsigned (ResolutionY, FontNameResolutionY)
+	GetString (Spacing, FontNameSpacing)
+	GetUnsigned (AverageWidth, FontNameAverageWidth)
+	GetString (CharSetRegistry, FontNameCharSetRegistry)
+	if (!*name) {
+		temp.CharSetEncoding[0] = '\0';
+		attributes |= FontNameCharSetEncoding;
+	} else {
+		GetString (CharSetEncoding, FontNameCharSetEncoding)
+	}
+	*fontName = temp;
+	*fontNameAttributes = attributes;
+	return True;
+}
+
+static char *
+utoa (
+	unsigned int	u,
+	char		*s,
+	int		size)
+{
+	char	*t;
+
+	t = s + size;
+	*--t = '\0';
+	do
+		*--t = (u % 10) + '0';
+	while (u /= 10);
+	return t;
+}
+
+Bool
+XFormatFontName (fontName, fontNameAttributes, fontNameString)
+	XFontName	*fontName;
+	unsigned int	fontNameAttributes;
+	XFontNameString	fontNameString;
+{
+	XFontNameString	tmp;
+	char		*name = tmp, *f;
+	int		left = sizeof (tmp) - 1;
+	char		number[32];
+
+#define PutString(field, bit)\
+	f = (fontNameAttributes & bit) ? \
+		fontName->field \
+		: "*"; \
+	if ((left -= strlen (f)) < 0) \
+		return False; \
+	while (*f) \
+		if ((*name++ = *f++) == '-') \
+			return False; 
+#define PutHyphen()\
+	if (--left < 0) \
+		return False; \
+	*name++ = '-';
+
+#define PutUnsigned(field, bit) \
+	f = (fontNameAttributes & bit) ? \
+		utoa (fontName->field, number, sizeof (number)) \
+		: "*"; \
+	if ((left -= strlen (f)) < 0) \
+		return False; \
+	while (*f) \
+		*name++ = *f++;
+
+	PutString (Registry, FontNameRegistry)
+	PutHyphen ();
+	PutString (Foundry, FontNameFoundry)
+	PutHyphen ();
+	PutString (FamilyName, FontNameFamilyName)
+	PutHyphen ();
+	PutString (WeightName, FontNameWeightName)
+	PutHyphen ();
+	PutString (Slant, FontNameSlant)
+	PutHyphen ();
+	PutString (SetwidthName, FontNameSetwidthName)
+	PutHyphen ();
+	PutString (AddStyleName, FontNameAddStyleName)
+	PutHyphen ();
+	PutUnsigned (PixelSize, FontNamePixelSize)
+	PutHyphen ();
+	PutUnsigned (PointSize, FontNamePointSize)
+	PutHyphen ();
+	PutUnsigned (ResolutionX, FontNameResolutionX)
+	PutHyphen ();
+	PutUnsigned (ResolutionY, FontNameResolutionY)
+	PutHyphen ();
+	PutString (Spacing, FontNameSpacing)
+	PutHyphen ();
+	PutUnsigned (AverageWidth, FontNameAverageWidth)
+	PutHyphen ();
+	PutString (CharSetRegistry, FontNameCharSetRegistry)
+	PutHyphen ();
+	PutString (CharSetEncoding, FontNameCharSetEncoding)
+	*name = '\0';
+	strcpy (fontNameString, tmp);
+	return True;
+}
+
+#if 0
+Bool
+XCompareFontName (
+	XFontName	*name1,
+	XFontName	*name2,
+	unsigned int	fontNameAttributes)
+{
+#define CompareString(field,bit) \
+	if (fontNameAttributes & bit) \
+		if (strcmp (name1->field, name2->field)) \
+			return False;
+
+#define CompareUnsigned(field,bit) \
+	if (fontNameAttributes & bit) \
+		if (name1->field != name2->field) \
+			return False;
+
+	CompareString (Registry, FontNameRegistry)
+	CompareString (Foundry, FontNameFoundry)
+	CompareString (FamilyName, FontNameFamilyName)
+	CompareString (WeightName, FontNameWeightName)
+	CompareString (Slant, FontNameSlant)
+	CompareString (SetwidthName, FontNameSetwidthName)
+	CompareString (AddStyleName, FontNameAddStyleName)
+	CompareUnsigned (PixelSize, FontNamePixelSize)
+	CompareUnsigned (PointSize, FontNamePointSize)
+	CompareUnsigned (ResolutionX, FontNameResolutionX)
+	CompareUnsigned (ResolutionY, FontNameResolutionY)
+	CompareString (Spacing, FontNameSpacing)
+	CompareUnsigned (AverageWidth, FontNameAverageWidth)
+	CompareString (CharSetRegistry, FontNameCharSetRegistry)
+	CompareString (CharSetEncoding, FontNameCharSetEncoding)
+	return True;
+}
+
+Bool
+XCopyFontName (
+	XFontName	*name1,
+	XFontName	*name2,
+	unsigned int	fontNameAttributes)
+{
+#define CopyString(field,bit) \
+	if (fontNameAttributes & bit) \
+		strcpy (name2->field, name1->field);
+
+#define CopyUnsigned(field,bit) \
+	if (fontNameAttributes & bit) \
+		name2->field = name1->field;
+
+	CopyString (Registry, FontNameRegistry)
+	CopyString (Foundry, FontNameFoundry)
+	CopyString (FamilyName, FontNameFamilyName)
+	CopyString (WeightName, FontNameWeightName)
+	CopyString (Slant, FontNameSlant)
+	CopyString (SetwidthName, FontNameSetwidthName)
+	CopyString (AddStyleName, FontNameAddStyleName)
+	CopyUnsigned (PixelSize, FontNamePixelSize)
+	CopyUnsigned (PointSize, FontNamePointSize)
+	CopyUnsigned (ResolutionX, FontNameResolutionX)
+	CopyUnsigned (ResolutionY, FontNameResolutionY)
+	CopyString (Spacing, FontNameSpacing)
+	CopyUnsigned (AverageWidth, FontNameAverageWidth)
+	CopyString (CharSetRegistry, FontNameCharSetRegistry)
+	CopyString (CharSetEncoding, FontNameCharSetEncoding)
+	return True;
+}
+#endif
+@
+
+
+1.1.9.1
+log
+@OpenBSD just has imported exactly this tree into their vendor branch,
+called the same tag, in XF4/xc
+This is, apparently, the last XFree86 snapshot before the licence change
+(ie, addition of the advertising clause)
+
+Since the developers don't see any problems with that, and we would like
+to integrate improvements done by the remaining one or two (or so) XFree86
+developers (j/k), this prepares enabling us to update X-Window in the future.
+@
+text
+@@
+
+
+1.1.1.1
+log
+@Import OpenBSD 3.3 XF4 repository from CTM 3132 the first time
+This finalizes starting an OpenBSD-mirabile (aka MirBSD) repository.
+
+### MirBSD is:
+# Copyright (c) 1982-2003 by Thorsten "mirabile" Glaser <x86@@ePost.de>
+# Copyright © 1968-2003  The authors of And contributors to UNIX®, the
+#       C Language, BSD/Berkeley Unix; 386BSD, NetBSD 1.1 and OpenBSD.
+#
+# Anyone who obtained a copy of this work is hereby permitted to freely use,
+# distribute, modify, merge, sublicence, give away or sell it as long as the
+# authors are given due credit and the following notice is retained:
+#
+# This work is provided "as is", with no explicit or implicit warranty what-
+# soever. Use it only at your own risk. In no event may an author or contri-
+# butor be held liable for any damage, directly or indirectly, that origina-
+# ted through or is caused by creation or modification of this work.
+
+MirBSD is my private tree. MirBSD does not differ very much from OpenBSD
+and intentionally tracks OpenBSD. That's why it _is_ OpenBSD, just not the
+official one. It's like with DarrenBSD.
+
+At time of this writing, no advertising for MirBSD must be done,
+because the advertising clause has not yet been sorted out.
+
+http://templeofhate.com/tglaser/MirBSD/index.php
+@
+text
+@@

@@ -1,0 +1,643 @@
+head	1.1;
+branch	1.1.1;
+access;
+symbols
+	tg-mergetmp-2:1.1.1.2
+	cvs-200410241530:1.1.1.2
+	cvs-200410012000:1.1.1.2
+	cvs-200407141120:1.1.1.2
+	cvs-200406231010:1.1.1.2
+	MIRBSD_7quater:1.1.1.1
+	cvs-200405271510:1.1.1.2
+	XFree86_4_4_0:1.1.9.1
+	cvs-200403021700:1.1.1.2
+	XFREE86_20040213:1.1.9.1
+	xc:1.1.9
+	cvs-200401291925:1.1.1.1
+	MIRBSD_7_ALPHA:1.1.1.1.0.4
+	MIRBSD_7:1.1.1.1.0.2
+	MIRBSD_7ter:1.1.1.1
+	cvs-20011091815:1.1.1.1
+	cvs-200309162130:1.1.1.1
+	cvs-200308302005:1.1.1.1
+	ctmx-0387:1.1.1.1
+	ctmx-0384:1.1.1.1
+	MIRBSD_5:1.1.1.1
+	ctmx-0375:1.1.1.1
+	ctmx-0373:1.1.1.1
+	ctm-0371:1.1.1.1
+	ctm-0370:1.1.1.1
+	MIRBSD_4:1.1.1.1
+	ctm-0363:1.1.1.1
+	ctm-0359:1.1.1.1
+	ctm-0349:1.1.1.1
+	openbsd:1.1.1;
+locks; strict;
+comment	@ * @;
+
+
+1.1
+date	2003.03.22.20.04.36;	author tg;	state Exp;
+branches
+	1.1.1.1
+	1.1.9.1;
+next	;
+
+1.1.1.1
+date	2003.03.22.20.04.36;	author tg;	state Exp;
+branches;
+next	1.1.1.2;
+
+1.1.1.2
+date	2004.03.02.18.02.09;	author tg;	state Stab;
+branches;
+next	;
+
+1.1.9.1
+date	2004.02.14.19.18.48;	author tg;	state Exp;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@/* $Xorg: cmsInt.c,v 1.4 2000/08/17 19:45:09 cpqbld Exp $ */
+
+/*
+ * Code and supporting documentation (c) Copyright 1990 1991 Tektronix, Inc.
+ * 	All Rights Reserved
+ * 
+ * This file is a component of an X Window System-specific implementation
+ * of Xcms based on the TekColor Color Management System.  Permission is
+ * hereby granted to use, copy, modify, sell, and otherwise distribute this
+ * software and its documentation for any purpose and without fee, provided
+ * that this copyright, permission, and disclaimer notice is reproduced in
+ * all copies of this software and in supporting documentation.  TekColor
+ * is a trademark of Tektronix, Inc.
+ * 
+ * Tektronix makes no representation about the suitability of this software
+ * for any purpose.  It is provided "as is" and with all faults.
+ * 
+ * TEKTRONIX DISCLAIMS ALL WARRANTIES APPLICABLE TO THIS SOFTWARE,
+ * INCLUDING THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A
+ * PARTICULAR PURPOSE.  IN NO EVENT SHALL TEKTRONIX BE LIABLE FOR ANY
+ * SPECIAL, INDIRECT OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES WHATSOEVER
+ * RESULTING FROM LOSS OF USE, DATA, OR PROFITS, WHETHER IN AN ACTION OF
+ * CONTRACT, NEGLIGENCE, OR OTHER TORTIOUS ACTION, ARISING OUT OF OR IN
+ * CONNECTION WITH THE USE OR THE PERFORMANCE OF THIS SOFTWARE.
+ *
+ *
+ *	NAME
+ *		XcmsInt.c - Xcms API utility routines
+ *
+ *	DESCRIPTION
+ *		Xcms Application Program Interface (API) utility
+ *		routines for hanging information directly onto
+ *		the Display structure.
+ *
+ *
+ */
+/* $XFree86: xc/lib/X11/cmsInt.c,v 1.3 2001/01/17 19:41:51 dawes Exp $ */
+
+/* #define NEED_EVENTS */
+#include <stdio.h>
+#include "Xlibint.h"
+#include "Xcmsint.h"
+
+#ifndef XCMSCOMPPROC
+#  define XCMSCOMPPROC	XcmsTekHVCClipC
+#endif
+
+/*
+ *      EXTERNS
+ */
+extern XcmsColorSpace **_XcmsDIColorSpaces;
+extern XcmsFunctionSet **_XcmsSCCFuncSets;
+
+/* LRGB.c */
+extern int _XcmsLRGB_InitScrnDefault();
+
+static void _XcmsFreeDefaultCCCs();
+
+/*
+ *      GLOBALS
+ */
+
+
+
+/************************************************************************
+ *									*
+ *			   API PRIVATE ROUTINES				*
+ *									*
+ ************************************************************************/
+
+/*
+ *	NAME
+ *		_XcmsCopyPointerArray
+ *
+ *	SYNOPSIS
+ */
+XPointer *
+_XcmsCopyPointerArray(pap)
+    XPointer *pap;
+/*
+ *	DESCRIPTION
+ *		Copies an array of NULL terminated pointers.
+ *
+ *	RETURNS
+ *		Returns NULL if failed; otherwise the address to
+ *		the copy.
+ *
+ */
+{
+    XPointer *newArray;
+    char **tmp;
+    int n;
+
+    for (tmp = pap, n = 0; *tmp != NULL; tmp++, n++);
+    n++; /* add 1 to include the NULL pointer */
+
+    if ((newArray = (XPointer *)Xmalloc(n * sizeof(XPointer)))) {
+	memcpy((char *)newArray, (char *)pap,
+	       (unsigned)(n * sizeof(XPointer)));
+    }
+    return((XPointer *)newArray);
+}
+
+/*
+ *	NAME
+ *		_XcmsFreePointerArray
+ *
+ *	SYNOPSIS
+ */
+void
+_XcmsFreePointerArray(pap)
+    XPointer *pap;
+/*
+ *	DESCRIPTION
+ *		Frees an array of NULL terminated pointers.
+ *
+ *	RETURNS
+ *		void
+ *
+ */
+{
+    Xfree(pap);
+}
+
+/*
+ *	NAME
+ *		_XcmsPushPointerArray
+ *
+ *	SYNOPSIS
+ */
+XPointer *
+_XcmsPushPointerArray(pap, p, papNoFree)
+    XPointer *pap;
+    XPointer p;
+    XPointer *papNoFree;
+/*
+ *	DESCRIPTION
+ *		Places the specified pointer at the head of an array of NULL
+ *		terminated pointers.
+ *
+ *	RETURNS
+ *		Returns NULL if failed; otherwise the address to
+ *		the head of the array.
+ *
+ */
+{
+    XPointer *newArray;
+    char **tmp;
+    int n;
+
+    for (tmp = pap, n = 0; *tmp != NULL; tmp++, n++);
+
+    /* add 2: 1 for the new pointer and another for the NULL pointer */
+    n += 2;
+
+    if ((newArray = (XPointer *)Xmalloc(n * sizeof(XPointer)))) {
+	memcpy((char *)(newArray+1),(char *)pap,
+	       (unsigned)((n-1) * sizeof(XPointer)));
+	*newArray = p;
+    }
+    if (pap != papNoFree) {
+        _XcmsFreePointerArray(pap);
+    }
+    return((XPointer *)newArray);
+}
+
+/*
+ *	NAME
+ *		_XcmsInitDefaultCCCs
+ *
+ *	SYNOPSIS
+ */
+int
+_XcmsInitDefaultCCCs(dpy)
+    Display *dpy;
+/*
+ *	DESCRIPTION
+ *		Initializes the Xcms per Display Info structure
+ *		(XcmsPerDpyInfo).
+ *
+ *	RETURNS
+ *		Returns 0 if failed; otherwise non-zero.
+ *
+ */
+{
+    int nScrn = ScreenCount(dpy);
+    int i;
+    XcmsCCC ccc;
+
+    if (nScrn <= 0) {
+	return(0);
+    }
+
+    /*
+     * Create an array of XcmsCCC structures, one for each screen.
+     * They serve as the screen's default CCC.
+     */
+    if (!(ccc = (XcmsCCC)
+	    Xcalloc((unsigned)nScrn, (unsigned) sizeof(XcmsCCCRec)))) {
+	return(0);
+    } 
+    dpy->cms.defaultCCCs = (XPointer)ccc;
+    dpy->free_funcs->defaultCCCs = _XcmsFreeDefaultCCCs;
+
+    for (i = 0; i < nScrn; i++, ccc++) {
+	ccc->dpy = dpy;
+	ccc->screenNumber = i;
+	ccc->visual = DefaultVisual(dpy, i);
+	/*
+	 * Used calloc to allocate memory so:
+	 *	ccc->clientWhitePt->format == XcmsUndefinedFormat
+	 *	ccc->gamutCompProc == NULL
+	 *	ccc->whitePtAdjProc == NULL
+	 *	ccc->pPerScrnInfo = NULL
+	 *
+	 * Don't need to create XcmsPerScrnInfo and its functionSet and
+	 * pScreenData components until the default CCC is accessed.
+	 * Note that the XcmsDefaultCCC routine calls _XcmsInitScrnInto
+	 * to do this.
+	 */
+	ccc->gamutCompProc = XCMSCOMPPROC;
+    }
+
+    return(1);
+}
+
+
+/*
+ *	NAME
+ *		_XcmsFreeDefaultCCCs - Free Default CCCs and its PerScrnInfo
+ *
+ *	SYNOPSIS
+ */
+static void
+_XcmsFreeDefaultCCCs(dpy)
+    Display *dpy;
+/*
+ *	DESCRIPTION
+ *		This routine frees the default XcmsCCC's associated with
+ *		each screen and its associated substructures as neccessary.
+ *
+ *	RETURNS
+ *		void
+ *
+ *
+ */
+{
+    int nScrn = ScreenCount(dpy);
+    XcmsCCC ccc;
+    int i;
+
+    /*
+     * Free Screen data in each DefaultCCC
+     *		Do not use XcmsFreeCCC here because it will not free
+     *		DefaultCCC's.
+     */
+    ccc = (XcmsCCC)dpy->cms.defaultCCCs;
+    for (i = nScrn; i--; ccc++) {
+	/*
+	 * Check if XcmsPerScrnInfo exists.
+	 *
+	 * This is the only place where XcmsPerScrnInfo structures
+	 * are freed since there is only one allocated per Screen.
+	 * It just so happens that we place its reference in the
+	 * default CCC.
+	 */
+	if (ccc->pPerScrnInfo) {
+	    /* Check if SCCData exists */
+	    if (ccc->pPerScrnInfo->state != XcmsInitNone
+		    && ccc->pPerScrnInfo->screenData) {
+		(*((XcmsFunctionSet *)ccc->pPerScrnInfo->functionSet)->screenFreeProc)
+			(ccc->pPerScrnInfo->screenData);
+	    }
+	    Xfree(ccc->pPerScrnInfo);
+	}
+    }
+
+    /*
+     * Free the array of XcmsCCC structures
+     */
+    Xfree(dpy->cms.defaultCCCs);
+    dpy->cms.defaultCCCs = (XPointer)NULL;
+}
+
+
+
+/*
+ *	NAME
+ *		_XcmsInitScrnInfo
+ *
+ *	SYNOPSIS
+ */
+int
+_XcmsInitScrnInfo(dpy, screenNumber)
+    register Display *dpy;
+    int screenNumber;
+/*
+ *	DESCRIPTION
+ *		Given a display and screen number, this routine attempts
+ *		to initialize the Xcms per Screen Info structure
+ *		(XcmsPerScrnInfo).
+ *
+ *	RETURNS
+ *		Returns zero if initialization failed; non-zero otherwise.
+ */
+{
+    XcmsFunctionSet **papSCCFuncSet = _XcmsSCCFuncSets;
+    XcmsCCC defaultccc;
+
+    /*
+     * Check if the XcmsCCC's for each screen has been created.
+     * Really dont need to be created until some routine uses the Xcms
+     * API routines.
+     */
+    if ((XcmsCCC)dpy->cms.defaultCCCs == NULL) {
+	if (!_XcmsInitDefaultCCCs(dpy)) {
+	    return(0);
+	}
+    }
+
+    defaultccc = (XcmsCCC)dpy->cms.defaultCCCs + screenNumber;
+
+    /*
+     * For each SCCFuncSet, try its pInitScrnFunc.
+     *	If the function succeeds, then we got it!
+     */
+
+    if (!defaultccc->pPerScrnInfo) {
+	/*
+	 * This is one of two places where XcmsPerScrnInfo structures
+	 * are allocated.  There is one allocated per Screen that is
+	 * shared among visuals that do not have specific intensity
+	 * tables.  Other XcmsPerScrnInfo structures are created
+	 * for the latter (see XcmsCreateCCC).  The ones created
+	 * here are referenced by the default CCC.
+	 */
+	if (!(defaultccc->pPerScrnInfo = (XcmsPerScrnInfo *)
+		Xcalloc(1, (unsigned) sizeof(XcmsPerScrnInfo)))) {
+	    return(0);
+	} 
+	defaultccc->pPerScrnInfo->state = XcmsInitNone;
+    }
+
+    while (*papSCCFuncSet != NULL) {
+	if ((*(*papSCCFuncSet)->screenInitProc)(dpy, screenNumber,
+		defaultccc->pPerScrnInfo)) {
+	    defaultccc->pPerScrnInfo->state = XcmsInitSuccess;
+	    return(1);
+	}
+	papSCCFuncSet++;
+    }
+
+    /*
+     * Use Default SCCData
+     */
+    return(_XcmsLRGB_InitScrnDefault(dpy, screenNumber, defaultccc->pPerScrnInfo));
+}
+
+
+/*
+ *	NAME
+ *		_XcmsFreeIntensityMaps
+ *
+ *	SYNOPSIS
+ */
+void
+_XcmsFreeIntensityMaps(dpy)
+    Display *dpy;
+/*
+ *	DESCRIPTION
+ *		Frees all XcmsIntensityMap structures in the linked list
+ *		and sets dpy->cms.perVisualIntensityMaps to NULL.
+ *
+ *	RETURNS
+ *		void
+ *
+ */
+{
+    XcmsIntensityMap *pNext, *pFree;
+
+    pNext = (XcmsIntensityMap *)dpy->cms.perVisualIntensityMaps;
+    while (pNext != NULL) {
+	pFree = pNext;
+	pNext = pNext->pNext;
+	(*pFree->pFreeScreenData)(pFree->screenData);
+	/* Now free the XcmsIntensityMap structure */
+	Xfree(pFree);
+    }
+    dpy->cms.perVisualIntensityMaps = (XPointer)NULL;
+}
+
+
+/*
+ *	NAME
+ *		_XcmsGetIntensityMap
+ *
+ *	SYNOPSIS
+ */
+XcmsIntensityMap *
+_XcmsGetIntensityMap(dpy, visual)
+    Display *dpy;
+    Visual *visual;
+/*
+ *	DESCRIPTION
+ *		Attempts to return a per-Visual intensity map.
+ *
+ *	RETURNS
+ *		Pointer to the XcmsIntensityMap structure if found;
+ *		otherwise NULL
+ *
+ */
+{
+    VisualID targetID = visual->visualid;
+    XcmsIntensityMap *pNext;
+
+    pNext = (XcmsIntensityMap *)dpy->cms.perVisualIntensityMaps;
+    while (pNext != NULL) {
+	if (targetID == pNext->visualID) {
+	    return(pNext);
+	}
+	pNext = pNext->pNext;
+    }
+    return((XcmsIntensityMap *)NULL);
+}
+@
+
+
+1.1.9.1
+log
+@OpenBSD just has imported exactly this tree into their vendor branch,
+called the same tag, in XF4/xc
+This is, apparently, the last XFree86 snapshot before the licence change
+(ie, addition of the advertising clause)
+
+Since the developers don't see any problems with that, and we would like
+to integrate improvements done by the remaining one or two (or so) XFree86
+developers (j/k), this prepares enabling us to update X-Window in the future.
+@
+text
+@d37 1
+a37 1
+/* $XFree86: xc/lib/X11/cmsInt.c,v 1.5 2003/04/17 02:06:31 dawes Exp $ */
+a42 1
+#include "Cv.h"
+d48 15
+a62 2
+/* forward/static */
+static void _XcmsFreeDefaultCCCs(Display *dpy);
+d78 2
+a79 2
+_XcmsCopyPointerArray(
+    XPointer *pap)
+d111 2
+a112 2
+_XcmsFreePointerArray(
+    XPointer *pap)
+d132 4
+a135 4
+_XcmsPushPointerArray(
+    XPointer *pap,
+    XPointer p,
+    XPointer *papNoFree)
+d174 2
+a175 2
+_XcmsInitDefaultCCCs(
+    Display *dpy)
+d235 2
+a236 2
+_XcmsFreeDefaultCCCs(
+    Display *dpy)
+d294 3
+a296 3
+_XcmsInitScrnInfo(
+    register Display *dpy,
+    int screenNumber)
+d367 2
+a368 2
+_XcmsFreeIntensityMaps(
+    Display *dpy)
+d400 3
+a402 3
+_XcmsGetIntensityMap(
+    Display *dpy,
+    Visual *visual)
+@
+
+
+1.1.1.1
+log
+@Import OpenBSD 3.3 XF4 repository from CTM 3132 the first time
+This finalizes starting an OpenBSD-mirabile (aka MirBSD) repository.
+
+### MirBSD is:
+# Copyright (c) 1982-2003 by Thorsten "mirabile" Glaser <x86@@ePost.de>
+# Copyright © 1968-2003  The authors of And contributors to UNIX®, the
+#       C Language, BSD/Berkeley Unix; 386BSD, NetBSD 1.1 and OpenBSD.
+#
+# Anyone who obtained a copy of this work is hereby permitted to freely use,
+# distribute, modify, merge, sublicence, give away or sell it as long as the
+# authors are given due credit and the following notice is retained:
+#
+# This work is provided "as is", with no explicit or implicit warranty what-
+# soever. Use it only at your own risk. In no event may an author or contri-
+# butor be held liable for any damage, directly or indirectly, that origina-
+# ted through or is caused by creation or modification of this work.
+
+MirBSD is my private tree. MirBSD does not differ very much from OpenBSD
+and intentionally tracks OpenBSD. That's why it _is_ OpenBSD, just not the
+official one. It's like with DarrenBSD.
+
+At time of this writing, no advertising for MirBSD must be done,
+because the advertising clause has not yet been sorted out.
+
+http://templeofhate.com/tglaser/MirBSD/index.php
+@
+text
+@@
+
+
+1.1.1.2
+log
+@That's what OpenBSD will, probably, ship as XF4 in 3.5
+their last sync against XFree86 4.3-current has been
+imported into our vendor branch, too
+@
+text
+@d37 1
+a37 1
+/* $XFree86: xc/lib/X11/cmsInt.c,v 1.5 2003/04/17 02:06:31 dawes Exp $ */
+a42 1
+#include "Cv.h"
+d48 15
+a62 2
+/* forward/static */
+static void _XcmsFreeDefaultCCCs(Display *dpy);
+d78 2
+a79 2
+_XcmsCopyPointerArray(
+    XPointer *pap)
+d111 2
+a112 2
+_XcmsFreePointerArray(
+    XPointer *pap)
+d132 4
+a135 4
+_XcmsPushPointerArray(
+    XPointer *pap,
+    XPointer p,
+    XPointer *papNoFree)
+d174 2
+a175 2
+_XcmsInitDefaultCCCs(
+    Display *dpy)
+d235 2
+a236 2
+_XcmsFreeDefaultCCCs(
+    Display *dpy)
+d294 3
+a296 3
+_XcmsInitScrnInfo(
+    register Display *dpy,
+    int screenNumber)
+d367 2
+a368 2
+_XcmsFreeIntensityMaps(
+    Display *dpy)
+d400 3
+a402 3
+_XcmsGetIntensityMap(
+    Display *dpy,
+    Visual *visual)
+@
+

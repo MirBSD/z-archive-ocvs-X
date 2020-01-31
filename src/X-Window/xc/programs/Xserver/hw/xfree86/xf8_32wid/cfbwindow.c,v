@@ -1,0 +1,438 @@
+head	1.1;
+branch	1.1.1;
+access;
+symbols
+	tg-mergetmp-2:1.1.1.2
+	cvs-200410241530:1.1.1.2
+	cvs-200410012000:1.1.1.2
+	cvs-200407221130:1.1.1.2
+	cvs-200407141120:1.1.1.2
+	cvs-200406231010:1.1.1.2
+	MIRBSD_7quater:1.1.1.1
+	cvs-200405271510:1.1.1.2
+	XFree86_4_4_0:1.1.9.1
+	cvs-200403021700:1.1.1.2
+	XFREE86_20040213:1.1.9.1
+	xc:1.1.9
+	cvs-200401291925:1.1.1.1
+	MIRBSD_7_ALPHA:1.1.1.1.0.4
+	MIRBSD_7:1.1.1.1.0.2
+	MIRBSD_7ter:1.1.1.1
+	cvs-20011091815:1.1.1.1
+	cvs-200309162130:1.1.1.1
+	cvs-200308302005:1.1.1.1
+	ctmx-0387:1.1.1.1
+	ctmx-0384:1.1.1.1
+	MIRBSD_5:1.1.1.1
+	ctmx-0375:1.1.1.1
+	ctmx-0373:1.1.1.1
+	ctm-0371:1.1.1.1
+	ctm-0370:1.1.1.1
+	MIRBSD_4:1.1.1.1
+	ctm-0363:1.1.1.1
+	ctm-0359:1.1.1.1
+	ctm-0349:1.1.1.1
+	openbsd:1.1.1;
+locks; strict;
+comment	@ * @;
+
+
+1.1
+date	2003.03.22.20.09.19;	author tg;	state Exp;
+branches
+	1.1.1.1
+	1.1.9.1;
+next	;
+
+1.1.1.1
+date	2003.03.22.20.09.19;	author tg;	state Exp;
+branches;
+next	1.1.1.2;
+
+1.1.1.2
+date	2004.03.02.18.28.26;	author tg;	state Stab;
+branches;
+next	;
+
+1.1.9.1
+date	2004.02.14.19.26.01;	author tg;	state Exp;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@/*
+   Copyright (C) 1999.  The XFree86 Project Inc.
+
+   Written by David S. Miller (davem@@redhat.com)
+
+   Based largely upon the xf8_16bpp module which is
+   Mark Vojkovich's work.
+*/
+
+/* $XFree86: xc/programs/Xserver/hw/xfree86/xf8_32wid/cfbwindow.c,v 1.2 2001/10/28 03:34:09 tsi Exp $ */
+
+#include "X.h"
+#include "scrnintstr.h"
+#include "windowstr.h"
+#define PSZ 8
+#include "cfb.h"
+#undef PSZ
+#include "cfb32.h"
+#include "cfb8_32wid.h"
+#include "mistruct.h"
+#include "regionstr.h"
+#include "cfbmskbits.h"
+#include "xf86.h"
+
+/* We don't bother with cfb's fastBackground/Border so we don't
+   need to use the Window privates */
+
+Bool
+cfb8_32WidCreateWindow(WindowPtr pWin)
+{
+	ScreenPtr pScreen = pWin->drawable.pScreen;
+	cfb8_32WidScreenPtr pScreenPriv = 
+		CFB8_32WID_GET_SCREEN_PRIVATE(pScreen);
+	cfbPrivWin *pPrivWin = cfbGetWindowPrivate(pWin);
+
+	pPrivWin->fastBackground = FALSE;
+	pPrivWin->fastBorder = FALSE;
+
+	if (!pScreenPriv->WIDOps->WidAlloc(pWin))
+		return FALSE;
+
+	return TRUE;
+}
+
+
+Bool
+cfb8_32WidDestroyWindow(WindowPtr pWin)
+{
+	ScreenPtr pScreen = pWin->drawable.pScreen;
+	cfb8_32WidScreenPtr pScreenPriv = 
+		CFB8_32WID_GET_SCREEN_PRIVATE(pScreen);
+
+	pScreenPriv->WIDOps->WidFree(pWin);
+	return TRUE;
+}
+
+Bool
+cfb8_32WidPositionWindow(WindowPtr pWin, int x, int y)
+{
+	return TRUE;
+}
+
+static void
+SegregateChildrenBpp(WindowPtr pWin, RegionPtr pReg, int subtract, int bpp, int other_bpp)
+{
+	WindowPtr pChild;
+
+	for (pChild = pWin->firstChild; pChild; pChild = pChild->nextSib) {
+		if (pChild->drawable.bitsPerPixel == bpp) {
+			if (subtract) {
+				REGION_SUBTRACT(pWin->drawable.pScreen, pReg,
+						pReg, &pChild->borderClip);
+			} else {
+				REGION_UNION(pWin->drawable.pScreen, pReg,
+					     pReg, &pChild->borderClip);
+			}
+			if (pChild->firstChild)
+				SegregateChildrenBpp(pChild, pReg,
+						     !subtract, other_bpp, bpp);
+		} else {
+			if (pChild->firstChild)
+				SegregateChildrenBpp(pChild, pReg,
+						     subtract, bpp, other_bpp);
+		}
+	}
+}
+
+void
+cfb8_32WidCopyWindow(WindowPtr pWin, DDXPointRec ptOldOrg, RegionPtr prgnSrc)
+{
+	ScreenPtr pScreen = pWin->drawable.pScreen;
+	cfb8_32WidScreenPtr pScreenPriv = 
+		CFB8_32WID_GET_SCREEN_PRIVATE(pScreen);
+	ScrnInfoPtr pScrn = xf86Screens[pScreen->myNum];
+	PixmapPtr pPixChildren;
+	DDXPointPtr ppt, pptSrc;
+	RegionRec rgnDst, rgnOther, rgnPixmap;
+	BoxPtr pbox;
+	int i, nbox, dx, dy, other_bpp;
+
+	REGION_INIT(pScreen, &rgnDst, NullBox, 0);
+
+	dx = ptOldOrg.x - pWin->drawable.x;
+	dy = ptOldOrg.y - pWin->drawable.y;
+	REGION_TRANSLATE(pScreen, prgnSrc, -dx, -dy);
+	REGION_INTERSECT(pScreen, &rgnDst, &pWin->borderClip, prgnSrc);
+
+	if ((nbox = REGION_NUM_RECTS(&rgnDst)) == 0) {
+		/* Nothing to render. */
+		REGION_UNINIT(pScreen, &rgnDst);
+		return;
+	}
+
+	/* First, copy the WID plane for the whole area. */
+	pptSrc = (DDXPointPtr )ALLOCATE_LOCAL(nbox * sizeof(DDXPointRec));
+	if(pptSrc) {
+		pbox = REGION_RECTS(&rgnDst);
+		for (i = nbox, ppt = pptSrc; i--; ppt++, pbox++) {
+			ppt->x = pbox->x1 + dx;
+			ppt->y = pbox->y1 + dy;
+		}
+
+		pScreenPriv->WIDOps->WidCopyArea((DrawablePtr)pScreenPriv->pixWid,
+						 &rgnDst, pptSrc);
+
+		DEALLOCATE_LOCAL(pptSrc);
+	}
+
+	/* Next, we copy children which have a different
+	 * bpp than pWin into a temporary pixmap.  We will
+	 * toss this pixmap back onto the framebuffer before
+	 * we return.
+	 */
+	if (pWin->drawable.bitsPerPixel == 8)
+		other_bpp = pScrn->bitsPerPixel;
+	else
+		other_bpp = 8;
+
+	REGION_INIT(pScreen, &rgnOther, NullBox, 0);
+	SegregateChildrenBpp(pWin, &rgnOther, 0,
+			     other_bpp, pWin->drawable.bitsPerPixel);
+	pPixChildren = NULL;
+	if (REGION_NOTEMPTY(pScreen, &rgnOther)) {
+		REGION_INTERSECT(pScreen, &rgnOther, &rgnOther, prgnSrc);
+		nbox = REGION_NUM_RECTS(&rgnOther);
+		if (nbox) {
+			int width = rgnOther.extents.x2 - rgnOther.extents.x1;
+			int height = rgnOther.extents.y2 - rgnOther.extents.y1;
+			int depth = (other_bpp == 8) ? 8 : pScrn->depth;
+
+			if (other_bpp == 8)
+				pPixChildren = cfbCreatePixmap(pScreen, width, height, depth);
+			else
+				pPixChildren = cfb32CreatePixmap(pScreen, width, height, depth);
+		}
+		if (nbox &&
+		    pPixChildren &&
+		    (pptSrc = (DDXPointPtr) ALLOCATE_LOCAL(nbox * sizeof(DDXPointRec)))) {
+			pbox = REGION_RECTS(&rgnOther);
+			for (i = nbox, ppt = pptSrc; i--; ppt++, pbox++) {
+				ppt->x = pbox->x1 + dx;
+				ppt->y = pbox->y1 + dy;
+			}
+
+			REGION_INIT(pScreen, &rgnPixmap, NullBox, 0);
+			REGION_COPY(pScreen, &rgnPixmap, &rgnOther);
+			REGION_TRANSLATE(pScreen, &rgnPixmap, -(rgnOther.extents.x1), -(rgnOther.extents.y1));
+
+			if (other_bpp == 8)
+				cfbDoBitbltCopy((DrawablePtr)pScreenPriv->pix8,
+						(DrawablePtr)pPixChildren,
+						GXcopy, &rgnPixmap, pptSrc, ~0L);
+			else
+				cfb32DoBitbltCopy((DrawablePtr)pScreenPriv->pix32,
+						  (DrawablePtr)pPixChildren,
+						  GXcopy, &rgnPixmap, pptSrc, ~0L);
+
+			REGION_UNINIT(pScreen, &rgnPixmap);
+
+			DEALLOCATE_LOCAL(pptSrc);
+		}
+
+		REGION_SUBTRACT(pScreen, &rgnDst, &rgnDst, &rgnOther);
+	}
+
+	/* Now copy the parent along with all child windows using the same depth. */
+	nbox = REGION_NUM_RECTS(&rgnDst);
+	if(nbox &&
+	   (pptSrc = (DDXPointPtr )ALLOCATE_LOCAL(nbox * sizeof(DDXPointRec)))) {
+		pbox = REGION_RECTS(&rgnDst);
+		for (i = nbox, ppt = pptSrc; i--; ppt++, pbox++) {
+			ppt->x = pbox->x1 + dx;
+			ppt->y = pbox->y1 + dy;
+		}
+
+		if (pWin->drawable.bitsPerPixel == 8)
+			cfbDoBitbltCopy((DrawablePtr)pScreenPriv->pix8,
+					(DrawablePtr)pScreenPriv->pix8,
+					GXcopy, &rgnDst, pptSrc, ~0L);
+		else
+			cfb32DoBitbltCopy((DrawablePtr)pScreenPriv->pix32,
+					  (DrawablePtr)pScreenPriv->pix32,
+					  GXcopy, &rgnDst, pptSrc, ~0L);
+
+		DEALLOCATE_LOCAL(pptSrc);
+	}
+
+	REGION_UNINIT(pScreen, &rgnDst);
+
+	if (pPixChildren) {
+		nbox = REGION_NUM_RECTS(&rgnOther);
+		pptSrc = (DDXPointPtr) ALLOCATE_LOCAL(nbox * sizeof(DDXPointRec));
+		if (pptSrc) {
+			pbox = REGION_RECTS(&rgnOther);
+			for (i = nbox, ppt = pptSrc; i--; ppt++, pbox++) {
+				ppt->x = pbox->x1 - rgnOther.extents.x1;
+				ppt->y = pbox->y1 - rgnOther.extents.y1;
+			}
+
+			if (other_bpp == 8)
+				cfbDoBitbltCopy((DrawablePtr)pPixChildren,
+						(DrawablePtr)pScreenPriv->pix8,
+						GXcopy, &rgnOther, pptSrc, ~0L);
+			else
+				cfb32DoBitbltCopy((DrawablePtr)pPixChildren,
+						  (DrawablePtr)pScreenPriv->pix32,
+						  GXcopy, &rgnOther, pptSrc, ~0L);
+
+			DEALLOCATE_LOCAL(pptSrc);
+		}
+
+		if (other_bpp == 8)
+			cfbDestroyPixmap(pPixChildren);
+		else
+			cfb32DestroyPixmap(pPixChildren);
+	}
+	REGION_UNINIT(pScreen, &rgnOther);
+}
+
+Bool
+cfb8_32WidChangeWindowAttributes(WindowPtr pWin, unsigned long mask)
+{
+	return TRUE;
+}
+
+void
+cfb8_32WidWindowExposures(WindowPtr pWin, RegionPtr pReg, RegionPtr pOtherReg)
+{
+	/* Fill in the WID channel before rendering of
+	 * the exposed window area.
+	 */
+	if (REGION_NUM_RECTS(pReg)) {
+		ScreenPtr pScreen = pWin->drawable.pScreen;
+		cfb8_32WidScreenPtr pScreenPriv = 
+			CFB8_32WID_GET_SCREEN_PRIVATE(pScreen);
+
+		pScreenPriv->WIDOps->WidFillBox((DrawablePtr)pScreenPriv->pixWid,
+						(DrawablePtr)pWin,
+						REGION_NUM_RECTS(pReg), REGION_RECTS(pReg));
+	}
+
+	miWindowExposures(pWin, pReg, pOtherReg);
+}
+
+void
+cfb8_32WidPaintWindow(WindowPtr pWin, RegionPtr pRegion, int what)
+{
+	if (what == PW_BORDER) {
+		ScreenPtr pScreen = pWin->drawable.pScreen;
+		cfb8_32WidScreenPtr pScreenPriv = 
+			CFB8_32WID_GET_SCREEN_PRIVATE(pScreen);
+
+		pScreenPriv->WIDOps->WidFillBox((DrawablePtr)pScreenPriv->pixWid,
+						(DrawablePtr)pWin,
+						REGION_NUM_RECTS(pRegion),
+						REGION_RECTS(pRegion));
+	}
+
+	if (pWin->drawable.bitsPerPixel == 8)
+		cfbPaintWindow(pWin, pRegion, what);
+	else
+		cfb32PaintWindow(pWin, pRegion, what);
+}
+
+@
+
+
+1.1.9.1
+log
+@OpenBSD just has imported exactly this tree into their vendor branch,
+called the same tag, in XF4/xc
+This is, apparently, the last XFree86 snapshot before the licence change
+(ie, addition of the advertising clause)
+
+Since the developers don't see any problems with that, and we would like
+to integrate improvements done by the remaining one or two (or so) XFree86
+developers (j/k), this prepares enabling us to update X-Window in the future.
+@
+text
+@d10 1
+a10 1
+/* $XFree86: xc/programs/Xserver/hw/xfree86/xf8_32wid/cfbwindow.c,v 1.3 2003/11/10 18:22:43 tsi Exp $ */
+d101 1
+a101 1
+	REGION_NULL(pScreen, &rgnDst);
+d139 1
+a139 1
+	REGION_NULL(pScreen, &rgnOther);
+d165 1
+a165 1
+			REGION_NULL(pScreen, &rgnPixmap);
+@
+
+
+1.1.1.1
+log
+@Import OpenBSD 3.3 XF4 repository from CTM 3132 the first time
+This finalizes starting an OpenBSD-mirabile (aka MirBSD) repository.
+
+### MirBSD is:
+# Copyright (c) 1982-2003 by Thorsten "mirabile" Glaser <x86@@ePost.de>
+# Copyright © 1968-2003  The authors of And contributors to UNIX®, the
+#       C Language, BSD/Berkeley Unix; 386BSD, NetBSD 1.1 and OpenBSD.
+#
+# Anyone who obtained a copy of this work is hereby permitted to freely use,
+# distribute, modify, merge, sublicence, give away or sell it as long as the
+# authors are given due credit and the following notice is retained:
+#
+# This work is provided "as is", with no explicit or implicit warranty what-
+# soever. Use it only at your own risk. In no event may an author or contri-
+# butor be held liable for any damage, directly or indirectly, that origina-
+# ted through or is caused by creation or modification of this work.
+
+MirBSD is my private tree. MirBSD does not differ very much from OpenBSD
+and intentionally tracks OpenBSD. That's why it _is_ OpenBSD, just not the
+official one. It's like with DarrenBSD.
+
+At time of this writing, no advertising for MirBSD must be done,
+because the advertising clause has not yet been sorted out.
+
+http://templeofhate.com/tglaser/MirBSD/index.php
+@
+text
+@@
+
+
+1.1.1.2
+log
+@That's what OpenBSD will, probably, ship as XF4 in 3.5
+their last sync against XFree86 4.3-current has been
+imported into our vendor branch, too
+@
+text
+@d10 1
+a10 1
+/* $XFree86: xc/programs/Xserver/hw/xfree86/xf8_32wid/cfbwindow.c,v 1.3 2003/11/10 18:22:43 tsi Exp $ */
+d101 1
+a101 1
+	REGION_NULL(pScreen, &rgnDst);
+d139 1
+a139 1
+	REGION_NULL(pScreen, &rgnOther);
+d165 1
+a165 1
+			REGION_NULL(pScreen, &rgnPixmap);
+@
+

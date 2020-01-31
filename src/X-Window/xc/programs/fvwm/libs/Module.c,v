@@ -1,0 +1,254 @@
+head	1.1;
+branch	1.1.1;
+access;
+symbols
+	tg-mergetmp-2:1.1.1.1
+	cvs-200410241530:1.1.1.1
+	cvs-200410012000:1.1.1.1
+	cvs-200407141120:1.1.1.1
+	cvs-200406231010:1.1.1.1
+	MIRBSD_7quater:1.1.1.1
+	cvs-200405271510:1.1.1.1
+	cvs-200403021700:1.1.1.1
+	cvs-200401291925:1.1.1.1
+	MIRBSD_7_ALPHA:1.1.1.1.0.4
+	MIRBSD_7:1.1.1.1.0.2
+	MIRBSD_7ter:1.1.1.1
+	cvs-20011091815:1.1.1.1
+	cvs-200309162130:1.1.1.1
+	cvs-200308302005:1.1.1.1
+	ctmx-0387:1.1.1.1
+	ctmx-0384:1.1.1.1
+	MIRBSD_5:1.1.1.1
+	ctmx-0375:1.1.1.1
+	ctmx-0373:1.1.1.1
+	ctm-0371:1.1.1.1
+	ctm-0370:1.1.1.1
+	MIRBSD_4:1.1.1.1
+	ctm-0363:1.1.1.1
+	ctm-0359:1.1.1.1
+	ctm-0349:1.1.1.1
+	openbsd:1.1.1;
+locks; strict;
+comment	@ * @;
+
+
+1.1
+date	2003.03.22.20.09.54;	author tg;	state Exp;
+branches
+	1.1.1.1;
+next	;
+
+1.1.1.1
+date	2003.03.22.20.09.54;	author tg;	state Stab;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@/*
+** Module.c: code for modules to communicate with fvwm
+*/
+#include "config.h"
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <ctype.h>
+
+#include <errno.h>
+
+#include "fvwmlib.h"
+#include "../fvwm/module.h"
+
+
+/************************************************************************
+ *
+ * Reads a single packet of info from fvwm. Prototype is:
+ * unsigned long header[HEADER_SIZE];
+ * unsigned long *body;
+ * int fd[2];
+ * void DeadPipe(int nonsense);  * Called if the pipe is no longer open  *
+ *
+ * ReadFvwmPacket(fd[1],header, &body);
+ *
+ * Returns:
+ *   > 0 everything is OK.
+ *   = 0 invalid packet.
+ *   < 0 pipe is dead. (Should never occur)
+ *   body is a malloc'ed space which needs to be freed
+ *
+ **************************************************************************/
+int ReadFvwmPacket(int fd, unsigned long *header, unsigned long **body)
+{
+  int count,total,count2,body_length;
+  char *cbody;
+  extern RETSIGTYPE DeadPipe(int);
+
+  errno = 0;
+  if((count = read(fd,header,HEADER_SIZE*sizeof(unsigned long))) >0)
+  {
+    if(header[0] == START_FLAG)
+    {
+      body_length = header[2]-HEADER_SIZE;
+      *body = (unsigned long *)
+        safemalloc(body_length * sizeof(unsigned long));
+      cbody = (char *)(*body);
+      total = 0;
+      while(total < body_length*sizeof(unsigned long))
+      {
+        errno = 0;
+        if((count2=
+            read(fd,&cbody[total],
+                 body_length*sizeof(unsigned long)-total)) >0)
+        {
+          total += count2;
+        }
+        else if(count2 < 0)
+        {
+          DeadPipe(errno);
+        }
+      }
+    }
+    else
+      count = 0;
+  }
+  if(count <= 0)
+    DeadPipe(errno);
+  return count;
+}
+
+/************************************************************************
+ *
+ * SendText - Sends arbitrary text/command back to fvwm
+ *
+ ***********************************************************************/
+void SendText(int *fd,char *message,unsigned long window)
+{
+  int w;
+
+  if(message != NULL)
+  {
+    write(fd[0],&window, sizeof(unsigned long));
+
+    w=strlen(message);
+    write(fd[0],&w,sizeof(int));
+    if (w)
+      write(fd[0],message,w);
+
+    /* keep going */
+    w = 1;
+    write(fd[0],&w,sizeof(int));
+  }
+}
+
+/***************************************************************************
+ *
+ * Sets the which-message-types-do-I-want mask for modules
+ *
+ **************************************************************************/
+void SetMessageMask(int *fd, unsigned long mask)
+{
+  char set_mask_mesg[50];
+
+  sprintf(set_mask_mesg,"SET_MASK %lu\n",mask);
+  SendText(fd,set_mask_mesg,0);
+}
+
+/***************************************************************************
+ * Gets a module configuration line from fvwm. Returns NULL if there are
+ * no more lines to be had. "line" is a pointer to a char *.
+ *
+ * Changed 10/19/98 by Dan Espen:
+ *
+ * - The "isspace"  call was referring to  memory  beyond the end of  the
+ * input area.  This could have led to the creation of a core file. Added
+ * "body_size" to keep it in bounds.
+ **************************************************************************/
+void GetConfigLine(int *fd, char **tline)
+{
+  static int first_pass = 1;
+  int count,done = 0;
+  int body_size;
+  static char *line = NULL;
+  unsigned long header[HEADER_SIZE];
+
+  if(line != NULL)
+    free(line);
+
+  if(first_pass)
+  {
+    SendInfo(fd,"Send_ConfigInfo",0);
+    first_pass = 0;
+  }
+
+  while(!done)
+  {
+    count = ReadFvwmPacket(fd[1],header,(unsigned long **)&line);
+    /* DB(("Packet count is %d", count)); */
+    if (count <= 0)
+      *tline = NULL;
+    else {
+      *tline = &line[3*sizeof(long)];
+      body_size = header[2]-HEADER_SIZE;
+      /* DB(("Config line (%d): `%s'", body_size, body_size ? *tline : "")); */
+      while((body_size > 0)
+            && isspace(**tline)) {
+        (*tline)++;
+        --body_size;
+      }
+    }
+
+/*   fprintf(stderr,"%x %x\n",header[1],M_END_CONFIG_INFO);*/
+    if(header[1] == M_CONFIG_INFO)
+      done = 1;
+    else if(header[1] == M_END_CONFIG_INFO)
+    {
+      done = 1;
+      if(line != NULL)
+        free(line);
+      line = NULL;
+      *tline = NULL;
+    }
+  }
+}
+@
+
+
+1.1.1.1
+log
+@Import OpenBSD 3.3 XF4 repository from CTM 3132 the first time
+This finalizes starting an OpenBSD-mirabile (aka MirBSD) repository.
+
+### MirBSD is:
+# Copyright (c) 1982-2003 by Thorsten "mirabile" Glaser <x86@@ePost.de>
+# Copyright © 1968-2003  The authors of And contributors to UNIX®, the
+#       C Language, BSD/Berkeley Unix; 386BSD, NetBSD 1.1 and OpenBSD.
+#
+# Anyone who obtained a copy of this work is hereby permitted to freely use,
+# distribute, modify, merge, sublicence, give away or sell it as long as the
+# authors are given due credit and the following notice is retained:
+#
+# This work is provided "as is", with no explicit or implicit warranty what-
+# soever. Use it only at your own risk. In no event may an author or contri-
+# butor be held liable for any damage, directly or indirectly, that origina-
+# ted through or is caused by creation or modification of this work.
+
+MirBSD is my private tree. MirBSD does not differ very much from OpenBSD
+and intentionally tracks OpenBSD. That's why it _is_ OpenBSD, just not the
+official one. It's like with DarrenBSD.
+
+At time of this writing, no advertising for MirBSD must be done,
+because the advertising clause has not yet been sorted out.
+
+http://templeofhate.com/tglaser/MirBSD/index.php
+@
+text
+@@

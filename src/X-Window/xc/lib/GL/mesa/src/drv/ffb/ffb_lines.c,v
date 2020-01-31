@@ -1,0 +1,538 @@
+head	1.1;
+branch	1.1.1;
+access;
+symbols
+	tg-mergetmp-2:1.1.1.3
+	cvs-200410241530:1.1.1.3
+	cvs-200410012000:1.1.1.3
+	cvs-200407141120:1.1.1.3
+	cvs-200406231010:1.1.1.3
+	MIRBSD_7quater:1.1.1.2
+	cvs-200405271510:1.1.1.3
+	XFree86_4_4_0:1.1.9.1
+	cvs-200403021700:1.1.1.3
+	XFREE86_20040213:1.1.9.1
+	xc:1.1.9
+	cvs-200401291925:1.1.1.2
+	MIRBSD_7_ALPHA:1.1.1.2.0.4
+	MIRBSD_7:1.1.1.2.0.2
+	MIRBSD_7ter:1.1.1.2
+	cvs-20011091815:1.1.1.2
+	cvs-200309162130:1.1.1.2
+	cvs-200308302005:1.1.1.2
+	ctmx-0387:1.1.1.2
+	ctmx-0384:1.1.1.2
+	MIRBSD_5:1.1.1.2
+	ctmx-0375:1.1.1.2
+	ctmx-0373:1.1.1.2
+	ctm-0371:1.1.1.2
+	ctm-0370:1.1.1.2
+	MIRBSD_4:1.1.1.2
+	ctm-0363:1.1.1.2
+	ctm-0359:1.1.1.2
+	ctm-0349:1.1.1.1
+	openbsd:1.1.1;
+locks; strict;
+comment	@ * @;
+
+
+1.1
+date	2003.03.22.20.04.11;	author tg;	state Exp;
+branches
+	1.1.1.1
+	1.1.9.1;
+next	;
+
+1.1.1.1
+date	2003.03.22.20.04.11;	author tg;	state Exp;
+branches;
+next	1.1.1.2;
+
+1.1.1.2
+date	2003.04.08.18.31.20;	author tg;	state Exp;
+branches;
+next	1.1.1.3;
+
+1.1.1.3
+date	2004.03.02.17.57.52;	author tg;	state Stab;
+branches;
+next	;
+
+1.1.9.1
+date	2004.02.14.19.17.47;	author tg;	state Exp;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@/* $XFree86: xc/lib/GL/mesa/src/drv/ffb/ffb_lines.c,v 1.1 2000/06/20 05:08:38 dawes Exp $
+ *
+ * GLX Hardware Device Driver for Sun Creator/Creator3D
+ * Copyright (C) 2000 David S. Miller
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a
+ * copy of this software and associated documentation files (the "Software"),
+ * to deal in the Software without restriction, including without limitation
+ * the rights to use, copy, modify, merge, publish, distribute, sublicense,
+ * and/or sell copies of the Software, and to permit persons to whom the
+ * Software is furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included
+ * in all copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
+ * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL
+ * DAVID MILLER, OR ANY OTHER CONTRIBUTORS BE LIABLE FOR ANY CLAIM, 
+ * DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR 
+ * OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE 
+ * OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+ *
+ *
+ *    David S. Miller <davem@@redhat.com>
+ */
+
+#include "types.h"
+#include "vbrender.h"
+
+#include <stdio.h>
+#include <stdlib.h>
+
+#include "mm.h"
+#include "ffb_dd.h"
+#include "ffb_span.h"
+#include "ffb_depth.h"
+#include "ffb_context.h"
+#include "ffb_vb.h"
+#include "ffb_lines.h"
+#include "ffb_lock.h"
+#include "extensions.h"
+#include "vb.h"
+#include "dd.h"
+#include "pipeline.h"
+
+#define FFB_LINE_FLAT_BIT	0x01
+#define FFB_LINE_TWOSIDE_BIT	0x02
+#define FFB_LINE_OFFSET_BIT	0x04
+#define FFB_LINE_WIDE_BIT	0x08
+#define FFB_LINE_ALPHA_BIT	0x10
+#define FFB_LINE_FALLBACK_BIT	0x20
+
+static line_func ffb_line_tab[0x40];
+
+/* If the line is not wide, we can support all of the line
+ * patterning and smooth shading features of OpenGL fully.
+ * If it is wide we use triangles to render them and as such
+ * we lose the capability to do the patterning+shading in HW.
+ *
+ * XXX Actually, with the triangle method we can probably do
+ * XXX the shading/antialiasing too if we are careful.  It might
+ * XXX not work, need to investigate this. -DaveM
+ */
+
+#define IND (0)
+#define TAG(x) x
+#include "ffb_linetmp.h"
+
+#define IND (FFB_LINE_FLAT_BIT)
+#define TAG(x) x##_flat
+#include "ffb_linetmp.h"
+
+#define IND (FFB_LINE_OFFSET_BIT)
+#define TAG(x) x##_offset
+#include "ffb_linetmp.h"
+
+#define IND (FFB_LINE_OFFSET_BIT|FFB_LINE_FLAT_BIT)
+#define TAG(x) x##_offset_flat
+#include "ffb_linetmp.h"
+
+#define IND (FFB_LINE_TWOSIDE_BIT)
+#define TAG(x) x##_twoside
+#include "ffb_linetmp.h"
+
+#define IND (FFB_LINE_TWOSIDE_BIT|FFB_LINE_FLAT_BIT)
+#define TAG(x) x##_twoside_flat
+#include "ffb_linetmp.h"
+
+#define IND (FFB_LINE_TWOSIDE_BIT|FFB_LINE_OFFSET_BIT)
+#define TAG(x) x##_twoside_offset
+#include "ffb_linetmp.h"
+
+#define IND (FFB_LINE_TWOSIDE_BIT|FFB_LINE_OFFSET_BIT|FFB_LINE_FLAT_BIT)
+#define TAG(x) x##_twoside_offset_flat
+#include "ffb_linetmp.h"
+
+#define IND (FFB_LINE_WIDE_BIT)
+#define TAG(x) x##_wide
+#include "ffb_linetmp.h"
+
+#define IND (FFB_LINE_WIDE_BIT|FFB_LINE_FLAT_BIT)
+#define TAG(x) x##_wide_flat
+#include "ffb_linetmp.h"
+
+#define IND (FFB_LINE_WIDE_BIT|FFB_LINE_OFFSET_BIT)
+#define TAG(x) x##_wide_offset
+#include "ffb_linetmp.h"
+
+#define IND (FFB_LINE_WIDE_BIT|FFB_LINE_OFFSET_BIT|FFB_LINE_FLAT_BIT)
+#define TAG(x) x##_wide_offset_flat
+#include "ffb_linetmp.h"
+
+#define IND (FFB_LINE_WIDE_BIT|FFB_LINE_TWOSIDE_BIT)
+#define TAG(x) x##_wide_twoside
+#include "ffb_linetmp.h"
+
+#define IND (FFB_LINE_WIDE_BIT|FFB_LINE_TWOSIDE_BIT|FFB_LINE_FLAT_BIT)
+#define TAG(x) x##_wide_twoside_flat
+#include "ffb_linetmp.h"
+
+#define IND (FFB_LINE_WIDE_BIT|FFB_LINE_TWOSIDE_BIT|FFB_LINE_OFFSET_BIT)
+#define TAG(x) x##_wide_twoside_offset
+#include "ffb_linetmp.h"
+
+#define IND (FFB_LINE_WIDE_BIT|FFB_LINE_TWOSIDE_BIT|FFB_LINE_OFFSET_BIT|FFB_LINE_FLAT_BIT)
+#define TAG(x) x##_wide_twoside_offset_flat
+#include "ffb_linetmp.h"
+
+#define IND (FFB_LINE_ALPHA_BIT)
+#define TAG(x) x##_alpha
+#include "ffb_linetmp.h"
+
+#define IND (FFB_LINE_ALPHA_BIT|FFB_LINE_FLAT_BIT)
+#define TAG(x) x##_alpha_flat
+#include "ffb_linetmp.h"
+
+#define IND (FFB_LINE_ALPHA_BIT|FFB_LINE_OFFSET_BIT)
+#define TAG(x) x##_alpha_offset
+#include "ffb_linetmp.h"
+
+#define IND (FFB_LINE_ALPHA_BIT|FFB_LINE_OFFSET_BIT|FFB_LINE_FLAT_BIT)
+#define TAG(x) x##_alpha_offset_flat
+#include "ffb_linetmp.h"
+
+#define IND (FFB_LINE_ALPHA_BIT|FFB_LINE_TWOSIDE_BIT)
+#define TAG(x) x##_alpha_twoside
+#include "ffb_linetmp.h"
+
+#define IND (FFB_LINE_ALPHA_BIT|FFB_LINE_TWOSIDE_BIT|FFB_LINE_FLAT_BIT)
+#define TAG(x) x##_alpha_twoside_flat
+#include "ffb_linetmp.h"
+
+#define IND (FFB_LINE_ALPHA_BIT|FFB_LINE_TWOSIDE_BIT|FFB_LINE_OFFSET_BIT)
+#define TAG(x) x##_alpha_twoside_offset
+#include "ffb_linetmp.h"
+
+#define IND (FFB_LINE_ALPHA_BIT|FFB_LINE_TWOSIDE_BIT|FFB_LINE_OFFSET_BIT|FFB_LINE_FLAT_BIT)
+#define TAG(x) x##_alpha_twoside_offset_flat
+#include "ffb_linetmp.h"
+
+#define IND (FFB_LINE_ALPHA_BIT|FFB_LINE_WIDE_BIT)
+#define TAG(x) x##_alpha_wide
+#include "ffb_linetmp.h"
+
+#define IND (FFB_LINE_ALPHA_BIT|FFB_LINE_WIDE_BIT|FFB_LINE_FLAT_BIT)
+#define TAG(x) x##_alpha_wide_flat
+#include "ffb_linetmp.h"
+
+#define IND (FFB_LINE_ALPHA_BIT|FFB_LINE_WIDE_BIT|FFB_LINE_OFFSET_BIT)
+#define TAG(x) x##_alpha_wide_offset
+#include "ffb_linetmp.h"
+
+#define IND (FFB_LINE_ALPHA_BIT|FFB_LINE_WIDE_BIT|FFB_LINE_OFFSET_BIT|FFB_LINE_FLAT_BIT)
+#define TAG(x) x##_alpha_wide_offset_flat
+#include "ffb_linetmp.h"
+
+#define IND (FFB_LINE_ALPHA_BIT|FFB_LINE_WIDE_BIT|FFB_LINE_TWOSIDE_BIT)
+#define TAG(x) x##_alpha_wide_twoside
+#include "ffb_linetmp.h"
+
+#define IND (FFB_LINE_ALPHA_BIT|FFB_LINE_WIDE_BIT|FFB_LINE_TWOSIDE_BIT|FFB_LINE_FLAT_BIT)
+#define TAG(x) x##_alpha_wide_twoside_flat
+#include "ffb_linetmp.h"
+
+#define IND (FFB_LINE_ALPHA_BIT|FFB_LINE_WIDE_BIT|FFB_LINE_TWOSIDE_BIT|FFB_LINE_OFFSET_BIT)
+#define TAG(x) x##_alpha_wide_twoside_offset
+#include "ffb_linetmp.h"
+
+#define IND (FFB_LINE_ALPHA_BIT|FFB_LINE_WIDE_BIT|FFB_LINE_TWOSIDE_BIT|FFB_LINE_OFFSET_BIT|FFB_LINE_FLAT_BIT)
+#define TAG(x) x##_alpha_wide_twoside_offset_flat
+#include "ffb_linetmp.h"
+
+void ffbDDLinefuncInit(void)
+{
+	init();
+	init_flat();
+	init_offset();
+	init_offset_flat();
+	init_twoside();
+	init_twoside_flat();
+	init_twoside_offset();
+	init_twoside_offset_flat();
+	init_wide();
+	init_wide_flat();
+	init_wide_offset();
+	init_wide_offset_flat();
+	init_wide_twoside();
+	init_wide_twoside_flat();
+	init_wide_twoside_offset();
+	init_wide_twoside_offset_flat();
+	init_alpha();
+	init_alpha_flat();
+	init_alpha_offset();
+	init_alpha_offset_flat();
+	init_alpha_twoside();
+	init_alpha_twoside_flat();
+	init_alpha_twoside_offset();
+	init_alpha_twoside_offset_flat();
+	init_alpha_wide();
+	init_alpha_wide_flat();
+	init_alpha_wide_offset();
+	init_alpha_wide_offset_flat();
+	init_alpha_wide_twoside();
+	init_alpha_wide_twoside_flat();
+	init_alpha_wide_twoside_offset();
+	init_alpha_wide_twoside_offset_flat();
+}
+
+/* Our caller makes sure TriangleCaps is non-zero and that
+ * we are not doing feedback/selection (Mesa handles those
+ * cases).
+ */
+void ffbDDChooseLineRenderState(GLcontext *ctx)
+{
+	ffbContextPtr fmesa = FFB_CONTEXT(ctx);
+	GLuint flags = ctx->TriangleCaps;
+	GLuint ind = 0;
+
+	if (!flags) {
+		fmesa->LineFunc = ffb_line_tab[0];
+		return;
+	}
+
+	if (flags & DD_FLATSHADE)
+		ind |= FFB_LINE_FLAT_BIT;
+	if (flags & DD_TRI_OFFSET)
+		ind |= FFB_LINE_OFFSET_BIT;
+	if (flags & DD_TRI_LIGHT_TWOSIDE)
+		ind |= FFB_LINE_TWOSIDE_BIT;
+	if (flags & DD_LINE_WIDTH) {
+		/* We cannot currently do wide lines with stipples
+		 * or antialiased in HW.
+		 */
+		if ((flags & DD_LINE_STIPPLE) != 0 ||
+		    ctx->Line.SmoothFlag)
+			ind |= FFB_LINE_FALLBACK_BIT;
+		else
+			ind |= FFB_LINE_WIDE_BIT;
+	} else {
+		if ((flags & DD_LINE_STIPPLE) != 0 &&
+		    fmesa->lpat == FFB_LPAT_BAD)
+			ind |= FFB_LINE_FALLBACK_BIT;
+	}
+
+	/* If blending or the alpha test is enabled we need to
+	 * provide alpha components to the chip, else we can
+	 * do without it and thus feed vertex data to the chip
+	 * more efficiently.
+	 */
+	if (ctx->Color.BlendEnabled || ctx->Color.AlphaEnabled)
+		ind |= FFB_LINE_ALPHA_BIT;
+
+	fmesa->LineFunc = ffb_line_tab[ind];
+}
+@
+
+
+1.1.9.1
+log
+@OpenBSD just has imported exactly this tree into their vendor branch,
+called the same tag, in XF4/xc
+This is, apparently, the last XFree86 snapshot before the licence change
+(ie, addition of the advertising clause)
+
+Since the developers don't see any problems with that, and we would like
+to integrate improvements done by the remaining one or two (or so) XFree86
+developers (j/k), this prepares enabling us to update X-Window in the future.
+@
+text
+@d1 1
+a1 1
+/* $XFree86: xc/lib/GL/mesa/src/drv/ffb/ffb_lines.c,v 1.3 2003/09/28 20:15:07 alanh Exp $
+d4 1
+a4 1
+ * Copyright (C) 2000, 2001 David S. Miller
+d28 6
+a33 1
+#include "mtypes.h"
+a34 1
+#include "mmath.h"
+a40 1
+#include "ffb_tris.h"
+d43 3
+a45 2
+
+#undef FFB_LINE_TRACE
+d48 5
+a52 2
+#define FFB_LINE_ALPHA_BIT	0x02
+#define MAX_FFB_LINE_FUNCS      0x04
+d54 1
+a54 1
+static ffb_line_func ffb_line_tab[MAX_FFB_LINE_FUNCS];
+d58 6
+d74 56
+d138 56
+d198 14
+d214 14
+d230 5
+a234 1
+static void ffb_dd_line( GLcontext *ctx, GLuint e0, GLuint e1 )
+d237 1
+a237 10
+	ffb_vertex *v0 = &fmesa->verts[e0];
+	ffb_vertex *v1 = &fmesa->verts[e1];
+	fmesa->draw_line( ctx, v0, v1 );
+}
+
+void ffbChooseLineState(GLcontext *ctx)
+{
+	ffbContextPtr fmesa = FFB_CONTEXT(ctx);
+ 	TNLcontext *tnl = TNL_CONTEXT(ctx);
+	GLuint flags = ctx->_TriangleCaps;
+d240 4
+a243 1
+	tnl->Driver.Render.Line = ffb_dd_line;
+d247 17
+a263 5
+
+	if ((flags & DD_LINE_STIPPLE) != 0 &&
+	    fmesa->lpat == FFB_LPAT_BAD) {
+		fmesa->draw_line = ffb_fallback_line;
+		return;
+d274 1
+a274 1
+	fmesa->draw_line = ffb_line_tab[ind];
+@
+
+
+1.1.1.1
+log
+@Import OpenBSD 3.3 XF4 repository from CTM 3132 the first time
+This finalizes starting an OpenBSD-mirabile (aka MirBSD) repository.
+
+### MirBSD is:
+# Copyright (c) 1982-2003 by Thorsten "mirabile" Glaser <x86@@ePost.de>
+# Copyright © 1968-2003  The authors of And contributors to UNIX®, the
+#       C Language, BSD/Berkeley Unix; 386BSD, NetBSD 1.1 and OpenBSD.
+#
+# Anyone who obtained a copy of this work is hereby permitted to freely use,
+# distribute, modify, merge, sublicence, give away or sell it as long as the
+# authors are given due credit and the following notice is retained:
+#
+# This work is provided "as is", with no explicit or implicit warranty what-
+# soever. Use it only at your own risk. In no event may an author or contri-
+# butor be held liable for any damage, directly or indirectly, that origina-
+# ted through or is caused by creation or modification of this work.
+
+MirBSD is my private tree. MirBSD does not differ very much from OpenBSD
+and intentionally tracks OpenBSD. That's why it _is_ OpenBSD, just not the
+official one. It's like with DarrenBSD.
+
+At time of this writing, no advertising for MirBSD must be done,
+because the advertising clause has not yet been sorted out.
+
+http://templeofhate.com/tglaser/MirBSD/index.php
+@
+text
+@@
+
+
+1.1.1.2
+log
+@The X-Windowing System
+
+Import XFree86 4.3 from OpenBSD by CTM, in the hope it's stable
+@
+text
+@d1 1
+a1 1
+/* $XFree86: xc/lib/GL/mesa/src/drv/ffb/ffb_lines.c,v 1.2 2002/02/22 21:32:58 dawes Exp $
+d4 1
+a4 1
+ * Copyright (C) 2000, 2001 David S. Miller
+d28 2
+a29 1
+#include "mtypes.h"
+a40 1
+#include "ffb_tris.h"
+d43 3
+a45 2
+
+#undef FFB_LINE_TRACE
+d48 5
+a52 2
+#define FFB_LINE_ALPHA_BIT	0x02
+#define MAX_FFB_LINE_FUNCS      0x04
+d54 1
+a54 1
+static ffb_line_func ffb_line_tab[MAX_FFB_LINE_FUNCS];
+d58 6
+d74 56
+d138 56
+d198 14
+d214 14
+d230 5
+a234 1
+static void ffb_dd_line( GLcontext *ctx, GLuint e0, GLuint e1 )
+d237 1
+a237 10
+	ffb_vertex *v0 = &fmesa->verts[e0];
+	ffb_vertex *v1 = &fmesa->verts[e1];
+	fmesa->draw_line( ctx, v0, v1 );
+}
+
+void ffbChooseLineState(GLcontext *ctx)
+{
+	ffbContextPtr fmesa = FFB_CONTEXT(ctx);
+ 	TNLcontext *tnl = TNL_CONTEXT(ctx);
+	GLuint flags = ctx->_TriangleCaps;
+d240 4
+a243 1
+	tnl->Driver.Render.Line = ffb_dd_line;
+d247 17
+a263 5
+
+	if ((flags & DD_LINE_STIPPLE) != 0 &&
+	    fmesa->lpat == FFB_LPAT_BAD) {
+		fmesa->draw_line = ffb_fallback_line;
+		return;
+d274 1
+a274 1
+	fmesa->draw_line = ffb_line_tab[ind];
+@
+
+
+1.1.1.3
+log
+@That's what OpenBSD will, probably, ship as XF4 in 3.5
+their last sync against XFree86 4.3-current has been
+imported into our vendor branch, too
+@
+text
+@d1 1
+a1 1
+/* $XFree86: xc/lib/GL/mesa/src/drv/ffb/ffb_lines.c,v 1.3 2003/09/28 20:15:07 alanh Exp $
+d29 4
+a33 1
+#include "mmath.h"
+@
+
+

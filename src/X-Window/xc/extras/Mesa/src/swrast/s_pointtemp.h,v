@@ -1,0 +1,980 @@
+head	1.2;
+branch	1.1.1;
+access;
+symbols
+	tg-mergetmp-2:1.1.1.2
+	cvs-200410241530:1.1.1.2
+	cvs-200410012000:1.1.1.2
+	cvs-200407141120:1.1.1.2
+	cvs-200406231010:1.1.1.2
+	MIRBSD_7quater:1.1.1.1
+	cvs-200405271510:1.1.1.2
+	XFree86_4_4_0:1.1.9.1
+	cvs-200403021700:1.1.1.2
+	XFREE86_20040213:1.1.9.1
+	xc:1.1.9
+	cvs-200401291925:1.1.1.1
+	MIRBSD_7_ALPHA:1.1.1.1.0.4
+	MIRBSD_7:1.1.1.1.0.2
+	MIRBSD_7ter:1.1.1.1
+	cvs-20011091815:1.1.1.1
+	cvs-200309162130:1.1.1.1
+	cvs-200308302005:1.1.1.1
+	ctmx-0387:1.1.1.1
+	ctmx-0384:1.1.1.1
+	MIRBSD_5:1.1.1.1
+	ctmx-0375:1.1.1.1
+	ctmx-0373:1.1.1.1
+	ctm-0371:1.1.1.1
+	ctm-0370:1.1.1.1
+	MIRBSD_4:1.1.1.1
+	ctm-0363:1.1.1.1
+	ctm-0359:1.1.1.1
+	openbsd:1.1.1;
+locks; strict;
+comment	@ * @;
+
+
+1.2
+date	2003.05.16.16.28.46;	author tg;	state dead;
+branches;
+next	1.1;
+
+1.1
+date	2003.04.08.18.20.15;	author tg;	state Exp;
+branches
+	1.1.1.1
+	1.1.9.1;
+next	;
+
+1.1.1.1
+date	2003.04.08.18.20.15;	author tg;	state Exp;
+branches;
+next	1.1.1.2;
+
+1.1.1.2
+date	2004.03.02.17.30.06;	author tg;	state Stab;
+branches;
+next	;
+
+1.1.9.1
+date	2004.02.14.19.05.10;	author tg;	state Exp;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.2
+log
+@remove a bunch of files not used in MirBSD - clean tree. People who want them got cvs.
+@
+text
+@
+/*
+ * Mesa 3-D graphics library
+ * Version:  4.0.5
+ *
+ * Copyright (C) 1999-2002  Brian Paul   All Rights Reserved.
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a
+ * copy of this software and associated documentation files (the "Software"),
+ * to deal in the Software without restriction, including without limitation
+ * the rights to use, copy, modify, merge, publish, distribute, sublicense,
+ * and/or sell copies of the Software, and to permit persons to whom the
+ * Software is furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included
+ * in all copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
+ * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL
+ * BRIAN PAUL BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN
+ * AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
+ * CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+ */
+
+
+/*
+ * Point rendering template code.
+ *
+ * Set FLAGS = bitwise-OR of the following tokens:
+ *
+ *   RGBA = do rgba instead of color index
+ *   SMOOTH = do antialiasing
+ *   TEXTURE = do texture coords
+ *   SPECULAR = do separate specular color
+ *   LARGE = do points with diameter > 1 pixel
+ *   ATTENUATE = compute point size attenuation
+ *
+ * Notes: LARGE and ATTENUATE are exclusive of each other.
+ *        TEXTURE requires RGBA
+ *        SPECULAR requires TEXTURE
+ */
+
+
+/*
+ * NOTES on antialiased point rasterization:
+ *
+ * Let d = distance of fragment center from vertex.
+ * if d < rmin2 then
+ *    fragment has 100% coverage
+ * else if d > rmax2 then
+ *    fragment has 0% coverage
+ * else
+ *    fragement has % coverage = (d - rmin2) / (rmax2 - rmin2)
+ */
+
+
+
+static void
+NAME ( GLcontext *ctx, const SWvertex *vert )
+{
+   SWcontext *swrast = SWRAST_CONTEXT(ctx);
+   struct pixel_buffer *PB = swrast->PB;
+
+   const GLint z = (GLint) (vert->win[2] + 0.5F);
+
+#if FLAGS & RGBA
+   const GLchan red   = vert->color[0];
+   const GLchan green = vert->color[1];
+   const GLchan blue  = vert->color[2];
+   GLchan alpha = vert->color[3];
+#if FLAGS & SPECULAR
+   const GLchan sRed   = vert->specular[0];
+   const GLchan sGreen = vert->specular[1];
+   const GLchan sBlue  = vert->specular[2];
+#endif
+#else
+   GLint index = vert->index;
+#endif
+#if FLAGS & (ATTENUATE | LARGE | SMOOTH)
+   GLfloat size;
+#endif
+#if FLAGS & ATTENUATE
+   GLfloat alphaAtten;
+#endif
+
+#if FLAGS & TEXTURE
+   GLfloat texcoord[MAX_TEXTURE_UNITS][4];
+   GLuint u;
+   for (u = 0; u < ctx->Const.MaxTextureUnits; u++) {
+      if (ctx->Texture.Unit[u]._ReallyEnabled) {
+         if (vert->texcoord[u][3] != 1.0 && vert->texcoord[u][3] != 0.0) {
+            texcoord[u][0] = vert->texcoord[u][0] / vert->texcoord[u][3];
+            texcoord[u][1] = vert->texcoord[u][1] / vert->texcoord[u][3];
+            texcoord[u][2] = vert->texcoord[u][2] / vert->texcoord[u][3];
+         }
+         else {
+            texcoord[u][0] = vert->texcoord[u][0];
+            texcoord[u][1] = vert->texcoord[u][1];
+            texcoord[u][2] = vert->texcoord[u][2];
+         }
+      }
+   }
+#endif
+
+#if FLAGS & ATTENUATE
+   if (vert->pointSize >= ctx->Point.Threshold) {
+      size = MIN2(vert->pointSize, ctx->Point.MaxSize);
+      alphaAtten = 1.0F;
+   }
+   else {
+      GLfloat dsize = vert->pointSize / ctx->Point.Threshold;
+      size = MAX2(ctx->Point.Threshold, ctx->Point.MinSize);
+      alphaAtten = dsize * dsize;
+   }
+#elif FLAGS & (LARGE | SMOOTH)
+   size = ctx->Point._Size;
+#endif
+
+   /* Cull primitives with malformed coordinates.
+    */
+   {
+      float tmp = vert->win[0] + vert->win[1];
+      if (IS_INF_OR_NAN(tmp))
+	 return;
+   }
+
+#if FLAGS & (LARGE | ATTENUATE | SMOOTH)
+
+   {
+      GLint x, y;
+      const GLfloat radius = 0.5F * size;
+#if FLAGS & SMOOTH
+      const GLfloat rmin = radius - 0.7071F;  /* 0.7071 = sqrt(2)/2 */
+      const GLfloat rmax = radius + 0.7071F;
+      const GLfloat rmin2 = MAX2(0.0F, rmin * rmin);
+      const GLfloat rmax2 = rmax * rmax;
+      const GLfloat cscale = 1.0F / (rmax2 - rmin2);
+      const GLint xmin = (GLint) (vert->win[0] - radius);
+      const GLint xmax = (GLint) (vert->win[0] + radius);
+      const GLint ymin = (GLint) (vert->win[1] - radius);
+      const GLint ymax = (GLint) (vert->win[1] + radius);
+#else
+      /* non-smooth */
+      GLint xmin, xmax, ymin, ymax;
+      GLint iSize = (GLint) (size + 0.5F);
+      GLint iRadius;
+      iSize = MAX2(1, iSize);
+      iRadius = iSize / 2;
+      if (iSize & 1) {
+         /* odd size */
+         xmin = (GLint) (vert->win[0] - iRadius);
+         xmax = (GLint) (vert->win[0] + iRadius);
+         ymin = (GLint) (vert->win[1] - iRadius);
+         ymax = (GLint) (vert->win[1] + iRadius);
+      }
+      else {
+         /* even size */
+         xmin = (GLint) vert->win[0] - iRadius + 1;
+         xmax = xmin + iSize - 1;
+         ymin = (GLint) vert->win[1] - iRadius + 1;
+         ymax = ymin + iSize - 1;
+      }
+#endif
+      (void) radius;
+
+      for (y = ymin; y <= ymax; y++) {
+         for (x = xmin; x <= xmax; x++) {
+#if FLAGS & SMOOTH
+            /* compute coverage */
+            const GLfloat dx = x - vert->win[0] + 0.5F;
+            const GLfloat dy = y - vert->win[1] + 0.5F;
+            const GLfloat dist2 = dx * dx + dy * dy;
+            if (dist2 < rmax2) {
+#if FLAGS & RGBA
+               alpha = vert->color[3];
+#endif
+               if (dist2 >= rmin2) {
+                  /* compute partial coverage */
+                  PB_COVERAGE(PB, 1.0F - (dist2 - rmin2) * cscale);
+	       }
+               else {
+                  /* full coverage */
+                  PB_COVERAGE(PB, 1.0F);
+               }
+
+#endif /* SMOOTH */
+
+#if ((FLAGS & (ATTENUATE | RGBA)) == (ATTENUATE | RGBA))
+	       alpha = (GLchan) (alpha * alphaAtten);
+#endif
+
+#if FLAGS & SPECULAR
+               PB_WRITE_MULTITEX_SPEC_PIXEL(PB, x, y, z, vert->fog,
+                                            red, green, blue, alpha,
+                                            sRed, sGreen, sBlue,
+                                            texcoord);
+#elif FLAGS & TEXTURE
+	       if (ctx->Texture._ReallyEnabled > TEXTURE0_ANY) {
+		  PB_WRITE_MULTITEX_PIXEL(PB, x, y, z, vert->fog,
+					  red, green, blue, alpha,
+					  texcoord);
+	       }
+	       else if (ctx->Texture._ReallyEnabled) {
+		  PB_WRITE_TEX_PIXEL(PB, x,y,z, vert->fog,
+				     red, green, blue, alpha,
+				     texcoord[0][0],
+				     texcoord[0][1],
+				     texcoord[0][2]);
+	       }
+               else {
+                  PB_WRITE_RGBA_PIXEL(PB, x, y, z, vert->fog,
+                                      red, green, blue, alpha);
+               }
+#elif FLAGS & RGBA
+	       PB_WRITE_RGBA_PIXEL(PB, x, y, z, vert->fog,
+                                   red, green, blue, alpha);
+#else /* color index */
+               PB_WRITE_CI_PIXEL(PB, x, y, z, vert->fog, index);
+#endif
+#if FLAGS & SMOOTH
+	    }
+#endif
+	 }
+      }
+
+#if FLAGS & SMOOTH
+      PB->haveCoverage = GL_TRUE;
+#endif
+
+      PB_CHECK_FLUSH(ctx,PB);
+   }
+
+#else /* LARGE || ATTENUATE || SMOOTH*/
+
+   {
+      /* size == 1 */
+      GLint x = (GLint) vert->win[0];
+      GLint y = (GLint) vert->win[1];
+#if ((FLAGS & (SPECULAR | TEXTURE)) == (SPECULAR | TEXTURE))
+      PB_WRITE_MULTITEX_SPEC_PIXEL(PB, x, y, z, vert->fog,
+                                   red, green, blue, alpha,
+                                   sRed, sGreen, sBlue,
+                                   texcoord);
+#elif FLAGS & TEXTURE
+      if (ctx->Texture._ReallyEnabled > TEXTURE0_ANY) {
+         PB_WRITE_MULTITEX_PIXEL(PB, x, y, z, vert->fog,
+                                 red, green, blue, alpha, texcoord );
+      }
+      else {
+         PB_WRITE_TEX_PIXEL(PB, x, y, z, vert->fog,
+                            red, green, blue, alpha,
+                            texcoord[0][0], texcoord[0][1], texcoord[0][2]);
+      }
+#elif FLAGS & RGBA
+      /* rgba size 1 point */
+      alpha = vert->color[3];
+      PB_WRITE_RGBA_PIXEL(PB, x, y, z, vert->fog, red, green, blue, alpha);
+#else
+      /* color index size 1 point */
+      PB_WRITE_CI_PIXEL(PB, x, y, z, vert->fog, index);
+#endif
+   }
+#endif /* LARGE || ATTENUATE || SMOOTH */
+
+   PB_CHECK_FLUSH(ctx, PB);
+}
+
+
+#undef FLAGS
+#undef NAME
+@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@@
+
+
+1.1.9.1
+log
+@OpenBSD just has imported exactly this tree into their vendor branch,
+called the same tag, in XF4/xc
+This is, apparently, the last XFree86 snapshot before the licence change
+(ie, addition of the advertising clause)
+
+Since the developers don't see any problems with that, and we would like
+to integrate improvements done by the remaining one or two (or so) XFree86
+developers (j/k), this prepares enabling us to update X-Window in the future.
+@
+text
+@d1 1
+a1 1
+/* $XFree86: xc/extras/Mesa/src/swrast/s_pointtemp.h,v 1.4 2003/10/22 15:27:45 tsi Exp $ */
+d4 1
+a4 1
+ * Version:  5.0
+a37 1
+ *   SPRITE = GL_NV_point_sprite
+d54 1
+a54 1
+ *    fragment has % coverage = (d - rmin2) / (rmax2 - rmin2)
+d62 5
+a66 3
+#if FLAGS & (ATTENUATE | LARGE | SMOOTH | SPRITE)
+   GLfloat size;
+#endif
+a67 3
+#if (FLAGS & ATTENUATE) && (FLAGS & SMOOTH)
+   GLfloat alphaAtten;
+#endif
+d71 8
+a78 1
+   const GLchan alpha = vert->color[3];
+d80 2
+a81 4
+#if FLAGS & SPECULAR
+   const GLchan specRed   = vert->specular[0];
+   const GLchan specGreen = vert->specular[1];
+   const GLchan specBlue  = vert->specular[2];
+d83 2
+a84 2
+#if FLAGS & INDEX
+   const GLuint colorIndex = vert->index;
+d86 1
+a89 30
+#endif
+   SWcontext *swrast = SWRAST_CONTEXT(ctx);
+   struct sw_span *span = &(swrast->PointSpan);
+
+   /* Cull primitives with malformed coordinates.
+    */
+   {
+      float tmp = vert->win[0] + vert->win[1];
+      if (IS_INF_OR_NAN(tmp))
+	 return;
+   }
+
+   /*
+    * Span init
+    */
+   span->interpMask = SPAN_FOG;
+   span->arrayMask = SPAN_XY | SPAN_Z;
+   span->fog = vert->fog;
+   span->fogStep = 0.0;
+#if FLAGS & RGBA
+   span->arrayMask |= SPAN_RGBA;
+#endif
+#if FLAGS & SPECULAR
+   span->arrayMask |= SPAN_SPEC;
+#endif
+#if FLAGS & INDEX
+   span->arrayMask |= SPAN_INDEX;
+#endif
+#if FLAGS & TEXTURE
+   span->arrayMask |= SPAN_TEXTURE;
+d92 10
+a101 6
+         const GLfloat q = vert->texcoord[u][3];
+         const GLfloat invQ = (q == 0.0F || q == 1.0F) ? 1.0F : (1.0F / q);
+         texcoord[u][0] = vert->texcoord[u][0] * invQ;
+         texcoord[u][1] = vert->texcoord[u][1] * invQ;
+         texcoord[u][2] = vert->texcoord[u][2] * invQ;
+         texcoord[u][3] = q;
+a104 6
+#if FLAGS & SMOOTH
+   span->arrayMask |= SPAN_COVERAGE;
+#endif
+#if FLAGS & SPRITE
+   span->arrayMask |= SPAN_TEXTURE;
+#endif
+a108 1
+#if (FLAGS & RGBA) && (FLAGS & SMOOTH)
+a109 1
+#endif
+a111 1
+#if (FLAGS & RGBA) && (FLAGS & SMOOTH)
+d113 1
+a114 2
+#endif
+      size = MAX2(ctx->Point.Threshold, ctx->Point.MinSize);
+d116 1
+a116 1
+#elif FLAGS & (LARGE | SMOOTH | SPRITE)
+d120 1
+a120 3
+#if FLAGS & (ATTENUATE | LARGE | SMOOTH | SPRITE)
+   /*
+    * Multi-pixel points
+d122 9
+a130 1
+   {{
+a132 2
+      const GLint z = (GLint) (vert->win[2] + 0.5F);
+      GLuint count;
+a163 14
+#endif /*SMOOTH*/
+
+      /* check if we need to flush */
+      if (span->end + (xmax-xmin+1) * (ymax-ymin+1) >= MAX_WIDTH ||
+          (swrast->_RasterMask & (BLEND_BIT | LOGIC_OP_BIT | MASKING_BIT))) {
+#if FLAGS & (TEXTURE | SPRITE)
+         if (ctx->Texture._EnabledUnits)
+            _mesa_write_texture_span(ctx, span);
+         else
+            _mesa_write_rgba_span(ctx, span);
+#elif FLAGS & RGBA
+         _mesa_write_rgba_span(ctx, span);
+#else
+         _mesa_write_index_span(ctx, span);
+d165 1
+a165 2
+         span->end = 0;
+      }
+a166 5
+      /*
+       * OK, generate fragments
+       */
+      count = span->end;
+      (void) radius;
+d169 8
+a176 2
+#if FLAGS & (SPRITE | TEXTURE)
+            GLuint u;
+d178 10
+d189 2
+a190 5
+#if FLAGS & RGBA
+            span->array->rgba[count][RCOMP] = red;
+            span->array->rgba[count][GCOMP] = green;
+            span->array->rgba[count][BCOMP] = blue;
+            span->array->rgba[count][ACOMP] = alpha;
+d192 1
+d194 26
+a219 3
+            span->array->spec[count][RCOMP] = specRed;
+            span->array->spec[count][GCOMP] = specGreen;
+            span->array->spec[count][BCOMP] = specBlue;
+d221 2
+a222 9
+#if FLAGS & INDEX
+            span->array->index[count] = colorIndex;
+#endif
+#if FLAGS & TEXTURE
+            for (u = 0; u < ctx->Const.MaxTextureUnits; u++) {
+               if (ctx->Texture.Unit[u]._ReallyEnabled) {
+                  COPY_4V(span->array->texcoords[u][count], texcoord[u]);
+               }
+            }
+d224 2
+d228 2
+a229 22
+            /* compute coverage */
+            {
+               const GLfloat dx = x - vert->win[0] + 0.5F;
+               const GLfloat dy = y - vert->win[1] + 0.5F;
+               const GLfloat dist2 = dx * dx + dy * dy;
+               if (dist2 < rmax2) {
+                  if (dist2 >= rmin2) {
+                     /* compute partial coverage */
+                     span->array->coverage[count] = 1.0F - (dist2 - rmin2) * cscale;
+#if FLAGS & INDEX
+                     /* coverage in [0,15] */
+                     span->array->coverage[count] *= 15.0;
+#endif
+                  }
+                  else {
+                     /* full coverage */
+                     span->array->coverage[count] = 1.0F;
+                  }
+
+                  span->array->x[count] = x;
+                  span->array->y[count] = y;
+                  span->array->z[count] = z;
+d231 2
+a232 38
+#if (FLAGS & ATTENUATE) && (FLAGS & RGBA)
+                  span->array->rgba[count][ACOMP] = (GLchan) (alpha * alphaAtten);
+#elif FLAGS & RGBA
+                  span->array->rgba[count][ACOMP] = alpha;
+#endif /*ATTENUATE*/
+                  count++;
+               } /*if*/
+            }
+
+#else /*SMOOTH*/
+
+            /* not smooth (square points) */
+            span->array->x[count] = x;
+            span->array->y[count] = y;
+            span->array->z[count] = z;
+
+#if FLAGS & SPRITE
+            for (u = 0; u < ctx->Const.MaxTextureUnits; u++) {
+               if (ctx->Texture.Unit[u]._ReallyEnabled) {
+                  if (ctx->Point.CoordReplace[u]) {
+                     GLfloat s = 0.5F + (x + 0.5F - vert->win[0]) / size;
+                     GLfloat t = 0.5F - (y + 0.5F - vert->win[1]) / size;
+                     span->array->texcoords[u][count][0] = s;
+                     span->array->texcoords[u][count][1] = t;
+                     span->array->texcoords[u][count][3] = 1.0F;
+                     if (ctx->Point.SpriteRMode == GL_ZERO)
+                        span->array->texcoords[u][count][2] = 0.0F;
+                     else if (ctx->Point.SpriteRMode == GL_S)
+                        span->array->texcoords[u][count][2] = vert->texcoord[u][0];
+                     else /* GL_R */
+                        span->array->texcoords[u][count][2] = vert->texcoord[u][2];
+                  }
+                  else {
+                     COPY_4V(span->array->texcoords[u][count], vert->texcoord[u]);
+                  }
+               }
+            }
+#endif /*SPRITE*/
+d234 1
+a234 1
+            count++;  /* square point */
+d236 19
+a254 23
+#endif /*SMOOTH*/
+
+	 } /*for x*/
+      } /*for y*/
+      span->end = count;
+   }}
+
+#else /* LARGE | ATTENUATE | SMOOTH | SPRITE */
+
+   /*
+    * Single-pixel points
+    */
+   {{
+      GLuint count;
+
+      /* check if we need to flush */
+      if (span->end >= MAX_WIDTH ||
+          (swrast->_RasterMask & (BLEND_BIT | LOGIC_OP_BIT | MASKING_BIT))) {
+#if FLAGS & (TEXTURE | SPRITE)
+         if (ctx->Texture._EnabledUnits)
+            _mesa_write_texture_span(ctx, span);
+         else
+            _mesa_write_rgba_span(ctx, span);
+d256 3
+a258 1
+         _mesa_write_rgba_span(ctx, span);
+d260 2
+a261 1
+         _mesa_write_index_span(ctx, span);
+d263 1
+a263 33
+         span->end = 0;
+      }
+
+      count = span->end;
+
+#if FLAGS & RGBA
+      span->array->rgba[count][RCOMP] = red;
+      span->array->rgba[count][GCOMP] = green;
+      span->array->rgba[count][BCOMP] = blue;
+      span->array->rgba[count][ACOMP] = alpha;
+#endif
+#if FLAGS & SPECULAR
+      span->array->spec[count][RCOMP] = specRed;
+      span->array->spec[count][GCOMP] = specGreen;
+      span->array->spec[count][BCOMP] = specBlue;
+#endif
+#if FLAGS & INDEX
+      span->array->index[count] = colorIndex;
+#endif
+#if FLAGS & TEXTURE
+      for (u = 0; u < ctx->Const.MaxTextureUnits; u++) {
+         if (ctx->Texture.Unit[u]._ReallyEnabled) {
+            COPY_4V(span->array->texcoords[u][count], texcoord[u]);
+         }
+      }
+#endif
+
+      span->array->x[count] = (GLint) vert->win[0];
+      span->array->y[count] = (GLint) vert->win[1];
+      span->array->z[count] = (GLint) (vert->win[2] + 0.5F);
+      span->end = count + 1;
+   }}
+
+d266 1
+a266 1
+   ASSERT(span->end <= MAX_WIDTH);
+@
+
+
+1.1.1.1
+log
+@The X-Windowing System
+
+Import XFree86 4.3 from OpenBSD by CTM, in the hope it's stable
+@
+text
+@@
+
+
+1.1.1.2
+log
+@That's what OpenBSD will, probably, ship as XF4 in 3.5
+their last sync against XFree86 4.3-current has been
+imported into our vendor branch, too
+@
+text
+@d1 1
+a1 1
+/* $XFree86: xc/extras/Mesa/src/swrast/s_pointtemp.h,v 1.4 2003/10/22 15:27:45 tsi Exp $ */
+d4 1
+a4 1
+ * Version:  5.0
+a37 1
+ *   SPRITE = GL_NV_point_sprite
+d54 1
+a54 1
+ *    fragment has % coverage = (d - rmin2) / (rmax2 - rmin2)
+d62 5
+a66 3
+#if FLAGS & (ATTENUATE | LARGE | SMOOTH | SPRITE)
+   GLfloat size;
+#endif
+a67 3
+#if (FLAGS & ATTENUATE) && (FLAGS & SMOOTH)
+   GLfloat alphaAtten;
+#endif
+d71 8
+a78 1
+   const GLchan alpha = vert->color[3];
+d80 2
+a81 4
+#if FLAGS & SPECULAR
+   const GLchan specRed   = vert->specular[0];
+   const GLchan specGreen = vert->specular[1];
+   const GLchan specBlue  = vert->specular[2];
+d83 2
+a84 2
+#if FLAGS & INDEX
+   const GLuint colorIndex = vert->index;
+d86 1
+a89 30
+#endif
+   SWcontext *swrast = SWRAST_CONTEXT(ctx);
+   struct sw_span *span = &(swrast->PointSpan);
+
+   /* Cull primitives with malformed coordinates.
+    */
+   {
+      float tmp = vert->win[0] + vert->win[1];
+      if (IS_INF_OR_NAN(tmp))
+	 return;
+   }
+
+   /*
+    * Span init
+    */
+   span->interpMask = SPAN_FOG;
+   span->arrayMask = SPAN_XY | SPAN_Z;
+   span->fog = vert->fog;
+   span->fogStep = 0.0;
+#if FLAGS & RGBA
+   span->arrayMask |= SPAN_RGBA;
+#endif
+#if FLAGS & SPECULAR
+   span->arrayMask |= SPAN_SPEC;
+#endif
+#if FLAGS & INDEX
+   span->arrayMask |= SPAN_INDEX;
+#endif
+#if FLAGS & TEXTURE
+   span->arrayMask |= SPAN_TEXTURE;
+d92 10
+a101 6
+         const GLfloat q = vert->texcoord[u][3];
+         const GLfloat invQ = (q == 0.0F || q == 1.0F) ? 1.0F : (1.0F / q);
+         texcoord[u][0] = vert->texcoord[u][0] * invQ;
+         texcoord[u][1] = vert->texcoord[u][1] * invQ;
+         texcoord[u][2] = vert->texcoord[u][2] * invQ;
+         texcoord[u][3] = q;
+a104 6
+#if FLAGS & SMOOTH
+   span->arrayMask |= SPAN_COVERAGE;
+#endif
+#if FLAGS & SPRITE
+   span->arrayMask |= SPAN_TEXTURE;
+#endif
+a108 1
+#if (FLAGS & RGBA) && (FLAGS & SMOOTH)
+a109 1
+#endif
+a111 1
+#if (FLAGS & RGBA) && (FLAGS & SMOOTH)
+d113 1
+a114 2
+#endif
+      size = MAX2(ctx->Point.Threshold, ctx->Point.MinSize);
+d116 1
+a116 1
+#elif FLAGS & (LARGE | SMOOTH | SPRITE)
+d120 1
+a120 3
+#if FLAGS & (ATTENUATE | LARGE | SMOOTH | SPRITE)
+   /*
+    * Multi-pixel points
+d122 9
+a130 1
+   {{
+a132 2
+      const GLint z = (GLint) (vert->win[2] + 0.5F);
+      GLuint count;
+a163 14
+#endif /*SMOOTH*/
+
+      /* check if we need to flush */
+      if (span->end + (xmax-xmin+1) * (ymax-ymin+1) >= MAX_WIDTH ||
+          (swrast->_RasterMask & (BLEND_BIT | LOGIC_OP_BIT | MASKING_BIT))) {
+#if FLAGS & (TEXTURE | SPRITE)
+         if (ctx->Texture._EnabledUnits)
+            _mesa_write_texture_span(ctx, span);
+         else
+            _mesa_write_rgba_span(ctx, span);
+#elif FLAGS & RGBA
+         _mesa_write_rgba_span(ctx, span);
+#else
+         _mesa_write_index_span(ctx, span);
+d165 1
+a165 2
+         span->end = 0;
+      }
+a166 5
+      /*
+       * OK, generate fragments
+       */
+      count = span->end;
+      (void) radius;
+d169 8
+a176 2
+#if FLAGS & (SPRITE | TEXTURE)
+            GLuint u;
+d178 10
+d189 2
+a190 5
+#if FLAGS & RGBA
+            span->array->rgba[count][RCOMP] = red;
+            span->array->rgba[count][GCOMP] = green;
+            span->array->rgba[count][BCOMP] = blue;
+            span->array->rgba[count][ACOMP] = alpha;
+d192 1
+d194 26
+a219 3
+            span->array->spec[count][RCOMP] = specRed;
+            span->array->spec[count][GCOMP] = specGreen;
+            span->array->spec[count][BCOMP] = specBlue;
+d221 2
+a222 9
+#if FLAGS & INDEX
+            span->array->index[count] = colorIndex;
+#endif
+#if FLAGS & TEXTURE
+            for (u = 0; u < ctx->Const.MaxTextureUnits; u++) {
+               if (ctx->Texture.Unit[u]._ReallyEnabled) {
+                  COPY_4V(span->array->texcoords[u][count], texcoord[u]);
+               }
+            }
+d224 2
+d228 2
+a229 22
+            /* compute coverage */
+            {
+               const GLfloat dx = x - vert->win[0] + 0.5F;
+               const GLfloat dy = y - vert->win[1] + 0.5F;
+               const GLfloat dist2 = dx * dx + dy * dy;
+               if (dist2 < rmax2) {
+                  if (dist2 >= rmin2) {
+                     /* compute partial coverage */
+                     span->array->coverage[count] = 1.0F - (dist2 - rmin2) * cscale;
+#if FLAGS & INDEX
+                     /* coverage in [0,15] */
+                     span->array->coverage[count] *= 15.0;
+#endif
+                  }
+                  else {
+                     /* full coverage */
+                     span->array->coverage[count] = 1.0F;
+                  }
+
+                  span->array->x[count] = x;
+                  span->array->y[count] = y;
+                  span->array->z[count] = z;
+d231 2
+a232 38
+#if (FLAGS & ATTENUATE) && (FLAGS & RGBA)
+                  span->array->rgba[count][ACOMP] = (GLchan) (alpha * alphaAtten);
+#elif FLAGS & RGBA
+                  span->array->rgba[count][ACOMP] = alpha;
+#endif /*ATTENUATE*/
+                  count++;
+               } /*if*/
+            }
+
+#else /*SMOOTH*/
+
+            /* not smooth (square points) */
+            span->array->x[count] = x;
+            span->array->y[count] = y;
+            span->array->z[count] = z;
+
+#if FLAGS & SPRITE
+            for (u = 0; u < ctx->Const.MaxTextureUnits; u++) {
+               if (ctx->Texture.Unit[u]._ReallyEnabled) {
+                  if (ctx->Point.CoordReplace[u]) {
+                     GLfloat s = 0.5F + (x + 0.5F - vert->win[0]) / size;
+                     GLfloat t = 0.5F - (y + 0.5F - vert->win[1]) / size;
+                     span->array->texcoords[u][count][0] = s;
+                     span->array->texcoords[u][count][1] = t;
+                     span->array->texcoords[u][count][3] = 1.0F;
+                     if (ctx->Point.SpriteRMode == GL_ZERO)
+                        span->array->texcoords[u][count][2] = 0.0F;
+                     else if (ctx->Point.SpriteRMode == GL_S)
+                        span->array->texcoords[u][count][2] = vert->texcoord[u][0];
+                     else /* GL_R */
+                        span->array->texcoords[u][count][2] = vert->texcoord[u][2];
+                  }
+                  else {
+                     COPY_4V(span->array->texcoords[u][count], vert->texcoord[u]);
+                  }
+               }
+            }
+#endif /*SPRITE*/
+d234 1
+a234 1
+            count++;  /* square point */
+d236 19
+a254 23
+#endif /*SMOOTH*/
+
+	 } /*for x*/
+      } /*for y*/
+      span->end = count;
+   }}
+
+#else /* LARGE | ATTENUATE | SMOOTH | SPRITE */
+
+   /*
+    * Single-pixel points
+    */
+   {{
+      GLuint count;
+
+      /* check if we need to flush */
+      if (span->end >= MAX_WIDTH ||
+          (swrast->_RasterMask & (BLEND_BIT | LOGIC_OP_BIT | MASKING_BIT))) {
+#if FLAGS & (TEXTURE | SPRITE)
+         if (ctx->Texture._EnabledUnits)
+            _mesa_write_texture_span(ctx, span);
+         else
+            _mesa_write_rgba_span(ctx, span);
+d256 3
+a258 1
+         _mesa_write_rgba_span(ctx, span);
+d260 2
+a261 1
+         _mesa_write_index_span(ctx, span);
+d263 1
+a263 33
+         span->end = 0;
+      }
+
+      count = span->end;
+
+#if FLAGS & RGBA
+      span->array->rgba[count][RCOMP] = red;
+      span->array->rgba[count][GCOMP] = green;
+      span->array->rgba[count][BCOMP] = blue;
+      span->array->rgba[count][ACOMP] = alpha;
+#endif
+#if FLAGS & SPECULAR
+      span->array->spec[count][RCOMP] = specRed;
+      span->array->spec[count][GCOMP] = specGreen;
+      span->array->spec[count][BCOMP] = specBlue;
+#endif
+#if FLAGS & INDEX
+      span->array->index[count] = colorIndex;
+#endif
+#if FLAGS & TEXTURE
+      for (u = 0; u < ctx->Const.MaxTextureUnits; u++) {
+         if (ctx->Texture.Unit[u]._ReallyEnabled) {
+            COPY_4V(span->array->texcoords[u][count], texcoord[u]);
+         }
+      }
+#endif
+
+      span->array->x[count] = (GLint) vert->win[0];
+      span->array->y[count] = (GLint) vert->win[1];
+      span->array->z[count] = (GLint) (vert->win[2] + 0.5F);
+      span->end = count + 1;
+   }}
+
+d266 1
+a266 1
+   ASSERT(span->end <= MAX_WIDTH);
+@
+

@@ -1,0 +1,372 @@
+head	1.1;
+branch	1.1.1;
+access;
+symbols
+	tg-mergetmp-2:1.1.1.2
+	cvs-200410241530:1.1.1.2
+	cvs-200410012000:1.1.1.2
+	cvs-200407221130:1.1.1.2
+	cvs-200407141120:1.1.1.2
+	cvs-200406231010:1.1.1.2
+	MIRBSD_7quater:1.1.1.1
+	cvs-200405271510:1.1.1.2
+	XFree86_4_4_0:1.1.9.1
+	cvs-200403021700:1.1.1.2
+	XFREE86_20040213:1.1.9.1
+	xc:1.1.9
+	cvs-200401291925:1.1.1.1
+	MIRBSD_7_ALPHA:1.1.1.1.0.4
+	MIRBSD_7:1.1.1.1.0.2
+	MIRBSD_7ter:1.1.1.1
+	cvs-20011091815:1.1.1.1
+	cvs-200309162130:1.1.1.1
+	cvs-200308302005:1.1.1.1
+	ctmx-0387:1.1.1.1
+	ctmx-0384:1.1.1.1
+	MIRBSD_5:1.1.1.1
+	ctmx-0375:1.1.1.1
+	ctmx-0373:1.1.1.1
+	ctm-0371:1.1.1.1
+	ctm-0370:1.1.1.1
+	MIRBSD_4:1.1.1.1
+	ctm-0363:1.1.1.1
+	ctm-0359:1.1.1.1
+	ctm-0349:1.1.1.1
+	openbsd:1.1.1;
+locks; strict;
+comment	@ * @;
+
+
+1.1
+date	2003.03.22.20.09.09;	author tg;	state Exp;
+branches
+	1.1.1.1
+	1.1.9.1;
+next	;
+
+1.1.1.1
+date	2003.03.22.20.09.09;	author tg;	state Exp;
+branches;
+next	1.1.1.2;
+
+1.1.1.2
+date	2004.03.02.18.27.20;	author tg;	state Stab;
+branches;
+next	;
+
+1.1.9.1
+date	2004.02.14.19.25.49;	author tg;	state Exp;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@/* $XFree86: xc/programs/Xserver/hw/xfree86/xf24_32bpp/cfbscrinit.c,v 1.4 1999/08/14 10:50:16 dawes Exp $ */
+
+
+#include "X.h"
+#include "Xmd.h"
+#include "misc.h"
+#include "servermd.h"
+#include "scrnintstr.h"
+#include "pixmapstr.h"
+#include "resource.h"
+#include "colormap.h"
+#include "colormapst.h"
+#define PSZ 8
+#include "cfb.h"
+#undef PSZ
+#include "cfb24.h"
+#include "cfb32.h"
+#include "cfb24_32.h"
+#include "mi.h"
+#include "micmap.h"
+#include "mistruct.h"
+#include "dix.h"
+#include "mibstore.h"
+
+/* CAUTION:  We require that cfb24 and cfb32 were NOT 
+	compiled with CFB_NEED_SCREEN_PRIVATE */
+
+static BSFuncRec cfb24_32BSFuncRec = {
+    cfb24SaveAreas,
+    cfb24RestoreAreas,
+    (BackingStoreSetClipmaskRgnProcPtr) 0,
+    (BackingStoreGetImagePixmapProcPtr) 0,
+    (BackingStoreGetSpansPixmapProcPtr) 0,
+};
+
+
+int cfb24_32GCIndex = 1;
+int cfb24_32PixmapIndex = 1;
+
+static unsigned long cfb24_32Generation = 0;
+extern WindowPtr *WindowTable;
+
+static Bool
+cfb24_32AllocatePrivates(ScreenPtr pScreen)
+{
+   if(cfb24_32Generation != serverGeneration) {
+	if( ((cfb24_32GCIndex = AllocateGCPrivateIndex()) < 0) |
+	    ((cfb24_32PixmapIndex = AllocatePixmapPrivateIndex()) < 0))
+	    return FALSE;
+	cfb24_32Generation = serverGeneration;
+   }
+   
+   
+   /* All cfb will have the same GC and Window private indicies */
+   if(!mfbAllocatePrivates(pScreen,&cfbWindowPrivateIndex, &cfbGCPrivateIndex))
+	return FALSE;
+
+   /* The cfb indicies are the mfb indicies. Reallocating them resizes them */ 
+   if(!AllocateWindowPrivate(pScreen,cfbWindowPrivateIndex,sizeof(cfbPrivWin)))
+	return FALSE;
+
+   if(!AllocateGCPrivate(pScreen, cfbGCPrivateIndex, sizeof(cfbPrivGC)))
+        return FALSE;
+
+   if(!AllocateGCPrivate(pScreen, cfb24_32GCIndex, sizeof(cfb24_32GCRec)))
+        return FALSE;
+
+   if(!AllocatePixmapPrivate(
+	pScreen, cfb24_32PixmapIndex, sizeof(cfb24_32PixmapRec)))
+        return FALSE;
+
+
+   return TRUE;
+}
+
+static Bool
+cfb24_32SetupScreen(
+    ScreenPtr pScreen,
+    pointer pbits,		/* pointer to screen bitmap */
+    int xsize, int ysize,	/* in pixels */
+    int dpix, int dpiy,		/* dots per inch */
+    int width			/* pixel width of frame buffer */
+){
+    if (!cfb24_32AllocatePrivates(pScreen))
+	return FALSE;
+    pScreen->defColormap = FakeClientID(0);
+    /* let CreateDefColormap do whatever it wants for pixels */ 
+    pScreen->blackPixel = pScreen->whitePixel = (Pixel) 0;
+    pScreen->QueryBestSize = mfbQueryBestSize;
+    /* SaveScreen */
+    pScreen->GetImage = cfb24_32GetImage;
+    pScreen->GetSpans = cfb24_32GetSpans;
+    pScreen->CreateWindow = cfb24_32CreateWindow;
+    pScreen->DestroyWindow = cfb24_32DestroyWindow;	
+    pScreen->PositionWindow = cfb24_32PositionWindow;
+    pScreen->ChangeWindowAttributes = cfb24_32ChangeWindowAttributes;
+    pScreen->RealizeWindow = cfb24MapWindow;			/* OK */
+    pScreen->UnrealizeWindow = cfb24UnmapWindow;		/* OK */
+    pScreen->PaintWindowBackground = cfb24PaintWindow;		/* OK */
+    pScreen->PaintWindowBorder = cfb24PaintWindow;		/* OK */
+    pScreen->CopyWindow = cfb24_32CopyWindow;
+    pScreen->CreatePixmap = cfb24_32CreatePixmap;
+    pScreen->DestroyPixmap = cfb24_32DestroyPixmap;
+    pScreen->RealizeFont = mfbRealizeFont;
+    pScreen->UnrealizeFont = mfbUnrealizeFont;
+    pScreen->CreateGC = cfb24_32CreateGC;
+    pScreen->CreateColormap = miInitializeColormap;
+    pScreen->DestroyColormap = (void (*)())NoopDDA;
+    pScreen->InstallColormap = miInstallColormap;
+    pScreen->UninstallColormap = miUninstallColormap;
+    pScreen->ListInstalledColormaps = miListInstalledColormaps;
+    pScreen->StoreColors = (void (*)())NoopDDA;
+    pScreen->ResolveColor = miResolveColor;
+    pScreen->BitmapToRegion = mfbPixmapToRegion;
+
+    mfbRegisterCopyPlaneProc (pScreen, miCopyPlane);
+    return TRUE;
+}
+
+typedef struct {
+    pointer pbits; 
+    int width;   
+} miScreenInitParmsRec, *miScreenInitParmsPtr;
+
+static Bool
+cfb24_32CreateScreenResources(ScreenPtr pScreen)
+{
+    miScreenInitParmsPtr pScrInitParms;
+    int pitch;
+    Bool retval;
+
+    /* get the pitch before mi destroys it */
+    pScrInitParms = (miScreenInitParmsPtr)pScreen->devPrivate;
+    pitch = BitmapBytePad(pScrInitParms->width * 24);
+
+    if((retval = miCreateScreenResources(pScreen))) {
+	/* fix the screen pixmap */
+	PixmapPtr pPix = (PixmapPtr)pScreen->devPrivate;
+	pPix->drawable.bitsPerPixel = 24;
+	pPix->devKind = pitch;
+    }
+
+    return retval;
+}
+
+
+static Bool
+cfb24_32FinishScreenInit(
+    ScreenPtr pScreen,
+    pointer pbits,		/* pointer to screen bitmap */
+    int xsize, int ysize,	/* in pixels */
+    int dpix, int dpiy,		/* dots per inch */
+    int width			/* pixel width of frame buffer */
+){
+    VisualPtr	visuals;
+    DepthPtr	depths;
+    int		nvisuals;
+    int		ndepths;
+    int		rootdepth;
+    VisualID	defaultVisual;
+
+    rootdepth = 0;
+    if (!miInitVisuals (&visuals, &depths, &nvisuals, &ndepths, &rootdepth,
+			 &defaultVisual,((unsigned long)1<<(24-1)), 8, -1))
+	return FALSE;
+    if (! miScreenInit(pScreen, pbits, xsize, ysize, dpix, dpiy, width,
+			rootdepth, ndepths, depths,
+			defaultVisual, nvisuals, visuals))
+	return FALSE;
+
+    pScreen->BackingStoreFuncs = cfb24_32BSFuncRec;
+    pScreen->CreateScreenResources = cfb24_32CreateScreenResources;
+    pScreen->CloseScreen = cfb32CloseScreen;		/* OK */
+    pScreen->GetScreenPixmap = cfb32GetScreenPixmap; 	/* OK */
+    pScreen->SetScreenPixmap = cfb32SetScreenPixmap;	/* OK */
+    return TRUE;
+}
+
+Bool
+cfb24_32ScreenInit(
+    ScreenPtr pScreen,
+    pointer pbits,		/* pointer to screen bitmap */
+    int xsize, int ysize,	/* in pixels */
+    int dpix, int dpiy,		/* dots per inch */
+    int width			/* pixel width of frame buffer */
+){
+    if (!cfb24_32SetupScreen(pScreen, pbits, xsize, ysize, dpix, dpiy, width))
+	return FALSE;
+    return cfb24_32FinishScreenInit(
+		pScreen, pbits, xsize, ysize, dpix, dpiy, width);
+}
+
+@
+
+
+1.1.9.1
+log
+@OpenBSD just has imported exactly this tree into their vendor branch,
+called the same tag, in XF4/xc
+This is, apparently, the last XFree86 snapshot before the licence change
+(ie, addition of the advertising clause)
+
+Since the developers don't see any problems with that, and we would like
+to integrate improvements done by the remaining one or two (or so) XFree86
+developers (j/k), this prepares enabling us to update X-Window in the future.
+@
+text
+@d1 1
+a1 1
+/* $XFree86: xc/programs/Xserver/hw/xfree86/xf24_32bpp/cfbscrinit.c,v 1.6 2003/09/13 21:33:09 dawes Exp $ */
+d41 1
+a75 14
+static void DestroyColormapNoop(
+        ColormapPtr pColormap)
+{
+    /* NOOP */
+}
+
+static void StoreColorsNoop(
+        ColormapPtr pColormap,
+        int ndef,
+        xColorItem * pdef)
+{
+    /* NOOP */
+}
+
+d108 1
+a108 1
+    pScreen->DestroyColormap = DestroyColormapNoop;
+d112 1
+a112 1
+    pScreen->StoreColors = StoreColorsNoop;
+@
+
+
+1.1.1.1
+log
+@Import OpenBSD 3.3 XF4 repository from CTM 3132 the first time
+This finalizes starting an OpenBSD-mirabile (aka MirBSD) repository.
+
+### MirBSD is:
+# Copyright (c) 1982-2003 by Thorsten "mirabile" Glaser <x86@@ePost.de>
+# Copyright © 1968-2003  The authors of And contributors to UNIX®, the
+#       C Language, BSD/Berkeley Unix; 386BSD, NetBSD 1.1 and OpenBSD.
+#
+# Anyone who obtained a copy of this work is hereby permitted to freely use,
+# distribute, modify, merge, sublicence, give away or sell it as long as the
+# authors are given due credit and the following notice is retained:
+#
+# This work is provided "as is", with no explicit or implicit warranty what-
+# soever. Use it only at your own risk. In no event may an author or contri-
+# butor be held liable for any damage, directly or indirectly, that origina-
+# ted through or is caused by creation or modification of this work.
+
+MirBSD is my private tree. MirBSD does not differ very much from OpenBSD
+and intentionally tracks OpenBSD. That's why it _is_ OpenBSD, just not the
+official one. It's like with DarrenBSD.
+
+At time of this writing, no advertising for MirBSD must be done,
+because the advertising clause has not yet been sorted out.
+
+http://templeofhate.com/tglaser/MirBSD/index.php
+@
+text
+@@
+
+
+1.1.1.2
+log
+@That's what OpenBSD will, probably, ship as XF4 in 3.5
+their last sync against XFree86 4.3-current has been
+imported into our vendor branch, too
+@
+text
+@d1 1
+a1 1
+/* $XFree86: xc/programs/Xserver/hw/xfree86/xf24_32bpp/cfbscrinit.c,v 1.6 2003/09/13 21:33:09 dawes Exp $ */
+d41 1
+a75 14
+static void DestroyColormapNoop(
+        ColormapPtr pColormap)
+{
+    /* NOOP */
+}
+
+static void StoreColorsNoop(
+        ColormapPtr pColormap,
+        int ndef,
+        xColorItem * pdef)
+{
+    /* NOOP */
+}
+
+d108 1
+a108 1
+    pScreen->DestroyColormap = DestroyColormapNoop;
+d112 1
+a112 1
+    pScreen->StoreColors = StoreColorsNoop;
+@
+

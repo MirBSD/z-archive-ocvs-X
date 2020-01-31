@@ -1,0 +1,297 @@
+head	1.4;
+access;
+symbols
+	cvs-200408271520:1.1.3.1 tg:1.1.3;
+locks; strict;
+comment	@# @;
+
+
+1.4
+date	2004.10.10.21.04.38;	author tg;	state dead;
+branches;
+next	1.3;
+
+1.3
+date	2004.10.10.16.46.15;	author tg;	state Exp;
+branches;
+next	1.2;
+
+1.2
+date	2004.08.27.16.08.06;	author tg;	state Exp;
+branches;
+next	1.1;
+
+1.1
+date	2004.08.27.15.25.54;	author tg;	state Exp;
+branches
+	1.1.3.1;
+next	;
+
+1.1.3.1
+date	2004.08.27.15.25.54;	author tg;	state Stab;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.4
+log
+@* add setup script for MirPorts Framework on MirOS (old),
+  MirOS (new) and OpenBSD
+* reorder and simplify layout
+  XXX README.* are out of date, someone fix it
+* enable mkuserdb to generate fields for _all_ users
+@
+text
+@#!/bin/ksh
+# $MirBSD: ports/infrastructure/compat/openbsd/setup-mirports.sh,v 1.3 2004/10/10 16:46:15 tg Exp $
+#-
+# Copyright (c) 2004
+#	Thorsten "mirabile" Glaser <tg@@66h.42h.de>
+#
+# Licensee is hereby permitted to deal in this work without restric-
+# tion, including unlimited rights to use, publically perform, modi-
+# fy, merge, distribute, sell, give away or sublicence, provided the
+# above copyright notices, these terms and the disclaimer are retai-
+# ned in all redistributions, or reproduced in accompanying documen-
+# tation or other materials provided with binary redistributions.
+#
+# Licensor hereby provides this work "AS IS" and WITHOUT WARRANTY of
+# any kind, expressed or implied, to the maximum extent permitted by
+# applicable law, but with the warranty of being written without ma-
+# licious intent or gross negligence; in no event shall licensor, an
+# author or contributor be held liable for any damage, direct, indi-
+# rect or other, however caused, arising in any way out of the usage
+# of covered work, even if advised of the possibility of such damage.
+#-
+# Installation script for MirPorts framework on OpenBSD.
+
+# 1) Build and install pkgtools to /usr/local/sbin
+# 2) Patch <bsd.sys.mk> if not yet done
+# 3) Copy over generic Makefile includes
+# 4) Install mirports.osdep.mk
+# 5) Patch mk.conf
+# 6) Patch user and group list
+
+cd $(dirname $0)
+top=$(pwd | sed 's,/compat/openbsd,,')
+
+if [[ $top = /usr/ports/infrastructure ]]; then
+	obp=NO
+	mbp=/usr/ports
+else
+	obp=/usr/ports
+	mbp=${top%/infrastructure}
+fi
+
+os=$(uname -s)
+osver=$(uname -r | sed 's/\./_/')
+
+if [[ $os != OpenBSD ]]; then
+	print "Fatal: Not running on OpenBSD, exiting."
+	exit 1
+fi
+
+if [[ ! -e $osver/patch-bsd_sys_mk ]]; then
+	print "Fatal: support for OpenBSD_$osver missing, exiting."
+	exit 1
+fi
+
+if [[ -e /usr/local/sbin/pkg_add ]]; then
+	print "Warning: package tools already exist in /usr/local/sbin!"
+	print "To continue and overwrite, hit RETURN, else hit Ctrl-C."
+	read foo
+	rm -f /usr/local/sbin/pkg{,_{add,create,delete,info,scan}}
+fi
+
+if ! touch /usr/local/sbin/pkg; then
+	print "Fatal: must be running as root, exiting."
+	exit 1
+fi
+rm /usr/local/sbin/pkg
+
+print "1. Building pkgtools..."
+
+cd $top/stools
+rm -rf */obj
+set -e
+make cleandir
+make obj
+make cleandir
+make depend
+make PORTABLE=1
+make install PREFIX=/usr/local MANDIR=/usr/local/man/cat
+set +e
+cd $top/compat/openbsd
+
+print -n "2. Patching system Makefile includes..."
+
+if fgrep '.ifndef TRUEPREFIX' /usr/share/mk/bsd.sys.mk >/dev/null 2>&1; then
+	print not needed.
+else
+	if patch /usr/share/mk/bsd.sys.mk $osver/patch-bsd_sys_mk; then
+		print done.
+		rm /usr/share/mk/bsd.sys.mk.orig
+	else
+		print failed.
+		exit 1
+	fi
+fi
+
+print -n "3. Installing MirPorts system Makefile includes..."
+
+if install -c -o root -g bin -m 444 \
+    $top/compat/generic/*.mk /usr/share/mk/; then
+	print done.
+else
+	print failed.
+	exit 1
+fi
+
+print -n "4. Installing MirPorts OS-dependent Makefile includes..."
+
+if install -c -o root -g bin -m 644 \
+    mirports.osdep.mk ${mbp}/infrastructure/mk/; then
+	print '/^#@@@@PKG_CMDDIR/s/^#@@@@//\nwq' \
+	    | ed -s ${mbp}/infrastructure/mk/mirports.osdep.mk
+	chmod 444 ${mbp}/infrastructure/mk/mirports.osdep.mk
+	print done.
+else
+	print failed.
+	exit 1
+fi
+
+print -n "5. Installing MirPorts/OpenBSD ports switch support..."
+
+if fgrep '#@@@@MIRPORTS' /etc/mk.conf >/dev/null 2>&1; then
+	print '/#@@@@MIRPORTS start/,/#@@@@MIRPORTS end/d\nwq' \
+	    | ed -s /etc/mk.conf
+fi
+
+if [[ $obp != NO ]]; then
+cat >>/etc/mk.conf <<EOF
+#@@@@MIRPORTS start
+
+USE_MIRPORTS?=	yes
+
+.if \${USE_MIRPORTS:L} == "yes"
+PORTSDIR=	${mbp}
+PKG_CMDDIR=	/usr/local/sbin
+.else
+PORTSDIR=	${obp}
+.endif
+
+#@@@@MIRPORTS end
+EOF
+else
+cat >>/etc/mk.conf <<EOF
+#@@@@MIRPORTS start
+
+PKG_CMDDIR=	/usr/local/sbin
+
+#@@@@MIRPORTS end
+EOF
+fi
+
+print done.
+print -n "6. Patching user and group database..."
+${SHELL:-/bin/ksh} $top/etc/mkuserdb
+
+cat <<EOF
+done.
+
+============================================================
+                     Congratulations!
+------------------------------------------------------------
+Your MirPorts Framework system is now up and running.
+If you have not yet done so, read the README file in
+$top/compat/openbsd/ for
+further information about how to use MirPorts.
+============================================================
+
+EOF
+exit 0
+@
+
+
+1.3
+log
+@* sync pkg tools with what's currently in src/
+  idea by bsiegert@@
+* -Wall -Werror only ifndef PORTABLE
+  (so it's still in for native development)
+* let setup.sh define PORTABLE
+@
+text
+@d2 1
+a2 1
+# $MirBSD: ports/infrastructure/compat/openbsd/setup-mirports.sh,v 1.2 2004/08/27 16:08:06 tg Exp $
+@
+
+
+1.2
+log
+@we live in ports/ and can auto-detect where we are in the installer (I hope)
+@
+text
+@d2 1
+a2 1
+# $MirBSD: ports/infrastructure/compat/openbsd/setup-mirports.sh,v 1.1.3.1 2004/08/27 15:25:54 tg Exp $
+d77 1
+a77 1
+make
+@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@d2 1
+a2 1
+# $MirBSD: mpsup/sysmake/openbsd/setup-mirports.sh,v 1.4 2004/08/22 14:59:49 wbx Exp $
+d32 9
+a40 1
+top=$(pwd | sed 's,/sysmake/openbsd,,')
+d70 1
+a70 1
+cd $top/pkgtools
+d80 1
+a80 1
+cd $top/sysmake/openbsd
+d99 1
+a99 1
+    $top/sysmake/generic/*.mk /usr/share/mk/; then
+d109 1
+a109 1
+    mirports.osdep.mk /usr/mirports/infrastructure/mk/; then
+d111 2
+a112 2
+	    | ed -s /usr/mirports/infrastructure/mk/mirports.osdep.mk
+	chmod 444 /usr/mirports/infrastructure/mk/mirports.osdep.mk
+d126 1
+d133 1
+a133 1
+PORTSDIR=	/usr/mirports
+d136 1
+a136 1
+PORTSDIR=	/usr/ports
+d141 9
+d163 1
+a163 1
+$top/sysmake/openbsd/ for
+@
+
+
+1.1.3.1
+log
+@mpsup/sysmake wanders into ports/infrastructure
+
+it did confuse the users to have to check out two modules
+@
+text
+@@

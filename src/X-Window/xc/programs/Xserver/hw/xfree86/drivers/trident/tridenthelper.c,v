@@ -1,0 +1,483 @@
+head	1.1;
+branch	1.1.1;
+access;
+symbols
+	tg-mergetmp-2:1.1.1.2
+	cvs-200410241530:1.1.1.2
+	cvs-200410012000:1.1.1.2
+	cvs-200407221130:1.1.1.2
+	cvs-200407141120:1.1.1.2
+	cvs-200406231010:1.1.1.2
+	MIRBSD_7quater:1.1.1.1
+	cvs-200405271510:1.1.1.2
+	XFree86_4_4_0:1.1.9.1
+	cvs-200403021700:1.1.1.2
+	XFREE86_20040213:1.1.9.1
+	xc:1.1.9
+	cvs-200401291925:1.1.1.1
+	MIRBSD_7_ALPHA:1.1.1.1.0.4
+	MIRBSD_7:1.1.1.1.0.2
+	MIRBSD_7ter:1.1.1.1
+	cvs-20011091815:1.1.1.1
+	cvs-200309162130:1.1.1.1
+	cvs-200308302005:1.1.1.1
+	ctmx-0387:1.1.1.1
+	ctmx-0384:1.1.1.1
+	MIRBSD_5:1.1.1.1
+	ctmx-0375:1.1.1.1
+	ctmx-0373:1.1.1.1
+	ctm-0371:1.1.1.1
+	ctm-0370:1.1.1.1
+	MIRBSD_4:1.1.1.1
+	ctm-0363:1.1.1.1
+	ctm-0359:1.1.1.1
+	ctm-0349:1.1.1.1
+	openbsd:1.1.1;
+locks; strict;
+comment	@ * @;
+
+
+1.1
+date	2003.03.22.20.07.50;	author tg;	state Exp;
+branches
+	1.1.1.1
+	1.1.9.1;
+next	;
+
+1.1.1.1
+date	2003.03.22.20.07.50;	author tg;	state Exp;
+branches;
+next	1.1.1.2;
+
+1.1.1.2
+date	2004.03.02.18.20.47;	author tg;	state Stab;
+branches;
+next	;
+
+1.1.9.1
+date	2004.02.14.19.24.09;	author tg;	state Exp;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@/*
+ * Copyright 1992-2000 by Alan Hourihane, Wigan, England.
+ *
+ * Permission to use, copy, modify, distribute, and sell this software and its
+ * documentation for any purpose is hereby granted without fee, provided that
+ * the above copyright notice appear in all copies and that both that
+ * copyright notice and this permission notice appear in supporting
+ * documentation, and that the name of Alan Hourihane not be used in
+ * advertising or publicity pertaining to distribution of the software without
+ * specific, written prior permission.  Alan Hourihane makes no representations
+ * about the suitability of this software for any purpose.  It is provided
+ * "as is" without express or implied warranty.
+ *
+ * ALAN HOURIHANE DISCLAIMS ALL WARRANTIES WITH REGARD TO THIS SOFTWARE,
+ * INCLUDING ALL IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS, IN NO
+ * EVENT SHALL ALAN HOURIHANE BE LIABLE FOR ANY SPECIAL, INDIRECT OR
+ * CONSEQUENTIAL DAMAGES OR ANY DAMAGES WHATSOEVER RESULTING FROM LOSS OF USE,
+ * DATA OR PROFITS, WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER
+ * TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR
+ * PERFORMANCE OF THIS SOFTWARE.
+ *
+ * Author:  Alan Hourihane, alanh@@fairlite.demon.co.uk
+ */
+/* $XFree86: xc/programs/Xserver/hw/xfree86/drivers/trident/tridenthelper.c,v 1.20 2001/10/28 03:33:52 tsi Exp $ */
+
+#include "xf86.h"
+#include "xf86_OSproc.h"
+#include "xf86_ansic.h"
+#include "xf86Version.h"
+#include "xf86PciInfo.h"
+#include "xf86Pci.h"
+
+#include "vgaHW.h"
+
+#include "trident.h"
+#include "trident_regs.h"
+
+static void IsClearTV(ScrnInfoPtr pScrn);
+
+void
+TGUISetClock(ScrnInfoPtr pScrn, int clock, CARD8 *a, CARD8 *b)
+{
+    TRIDENTPtr pTrident = TRIDENTPTR(pScrn);
+	int powerup[4] = { 1,2,4,8 };
+	int clock_diff = 750;
+	int freq, ffreq;
+	int m, n, k;
+	int p, q, r, s; 
+	int endn, endm, endk, startk;
+
+	p = q = r = s = 0;
+
+        IsClearTV(pScrn);
+
+	if (pTrident->NewClockCode)
+	{
+		endn = 255;
+		endm = 63;
+		endk = 2;
+		if (clock >= 100000) startk = 0; else
+		if (clock >=  50000) startk = 1; else
+				     startk = 2;
+	}
+	else
+	{
+		endn = 121;
+		endm = 31;
+		endk = 1;
+		if (clock > 50000) startk = 1; else
+				   startk = 0;
+	}
+
+ 	freq = clock;
+
+	for (k=startk;k<=endk;k++)
+	  for (n=0;n<=endn;n++)
+	    for (m=1;m<=endm;m++)
+	    {
+		ffreq = ( ( ((n + 8) * pTrident->frequency) / ((m + 2) * powerup[k]) ) * 1000);
+		if ((ffreq > freq - clock_diff) && (ffreq < freq + clock_diff)) 
+		{
+/*
+ * It seems that the 9440 docs have this STRICT limitation, although
+ * most 9440 boards seem to cope. 96xx/Cyber chips don't need this limit
+ * so, I'm gonna remove it and it allows lower clocks < 25.175 too !
+ */
+#ifdef STRICT
+			if ( (n+8)*100/(m+2) < 978 && (n+8)*100/(m+2) > 349 ) {
+#endif
+				clock_diff = (freq > ffreq) ? freq - ffreq : ffreq - freq;
+				p = n; q = m; r = k; s = ffreq;
+#ifdef STRICT
+			}
+#endif
+		}
+	    }
+
+	if (s == 0)
+	{
+		FatalError("Unable to set programmable clock.\n"
+			   "Frequency %d is not a valid clock.\n"
+			   "Please modify XF86Config for a new clock.\n",	
+			   freq);
+	}
+
+	if (pTrident->NewClockCode)
+	{
+		/* N is all 8bits */
+		*a = p;
+		/* M is first 6bits, with K last 2bits */
+		*b = (q & 0x3F) | (r << 6);
+	}
+	else
+	{
+		/* N is first 7bits, first M bit is 8th bit */
+		*a = ((1 & q) << 7) | p;
+		/* first 4bits are rest of M, 1bit for K value */
+		*b = (((q & 0xFE) >> 1) | (r << 4));
+	}
+	xf86DrvMsgVerb(pScrn->scrnIndex,X_INFO,3,"Found Clock %6.2f n=%i m=%i"
+		       " k=%i\n",clock/1000.,p,q,r);
+}
+
+static void
+IsClearTV(ScrnInfoPtr pScrn)
+{	
+    int vgaIOBase = VGAHWPTR(pScrn)->IOBase;
+    TRIDENTPtr pTrident = TRIDENTPTR(pScrn);
+    CARD8 temp;
+
+    if (pTrident->frequency != 0) return;
+
+    OUTB(vgaIOBase + 4, 0xC0);
+    temp = INB(vgaIOBase + 5);
+    if (temp & 0x80)
+	pTrident->frequency = PAL;
+    else
+	pTrident->frequency = NTSC;
+}
+
+void
+TridentFindClock(ScrnInfoPtr pScrn, int clock)
+{
+    TRIDENTPtr pTrident = TRIDENTPTR(pScrn);
+
+    pTrident->MUX = FALSE;
+#ifdef READOUT
+    pTrident->DontSetClock = FALSE;
+#endif
+    pTrident->currentClock = clock;
+
+    if (pTrident->IsCyber) {
+        Bool LCDActive;
+#ifdef READOUT
+        Bool ShadowModeActive;
+	Bool HStretch;
+	Bool VStretch;
+#endif
+	OUTB(0x3CE, FPConfig);
+	LCDActive = (INB(0x3CF) & 0x10);
+#ifdef READOUT
+	OUTB(0x3CE,HorStretch);
+	HStretch = (INB(0x3CF) & 0x01);
+	OUTB(0x3CE,VertStretch);
+	VStretch = (INB(0x3CF) & 0x01);
+	
+	if (!(VStretch || HStretch) && LCDActive) {
+	    CARD8 temp;
+	    temp = INB(0x3C8);
+	    temp = INB(0x3C6);
+	    temp = INB(0x3C6);
+	    temp = INB(0x3C6);
+	    temp = INB(0x3C6);
+	    pTrident->MUX = ((INB(0x3C6) & 0x20) == 0x20);
+	    temp = INB(0x3C8);
+	    pTrident->DontSetClock = TRUE;
+	    xf86DrvMsg(pScrn->scrnIndex,X_INFO,"Keeping Clock for LCD Mode\n");
+	    xf86DrvMsg(pScrn->scrnIndex,X_INFO,"MUX is %s\n",pTrident->MUX?
+		       "on":"off");
+	    return;
+
+	} else
+#endif
+	{
+	    if (pTrident->lcdMode != 0xff && LCDActive)
+	        pTrident->currentClock =  clock = LCD[pTrident->lcdMode].clock;
+	}
+	
+    } 
+    if (clock > pTrident->MUXThreshold) pTrident->MUX = TRUE;
+    else  pTrident->MUX = FALSE;
+
+}
+
+float
+CalculateMCLK(ScrnInfoPtr pScrn)
+{
+    int vgaIOBase = VGAHWPTR(pScrn)->IOBase;
+    TRIDENTPtr pTrident = TRIDENTPTR(pScrn);
+    int a,b;
+    int m,n,k;
+    float freq = 0.0;
+    int powerup[4] = { 1,2,4,8 };
+    CARD8 temp;
+
+    if (pTrident->HasSGRAM) {
+	OUTB(vgaIOBase + 4, 0x28);
+	switch(INB(vgaIOBase + 5) & 0x07) {
+	    case 0:
+		freq = 60;
+		break;
+	    case 1:
+		freq = 78;
+		break;
+	    case 2:
+		freq = 90;
+		break;
+	    case 3:
+		freq = 120;
+		break;
+	    case 4:
+		freq = 66;
+		break;
+	    case 5:
+		freq = 83;
+		break;
+	    case 6:
+		freq = 100;
+		break;
+	    case 7:
+		freq = 132;
+		break;
+	}
+    } else {
+	OUTB(0x3C4, NewMode1);
+	temp = INB(0x3C5);
+
+	OUTB(0x3C5, 0xC2);
+        if (!Is3Dchip) {
+	    a = INB(0x43C6);
+	    b = INB(0x43C7);
+    	} else {
+	    OUTB(0x3C4, 0x16);
+	    a = INB(0x3C5);
+	    OUTB(0x3C4, 0x17);
+	    b = INB(0x3C5);
+    	}
+
+	OUTB(0x3C4, NewMode1);
+	OUTB(0x3C5, temp);
+
+        IsClearTV(pScrn);
+
+	if (pTrident->NewClockCode) {
+	    m = b & 0x3F;
+	    n = a;
+	    k = (b & 0xC0) >> 6;
+	} else {
+	    m = (a & 0x07);
+	    k = (b & 0x02) >> 1;
+	    n = ((a & 0xF8)>>3)|((b&0x01)<<5);
+	}
+
+	freq = ((n+8)*pTrident->frequency)/((m+2)*powerup[k]);
+    }
+    return (freq);
+}
+
+void
+TGUISetMCLK(ScrnInfoPtr pScrn, int clock, CARD8 *a, CARD8 *b)
+{
+    TRIDENTPtr pTrident = TRIDENTPTR(pScrn);
+    int powerup[4] = { 1,2,4,8 };
+    int clock_diff = 750;
+    int freq, ffreq;
+    int m,n,k;
+    int p, q, r, s; 
+    int startn, endn;
+    int endm, endk;
+
+    p = q = r = s = 0;
+
+    IsClearTV(pScrn);
+
+    if (pTrident->NewClockCode)
+    {
+	startn = 64;
+	endn = 255;
+	endm = 63;
+	endk = 3;
+    }
+    else
+    {
+	startn = 0;
+	endn = 121;
+	endm = 31;
+	endk = 1;
+    }
+
+    freq = clock;
+
+    if (!pTrident->HasSGRAM) {
+      for (k=0;k<=endk;k++)
+        for (n=startn;n<=endn;n++)
+          for (m=1;m<=endm;m++) {
+	    ffreq = ((((n+8)*pTrident->frequency)/((m+2)*powerup[k]))*1000);
+		if ((ffreq > freq - clock_diff) && (ffreq < freq + clock_diff)) 
+		{
+		    clock_diff = (freq > ffreq) ? freq - ffreq : ffreq - freq;
+		    p = n; q = m; r = k; s = ffreq;
+	    }
+	}
+
+	if (s == 0)
+	{
+		FatalError("Unable to set memory clock.\n"
+			   "Frequency %d is not a valid clock.\n"
+			   "Please modify XF86Config for a new clock.\n",	
+			   freq);
+	}
+
+	if (pTrident->NewClockCode)
+	{
+		/* N is all 8bits */
+		*a = p;
+		/* M is first 6bits, with K last 2bits */
+		*b = (q & 0x3F) | (r << 6);
+	}
+	else
+	{
+		/* N is first 7bits, first M bit is 8th bit */
+		*a = ((1 & q) << 7) | p;
+		/* first 4bits are rest of M, 1bit for K value */
+		*b = (((q & 0xFE) >> 1) | (r << 4));
+	}
+    }
+}
+
+
+
+
+@
+
+
+1.1.9.1
+log
+@OpenBSD just has imported exactly this tree into their vendor branch,
+called the same tag, in XF4/xc
+This is, apparently, the last XFree86 snapshot before the licence change
+(ie, addition of the advertising clause)
+
+Since the developers don't see any problems with that, and we would like
+to integrate improvements done by the remaining one or two (or so) XFree86
+developers (j/k), this prepares enabling us to update X-Window in the future.
+@
+text
+@d2 1
+a2 1
+ * Copyright 1992-2003 by Alan Hourihane, North Wales, UK.
+d24 1
+a24 1
+/* $XFree86: xc/programs/Xserver/hw/xfree86/drivers/trident/tridenthelper.c,v 1.21 2003/09/05 22:07:29 alanh Exp $ */
+@
+
+
+1.1.1.1
+log
+@Import OpenBSD 3.3 XF4 repository from CTM 3132 the first time
+This finalizes starting an OpenBSD-mirabile (aka MirBSD) repository.
+
+### MirBSD is:
+# Copyright (c) 1982-2003 by Thorsten "mirabile" Glaser <x86@@ePost.de>
+# Copyright © 1968-2003  The authors of And contributors to UNIX®, the
+#       C Language, BSD/Berkeley Unix; 386BSD, NetBSD 1.1 and OpenBSD.
+#
+# Anyone who obtained a copy of this work is hereby permitted to freely use,
+# distribute, modify, merge, sublicence, give away or sell it as long as the
+# authors are given due credit and the following notice is retained:
+#
+# This work is provided "as is", with no explicit or implicit warranty what-
+# soever. Use it only at your own risk. In no event may an author or contri-
+# butor be held liable for any damage, directly or indirectly, that origina-
+# ted through or is caused by creation or modification of this work.
+
+MirBSD is my private tree. MirBSD does not differ very much from OpenBSD
+and intentionally tracks OpenBSD. That's why it _is_ OpenBSD, just not the
+official one. It's like with DarrenBSD.
+
+At time of this writing, no advertising for MirBSD must be done,
+because the advertising clause has not yet been sorted out.
+
+http://templeofhate.com/tglaser/MirBSD/index.php
+@
+text
+@@
+
+
+1.1.1.2
+log
+@That's what OpenBSD will, probably, ship as XF4 in 3.5
+their last sync against XFree86 4.3-current has been
+imported into our vendor branch, too
+@
+text
+@d2 1
+a2 1
+ * Copyright 1992-2003 by Alan Hourihane, North Wales, UK.
+d24 1
+a24 1
+/* $XFree86: xc/programs/Xserver/hw/xfree86/drivers/trident/tridenthelper.c,v 1.21 2003/09/05 22:07:29 alanh Exp $ */
+@
+

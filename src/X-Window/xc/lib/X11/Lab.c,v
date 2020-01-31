@@ -1,0 +1,590 @@
+head	1.1;
+branch	1.1.1;
+access;
+symbols
+	tg-mergetmp-2:1.1.1.2
+	cvs-200410241530:1.1.1.2
+	cvs-200410012000:1.1.1.2
+	cvs-200407141120:1.1.1.2
+	cvs-200406231010:1.1.1.2
+	MIRBSD_7quater:1.1.1.1
+	cvs-200405271510:1.1.1.2
+	XFree86_4_4_0:1.1.9.1
+	cvs-200403021700:1.1.1.2
+	XFREE86_20040213:1.1.9.1
+	xc:1.1.9
+	cvs-200401291925:1.1.1.1
+	MIRBSD_7_ALPHA:1.1.1.1.0.4
+	MIRBSD_7:1.1.1.1.0.2
+	MIRBSD_7ter:1.1.1.1
+	cvs-20011091815:1.1.1.1
+	cvs-200309162130:1.1.1.1
+	cvs-200308302005:1.1.1.1
+	ctmx-0387:1.1.1.1
+	ctmx-0384:1.1.1.1
+	MIRBSD_5:1.1.1.1
+	ctmx-0375:1.1.1.1
+	ctmx-0373:1.1.1.1
+	ctm-0371:1.1.1.1
+	ctm-0370:1.1.1.1
+	MIRBSD_4:1.1.1.1
+	ctm-0363:1.1.1.1
+	ctm-0359:1.1.1.1
+	ctm-0349:1.1.1.1
+	openbsd:1.1.1;
+locks; strict;
+comment	@ * @;
+
+
+1.1
+date	2003.03.22.20.04.31;	author tg;	state Exp;
+branches
+	1.1.1.1
+	1.1.9.1;
+next	;
+
+1.1.1.1
+date	2003.03.22.20.04.31;	author tg;	state Exp;
+branches;
+next	1.1.1.2;
+
+1.1.1.2
+date	2004.03.02.18.00.53;	author tg;	state Stab;
+branches;
+next	;
+
+1.1.9.1
+date	2004.02.14.19.18.31;	author tg;	state Exp;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@/* $Xorg: Lab.c,v 1.3 2000/08/17 19:44:39 cpqbld Exp $ */
+
+/*
+ * Code and supporting documentation (c) Copyright 1990 1991 Tektronix, Inc.
+ * 	All Rights Reserved
+ * 
+ * This file is a component of an X Window System-specific implementation
+ * of XCMS based on the TekColor Color Management System.  Permission is
+ * hereby granted to use, copy, modify, sell, and otherwise distribute this
+ * software and its documentation for any purpose and without fee, provided
+ * that this copyright, permission, and disclaimer notice is reproduced in
+ * all copies of this software and in supporting documentation.  TekColor
+ * is a trademark of Tektronix, Inc.
+ * 
+ * Tektronix makes no representation about the suitability of this software
+ * for any purpose.  It is provided "as is" and with all faults.
+ * 
+ * TEKTRONIX DISCLAIMS ALL WARRANTIES APPLICABLE TO THIS SOFTWARE,
+ * INCLUDING THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A
+ * PARTICULAR PURPOSE.  IN NO EVENT SHALL TEKTRONIX BE LIABLE FOR ANY
+ * SPECIAL, INDIRECT OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES WHATSOEVER
+ * RESULTING FROM LOSS OF USE, DATA, OR PROFITS, WHETHER IN AN ACTION OF
+ * CONTRACT, NEGLIGENCE, OR OTHER TORTIOUS ACTION, ARISING OUT OF OR IN
+ * CONNECTION WITH THE USE OR THE PERFORMANCE OF THIS SOFTWARE.
+ *
+ *
+ *	NAME
+ *	    CIELab.c
+ *
+ *	DESCRIPTION
+ *		This file contains routines that support the CIE L*a*b*
+ *		color space to include conversions to and from the CIE
+ *		XYZ space.  These conversions are from Principles of
+ *		Color Technology Second Edition, Fred W. Billmeyer, Jr.
+ *		and Max Saltzman, John Wiley & Sons, Inc., 1981.
+ *
+ *		Note that the range for L* is 0 to 1.
+ */
+/* $XFree86: xc/lib/X11/Lab.c,v 1.3 2001/01/17 19:41:38 dawes Exp $ */
+
+
+#include <X11/Xos.h>
+#include <stdio.h> /* sscanf */
+#include "Xlibint.h"
+#include "Xcmsint.h"
+
+/*
+ *	DEFINES
+ *		Internal definitions that need NOT be exported to any package
+ *		or program using this package.
+ */
+#ifdef DBL_EPSILON
+#  define XMY_DBL_EPSILON DBL_EPSILON
+#else
+#  define XMY_DBL_EPSILON 0.00001
+#endif
+#define DIV16BY116	0.137931
+
+/*
+ *	EXTERNS
+ */
+extern char	_XcmsCIELab_prefix[];
+
+/* CvCols.c */
+extern Status _XcmsDIConvertColors();
+
+/* XYZ.c */
+extern Status _XcmsCIEXYZ_ValidSpec();
+
+/*
+ *	FORWARD DECLARATIONS
+ */
+
+static int CIELab_ParseString();
+static Status XcmsCIELab_ValidSpec();
+
+
+/*
+ *	LOCAL VARIABLES
+ */
+
+
+    /*
+     * NULL terminated list of functions applied to get from CIELab to CIEXYZ
+     */
+static XcmsConversionProc Fl_CIELab_to_CIEXYZ[] = {
+    XcmsCIELabToCIEXYZ,
+    NULL
+};
+
+    /*
+     * NULL terminated list of functions applied to get from CIEXYZ to CIELab
+     */
+static XcmsConversionProc Fl_CIEXYZ_to_CIELab[] = {
+    XcmsCIEXYZToCIELab,
+    NULL
+};
+
+
+/*
+ *	GLOBALS
+ */
+    /*
+     * CIE Lab Color Space
+     */
+XcmsColorSpace	XcmsCIELabColorSpace =
+    {
+	_XcmsCIELab_prefix,	/* prefix */
+	XcmsCIELabFormat,		/* id */
+	CIELab_ParseString,	/* parseString */
+	Fl_CIELab_to_CIEXYZ,	/* to_CIEXYZ */
+	Fl_CIEXYZ_to_CIELab,	/* from_CIEXYZ */
+	1
+    };
+
+
+/************************************************************************
+ *									*
+ *			 PRIVATE ROUTINES				*
+ *									*
+ ************************************************************************/
+
+/*
+ *	NAME
+ *		CIELab_ParseString
+ *
+ *	SYNOPSIS
+ */
+static int
+CIELab_ParseString(spec, pColor)
+    register char *spec;
+    XcmsColor *pColor;
+/*
+ *	DESCRIPTION
+ *		This routines takes a string and attempts to convert
+ *		it into a XcmsColor structure with XcmsCIELabFormat.
+ *		The assumed CIELab string syntax is:
+ *		    CIELab:<L>/<a>/<b>
+ *		Where L, a, and b are in string input format for floats
+ *		consisting of:
+ *		    a. an optional sign
+ *		    b. a string of numbers possibly containing a decimal point,
+ *		    c. an optional exponent field containing an 'E' or 'e'
+ *			followed by a possibly signed integer string.
+ *
+ *	RETURNS
+ *		0 if failed, non-zero otherwise.
+ */
+{
+    int n;
+    char *pchar;
+
+    if ((pchar = strchr(spec, ':')) == NULL) {
+	return(XcmsFailure);
+    }
+    n = (int)(pchar - spec);
+
+    /*
+     * Check for proper prefix.
+     */
+    if (strncmp(spec, _XcmsCIELab_prefix, n) != 0) {
+	return(XcmsFailure);
+    }
+
+    /*
+     * Attempt to parse the value portion.
+     */
+    if (sscanf(spec + n + 1, "%lf/%lf/%lf",
+	    &pColor->spec.CIELab.L_star,
+	    &pColor->spec.CIELab.a_star,
+	    &pColor->spec.CIELab.b_star) != 3) {
+	return(XcmsFailure);
+    }
+    pColor->format = XcmsCIELabFormat;
+    pColor->pixel = 0;
+
+    return(XcmsCIELab_ValidSpec(pColor));
+}
+
+
+
+/************************************************************************
+ *									*
+ *			 PUBLIC ROUTINES				*
+ *									*
+ ************************************************************************/
+
+/*
+ *	NAME
+ *		XcmsCIELab_ValidSpec
+ *
+ *	SYNOPSIS
+ */
+static Status
+XcmsCIELab_ValidSpec(pColor)
+    XcmsColor *pColor;
+/*
+ *	DESCRIPTION
+ *		Checks if color specification valid for CIE L*a*b*.
+ *
+ *	RETURNS
+ *		XcmsFailure if invalid,
+ *		XcmsSuccess if valid.
+ *
+ */
+{
+    if (pColor->format != XcmsCIELabFormat
+	    ||
+	    (pColor->spec.CIELab.L_star < 0.0 - XMY_DBL_EPSILON)
+	    ||
+	    (pColor->spec.CIELab.L_star > 100.0 + XMY_DBL_EPSILON)) {
+	return(XcmsFailure);
+    }
+    return(XcmsSuccess);
+}
+
+
+/*
+ *	NAME
+ *		XcmsCIELabToCIEXYZ - convert CIELab to CIEXYZ
+ *
+ *	SYNOPSIS
+ */
+Status
+XcmsCIELabToCIEXYZ(ccc, pLab_WhitePt, pColors_in_out, nColors)
+    XcmsCCC ccc;
+    XcmsColor *pLab_WhitePt;
+    XcmsColor *pColors_in_out;
+    unsigned int nColors;
+/*
+ *	DESCRIPTION
+ *		Converts color specifications in an array of XcmsColor
+ *		structures from CIELab format to CIEXYZ format.
+ *
+ *		WARNING: This routine assumes that Yn = 1.0;
+ *
+ *	RETURNS
+ *		XcmsFailure if failed,
+ *		XcmsSuccess if succeeded.
+ *
+ */
+{
+    XcmsCIEXYZ XYZ_return;
+    XcmsFloat tmpFloat, tmpL;
+    XcmsColor whitePt;
+    int i;
+    XcmsColor *pColor = pColors_in_out;
+
+    /*
+     * Check arguments
+     */
+    if (pLab_WhitePt == NULL || pColors_in_out == NULL) {
+	return(XcmsFailure);
+    }
+
+    /*
+     * Make sure white point is in CIEXYZ form, if not, convert it.
+     */
+    if (pLab_WhitePt->format != XcmsCIEXYZFormat) {
+	/* Make a copy of the white point because we're going to modify it */
+	memcpy((char *)&whitePt, (char *)pLab_WhitePt, sizeof(XcmsColor));
+	if (!_XcmsDIConvertColors(ccc, &whitePt,
+		(XcmsColor *)NULL, 1, XcmsCIEXYZFormat)) {
+	    return(XcmsFailure);
+	}
+	pLab_WhitePt = &whitePt;
+    }
+
+    /*
+     * Make sure it is a white point, i.e., Y == 1.0
+     */
+    if (pLab_WhitePt->spec.CIEXYZ.Y != 1.0) {
+	return (0);
+    }
+
+    /*
+     * Now convert each XcmsColor structure to CIEXYZ form
+     */
+    for (i = 0; i < nColors; i++, pColor++) {
+
+	/* Make sure original format is CIELab */
+	if (!XcmsCIELab_ValidSpec(pColor)) {
+	    return(XcmsFailure);
+	}
+
+	/* Calculate Y: assume that Yn = 1.0 */
+	tmpL = (pColor->spec.CIELab.L_star + 16.0) / 116.0;
+	XYZ_return.Y = tmpL * tmpL * tmpL;
+
+	if (XYZ_return.Y < 0.008856) {
+	    /* Calculate Y: assume that Yn = 1.0 */
+	    tmpL = pColor->spec.CIELab.L_star / 9.03292;
+
+	    /* Calculate X */
+	    XYZ_return.X = pLab_WhitePt->spec.CIEXYZ.X *
+		    ((pColor->spec.CIELab.a_star / 3893.5) + tmpL);
+	    /* Calculate Y */
+	    XYZ_return.Y = tmpL;
+	    /* Calculate Z */
+	    XYZ_return.Z = pLab_WhitePt->spec.CIEXYZ.Z *
+		    (tmpL - (pColor->spec.CIELab.b_star / 1557.4));
+	} else {
+	    /* Calculate X */
+	    tmpFloat = tmpL + (pColor->spec.CIELab.a_star / 5.0);
+	    XYZ_return.X = pLab_WhitePt->spec.CIEXYZ.X * tmpFloat * tmpFloat * tmpFloat;
+
+	    /* Calculate Z */
+	    tmpFloat = tmpL - (pColor->spec.CIELab.b_star / 2.0);
+	    XYZ_return.Z = pLab_WhitePt->spec.CIEXYZ.Z * tmpFloat * tmpFloat * tmpFloat;
+	}
+
+	memcpy((char *)&pColor->spec.CIEXYZ, (char *)&XYZ_return,
+	       sizeof(XcmsCIEXYZ));
+	pColor->format = XcmsCIEXYZFormat;
+    }
+
+    return (1);
+}
+
+
+/*
+ *	NAME
+ *		XcmsCIEXYZToCIELab - convert CIEXYZ to CIELab
+ *
+ *	SYNOPSIS
+ */
+Status
+XcmsCIEXYZToCIELab(ccc, pLab_WhitePt, pColors_in_out, nColors)
+    XcmsCCC ccc;
+    XcmsColor *pLab_WhitePt;
+    XcmsColor *pColors_in_out;
+    unsigned int nColors;
+/*
+ *	DESCRIPTION
+ *		Converts color specifications in an array of XcmsColor
+ *		structures from CIEXYZ format to CIELab format.
+ *
+ *		WARNING: This routine assumes that Yn = 1.0;
+ *
+ *	RETURNS
+ *		XcmsFailure if failed,
+ *		XcmsSuccess if succeeded.
+ *
+ */
+{
+    XcmsCIELab Lab_return;
+    XcmsFloat fX_Xn, fY_Yn, fZ_Zn;
+    XcmsColor whitePt;
+    int i;
+    XcmsColor *pColor = pColors_in_out;
+
+    /*
+     * Check arguments
+     */
+    if (pLab_WhitePt == NULL || pColors_in_out == NULL) {
+	return(XcmsFailure);
+    }
+
+    /*
+     * Make sure white point is in CIEXYZ form, if not, convert it.
+     */
+    if (pLab_WhitePt->format != XcmsCIEXYZFormat) {
+	/* Make a copy of the white point because we're going to modify it */
+	memcpy((char *)&whitePt, (char *)pLab_WhitePt, sizeof(XcmsColor));
+	if (!_XcmsDIConvertColors(ccc, &whitePt, (XcmsColor *)NULL,
+		1, XcmsCIEXYZFormat)) {
+	    return(XcmsFailure);
+	}
+	pLab_WhitePt = &whitePt;
+    }
+
+    /*
+     * Make sure it is a white point, i.e., Y == 1.0
+     */
+    if (pLab_WhitePt->spec.CIEXYZ.Y != 1.0) {
+	return(XcmsFailure);
+    }
+
+    /*
+     * Now convert each XcmsColor structure to CIEXYZ form
+     */
+    for (i = 0; i < nColors; i++, pColor++) {
+
+	/* Make sure original format is CIELab */
+	if (!_XcmsCIEXYZ_ValidSpec(pColor)) {
+	    return(XcmsFailure);
+	}
+
+	/* Calculate L*:  assume Yn = 1.0 */
+	if (pColor->spec.CIEXYZ.Y < 0.008856) {
+	    fY_Yn = (0.07787 * pColor->spec.CIEXYZ.Y) + DIV16BY116;
+	    /* note fY_Yn used to compute Lab_return.a below */
+	    Lab_return.L_star = 116.0 * (fY_Yn - DIV16BY116);
+	} else {
+	    fY_Yn = (XcmsFloat)XCMS_CUBEROOT(pColor->spec.CIEXYZ.Y);
+	    /* note fY_Yn used to compute Lab_return.a_star below */
+	    Lab_return.L_star = (116.0 * fY_Yn) - 16.0;
+	}
+
+	/* Calculate f(X/Xn) */
+	if ((fX_Xn = pColor->spec.CIEXYZ.X / pLab_WhitePt->spec.CIEXYZ.X) < 0.008856) {
+	    fX_Xn = (0.07787 * fX_Xn) + DIV16BY116;
+	} else {
+	    fX_Xn = (XcmsFloat) XCMS_CUBEROOT(fX_Xn);
+	}
+
+	/* Calculate f(Z/Zn) */
+	if ((fZ_Zn = pColor->spec.CIEXYZ.Z / pLab_WhitePt->spec.CIEXYZ.Z) < 0.008856) {
+	    fZ_Zn = (0.07787 * fZ_Zn) + DIV16BY116;
+	} else {
+	    fZ_Zn = (XcmsFloat) XCMS_CUBEROOT(fZ_Zn);
+	}
+
+	Lab_return.a_star = 5.0 * (fX_Xn - fY_Yn);
+	Lab_return.b_star = 2.0 * (fY_Yn - fZ_Zn);
+
+	memcpy((char *)&pColor->spec.CIELab, (char *)&Lab_return,
+	       sizeof(XcmsCIELab));
+	pColor->format = XcmsCIELabFormat;
+    }
+
+    return(XcmsSuccess);
+}
+@
+
+
+1.1.9.1
+log
+@OpenBSD just has imported exactly this tree into their vendor branch,
+called the same tag, in XF4/xc
+This is, apparently, the last XFree86 snapshot before the licence change
+(ie, addition of the advertising clause)
+
+Since the developers don't see any problems with that, and we would like
+to integrate improvements done by the remaining one or two (or so) XFree86
+developers (j/k), this prepares enabling us to update X-Window in the future.
+@
+text
+@d39 1
+a39 1
+/* $XFree86: xc/lib/X11/Lab.c,v 1.4 2003/04/13 19:22:16 dawes Exp $ */
+a45 1
+#include "Cv.h"
+d60 11
+d74 2
+a75 2
+static int CIELab_ParseString(register char *spec, XcmsColor *pColor);
+static Status XcmsCIELab_ValidSpec(XcmsColor *pColor);
+d130 3
+a132 3
+CIELab_ParseString(
+    register char *spec,
+    XcmsColor *pColor)
+d195 2
+a196 2
+XcmsCIELab_ValidSpec(
+    XcmsColor *pColor)
+@
+
+
+1.1.1.1
+log
+@Import OpenBSD 3.3 XF4 repository from CTM 3132 the first time
+This finalizes starting an OpenBSD-mirabile (aka MirBSD) repository.
+
+### MirBSD is:
+# Copyright (c) 1982-2003 by Thorsten "mirabile" Glaser <x86@@ePost.de>
+# Copyright © 1968-2003  The authors of And contributors to UNIX®, the
+#       C Language, BSD/Berkeley Unix; 386BSD, NetBSD 1.1 and OpenBSD.
+#
+# Anyone who obtained a copy of this work is hereby permitted to freely use,
+# distribute, modify, merge, sublicence, give away or sell it as long as the
+# authors are given due credit and the following notice is retained:
+#
+# This work is provided "as is", with no explicit or implicit warranty what-
+# soever. Use it only at your own risk. In no event may an author or contri-
+# butor be held liable for any damage, directly or indirectly, that origina-
+# ted through or is caused by creation or modification of this work.
+
+MirBSD is my private tree. MirBSD does not differ very much from OpenBSD
+and intentionally tracks OpenBSD. That's why it _is_ OpenBSD, just not the
+official one. It's like with DarrenBSD.
+
+At time of this writing, no advertising for MirBSD must be done,
+because the advertising clause has not yet been sorted out.
+
+http://templeofhate.com/tglaser/MirBSD/index.php
+@
+text
+@@
+
+
+1.1.1.2
+log
+@That's what OpenBSD will, probably, ship as XF4 in 3.5
+their last sync against XFree86 4.3-current has been
+imported into our vendor branch, too
+@
+text
+@d39 1
+a39 1
+/* $XFree86: xc/lib/X11/Lab.c,v 1.4 2003/04/13 19:22:16 dawes Exp $ */
+a45 1
+#include "Cv.h"
+d60 11
+d74 2
+a75 2
+static int CIELab_ParseString(register char *spec, XcmsColor *pColor);
+static Status XcmsCIELab_ValidSpec(XcmsColor *pColor);
+d130 3
+a132 3
+CIELab_ParseString(
+    register char *spec,
+    XcmsColor *pColor)
+d195 2
+a196 2
+XcmsCIELab_ValidSpec(
+    XcmsColor *pColor)
+@
+

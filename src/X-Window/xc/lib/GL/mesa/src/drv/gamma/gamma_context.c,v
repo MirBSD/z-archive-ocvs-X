@@ -1,0 +1,340 @@
+head	1.1;
+branch	1.1.1;
+access;
+symbols
+	tg-mergetmp-2:1.1.1.2
+	cvs-200410241530:1.1.1.2
+	cvs-200410012000:1.1.1.2
+	cvs-200407141120:1.1.1.2
+	cvs-200406231010:1.1.1.2
+	MIRBSD_7quater:1.1.1.1
+	cvs-200405271510:1.1.1.2
+	XFree86_4_4_0:1.1.9.1
+	cvs-200403021700:1.1.1.2
+	XFREE86_20040213:1.1.9.1
+	xc:1.1.9
+	cvs-200401291925:1.1.1.1
+	MIRBSD_7_ALPHA:1.1.1.1.0.4
+	MIRBSD_7:1.1.1.1.0.2
+	MIRBSD_7ter:1.1.1.1
+	cvs-20011091815:1.1.1.1
+	cvs-200309162130:1.1.1.1
+	cvs-200308302005:1.1.1.1
+	ctmx-0387:1.1.1.1
+	ctmx-0384:1.1.1.1
+	MIRBSD_5:1.1.1.1
+	ctmx-0375:1.1.1.1
+	ctmx-0373:1.1.1.1
+	ctm-0371:1.1.1.1
+	ctm-0370:1.1.1.1
+	MIRBSD_4:1.1.1.1
+	ctm-0363:1.1.1.1
+	ctm-0359:1.1.1.1
+	openbsd:1.1.1;
+locks; strict;
+comment	@ * @;
+
+
+1.1
+date	2003.04.08.18.31.24;	author tg;	state Exp;
+branches
+	1.1.1.1
+	1.1.9.1;
+next	;
+
+1.1.1.1
+date	2003.04.08.18.31.24;	author tg;	state Exp;
+branches;
+next	1.1.1.2;
+
+1.1.1.2
+date	2004.03.02.17.58.01;	author tg;	state Stab;
+branches;
+next	;
+
+1.1.9.1
+date	2004.02.14.19.17.50;	author tg;	state Exp;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@/*
+ * Copyright 2001 by Alan Hourihane.
+ *
+ * Permission to use, copy, modify, distribute, and sell this software and its
+ * documentation for any purpose is hereby granted without fee, provided that
+ * the above copyright notice appear in all copies and that both that
+ * copyright notice and this permission notice appear in supporting
+ * documentation, and that the name of Alan Hourihane not be used in
+ * advertising or publicity pertaining to distribution of the software without
+ * specific, written prior permission.  Alan Hourihane makes no representations
+ * about the suitability of this software for any purpose.  It is provided
+ * "as is" without express or implied warranty.
+ *
+ * ALAN HOURIHANE DISCLAIMS ALL WARRANTIES WITH REGARD TO THIS SOFTWARE,
+ * INCLUDING ALL IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS, IN NO
+ * EVENT SHALL ALAN HOURIHANE BE LIABLE FOR ANY SPECIAL, INDIRECT OR
+ * CONSEQUENTIAL DAMAGES OR ANY DAMAGES WHATSOEVER RESULTING FROM LOSS OF USE,
+ * DATA OR PROFITS, WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER
+ * TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR
+ * PERFORMANCE OF THIS SOFTWARE.
+ *
+ * Authors:  Alan Hourihane, <alanh@@tungstengraphics.com>
+ *
+ * 3DLabs Gamma driver.
+ *
+ */
+#include "gamma_context.h"
+
+#include "swrast/swrast.h"
+#include "swrast_setup/swrast_setup.h"
+#include "array_cache/acache.h"
+
+#include "tnl/tnl.h"
+#include "tnl/t_pipeline.h"
+
+#include "context.h"
+#include "simple_list.h"
+#include "mem.h"
+#include "matrix.h"
+#include "extensions.h"
+#if defined(USE_X86_ASM)
+#include "X86/common_x86_asm.h"
+#endif
+#include "simple_list.h"
+#include "mem.h"
+#include "mm.h"
+
+
+#include "gamma_vb.h"
+#include "gamma_tris.h"
+
+extern const struct gl_pipeline_stage _gamma_render_stage;
+
+static const struct gl_pipeline_stage *gamma_pipeline[] = {
+   &_tnl_vertex_transform_stage,
+   &_tnl_normal_transform_stage,
+   &_tnl_lighting_stage,
+   &_tnl_fog_coordinate_stage,
+   &_tnl_texgen_stage,
+   &_tnl_texture_transform_stage,
+				/* REMOVE: point attenuation stage */
+#if 1
+   &_gamma_render_stage,	/* ADD: unclipped rastersetup-to-dma */
+#endif
+   &_tnl_render_stage,
+   0,
+};
+
+GLboolean gammaCreateContext( Display *dpy, const __GLcontextModes *glVisual,
+			     __DRIcontextPrivate *driContextPriv,
+                     	     void *sharedContextPrivate)
+{
+   GLcontext *ctx, *shareCtx;
+   __DRIscreenPrivate *sPriv = driContextPriv->driScreenPriv;
+   gammaContextPtr gmesa;
+   gammaScreenPtr gammascrn;
+   GLINTSAREADRIPtr saPriv=(GLINTSAREADRIPtr)(((char*)sPriv->pSAREA)+
+						 sizeof(XF86DRISAREARec));
+
+   gmesa = (gammaContextPtr) CALLOC( sizeof(*gmesa) );
+   if ( !gmesa ) return GL_FALSE;
+
+   /* Allocate the Mesa context */
+   if (sharedContextPrivate)
+      shareCtx = ((gammaContextPtr) sharedContextPrivate)->glCtx;
+   else
+      shareCtx = NULL;
+
+   gmesa->glCtx = _mesa_create_context(glVisual, shareCtx, gmesa, GL_TRUE);
+   if (!gmesa->glCtx) {
+      FREE(gmesa);
+      return GL_FALSE;
+   }
+
+   gmesa->display = dpy;
+
+   gmesa->driContext = driContextPriv;
+   gmesa->driScreen = sPriv;
+   gmesa->driDrawable = NULL; /* Set by XMesaMakeCurrent */
+
+   gmesa->hHWContext = driContextPriv->hHWContext;
+   gmesa->driHwLock = &sPriv->pSAREA->lock;
+   gmesa->driFd = sPriv->fd;
+   gmesa->sarea = saPriv;
+
+   gammascrn = gmesa->gammaScreen = (gammaScreenPtr)(sPriv->private);
+
+   ctx = gmesa->glCtx;
+
+   ctx->Const.MaxTextureLevels = 13;  /* 4K by 4K?  Is that right? */
+   ctx->Const.MaxTextureUnits = 1; /* Permedia 3 */
+
+   ctx->Const.MinLineWidth = 0.0;
+   ctx->Const.MaxLineWidth = 255.0;
+
+   ctx->Const.MinLineWidthAA = 0.0;
+   ctx->Const.MaxLineWidthAA = 65536.0;
+
+   ctx->Const.MinPointSize = 0.0;
+   ctx->Const.MaxPointSize = 255.0;
+
+   ctx->Const.MinPointSizeAA = 0.5; /* 4x4 quality mode */
+   ctx->Const.MaxPointSizeAA = 16.0; 
+   ctx->Const.PointSizeGranularity = 0.25;
+
+   gmesa->texHeap = mmInit( 0, gmesa->gammaScreen->textureSize );
+
+   make_empty_list(&gmesa->TexObjList);
+   make_empty_list(&gmesa->SwappedOut);
+
+   gmesa->CurrentTexObj[0] = 0;
+   gmesa->CurrentTexObj[1] = 0; /* Permedia 3, second texture */
+
+   gmesa->RenderIndex = ~0;
+
+
+   /* Initialize the software rasterizer and helper modules.
+    */
+   _swrast_CreateContext( ctx );
+   _ac_CreateContext( ctx );
+   _tnl_CreateContext( ctx );
+   _swsetup_CreateContext( ctx );
+
+   /* Install the customized pipeline:
+    */
+   _tnl_destroy_pipeline( ctx );
+   _tnl_install_pipeline( ctx, gamma_pipeline );
+
+   /* Configure swrast to match hardware characteristics:
+    */
+   _swrast_allow_pixel_fog( ctx, GL_FALSE );
+   _swrast_allow_vertex_fog( ctx, GL_TRUE );
+
+   gammaInitVB( ctx );
+   gammaDDInitExtensions( ctx );
+   gammaDDInitDriverFuncs( ctx );
+   gammaDDInitStateFuncs( ctx );
+   gammaDDInitSpanFuncs( ctx );
+   gammaDDInitTextureFuncs( ctx );
+   gammaDDInitTriFuncs( ctx );
+   gammaDDInitState( gmesa );
+
+   driContextPriv->driverPrivate = (void *)gmesa;
+
+   GET_FIRST_DMA(gmesa->driFd, gmesa->hHWContext,
+		  1, &gmesa->bufIndex, &gmesa->bufSize,
+		  &gmesa->buf, &gmesa->bufCount, gammascrn);
+
+#ifdef DO_VALIDATE
+    GET_FIRST_DMA(gmesa->driFd, gmesa->hHWContext,
+		  1, &gmesa->WCbufIndex, &gmesa->WCbufSize,
+		  &gmesa->WCbuf, &gmesa->WCbufCount, gammascrn);
+#endif
+
+    switch (glVisual->depthBits) {
+    case 16:
+	gmesa->DeltaMode = DM_Depth16;
+	gmesa->depth_scale = 1.0f / 0xffff;
+	break;
+    case 24:
+	gmesa->DeltaMode = DM_Depth24;
+	gmesa->depth_scale = 1.0f / 0xffffff;
+	break;
+    case 32:
+	gmesa->DeltaMode = DM_Depth32;
+	gmesa->depth_scale = 1.0f / 0xffffffff;
+	break;
+    default:
+	break;
+    }
+
+    gmesa->DepthSize = glVisual->depthBits;
+    gmesa->Flags  = GAMMA_FRONT_BUFFER;
+    gmesa->Flags |= (glVisual->doubleBufferMode ? GAMMA_BACK_BUFFER : 0);
+    gmesa->Flags |= (gmesa->DepthSize > 0 ? GAMMA_DEPTH_BUFFER : 0);
+
+    gmesa->EnabledFlags = GAMMA_FRONT_BUFFER;
+    gmesa->EnabledFlags |= (glVisual->doubleBufferMode ? GAMMA_BACK_BUFFER : 0);
+
+
+    if (gmesa->Flags & GAMMA_BACK_BUFFER) {
+        gmesa->readOffset = gmesa->drawOffset = gmesa->driScreen->fbHeight * gmesa->driScreen->fbWidth * gmesa->gammaScreen->cpp;
+    } else {
+    	gmesa->readOffset = gmesa->drawOffset = 0;
+    }
+
+    gammaInitHW( gmesa );
+
+    driContextPriv->driverPrivate = (void *)gmesa;
+
+    return GL_TRUE;
+}
+@
+
+
+1.1.9.1
+log
+@OpenBSD just has imported exactly this tree into their vendor branch,
+called the same tag, in XF4/xc
+This is, apparently, the last XFree86 snapshot before the licence change
+(ie, addition of the advertising clause)
+
+Since the developers don't see any problems with that, and we would like
+to integrate improvements done by the remaining one or two (or so) XFree86
+developers (j/k), this prepares enabling us to update X-Window in the future.
+@
+text
+@d38 1
+a38 1
+#include "imports.h"
+d45 1
+d69 1
+a69 1
+GLboolean gammaCreateContext( const __GLcontextModes *glVisual,
+d89 1
+a89 1
+   gmesa->glCtx = _mesa_create_context(glVisual, shareCtx, (void *) gmesa, GL_TRUE);
+d94 2
+@
+
+
+1.1.1.1
+log
+@The X-Windowing System
+
+Import XFree86 4.3 from OpenBSD by CTM, in the hope it's stable
+@
+text
+@@
+
+
+1.1.1.2
+log
+@That's what OpenBSD will, probably, ship as XF4 in 3.5
+their last sync against XFree86 4.3-current has been
+imported into our vendor branch, too
+@
+text
+@d38 1
+a38 1
+#include "imports.h"
+d45 1
+d69 1
+a69 1
+GLboolean gammaCreateContext( const __GLcontextModes *glVisual,
+d89 1
+a89 1
+   gmesa->glCtx = _mesa_create_context(glVisual, shareCtx, (void *) gmesa, GL_TRUE);
+d94 2
+@
+

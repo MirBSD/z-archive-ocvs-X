@@ -1,0 +1,472 @@
+head	1.1;
+branch	1.1.1;
+access;
+symbols
+	tg-mergetmp-2:1.1.1.2
+	cvs-200410241530:1.1.1.2
+	cvs-200410012000:1.1.1.2
+	cvs-200407141120:1.1.1.2
+	cvs-200406231010:1.1.1.2
+	MIRBSD_7quater:1.1.1.2
+	cvs-200405271510:1.1.1.2
+	XFree86_4_4_0:1.1.9.1
+	cvs-200403021700:1.1.1.2
+	XFREE86_20040213:1.1.9.1
+	xc:1.1.9
+	cvs-200401291925:1.1.1.2
+	MIRBSD_7_ALPHA:1.1.1.2.0.4
+	MIRBSD_7:1.1.1.2.0.2
+	MIRBSD_7ter:1.1.1.2
+	cvs-20011091815:1.1.1.2
+	cvs-200309162130:1.1.1.2
+	cvs-200308302005:1.1.1.2
+	ctmx-0387:1.1.1.2
+	ctmx-0384:1.1.1.2
+	MIRBSD_5:1.1.1.2
+	ctmx-0375:1.1.1.2
+	ctmx-0373:1.1.1.2
+	ctm-0371:1.1.1.2
+	ctm-0370:1.1.1.2
+	MIRBSD_4:1.1.1.2
+	ctm-0363:1.1.1.2
+	ctm-0359:1.1.1.2
+	ctm-0349:1.1.1.1
+	openbsd:1.1.1;
+locks; strict;
+comment	@ * @;
+
+
+1.1
+date	2003.03.22.20.10.03;	author tg;	state Exp;
+branches
+	1.1.1.1
+	1.1.9.1;
+next	;
+
+1.1.1.1
+date	2003.03.22.20.10.03;	author tg;	state Exp;
+branches;
+next	1.1.1.2;
+
+1.1.1.2
+date	2003.04.08.18.39.02;	author tg;	state Stab;
+branches;
+next	;
+
+1.1.9.1
+date	2004.02.14.19.26.51;	author tg;	state Exp;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@/* $Xorg: atomcache.c,v 1.4 2001/02/09 02:05:31 xorgcvs Exp $ */
+/*
+
+Copyright 1998  The Open Group
+
+Permission to use, copy, modify, distribute, and sell this software and its
+documentation for any purpose is hereby granted without fee, provided that
+the above copyright notice appear in all copies and that both that
+copyright notice and this permission notice appear in supporting
+documentation.
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
+OPEN GROUP BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN
+AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
+CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+Except as contained in this notice, the name of The Open Group shall not be
+used in advertising or otherwise to promote the sale, use or other dealings
+in this Software without prior written authorization from The Open Group.
+
+*/
+/*
+ * Copyright 1994 Network Computing Devices, Inc.
+ *
+ * Permission to use, copy, modify, distribute, and sell this software and
+ * its documentation for any purpose is hereby granted without fee, provided
+ * that the above copyright notice appear in all copies and that both that
+ * copyright notice and this permission notice appear in supporting
+ * documentation, and that the name Network Computing Devices, Inc. not be
+ * used in advertising or publicity pertaining to distribution of this 
+ * software without specific, written prior permission.
+ * 
+ * THIS SOFTWARE IS PROVIDED `AS-IS'.  NETWORK COMPUTING DEVICES, INC.,
+ * DISCLAIMS ALL WARRANTIES WITH REGARD TO THIS SOFTWARE, INCLUDING WITHOUT
+ * LIMITATION ALL IMPLIED WARRANTIES OF MERCHANTABILITY, FITNESS FOR A
+ * PARTICULAR PURPOSE, OR NONINFRINGEMENT.  IN NO EVENT SHALL NETWORK
+ * COMPUTING DEVICES, INC., BE LIABLE FOR ANY DAMAGES WHATSOEVER, INCLUDING
+ * SPECIAL, INCIDENTAL OR CONSEQUENTIAL DAMAGES, INCLUDING LOSS OF USE, DATA,
+ * OR PROFITS, EVEN IF ADVISED OF THE POSSIBILITY THEREOF, AND REGARDLESS OF
+ * WHETHER IN AN ACTION IN CONTRACT, TORT OR NEGLIGENCE, ARISING OUT OF OR IN
+ * CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+ * 
+ */
+/* $XFree86: xc/programs/lbxproxy/di/atomcache.c,v 1.6 2001/12/14 20:00:50 dawes Exp $ */
+
+/*
+ * atom cache for LBX
+ *
+ * real close to standard atom code, but with a slight twist.
+ * LBX doesn't want to invent the Atom associated with a string,
+ * but insert it itself.  only LbxMakeAtom() ends up being modified.
+ *
+ * the end result is a (probably) sparse array of atoms.
+ *
+ * when a client does a GetAtomName(), we use NameForAtom()
+ * - if it works, great, return the value.
+ * - if its doesn't, send it on to the server, and when the answer
+ * 	comes back, call LbxMakeAtom()
+ *
+ * when a client does InternAtom(), LbxMakeAtom() is called.
+ * if its already there (or only-if-exists is true) we return
+ * the appropriate value. if not, we send it on to the server,
+ * and call LbxMakeAtom() with the answer.
+ */
+
+
+#include "misc.h"
+#include "util.h"
+#include "wire.h"
+#include "atomcache.h"
+
+static int
+Hash(string, len)
+    char       *string;
+    int		len;
+{
+    int         h;
+
+    h = 0;
+    while (len--)
+	h = (h << 3) ^ *string++;
+    if (h < 0)
+	return -h;
+    return h;
+}
+
+static Bool
+ResizeHashTable(server)
+    XServerPtr	server;
+{
+    int         newHashSize;
+    int         newHashMask;
+    AtomListPtr *newHashTable;
+    int         i;
+    int         h;
+    int         newRehash;
+    int         r;
+
+    if (server->hashSize == 0)
+	newHashSize = 1024;
+    else
+	newHashSize = server->hashSize * 2;
+    newHashTable = (AtomListPtr *) xalloc(newHashSize * sizeof(AtomListPtr));
+    if (!newHashTable)
+	return FALSE;
+    bzero((char *) newHashTable, newHashSize * sizeof(AtomListPtr));
+    newHashMask = newHashSize - 1;
+    newRehash = (newHashMask - 2);
+    for (i = 0; i < server->hashSize; i++) {
+	if (server->hashTable[i]) {
+	    h = (server->hashTable[i]->hash) & newHashMask;
+	    if (newHashTable[h]) {
+		r = server->hashTable[i]->hash % newRehash | 1;
+		do {
+		    h += r;
+		    if (h >= newHashSize)
+			h -= newHashSize;
+		} while (newHashTable[h]);
+	    }
+	    newHashTable[h] = server->hashTable[i];
+	}
+    }
+    xfree(server->hashTable);
+    server->hashTable = newHashTable;
+    server->hashSize = newHashSize;
+    server->hashMask = newHashMask;
+    server->rehash = newRehash;
+    return TRUE;
+}
+
+static Bool
+ResizeReverseMap(server)
+    XServerPtr	server;
+{
+    if (server->reverseMapSize == 0)
+	server->reverseMapSize = 1000;
+    else
+	server->reverseMapSize *= 2;
+
+    server->reverseMap = (AtomListPtr *) xrealloc(server->reverseMap, 
+		server->reverseMapSize * sizeof(AtomListPtr));
+    bzero((char *)server->reverseMap, 
+	  (server->reverseMapSize * sizeof(AtomListPtr)));
+
+    if (!server->reverseMap)
+	return FALSE;
+
+    return TRUE;
+}
+
+Atom
+LbxMakeAtom(server, string, len, atom, makeit)
+    XServerPtr	server;
+    char       *string;
+    Atom        atom;
+    unsigned    len;
+    int         makeit;
+{
+    AtomListPtr a;
+    int         hash;
+    int         h = 0;
+    int         r;
+
+    hash = Hash(string, len);
+    if (server->hashTable) {
+	h = hash & server->hashMask;
+	if (server->hashTable[h]) {
+	    if (server->hashTable[h]->hash == hash && 
+		server->hashTable[h]->len == len &&
+		!strncmp(server->hashTable[h]->name, string, len)) {
+		    return server->hashTable[h]->atom;
+	    }
+	    r = (hash % server->rehash) | 1;
+	    for (;;) {
+		h += r;
+		if (h >= server->hashSize)
+		    h -= server->hashSize;
+		if (!server->hashTable[h])
+		    break;
+		if (server->hashTable[h]->hash == hash && 
+		    server->hashTable[h]->len == len &&
+		    !strncmp(server->hashTable[h]->name, string, len)) {
+			return server->hashTable[h]->atom;
+		}
+	    }
+	}
+    }
+    if (!makeit)
+	return None;
+    a = (AtomListPtr) xalloc(sizeof(AtomListRec) + len + 1);
+    a->name = (char *) (a + 1);
+    a->len = len;
+    strncpy(a->name, string, len);
+    a->name[len] = '\0';
+    a->atom = atom;
+    if (atom > server->lastAtom)
+	server->lastAtom = atom;
+    a->hash = hash;
+    if (server->hashUsed >= server->hashSize / 2) {
+	ResizeHashTable(server);
+	h = hash & server->hashMask;
+	if (server->hashTable[h]) {
+	    r = (hash % server->rehash) | 1;
+	    do {
+		h += r;
+		if (h >= server->hashSize)
+		    h -= server->hashSize;
+	    } while (server->hashTable[h]);
+	}
+    }
+    server->hashTable[h] = a;
+    server->hashUsed++;
+    a->flags = 0;
+    for (r = 0; r < server->atom_control_count; r++) {
+	if (a->len == server->atom_control[r].len &&
+	    !strncmp(a->name, server->atom_control[r].name, a->len)) {
+	    a->flags = server->atom_control[r].flags;
+	    break;
+	}
+    }
+    if (server->reverseMapSize <= a->atom)
+	ResizeReverseMap(server);
+    server->reverseMap[a->atom] = a;
+    return a->atom;
+}
+
+char *
+NameForAtom(server, atom)
+    XServerPtr	server;
+    Atom        atom;
+{
+    if (atom != None && atom <= server->lastAtom && server->reverseMap[atom])
+	return server->reverseMap[atom]->name;
+    return 0;
+}
+
+unsigned
+FlagsForAtom(server, atom)
+    XServerPtr	server;
+    Atom        atom;
+{
+    if (atom != None && atom <= server->lastAtom && server->reverseMap[atom])
+	return server->reverseMap[atom]->flags;
+    return 0;
+}
+
+void
+FreeAtoms()
+{
+    int         i;
+
+    for (i=0; i < lbxMaxServers; i++) {
+	if (servers[i]) {
+	    if (servers[i]->reverseMap) {
+		for (i = 0; i <= servers[i]->lastAtom; i++)
+		    xfree(servers[i]->reverseMap[i]);
+		xfree(servers[i]->reverseMap);
+	    }
+	    xfree(servers[i]->hashTable);
+	    servers[i]->reverseMapSize = 0;
+	    servers[i]->reverseMap = NULL;
+	    servers[i]->hashTable = NULL;
+	    servers[i]->lastAtom = 0;
+	    servers[i]->hashSize = 0;
+	    servers[i]->hashUsed = 0;
+	}
+    }
+}
+@
+
+
+1.1.9.1
+log
+@OpenBSD just has imported exactly this tree into their vendor branch,
+called the same tag, in XF4/xc
+This is, apparently, the last XFree86 snapshot before the licence change
+(ie, addition of the advertising clause)
+
+Since the developers don't see any problems with that, and we would like
+to integrate improvements done by the remaining one or two (or so) XFree86
+developers (j/k), this prepares enabling us to update X-Window in the future.
+@
+text
+@d49 1
+a49 1
+/* $XFree86: xc/programs/lbxproxy/di/atomcache.c,v 1.7 2002/10/15 02:16:26 dawes Exp $ */
+d137 1
+a137 1
+ResizeReverseMap(server, atom)
+a138 1
+    Atom	atom;
+d140 1
+a140 4
+    int oldMapSize = 0;
+
+    /* has the map already been initialized? */
+    if (server->reverseMapSize <= 0)
+a142 5
+	/* keep track of the map size before we resize it */
+	oldMapSize = server->reverseMapSize;
+
+    /* grow the map until it is big enough */
+    while (server->reverseMapSize < atom)
+d145 1
+a145 2
+    /* resize the map */
+    server->reverseMap = (AtomListPtr *) xrealloc(server->reverseMap,
+d147 2
+a150 1
+	/* memory allocation problem */
+a152 4
+    /* zero out the new portion of the map */
+    bzero((char *) (server->reverseMap + oldMapSize),
+	  ((server->reverseMapSize - oldMapSize) * sizeof(AtomListPtr)));
+
+d227 1
+a227 1
+	ResizeReverseMap(server, a->atom);
+@
+
+
+1.1.1.1
+log
+@Import OpenBSD 3.3 XF4 repository from CTM 3132 the first time
+This finalizes starting an OpenBSD-mirabile (aka MirBSD) repository.
+
+### MirBSD is:
+# Copyright (c) 1982-2003 by Thorsten "mirabile" Glaser <x86@@ePost.de>
+# Copyright © 1968-2003  The authors of And contributors to UNIX®, the
+#       C Language, BSD/Berkeley Unix; 386BSD, NetBSD 1.1 and OpenBSD.
+#
+# Anyone who obtained a copy of this work is hereby permitted to freely use,
+# distribute, modify, merge, sublicence, give away or sell it as long as the
+# authors are given due credit and the following notice is retained:
+#
+# This work is provided "as is", with no explicit or implicit warranty what-
+# soever. Use it only at your own risk. In no event may an author or contri-
+# butor be held liable for any damage, directly or indirectly, that origina-
+# ted through or is caused by creation or modification of this work.
+
+MirBSD is my private tree. MirBSD does not differ very much from OpenBSD
+and intentionally tracks OpenBSD. That's why it _is_ OpenBSD, just not the
+official one. It's like with DarrenBSD.
+
+At time of this writing, no advertising for MirBSD must be done,
+because the advertising clause has not yet been sorted out.
+
+http://templeofhate.com/tglaser/MirBSD/index.php
+@
+text
+@@
+
+
+1.1.1.2
+log
+@The X-Windowing System
+
+Import XFree86 4.3 from OpenBSD by CTM, in the hope it's stable
+@
+text
+@d49 1
+a49 1
+/* $XFree86: xc/programs/lbxproxy/di/atomcache.c,v 1.7 2002/10/15 02:16:26 dawes Exp $ */
+d137 1
+a137 1
+ResizeReverseMap(server, atom)
+a138 1
+    Atom	atom;
+d140 1
+a140 4
+    int oldMapSize = 0;
+
+    /* has the map already been initialized? */
+    if (server->reverseMapSize <= 0)
+a142 5
+	/* keep track of the map size before we resize it */
+	oldMapSize = server->reverseMapSize;
+
+    /* grow the map until it is big enough */
+    while (server->reverseMapSize < atom)
+d145 1
+a145 2
+    /* resize the map */
+    server->reverseMap = (AtomListPtr *) xrealloc(server->reverseMap,
+d147 2
+a150 1
+	/* memory allocation problem */
+a152 4
+    /* zero out the new portion of the map */
+    bzero((char *) (server->reverseMap + oldMapSize),
+	  ((server->reverseMapSize - oldMapSize) * sizeof(AtomListPtr)));
+
+d227 1
+a227 1
+	ResizeReverseMap(server, a->atom);
+@
+

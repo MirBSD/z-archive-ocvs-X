@@ -1,0 +1,1435 @@
+head	1.1;
+branch	1.1.1;
+access;
+symbols
+	tg-mergetmp-2:1.1.1.2
+	cvs-200410241530:1.1.1.2
+	cvs-200410012000:1.1.1.2
+	cvs-200407141120:1.1.1.2
+	cvs-200406231010:1.1.1.2
+	MIRBSD_7quater:1.1.1.1
+	cvs-200405271510:1.1.1.2
+	XFree86_4_4_0:1.1.9.1
+	cvs-200403021700:1.1.1.2
+	XFREE86_20040213:1.1.9.1
+	xc:1.1.9
+	cvs-200401291925:1.1.1.1
+	MIRBSD_7_ALPHA:1.1.1.1.0.4
+	MIRBSD_7:1.1.1.1.0.2
+	MIRBSD_7ter:1.1.1.1
+	cvs-20011091815:1.1.1.1
+	cvs-200309162130:1.1.1.1
+	cvs-200308302005:1.1.1.1
+	ctmx-0387:1.1.1.1
+	ctmx-0384:1.1.1.1
+	MIRBSD_5:1.1.1.1
+	ctmx-0375:1.1.1.1
+	ctmx-0373:1.1.1.1
+	ctm-0371:1.1.1.1
+	ctm-0370:1.1.1.1
+	MIRBSD_4:1.1.1.1
+	ctm-0363:1.1.1.1
+	ctm-0359:1.1.1.1
+	openbsd:1.1.1;
+locks; strict;
+comment	@ * @;
+
+
+1.1
+date	2003.04.08.18.31.12;	author tg;	state Exp;
+branches
+	1.1.1.1
+	1.1.9.1;
+next	;
+
+1.1.1.1
+date	2003.04.08.18.31.12;	author tg;	state Exp;
+branches;
+next	1.1.1.2;
+
+1.1.1.2
+date	2004.03.02.17.57.21;	author tg;	state Stab;
+branches;
+next	;
+
+1.1.9.1
+date	2004.02.14.19.17.41;	author tg;	state Exp;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@/* $XFree86: xc/lib/GL/dri/dri_util.h,v 1.1 2002/02/22 21:32:52 dawes Exp $ */
+/**************************************************************************
+
+Copyright 1998-1999 Precision Insight, Inc., Cedar Park, Texas.
+All Rights Reserved.
+
+Permission is hereby granted, free of charge, to any person obtaining a
+copy of this software and associated documentation files (the
+"Software"), to deal in the Software without restriction, including
+without limitation the rights to use, copy, modify, merge, publish,
+distribute, sub license, and/or sell copies of the Software, and to
+permit persons to whom the Software is furnished to do so, subject to
+the following conditions:
+
+The above copyright notice and this permission notice (including the
+next paragraph) shall be included in all copies or substantial portions
+of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
+OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NON-INFRINGEMENT.
+IN NO EVENT SHALL PRECISION INSIGHT AND/OR ITS SUPPLIERS BE LIABLE FOR
+ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,
+TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
+SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+**************************************************************************/
+
+/*
+ * Authors:
+ *   Kevin E. Martin <kevin@@precisioninsight.com>
+ *   Brian Paul <brian@@precisioninsight.com>
+ */
+
+#ifndef _DRI_UTIL_H_
+#define _DRI_UTIL_H_
+
+#ifdef GLX_DIRECT_RENDERING
+
+#define CAPI  /* XXX this should be globally defined somewhere */
+
+#include <stdarg.h>
+#include "glxclient.h"
+#include "xf86dri.h"
+#include "sarea.h"
+#include "GL/internal/glcore.h"
+
+
+typedef struct __DRIdisplayPrivateRec  __DRIdisplayPrivate;
+typedef struct __DRIscreenPrivateRec   __DRIscreenPrivate;
+typedef struct __DRIcontextPrivateRec  __DRIcontextPrivate;
+typedef struct __DRIdrawablePrivateRec __DRIdrawablePrivate;
+
+
+#define DRI_VALIDATE_DRAWABLE_INFO_ONCE(dpy, scrn, pDrawPriv)   \
+    do {                                                        \
+	if (*(pDrawPriv->pStamp) != pDrawPriv->lastStamp) {     \
+	    __driUtilUpdateDrawableInfo(dpy, scrn, pDrawPriv);  \
+	}                                                       \
+    } while (0)
+
+
+#define DRI_VALIDATE_DRAWABLE_INFO(dpy, psp, pdp)                       \
+do {                                                                    \
+    while (*(pdp->pStamp) != pdp->lastStamp) {                          \
+	DRM_UNLOCK(psp->fd, &psp->pSAREA->lock,                         \
+		   pdp->driContextPriv->hHWContext);                    \
+                                                                        \
+	DRM_SPINLOCK(&psp->pSAREA->drawable_lock, psp->drawLockID);     \
+	DRI_VALIDATE_DRAWABLE_INFO_ONCE(dpy, psp->myNum, pdp);          \
+	DRM_SPINUNLOCK(&psp->pSAREA->drawable_lock, psp->drawLockID);   \
+                                                                        \
+	DRM_LIGHT_LOCK(psp->fd, &psp->pSAREA->lock,                     \
+		       pdp->driContextPriv->hHWContext);                \
+    }                                                                   \
+} while (0)
+
+
+struct __DriverAPIRec {
+    GLboolean (*InitDriver)(__DRIscreenPrivate *driScrnPriv);
+    void (*DestroyScreen)(__DRIscreenPrivate *driScrnPriv);
+    GLboolean (*CreateContext)(Display *dpy,
+                               const __GLcontextModes *glVis,
+                               __DRIcontextPrivate *driContextPriv,
+                               void *sharedContextPrivate);
+    void (*DestroyContext)(__DRIcontextPrivate *driContextPriv);
+    GLboolean (*CreateBuffer)(Display *dpy,
+                              __DRIscreenPrivate *driScrnPriv,
+                              __DRIdrawablePrivate *driDrawPriv,
+                              const __GLcontextModes *glVis,
+                              GLboolean pixmapBuffer);
+    void (*DestroyBuffer)(__DRIdrawablePrivate *driDrawPriv);
+    void (*SwapBuffers)(Display *dpy, void *drawablePrivate);
+    GLboolean (*MakeCurrent)(__DRIcontextPrivate *driContextPriv,
+                             __DRIdrawablePrivate *driDrawPriv,
+                             __DRIdrawablePrivate *driReadPriv);
+    GLboolean (*UnbindContext)(__DRIcontextPrivate *driContextPriv);
+    GLboolean (*OpenFullScreen)(__DRIcontextPrivate *driContextPriv);
+    GLboolean (*CloseFullScreen)(__DRIcontextPrivate *driContextPriv);
+};
+
+
+struct __DRIdrawablePrivateRec {
+    /*
+    ** Kernel drawable handle (not currently used).
+    */
+    drmDrawable hHWDrawable;
+
+    /*
+    ** Driver's private drawable information.  This structure is opaque.
+    */
+    void *driverPrivate;
+
+    /*
+    ** X's drawable ID associated with this private drawable.
+    */
+    GLXDrawable draw;
+
+    /*
+    ** Reference count for number of context's currently bound to this
+    ** drawable.  Once the refcount reaches 0, the drawable can be
+    ** destroyed.  This behavior will change with GLX 1.3.
+    */
+    int refcount;
+
+    /*
+    ** Index of this drawable's information in the SAREA.
+    */
+    unsigned int index;
+
+    /*
+    ** Pointer to the "drawable has changed ID" stamp in the SAREA.
+    */
+    unsigned int *pStamp;
+
+    /*
+    ** Last value of the stamp.  If this differs from the value stored
+    ** at *pStamp, then the drawable information has been modified by
+    ** the X server, and the drawable information (below) should be
+    ** retrieved from the X server.
+    */
+    unsigned int lastStamp;
+
+    /*
+    ** Drawable information used in software fallbacks.
+    */
+    int x;
+    int y;
+    int w;
+    int h;
+    int numClipRects;
+    XF86DRIClipRectPtr pClipRects;
+
+    /*
+    ** Information about the back and depthbuffer where different
+    ** from above.
+    */
+    int backX;
+    int backY;
+    int backClipRectType;
+    int numBackClipRects;
+    XF86DRIClipRectPtr pBackClipRects;
+
+    /*
+    ** Pointer to context to which this drawable is currently bound.
+    */
+    __DRIcontextPrivate *driContextPriv;
+
+    /*
+    ** Pointer to screen on which this drawable was created.
+    */
+    __DRIscreenPrivate *driScreenPriv;
+};
+
+struct __DRIcontextPrivateRec {
+    /*
+    ** Kernel context handle used to access the device lock.
+    */
+    XID contextID;
+
+    /*
+    ** Kernel context handle used to access the device lock.
+    */
+    drmContext hHWContext;
+
+    /*
+    ** Device driver's private context data.  This structure is opaque.
+    */
+    void *driverPrivate;
+
+    /*
+    ** This context's display pointer.
+    */
+    Display *display;
+
+    /*
+    ** Pointer to drawable currently bound to this context.
+    */
+    __DRIdrawablePrivate *driDrawablePriv;
+
+    /*
+    ** Pointer to screen on which this context was created.
+    */
+    __DRIscreenPrivate *driScreenPriv;
+};
+
+struct __DRIscreenPrivateRec {
+    /*
+    ** Display for this screen
+    */
+    Display *display;
+
+    /*
+    ** Current screen's number
+    */
+    int myNum;
+
+    /*
+    ** Callback functions into the hardware-specific DRI driver code.
+    */
+    struct __DriverAPIRec DriverAPI;
+
+    /*
+    ** DDX / 2D driver version information.
+    */
+    int ddxMajor;
+    int ddxMinor;
+    int ddxPatch;
+
+    /*
+    ** DRM version information.
+    */
+    int drmMajor;
+    int drmMinor;
+    int drmPatch;
+
+    /*
+    ** ID used when the client sets the drawable lock.  The X server
+    ** uses this value to detect if the client has died while holding
+    ** the drawable lock.
+    */
+    int drawLockID;
+
+    /*
+    ** File descriptor returned when the kernel device driver is opened.
+    ** It is used to:
+    **   - authenticate client to kernel
+    **   - map the frame buffer, SAREA, etc.
+    **   - close the kernel device driver
+    */
+    int fd;
+
+    /*
+    ** SAREA pointer used to access:
+    **   - the device lock
+    **   - the device-independent per-drawable and per-context(?) information
+    */
+    XF86DRISAREAPtr pSAREA;
+
+    /*
+    ** Direct frame buffer access information used for software
+    ** fallbacks.
+    */
+    unsigned char *pFB;
+    int fbSize;
+    int fbOrigin;
+    int fbStride;
+    int fbWidth;
+    int fbHeight;
+    int fbBPP;
+
+    /*
+    ** Device-dependent private information (stored in the SAREA).  This
+    ** data is accessed by the client driver only.
+    */
+    void *pDevPriv;
+    int devPrivSize;
+
+    /*
+    ** Dummy context to which drawables are bound when not bound to any
+    ** other context. A dummy hHWContext is created for this context,
+    ** and is used by the GL core when a HW lock is required but the
+    ** drawable is not currently bound (e.g., potentially during a
+    ** SwapBuffers request).  The dummy context is created when the
+    ** first "real" context is created on this screen.
+    */
+    __DRIcontextPrivate dummyContextPriv;
+
+    /*
+    ** Hash table to hold the drawable information for this screen.
+    */
+    void *drawHash;
+
+    /*
+    ** Device-dependent private information (not stored in the SAREA).
+    ** This pointer is never touched by the DRI layer.
+    */
+    void *private;
+
+    /* If we're in full screen mode (via DRIOpenFullScreen), this points
+       to the drawable that was bound.  Otherwise, this is NULL. */
+    __DRIdrawablePrivate *fullscreen;
+};
+
+
+
+extern void
+__driUtilMessage(const char *f, ...);
+
+
+extern void
+__driUtilUpdateDrawableInfo(Display *dpy, int scrn,
+                            __DRIdrawablePrivate *pdp);
+
+extern __DRIscreenPrivate *
+__driUtilCreateScreen(Display *dpy, int scrn, __DRIscreen *psc,
+                      int numConfigs, __GLXvisualConfig *config,
+                      const struct __DriverAPIRec *driverAPI);
+
+/* This must be implemented in each driver */
+extern void *
+__driCreateScreen(Display *dpy, int scrn, __DRIscreen *psc,
+                  int numConfigs, __GLXvisualConfig *config);
+
+
+/* This is optionally implemented in each driver */
+extern void
+__driRegisterExtensions( void );
+
+
+#endif /* GLX_DIRECT_RENDERING */
+
+#endif /* _DRI_UTIL_H_ */
+@
+
+
+1.1.9.1
+log
+@OpenBSD just has imported exactly this tree into their vendor branch,
+called the same tag, in XF4/xc
+This is, apparently, the last XFree86 snapshot before the licence change
+(ie, addition of the advertising clause)
+
+Since the developers don't see any problems with that, and we would like
+to integrate improvements done by the remaining one or two (or so) XFree86
+developers (j/k), this prepares enabling us to update X-Window in the future.
+@
+text
+@d1 27
+a27 21
+/* $XFree86: xc/lib/GL/dri/dri_util.h,v 1.4 2003/11/14 22:44:26 tsi Exp $ */
+/**
+ * \file dri_util.h
+ * DRI utility functions definitions.
+ *
+ * This module acts as glue between GLX and the actual hardware driver.  A DRI
+ * driver doesn't really \e have to use any of this - it's optional.  But, some
+ * useful stuff is done here that otherwise would have to be duplicated in most
+ * drivers.
+ * 
+ * Basically, these utility functions take care of some of the dirty details of
+ * screen initialization, context creation, context binding, DRM setup, etc.
+ *
+ * These functions are compiled into each DRI driver so libGL.so knows nothing
+ * about them.
+ *
+ * \sa dri_util.c.
+ * 
+ * \author Kevin E. Martin <kevin@@precisioninsight.com>
+ * \author Brian Paul <brian@@precisioninsight.com>
+ */
+d30 3
+a32 22
+ * Copyright 1998-1999 Precision Insight, Inc., Cedar Park, Texas.
+ * All Rights Reserved.
+ * 
+ * Permission is hereby granted, free of charge, to any person obtaining a
+ * copy of this software and associated documentation files (the
+ * "Software"), to deal in the Software without restriction, including
+ * without limitation the rights to use, copy, modify, merge, publish,
+ * distribute, sub license, and/or sell copies of the Software, and to
+ * permit persons to whom the Software is furnished to do so, subject to
+ * the following conditions:
+ * 
+ * The above copyright notice and this permission notice (including the
+ * next paragraph) shall be included in all copies or substantial portions
+ * of the Software.
+ * 
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
+ * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+ * MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NON-INFRINGEMENT.
+ * IN NO EVENT SHALL PRECISION INSIGHT AND/OR ITS SUPPLIERS BE LIABLE FOR
+ * ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,
+ * TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
+ * SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+a34 1
+
+d42 5
+a46 5
+#include <sys/types.h>
+#include "glxclient.h"           /* for GLXDrawable */
+#include "xf86dri.h"             /* for XF86DRIClipRectPtr */
+#include "sarea.h"               /* for XF86DRISAREAPtr */
+#include "GL/internal/glcore.h"  /* for __GLcontextModes */
+a52 1
+typedef struct __DRIswapInfoRec        __DRIswapInfo;
+d55 1
+a55 4
+/**
+ * Used by DRI_VALIDATE_DRAWABLE_INFO
+ */
+#define DRI_VALIDATE_DRAWABLE_INFO_ONCE(pDrawPriv)              \
+d58 1
+a58 1
+	    __driUtilUpdateDrawableInfo(pDrawPriv);             \
+d63 1
+a63 6
+/**
+ * Utility macro to validate the drawable information.
+ *
+ * See __DRIdrawablePrivate::pStamp and __DRIdrawablePrivate::lastStamp.
+ */
+#define DRI_VALIDATE_DRAWABLE_INFO(psp, pdp)                            \
+d70 1
+a70 1
+	DRI_VALIDATE_DRAWABLE_INFO_ONCE(pdp);                           \
+a78 10
+/**
+ * Driver callback functions.
+ *
+ * Each DRI driver must have one of these structures with all the pointers set
+ * to appropriate functions within the driver.
+ * 
+ * When glXCreateContext() is called, for example, it'll call a helper function
+ * dri_util.c which in turn will jump through the \a CreateContext pointer in
+ * this structure.
+ */
+a79 3
+    /** 
+     * Driver initialization callback
+     */
+a80 4
+    
+    /**
+     * Screen destruction callback
+     */
+d82 2
+a83 5
+
+    /**
+     * Context creation callback
+     */	    	    
+    GLboolean (*CreateContext)(const __GLcontextModes *glVis,
+a85 4
+
+    /**
+     * Context destruction callback
+     */
+d87 2
+a88 5
+
+    /**
+     * Buffer (drawable) creation callback
+     */
+    GLboolean (*CreateBuffer)(__DRIscreenPrivate *driScrnPriv,
+a91 4
+    
+    /**
+     * Buffer (drawable) destruction callback
+     */
+d93 1
+a93 9
+
+    /**
+     * Buffer swapping callback 
+     */
+    void (*SwapBuffers)(__DRIdrawablePrivate *driDrawPriv);
+
+    /**
+     * Context activation callback
+     */
+a96 4
+
+    /**
+     * Context unbinding callback
+     */
+a97 8
+  
+    /**
+     * Full screen mode opening callback.
+     * 
+     * \deprecated Full screen functionality is no longer used by DRI.
+     *             Drivers should simply install a function returning 
+     *             \c GL_TRUE for backwards compatability.
+     */
+a98 8
+
+    /**
+     * Full screen mode closing callback.
+     * 
+     * \deprecated Full screen functionality is no longer used by DRI.
+     *             Drivers should simply install a function returning 
+     *             \c GL_TRUE for backwards compatability.
+     */
+a99 56
+
+    /* Retrieves statistics about buffer swap operations.  Required if
+     * GLX_OML_sync_control or GLX_MESA_swap_frame_usage is supported.
+     */
+    int (*GetSwapInfo)( __DRIdrawablePrivate *dPriv, __DRIswapInfo * sInfo );
+
+
+    /* Required if GLX_SGI_video_sync or GLX_OML_sync_control is
+     * supported.
+     */
+    int (*GetMSC)( __DRIscreenPrivate * priv, int64_t * count );
+
+    /**
+     * These are required if GLX_OML_sync_control is supported.
+     */
+    /*@@{*/
+    int (*WaitForMSC)( __DRIdrawablePrivate *priv, int64_t target_msc, 
+		       int64_t divisor, int64_t remainder,
+		       int64_t * msc );
+    int (*WaitForSBC)( __DRIdrawablePrivate *priv, int64_t target_sbc,
+		       int64_t * msc, int64_t * sbc );
+
+    int64_t (*SwapBuffersMSC)( __DRIdrawablePrivate *priv, int64_t target_msc,
+			       int64_t divisor, int64_t remainder );
+    /*@@}*/
+};
+
+
+struct __DRIswapInfoRec {
+    /** 
+     * Number of swapBuffers operations that have been *completed*. 
+     */
+    u_int64_t  swap_count;
+
+    /*
+     * Unadjusted system time of the last buffer swap.  This is the time
+     * when the swap completed, not the time when swapBuffers was called.
+     */
+    int64_t   swap_ust;
+
+    /*
+     * Number of swap operations that occurred after the swap deadline.  That
+     * is if a swap happens more than swap_interval frames after the previous
+     * swap, it has missed its deadline.  If swap_interval is 0, then the
+     * swap deadline is 1 frame after the previous swap.
+     */
+    u_int64_t  swap_missed_count;
+
+    /*
+     * Amount of time used by the last swap that missed its deadline.  This
+     * is calculated as (__glXGetUST() - swap_ust) / (swap_interval * 
+     * time_for_single_vrefresh)).  If the actual value of swap_interval is
+     * 0, then 1 is used instead.  If swap_missed_count is non-zero, this
+     * should be greater-than 1.0.
+     */
+    float     swap_missed_usage;
+a102 3
+/**
+ * Per-drawable private DRI driver information.
+ */
+d104 3
+a106 3
+    /**
+     * Kernel drawable handle
+     */
+d109 3
+a111 5
+    /**
+     * Driver's private drawable information.  
+     *
+     * This structure is opaque.
+     */
+d114 3
+a116 3
+    /**
+     * X's drawable ID associated with this private drawable.
+     */
+a117 1
+    __DRIdrawable *pdraw;
+d119 5
+a123 8
+    /**
+     * Reference count for number of context's currently bound to this
+     * drawable.  
+     *
+     * Once it reaches zero, the drawable can be destroyed.
+     *
+     * \note This behavior will change with GLX 1.3.
+     */
+d126 3
+a128 3
+    /**
+     * Index of this drawable information in the SAREA.
+     */
+d131 3
+a133 3
+    /**
+     * Pointer to the "drawable has changed ID" stamp in the SAREA.
+     */
+d136 6
+a141 7
+    /**
+     * Last value of the stamp.
+     *
+     * If this differs from the value stored at __DRIdrawablePrivate::pStamp,
+     * then the drawable information has been modified by the X server, and the
+     * drawable information (below) should be retrieved from the X server.
+     */
+d144 3
+a146 6
+    /**
+     * \name Drawable 
+     *
+     * Drawable information used in software fallbacks.
+     */
+    /*@@{*/
+a152 1
+    /*@@}*/
+d154 4
+a157 6
+    /**
+     * \name Back and depthbuffer
+     *
+     * Information about the back and depthbuffer where different from above.
+     */
+    /*@@{*/
+a162 1
+    /*@@}*/
+d164 3
+a166 3
+    /**
+     * Pointer to context to which this drawable is currently bound.
+     */
+d169 3
+a171 3
+    /**
+     * Pointer to screen on which this drawable was created.
+     */
+a172 16
+
+    /**
+     * \name Display and screen information.
+     * 
+     * Basically just need these for when the locking code needs to call
+     * __driUtilUpdateDrawableInfo() which calls XF86DRIGetDrawableInfo().
+     */
+    /*@@{*/
+    Display *display;
+    int screen;
+    /*@@}*/
+
+    /**
+     * Called via glXSwapBuffers().
+     */
+    void (*swapBuffers)( __DRIdrawablePrivate *dPriv );
+a174 3
+/**
+ * Per-context private driver information.
+ */
+d176 3
+a178 3
+    /**
+     * Kernel context handle used to access the device lock.
+     */
+d181 3
+a183 3
+    /**
+     * Kernel context handle used to access the device lock.
+     */
+d186 3
+a188 3
+    /**
+     * Device driver's private context data.  This structure is opaque.
+     */
+d191 3
+a193 3
+    /**
+     * This context's display pointer.
+     */
+d196 3
+a198 3
+    /**
+     * Pointer to drawable currently bound to this context.
+     */
+d201 3
+a203 3
+    /**
+     * Pointer to screen on which this context was created.
+     */
+a206 3
+/**
+ * Per-screen private driver information.
+ */
+d208 3
+a210 3
+    /**
+     * Display for this screen
+     */
+d213 3
+a215 3
+    /**
+     * Current screen's number
+     */
+d218 3
+a220 3
+    /**
+     * Callback functions into the hardware-specific DRI driver code.
+     */
+d223 3
+a225 5
+    /**
+     * \name DDX version
+     * DDX / 2D driver version information.
+     */
+    /*@@{*/
+a228 1
+    /*@@}*/
+d230 3
+a232 15
+    /**
+     * \name DRI version
+     * DRI X extension version information.
+     */
+    /*@@{*/
+    int driMajor;
+    int driMinor;
+    int driPatch;
+    /*@@}*/
+
+    /**
+     * \name DRM version
+     * DRM (kernel module) version information.
+     */
+    /*@@{*/
+a235 1
+    /*@@}*/
+d237 5
+a241 6
+    /**
+     * ID used when the client sets the drawable lock.
+     *
+     * The X server uses this value to detect if the client has died while
+     * holding the drawable lock.
+     */
+d244 7
+a250 8
+    /**
+     * File descriptor returned when the kernel device driver is opened.
+     * 
+     * Used to:
+     *   - authenticate client to kernel
+     *   - map the frame buffer, SAREA, etc.
+     *   - close the kernel device driver
+     */
+d253 5
+a257 7
+    /**
+     * SAREA pointer 
+     *
+     * Used to access:
+     *   - the device lock
+     *   - the device-independent per-drawable and per-context(?) information
+     */
+d260 4
+a263 5
+    /**
+     * \name Direct frame buffer access information 
+     * Used for software fallbacks.
+     */
+    /*@@{*/
+a270 1
+    /*@@}*/
+d272 4
+a275 6
+    /**
+     * \name Device-dependent private information (stored in the SAREA).
+     *
+     * This data is accessed by the client driver only.
+     */
+    /*@@{*/
+a277 1
+    /*@@}*/
+d279 8
+a286 10
+    /**
+     * Dummy context to which drawables are bound when not bound to any
+     * other context. 
+     *
+     * A dummy hHWContext is created for this context, and is used by the GL
+     * core when a hardware lock is required but the drawable is not currently
+     * bound (e.g., potentially during a SwapBuffers request).  The dummy
+     * context is created when the first "real" context is created on this
+     * screen.
+     */
+d289 3
+a291 3
+    /**
+     * Hash table to hold the drawable information for this screen.
+     */
+d294 4
+a297 5
+    /**
+     * Device-dependent private information (not stored in the SAREA).
+     * 
+     * This pointer is never touched by the DRI layer.
+     */
+d300 3
+a302 15
+    /**
+     * \name Visuals 
+     *
+     * Visuals (configs) in this screen.
+     */
+    /*@@{*/
+    int numConfigs;		/**< Number of visuals. */
+    __GLXvisualConfig *configs;	/**< Visuals list pointer. */
+    /*@@}*/
+
+    /**
+     * Pointer back to the \c __DRIscreen that contains this structure.
+     */
+
+    __DRIscreen *psc;
+d312 2
+a313 2
+__driUtilUpdateDrawableInfo(__DRIdrawablePrivate *pdp);
+
+d320 1
+a320 1
+/** This must be implemented in each driver */
+d326 1
+a326 1
+/** This is optionally implemented in each driver */
+a329 7
+/* Test the version of the internal GLX API.  Returns a value like strcmp. */
+extern int
+driCompareGLXAPIVersion( GLuint required_version );
+
+extern float
+driCalculateSwapUsage( __DRIdrawablePrivate *dPriv,
+		       int64_t last_swap_ust, int64_t current_ust );
+@
+
+
+1.1.1.1
+log
+@The X-Windowing System
+
+Import XFree86 4.3 from OpenBSD by CTM, in the hope it's stable
+@
+text
+@@
+
+
+1.1.1.2
+log
+@That's what OpenBSD will, probably, ship as XF4 in 3.5
+their last sync against XFree86 4.3-current has been
+imported into our vendor branch, too
+@
+text
+@d1 27
+a27 21
+/* $XFree86: xc/lib/GL/dri/dri_util.h,v 1.4 2003/11/14 22:44:26 tsi Exp $ */
+/**
+ * \file dri_util.h
+ * DRI utility functions definitions.
+ *
+ * This module acts as glue between GLX and the actual hardware driver.  A DRI
+ * driver doesn't really \e have to use any of this - it's optional.  But, some
+ * useful stuff is done here that otherwise would have to be duplicated in most
+ * drivers.
+ * 
+ * Basically, these utility functions take care of some of the dirty details of
+ * screen initialization, context creation, context binding, DRM setup, etc.
+ *
+ * These functions are compiled into each DRI driver so libGL.so knows nothing
+ * about them.
+ *
+ * \sa dri_util.c.
+ * 
+ * \author Kevin E. Martin <kevin@@precisioninsight.com>
+ * \author Brian Paul <brian@@precisioninsight.com>
+ */
+d30 3
+a32 22
+ * Copyright 1998-1999 Precision Insight, Inc., Cedar Park, Texas.
+ * All Rights Reserved.
+ * 
+ * Permission is hereby granted, free of charge, to any person obtaining a
+ * copy of this software and associated documentation files (the
+ * "Software"), to deal in the Software without restriction, including
+ * without limitation the rights to use, copy, modify, merge, publish,
+ * distribute, sub license, and/or sell copies of the Software, and to
+ * permit persons to whom the Software is furnished to do so, subject to
+ * the following conditions:
+ * 
+ * The above copyright notice and this permission notice (including the
+ * next paragraph) shall be included in all copies or substantial portions
+ * of the Software.
+ * 
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
+ * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+ * MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NON-INFRINGEMENT.
+ * IN NO EVENT SHALL PRECISION INSIGHT AND/OR ITS SUPPLIERS BE LIABLE FOR
+ * ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,
+ * TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
+ * SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+a34 1
+
+d42 5
+a46 5
+#include <sys/types.h>
+#include "glxclient.h"           /* for GLXDrawable */
+#include "xf86dri.h"             /* for XF86DRIClipRectPtr */
+#include "sarea.h"               /* for XF86DRISAREAPtr */
+#include "GL/internal/glcore.h"  /* for __GLcontextModes */
+a52 1
+typedef struct __DRIswapInfoRec        __DRIswapInfo;
+d55 1
+a55 4
+/**
+ * Used by DRI_VALIDATE_DRAWABLE_INFO
+ */
+#define DRI_VALIDATE_DRAWABLE_INFO_ONCE(pDrawPriv)              \
+d58 1
+a58 1
+	    __driUtilUpdateDrawableInfo(pDrawPriv);             \
+d63 1
+a63 6
+/**
+ * Utility macro to validate the drawable information.
+ *
+ * See __DRIdrawablePrivate::pStamp and __DRIdrawablePrivate::lastStamp.
+ */
+#define DRI_VALIDATE_DRAWABLE_INFO(psp, pdp)                            \
+d70 1
+a70 1
+	DRI_VALIDATE_DRAWABLE_INFO_ONCE(pdp);                           \
+a78 10
+/**
+ * Driver callback functions.
+ *
+ * Each DRI driver must have one of these structures with all the pointers set
+ * to appropriate functions within the driver.
+ * 
+ * When glXCreateContext() is called, for example, it'll call a helper function
+ * dri_util.c which in turn will jump through the \a CreateContext pointer in
+ * this structure.
+ */
+a79 3
+    /** 
+     * Driver initialization callback
+     */
+a80 4
+    
+    /**
+     * Screen destruction callback
+     */
+d82 2
+a83 5
+
+    /**
+     * Context creation callback
+     */	    	    
+    GLboolean (*CreateContext)(const __GLcontextModes *glVis,
+a85 4
+
+    /**
+     * Context destruction callback
+     */
+d87 2
+a88 5
+
+    /**
+     * Buffer (drawable) creation callback
+     */
+    GLboolean (*CreateBuffer)(__DRIscreenPrivate *driScrnPriv,
+a91 4
+    
+    /**
+     * Buffer (drawable) destruction callback
+     */
+d93 1
+a93 9
+
+    /**
+     * Buffer swapping callback 
+     */
+    void (*SwapBuffers)(__DRIdrawablePrivate *driDrawPriv);
+
+    /**
+     * Context activation callback
+     */
+a96 4
+
+    /**
+     * Context unbinding callback
+     */
+a97 8
+  
+    /**
+     * Full screen mode opening callback.
+     * 
+     * \deprecated Full screen functionality is no longer used by DRI.
+     *             Drivers should simply install a function returning 
+     *             \c GL_TRUE for backwards compatability.
+     */
+a98 8
+
+    /**
+     * Full screen mode closing callback.
+     * 
+     * \deprecated Full screen functionality is no longer used by DRI.
+     *             Drivers should simply install a function returning 
+     *             \c GL_TRUE for backwards compatability.
+     */
+a99 56
+
+    /* Retrieves statistics about buffer swap operations.  Required if
+     * GLX_OML_sync_control or GLX_MESA_swap_frame_usage is supported.
+     */
+    int (*GetSwapInfo)( __DRIdrawablePrivate *dPriv, __DRIswapInfo * sInfo );
+
+
+    /* Required if GLX_SGI_video_sync or GLX_OML_sync_control is
+     * supported.
+     */
+    int (*GetMSC)( __DRIscreenPrivate * priv, int64_t * count );
+
+    /**
+     * These are required if GLX_OML_sync_control is supported.
+     */
+    /*@@{*/
+    int (*WaitForMSC)( __DRIdrawablePrivate *priv, int64_t target_msc, 
+		       int64_t divisor, int64_t remainder,
+		       int64_t * msc );
+    int (*WaitForSBC)( __DRIdrawablePrivate *priv, int64_t target_sbc,
+		       int64_t * msc, int64_t * sbc );
+
+    int64_t (*SwapBuffersMSC)( __DRIdrawablePrivate *priv, int64_t target_msc,
+			       int64_t divisor, int64_t remainder );
+    /*@@}*/
+};
+
+
+struct __DRIswapInfoRec {
+    /** 
+     * Number of swapBuffers operations that have been *completed*. 
+     */
+    u_int64_t  swap_count;
+
+    /*
+     * Unadjusted system time of the last buffer swap.  This is the time
+     * when the swap completed, not the time when swapBuffers was called.
+     */
+    int64_t   swap_ust;
+
+    /*
+     * Number of swap operations that occurred after the swap deadline.  That
+     * is if a swap happens more than swap_interval frames after the previous
+     * swap, it has missed its deadline.  If swap_interval is 0, then the
+     * swap deadline is 1 frame after the previous swap.
+     */
+    u_int64_t  swap_missed_count;
+
+    /*
+     * Amount of time used by the last swap that missed its deadline.  This
+     * is calculated as (__glXGetUST() - swap_ust) / (swap_interval * 
+     * time_for_single_vrefresh)).  If the actual value of swap_interval is
+     * 0, then 1 is used instead.  If swap_missed_count is non-zero, this
+     * should be greater-than 1.0.
+     */
+    float     swap_missed_usage;
+a102 3
+/**
+ * Per-drawable private DRI driver information.
+ */
+d104 3
+a106 3
+    /**
+     * Kernel drawable handle
+     */
+d109 3
+a111 5
+    /**
+     * Driver's private drawable information.  
+     *
+     * This structure is opaque.
+     */
+d114 3
+a116 3
+    /**
+     * X's drawable ID associated with this private drawable.
+     */
+a117 1
+    __DRIdrawable *pdraw;
+d119 5
+a123 8
+    /**
+     * Reference count for number of context's currently bound to this
+     * drawable.  
+     *
+     * Once it reaches zero, the drawable can be destroyed.
+     *
+     * \note This behavior will change with GLX 1.3.
+     */
+d126 3
+a128 3
+    /**
+     * Index of this drawable information in the SAREA.
+     */
+d131 3
+a133 3
+    /**
+     * Pointer to the "drawable has changed ID" stamp in the SAREA.
+     */
+d136 6
+a141 7
+    /**
+     * Last value of the stamp.
+     *
+     * If this differs from the value stored at __DRIdrawablePrivate::pStamp,
+     * then the drawable information has been modified by the X server, and the
+     * drawable information (below) should be retrieved from the X server.
+     */
+d144 3
+a146 6
+    /**
+     * \name Drawable 
+     *
+     * Drawable information used in software fallbacks.
+     */
+    /*@@{*/
+a152 1
+    /*@@}*/
+d154 4
+a157 6
+    /**
+     * \name Back and depthbuffer
+     *
+     * Information about the back and depthbuffer where different from above.
+     */
+    /*@@{*/
+a162 1
+    /*@@}*/
+d164 3
+a166 3
+    /**
+     * Pointer to context to which this drawable is currently bound.
+     */
+d169 3
+a171 3
+    /**
+     * Pointer to screen on which this drawable was created.
+     */
+a172 16
+
+    /**
+     * \name Display and screen information.
+     * 
+     * Basically just need these for when the locking code needs to call
+     * __driUtilUpdateDrawableInfo() which calls XF86DRIGetDrawableInfo().
+     */
+    /*@@{*/
+    Display *display;
+    int screen;
+    /*@@}*/
+
+    /**
+     * Called via glXSwapBuffers().
+     */
+    void (*swapBuffers)( __DRIdrawablePrivate *dPriv );
+a174 3
+/**
+ * Per-context private driver information.
+ */
+d176 3
+a178 3
+    /**
+     * Kernel context handle used to access the device lock.
+     */
+d181 3
+a183 3
+    /**
+     * Kernel context handle used to access the device lock.
+     */
+d186 3
+a188 3
+    /**
+     * Device driver's private context data.  This structure is opaque.
+     */
+d191 3
+a193 3
+    /**
+     * This context's display pointer.
+     */
+d196 3
+a198 3
+    /**
+     * Pointer to drawable currently bound to this context.
+     */
+d201 3
+a203 3
+    /**
+     * Pointer to screen on which this context was created.
+     */
+a206 3
+/**
+ * Per-screen private driver information.
+ */
+d208 3
+a210 3
+    /**
+     * Display for this screen
+     */
+d213 3
+a215 3
+    /**
+     * Current screen's number
+     */
+d218 3
+a220 3
+    /**
+     * Callback functions into the hardware-specific DRI driver code.
+     */
+d223 3
+a225 5
+    /**
+     * \name DDX version
+     * DDX / 2D driver version information.
+     */
+    /*@@{*/
+a228 1
+    /*@@}*/
+d230 3
+a232 15
+    /**
+     * \name DRI version
+     * DRI X extension version information.
+     */
+    /*@@{*/
+    int driMajor;
+    int driMinor;
+    int driPatch;
+    /*@@}*/
+
+    /**
+     * \name DRM version
+     * DRM (kernel module) version information.
+     */
+    /*@@{*/
+a235 1
+    /*@@}*/
+d237 5
+a241 6
+    /**
+     * ID used when the client sets the drawable lock.
+     *
+     * The X server uses this value to detect if the client has died while
+     * holding the drawable lock.
+     */
+d244 7
+a250 8
+    /**
+     * File descriptor returned when the kernel device driver is opened.
+     * 
+     * Used to:
+     *   - authenticate client to kernel
+     *   - map the frame buffer, SAREA, etc.
+     *   - close the kernel device driver
+     */
+d253 5
+a257 7
+    /**
+     * SAREA pointer 
+     *
+     * Used to access:
+     *   - the device lock
+     *   - the device-independent per-drawable and per-context(?) information
+     */
+d260 4
+a263 5
+    /**
+     * \name Direct frame buffer access information 
+     * Used for software fallbacks.
+     */
+    /*@@{*/
+a270 1
+    /*@@}*/
+d272 4
+a275 6
+    /**
+     * \name Device-dependent private information (stored in the SAREA).
+     *
+     * This data is accessed by the client driver only.
+     */
+    /*@@{*/
+a277 1
+    /*@@}*/
+d279 8
+a286 10
+    /**
+     * Dummy context to which drawables are bound when not bound to any
+     * other context. 
+     *
+     * A dummy hHWContext is created for this context, and is used by the GL
+     * core when a hardware lock is required but the drawable is not currently
+     * bound (e.g., potentially during a SwapBuffers request).  The dummy
+     * context is created when the first "real" context is created on this
+     * screen.
+     */
+d289 3
+a291 3
+    /**
+     * Hash table to hold the drawable information for this screen.
+     */
+d294 4
+a297 5
+    /**
+     * Device-dependent private information (not stored in the SAREA).
+     * 
+     * This pointer is never touched by the DRI layer.
+     */
+d300 3
+a302 15
+    /**
+     * \name Visuals 
+     *
+     * Visuals (configs) in this screen.
+     */
+    /*@@{*/
+    int numConfigs;		/**< Number of visuals. */
+    __GLXvisualConfig *configs;	/**< Visuals list pointer. */
+    /*@@}*/
+
+    /**
+     * Pointer back to the \c __DRIscreen that contains this structure.
+     */
+
+    __DRIscreen *psc;
+d312 2
+a313 2
+__driUtilUpdateDrawableInfo(__DRIdrawablePrivate *pdp);
+
+d320 1
+a320 1
+/** This must be implemented in each driver */
+d326 1
+a326 1
+/** This is optionally implemented in each driver */
+a329 7
+/* Test the version of the internal GLX API.  Returns a value like strcmp. */
+extern int
+driCompareGLXAPIVersion( GLuint required_version );
+
+extern float
+driCalculateSwapUsage( __DRIdrawablePrivate *dPriv,
+		       int64_t last_swap_ust, int64_t current_ust );
+@
+

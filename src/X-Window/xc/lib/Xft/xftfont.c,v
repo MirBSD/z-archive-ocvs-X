@@ -1,0 +1,732 @@
+head	1.1;
+branch	1.1.1;
+access;
+symbols
+	tg-mergetmp-2:1.1.1.2
+	cvs-200410241530:1.1.1.2
+	cvs-200410012000:1.1.1.2
+	cvs-200407141120:1.1.1.2
+	cvs-200406231010:1.1.1.2
+	MIRBSD_7quater:1.1.1.2
+	cvs-200405271510:1.1.1.2
+	XFree86_4_4_0:1.1.9.1
+	cvs-200403021700:1.1.1.2
+	XFREE86_20040213:1.1.9.1
+	xc:1.1.9
+	cvs-200401291925:1.1.1.2
+	MIRBSD_7_ALPHA:1.1.1.2.0.4
+	MIRBSD_7:1.1.1.2.0.2
+	MIRBSD_7ter:1.1.1.2
+	cvs-20011091815:1.1.1.2
+	cvs-200309162130:1.1.1.2
+	cvs-200308302005:1.1.1.2
+	ctmx-0387:1.1.1.2
+	ctmx-0384:1.1.1.2
+	MIRBSD_5:1.1.1.2
+	ctmx-0375:1.1.1.2
+	ctmx-0373:1.1.1.2
+	ctm-0371:1.1.1.2
+	ctm-0370:1.1.1.2
+	MIRBSD_4:1.1.1.2
+	ctm-0363:1.1.1.2
+	ctm-0359:1.1.1.2
+	ctm-0349:1.1.1.1
+	openbsd:1.1.1;
+locks; strict;
+comment	@ * @;
+
+
+1.1
+date	2003.03.22.20.04.53;	author tg;	state Exp;
+branches
+	1.1.1.1
+	1.1.9.1;
+next	;
+
+1.1.1.1
+date	2003.03.22.20.04.53;	author tg;	state Exp;
+branches;
+next	1.1.1.2;
+
+1.1.1.2
+date	2003.04.08.18.32.34;	author tg;	state Stab;
+branches;
+next	;
+
+1.1.9.1
+date	2004.02.14.19.19.20;	author tg;	state Exp;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@/*
+ * $XFree86: xc/lib/Xft/xftfont.c,v 1.8 2000/12/20 00:20:48 keithp Exp $
+ *
+ * Copyright © 2000 Keith Packard, member of The XFree86 Project, Inc.
+ *
+ * Permission to use, copy, modify, distribute, and sell this software and its
+ * documentation for any purpose is hereby granted without fee, provided that
+ * the above copyright notice appear in all copies and that both that
+ * copyright notice and this permission notice appear in supporting
+ * documentation, and that the name of Keith Packard not be used in
+ * advertising or publicity pertaining to distribution of the software without
+ * specific, written prior permission.  Keith Packard makes no
+ * representations about the suitability of this software for any purpose.  It
+ * is provided "as is" without express or implied warranty.
+ *
+ * KEITH PACKARD DISCLAIMS ALL WARRANTIES WITH REGARD TO THIS SOFTWARE,
+ * INCLUDING ALL IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS, IN NO
+ * EVENT SHALL KEITH PACKARD BE LIABLE FOR ANY SPECIAL, INDIRECT OR
+ * CONSEQUENTIAL DAMAGES OR ANY DAMAGES WHATSOEVER RESULTING FROM LOSS OF USE,
+ * DATA OR PROFITS, WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER
+ * TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR
+ * PERFORMANCE OF THIS SOFTWARE.
+ */
+
+#include <stdio.h>
+#include <stdlib.h>
+#include "xftint.h"
+
+XftPattern *
+XftFontMatch (Display *dpy, int screen, XftPattern *pattern, XftResult *result)
+{
+    XftPattern	*new;
+    XftPattern	*match;
+    XftFontSet	*sets[2];
+    int		nsets;
+#ifdef FREETYPE2
+    Bool	render, core;
+#endif
+
+    if (!XftInit (0))
+	return 0;
+    
+    new = XftPatternDuplicate (pattern);
+    if (!new)
+	return 0;
+
+    if (_XftFontDebug () & XFT_DBG_OPENV)
+    {
+	printf ("XftFontMatch pattern ");
+	XftPatternPrint (new);
+    }
+    XftConfigSubstitute (new);
+    if (_XftFontDebug () & XFT_DBG_OPENV)
+    {
+	printf ("XftFontMatch after XftConfig substitutions ");
+	XftPatternPrint (new);
+    }
+    XftDefaultSubstitute (dpy, screen, new);
+    if (_XftFontDebug () & XFT_DBG_OPENV)
+    {
+	printf ("XftFontMatch after X resource substitutions ");
+	XftPatternPrint (new);
+    }
+    nsets = 0;
+    
+#ifdef FREETYPE2
+    render = False;
+    core = True;
+    (void) XftPatternGetBool (new, XFT_RENDER, 0, &render);
+    (void) XftPatternGetBool (new, XFT_CORE, 0, &core);
+    if (_XftFontDebug () & XFT_DBG_OPENV)
+    {
+	printf ("XftFontMatch: use core fonts \"%s\", use render fonts \"%s\"\n",
+		core ? "True" : "False", render ? "True" : "False");
+    }
+
+    if (render)
+    {
+	if (XftInitFtLibrary ())
+	{
+	    sets[nsets] = _XftFontSet;
+	    if (sets[nsets])
+		nsets++;
+	}
+    }
+    if (core)
+#endif
+    {
+	sets[nsets] = XftDisplayGetFontSet (dpy);
+	if (sets[nsets])
+	    nsets++;
+    }
+    
+    match = XftFontSetMatch (sets, nsets, new, result);
+    XftPatternDestroy (new);
+    return match;
+}
+
+XftFont *
+XftFontOpenPattern (Display *dpy, XftPattern *pattern)
+{
+    Bool	    core = True;
+    XFontStruct	    *xfs = 0;
+    XftFont	    *font;
+#ifdef FREETYPE2
+    XftFontStruct   *fs = 0;
+
+    if (XftPatternGetBool (pattern, XFT_CORE, 0, &core) != XftResultMatch)
+	return 0;
+    if (core)
+#endif
+    {
+	xfs = XftCoreOpen (dpy, pattern);
+	if (!xfs) return 0;
+    }
+#ifdef FREETYPE2
+    else
+    {
+	fs = XftFreeTypeOpen (dpy, pattern);
+	if (!fs) return 0;
+    }
+#endif
+    font = (XftFont *) malloc (sizeof (XftFont));
+    font->core = core;
+    font->pattern = pattern;
+#ifdef FREETYPE2
+    if (core)
+#endif
+    {
+	font->u.core.font = xfs;
+	font->ascent = xfs->ascent;
+	font->descent = xfs->descent;
+	font->height = xfs->ascent + xfs->descent;
+	font->max_advance_width = xfs->max_bounds.width;
+    }
+#ifdef FREETYPE2
+    else
+    {
+	font->u.ft.font = fs;
+	font->ascent = fs->ascent;
+	font->descent = fs->descent;
+	font->height = fs->height;
+	font->max_advance_width = fs->max_advance_width;
+    }
+#endif
+    return font;
+}
+
+int
+_XftFontDebug (void)
+{
+    static int	initialized;
+    static int	debug;
+
+    if (!initialized)
+    {
+	char	*e;
+	
+	initialized = 1;
+	e = getenv ("XFT_DEBUG");
+	if (e)
+	{
+	    printf ("XFT_DEBUG=%s\n", e);
+	    debug = atoi (e);
+	    if (debug <= 0)
+		debug = 1;
+	}
+    }
+    return debug;
+}
+
+XftFont *
+XftFontOpen (Display *dpy, int screen, ...)
+{
+    va_list	    va;
+    XftPattern	    *pat;
+    XftPattern	    *match;
+    XftResult	    result;
+    XftFont	    *font;
+
+    va_start (va, screen);
+    pat = XftPatternVaBuild (0, va);
+    va_end (va);
+    if (!pat)
+    {
+	if (_XftFontDebug () & XFT_DBG_OPEN)
+	    printf ("XftFontOpen: Invalid pattern argument\n");
+	return 0;
+    }
+    match = XftFontMatch (dpy, screen, pat, &result);
+    if (_XftFontDebug () & XFT_DBG_OPEN)
+    {
+	printf ("Pattern ");
+	XftPatternPrint (pat);
+	if (match)
+	{
+	    printf ("Match ");
+	    XftPatternPrint (match);
+	}
+	else
+	    printf ("No Match\n");
+    }
+    XftPatternDestroy (pat);
+    if (!match)
+	return 0;
+    
+    font = XftFontOpenPattern (dpy, match);
+    if (!font)
+    {
+	if (_XftFontDebug () & XFT_DBG_OPEN)
+	    printf ("No Font\n");
+	XftPatternDestroy (match);
+    }
+
+    return font;
+}
+
+XftFont *
+XftFontOpenName (Display *dpy, int screen, const char *name)
+{
+    XftPattern	    *pat;
+    XftPattern	    *match;
+    XftResult	    result;
+    XftFont   *font;
+
+    pat = XftNameParse (name);
+    if (_XftFontDebug () & XFT_DBG_OPEN)
+    {
+	printf ("XftFontOpenName \"%s\": ", name);
+	if (pat)
+	    XftPatternPrint (pat);
+	else
+	    printf ("Invalid name\n");
+    }
+			     
+    if (!pat)
+	return 0;
+    match = XftFontMatch (dpy, screen, pat, &result);
+    if (_XftFontDebug () & XFT_DBG_OPEN)
+    {
+	if (match)
+	{
+	    printf ("Match ");
+	    XftPatternPrint (match);
+	}
+	else
+	    printf ("No Match\n");
+    }
+    XftPatternDestroy (pat);
+    if (!match)
+	return 0;
+    
+    font = XftFontOpenPattern (dpy, match);
+    if (!font)
+	XftPatternDestroy (match);
+    
+    return font;
+}
+
+XftFont *
+XftFontOpenXlfd (Display *dpy, int screen, const char *xlfd)
+{
+    XftPattern	    *pat;
+    XftPattern	    *match;
+    XftResult	    result;
+    XftFont   *font;
+
+    pat = XftXlfdParse (xlfd, False, False);
+    if (_XftFontDebug () & XFT_DBG_OPEN)
+    {
+	printf ("XftFontOpenXlfd \"%s\": ", xlfd);
+	if (pat)
+	    printf ("Invalid xlfd\n");
+	else
+	    XftPatternPrint (pat);
+    }
+			     
+    if (!pat)
+	return 0;
+    match = XftFontMatch (dpy, screen, pat, &result);
+    if (_XftFontDebug () & XFT_DBG_OPEN)
+    {
+	if (match)
+	{
+	    printf ("Match ");
+	    XftPatternPrint (match);
+	}
+	else
+	    printf ("No Match\n");
+    }
+    XftPatternDestroy (pat);
+    if (!match)
+	return 0;
+    
+    font = XftFontOpenPattern (dpy, match);
+    if (!font)
+	XftPatternDestroy (match);
+    
+    return font;
+}
+
+void
+XftFontClose (Display *dpy, XftFont *font)
+{
+    if (font->core)
+	XftCoreClose (dpy, font->u.core.font);
+#ifdef FREETYPE2
+    else
+	XftFreeTypeClose (dpy, font->u.ft.font);
+#endif
+    if (font->pattern)
+	XftPatternDestroy (font->pattern);
+    free (font);
+}
+
+Bool
+XftGlyphExists (Display *dpy, XftFont *font, XftChar32 glyph)
+{
+    if (font->core)
+	return XftCoreGlyphExists (dpy, font->u.core.font, glyph);
+    else
+#ifdef FREETYPE2
+	return XftFreeTypeGlyphExists (dpy, font->u.ft.font, glyph);
+#else
+	return False;
+#endif
+}
+@
+
+
+1.1.9.1
+log
+@OpenBSD just has imported exactly this tree into their vendor branch,
+called the same tag, in XF4/xc
+This is, apparently, the last XFree86 snapshot before the licence change
+(ie, addition of the advertising clause)
+
+Since the developers don't see any problems with that, and we would like
+to integrate improvements done by the remaining one or two (or so) XFree86
+developers (j/k), this prepares enabling us to update X-Window in the future.
+@
+text
+@d2 1
+a2 1
+ * $XFree86: xc/lib/Xft/xftfont.c,v 1.11 2002/10/11 17:53:02 keithp Exp $
+d29 2
+a30 5
+FcPattern *
+XftFontMatch (Display		*dpy,
+	      int		screen,
+	      _Xconst FcPattern *pattern,
+	      FcResult		*result)
+d32 7
+a38 2
+    FcPattern	*new;
+    FcPattern	*match;
+d43 1
+a43 1
+    new = FcPatternDuplicate (pattern);
+d47 1
+a47 1
+    if (XftDebug () & XFT_DBG_OPENV)
+d50 1
+a50 1
+	FcPatternPrint (new);
+d52 2
+a53 2
+    FcConfigSubstitute (0, new, FcMatchPattern);
+    if (XftDebug () & XFT_DBG_OPENV)
+d55 2
+a56 2
+	printf ("XftFontMatch after FcConfig substitutions ");
+	FcPatternPrint (new);
+d59 1
+a59 1
+    if (XftDebug () & XFT_DBG_OPENV)
+d62 1
+a62 1
+	FcPatternPrint (new);
+d64 1
+d66 6
+a71 2
+    match = FcFontMatch (0, new, result);
+    if (XftDebug () & XFT_DBG_OPENV)
+d73 2
+a74 2
+	printf ("XftFontMatch result ");
+	FcPatternPrint (match);
+d76 20
+a95 1
+    FcPatternDestroy (new);
+d100 73
+d176 3
+a178 3
+    FcPattern	    *pat;
+    FcPattern	    *match;
+    FcResult	    result;
+d182 1
+a182 1
+    pat = FcPatternVaBuild (0, va);
+d186 1
+a186 1
+	if (XftDebug () & XFT_DBG_OPEN)
+d191 1
+a191 1
+    if (XftDebug () & XFT_DBG_OPEN)
+d194 1
+a194 1
+	FcPatternPrint (pat);
+d198 1
+a198 1
+	    FcPatternPrint (match);
+d203 1
+a203 1
+    FcPatternDestroy (pat);
+d210 1
+a210 1
+	if (XftDebug () & XFT_DBG_OPEN)
+d212 1
+a212 1
+	FcPatternDestroy (match);
+d221 4
+a224 4
+    FcPattern	    *pat;
+    FcPattern	    *match;
+    FcResult	    result;
+    XftFont	    *font;
+d226 2
+a227 2
+    pat = FcNameParse ((FcChar8 *) name);
+    if (XftDebug () & XFT_DBG_OPEN)
+d231 1
+a231 1
+	    FcPatternPrint (pat);
+d239 1
+a239 1
+    if (XftDebug () & XFT_DBG_OPEN)
+d244 1
+a244 1
+	    FcPatternPrint (match);
+d249 1
+a249 1
+    FcPatternDestroy (pat);
+d255 1
+a255 5
+    {
+	if (XftDebug () & XFT_DBG_OPEN)
+	    printf ("No Font\n");
+	FcPatternDestroy (match);
+    }
+d263 4
+a266 4
+    FcPattern	    *pat;
+    FcPattern	    *match;
+    FcResult	    result;
+    XftFont	    *font;
+d268 2
+a269 2
+    pat = XftXlfdParse (xlfd, FcFalse, FcFalse);
+    if (XftDebug () & XFT_DBG_OPEN)
+d275 1
+a275 1
+	    FcPatternPrint (pat);
+d281 1
+a281 1
+    if (XftDebug () & XFT_DBG_OPEN)
+d286 1
+a286 1
+	    FcPatternPrint (match);
+d291 1
+a291 1
+    FcPatternDestroy (pat);
+d297 1
+a297 5
+    {
+	if (XftDebug () & XFT_DBG_OPEN)
+	    printf ("No Font\n");
+	FcPatternDestroy (match);
+    }
+d302 26
+@
+
+
+1.1.1.1
+log
+@Import OpenBSD 3.3 XF4 repository from CTM 3132 the first time
+This finalizes starting an OpenBSD-mirabile (aka MirBSD) repository.
+
+### MirBSD is:
+# Copyright (c) 1982-2003 by Thorsten "mirabile" Glaser <x86@@ePost.de>
+# Copyright © 1968-2003  The authors of And contributors to UNIX®, the
+#       C Language, BSD/Berkeley Unix; 386BSD, NetBSD 1.1 and OpenBSD.
+#
+# Anyone who obtained a copy of this work is hereby permitted to freely use,
+# distribute, modify, merge, sublicence, give away or sell it as long as the
+# authors are given due credit and the following notice is retained:
+#
+# This work is provided "as is", with no explicit or implicit warranty what-
+# soever. Use it only at your own risk. In no event may an author or contri-
+# butor be held liable for any damage, directly or indirectly, that origina-
+# ted through or is caused by creation or modification of this work.
+
+MirBSD is my private tree. MirBSD does not differ very much from OpenBSD
+and intentionally tracks OpenBSD. That's why it _is_ OpenBSD, just not the
+official one. It's like with DarrenBSD.
+
+At time of this writing, no advertising for MirBSD must be done,
+because the advertising clause has not yet been sorted out.
+
+http://templeofhate.com/tglaser/MirBSD/index.php
+@
+text
+@@
+
+
+1.1.1.2
+log
+@The X-Windowing System
+
+Import XFree86 4.3 from OpenBSD by CTM, in the hope it's stable
+@
+text
+@d2 1
+a2 1
+ * $XFree86: xc/lib/Xft/xftfont.c,v 1.11 2002/10/11 17:53:02 keithp Exp $
+d29 2
+a30 5
+FcPattern *
+XftFontMatch (Display		*dpy,
+	      int		screen,
+	      _Xconst FcPattern *pattern,
+	      FcResult		*result)
+d32 7
+a38 2
+    FcPattern	*new;
+    FcPattern	*match;
+d43 1
+a43 1
+    new = FcPatternDuplicate (pattern);
+d47 1
+a47 1
+    if (XftDebug () & XFT_DBG_OPENV)
+d50 1
+a50 1
+	FcPatternPrint (new);
+d52 2
+a53 2
+    FcConfigSubstitute (0, new, FcMatchPattern);
+    if (XftDebug () & XFT_DBG_OPENV)
+d55 2
+a56 2
+	printf ("XftFontMatch after FcConfig substitutions ");
+	FcPatternPrint (new);
+d59 1
+a59 1
+    if (XftDebug () & XFT_DBG_OPENV)
+d62 1
+a62 1
+	FcPatternPrint (new);
+d64 1
+d66 6
+a71 2
+    match = FcFontMatch (0, new, result);
+    if (XftDebug () & XFT_DBG_OPENV)
+d73 2
+a74 2
+	printf ("XftFontMatch result ");
+	FcPatternPrint (match);
+d76 20
+a95 1
+    FcPatternDestroy (new);
+d100 73
+d176 3
+a178 3
+    FcPattern	    *pat;
+    FcPattern	    *match;
+    FcResult	    result;
+d182 1
+a182 1
+    pat = FcPatternVaBuild (0, va);
+d186 1
+a186 1
+	if (XftDebug () & XFT_DBG_OPEN)
+d191 1
+a191 1
+    if (XftDebug () & XFT_DBG_OPEN)
+d194 1
+a194 1
+	FcPatternPrint (pat);
+d198 1
+a198 1
+	    FcPatternPrint (match);
+d203 1
+a203 1
+    FcPatternDestroy (pat);
+d210 1
+a210 1
+	if (XftDebug () & XFT_DBG_OPEN)
+d212 1
+a212 1
+	FcPatternDestroy (match);
+d221 4
+a224 4
+    FcPattern	    *pat;
+    FcPattern	    *match;
+    FcResult	    result;
+    XftFont	    *font;
+d226 2
+a227 2
+    pat = FcNameParse ((FcChar8 *) name);
+    if (XftDebug () & XFT_DBG_OPEN)
+d231 1
+a231 1
+	    FcPatternPrint (pat);
+d239 1
+a239 1
+    if (XftDebug () & XFT_DBG_OPEN)
+d244 1
+a244 1
+	    FcPatternPrint (match);
+d249 1
+a249 1
+    FcPatternDestroy (pat);
+d255 1
+a255 5
+    {
+	if (XftDebug () & XFT_DBG_OPEN)
+	    printf ("No Font\n");
+	FcPatternDestroy (match);
+    }
+d263 4
+a266 4
+    FcPattern	    *pat;
+    FcPattern	    *match;
+    FcResult	    result;
+    XftFont	    *font;
+d268 2
+a269 2
+    pat = XftXlfdParse (xlfd, FcFalse, FcFalse);
+    if (XftDebug () & XFT_DBG_OPEN)
+d275 1
+a275 1
+	    FcPatternPrint (pat);
+d281 1
+a281 1
+    if (XftDebug () & XFT_DBG_OPEN)
+d286 1
+a286 1
+	    FcPatternPrint (match);
+d291 1
+a291 1
+    FcPatternDestroy (pat);
+d297 1
+a297 5
+    {
+	if (XftDebug () & XFT_DBG_OPEN)
+	    printf ("No Font\n");
+	FcPatternDestroy (match);
+    }
+d302 26
+@
+

@@ -1,0 +1,408 @@
+head	1.1;
+branch	1.1.1;
+access;
+symbols
+	tg-mergetmp-2:1.1.1.1
+	cvs-200410241530:1.1.1.1
+	cvs-200410012000:1.1.1.1
+	cvs-200407141120:1.1.1.1
+	cvs-200406231010:1.1.1.1
+	MIRBSD_7quater:1.1.1.1
+	cvs-200405271510:1.1.1.1
+	XFree86_4_4_0:1.1.9.1
+	cvs-200403021700:1.1.1.1
+	XFREE86_20040213:1.1.9.1
+	xc:1.1.9
+	cvs-200401291925:1.1.1.1
+	MIRBSD_7_ALPHA:1.1.1.1.0.4
+	MIRBSD_7:1.1.1.1.0.2
+	MIRBSD_7ter:1.1.1.1
+	cvs-20011091815:1.1.1.1
+	cvs-200309162130:1.1.1.1
+	cvs-200308302005:1.1.1.1
+	ctmx-0387:1.1.1.1
+	ctmx-0384:1.1.1.1
+	MIRBSD_5:1.1.1.1
+	ctmx-0375:1.1.1.1
+	ctmx-0373:1.1.1.1
+	ctm-0371:1.1.1.1
+	ctm-0370:1.1.1.1
+	MIRBSD_4:1.1.1.1
+	ctm-0363:1.1.1.1
+	ctm-0359:1.1.1.1
+	ctm-0349:1.1.1.1
+	openbsd:1.1.1;
+locks; strict;
+comment	@ * @;
+
+
+1.1
+date	2003.03.22.20.09.25;	author tg;	state Exp;
+branches
+	1.1.1.1
+	1.1.9.1;
+next	;
+
+1.1.1.1
+date	2003.03.22.20.09.25;	author tg;	state Stab;
+branches;
+next	;
+
+1.1.9.1
+date	2004.02.14.19.26.07;	author tg;	state Exp;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@/*
+ *Copyright (C) 1994-2000 The XFree86 Project, Inc. All Rights Reserved.
+ *
+ *Permission is hereby granted, free of charge, to any person obtaining
+ * a copy of this software and associated documentation files (the
+ *"Software"), to deal in the Software without restriction, including
+ *without limitation the rights to use, copy, modify, merge, publish,
+ *distribute, sublicense, and/or sell copies of the Software, and to
+ *permit persons to whom the Software is furnished to do so, subject to
+ *the following conditions:
+ *
+ *The above copyright notice and this permission notice shall be
+ *included in all copies or substantial portions of the Software.
+ *
+ *THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+ *EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+ *MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
+ *NONINFRINGEMENT. IN NO EVENT SHALL THE XFREE86 PROJECT BE LIABLE FOR
+ *ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF
+ *CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
+ *WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+ *
+ *Except as contained in this notice, the name of the XFree86 Project
+ *shall not be used in advertising or otherwise to promote the sale, use
+ *or other dealings in this Software without prior written authorization
+ *from the XFree86 Project.
+ *
+ * Authors:	Dakshinamurthy Karra
+ *		Suhaib M Siddiqi
+ *		Peter Busch
+ *		Harold L Hunt II
+ */
+/* $XFree86: xc/programs/Xserver/hw/xwin/winmouse.c,v 1.4 2001/10/29 21:10:24 alanh Exp $ */
+
+#include "win.h"
+
+void
+winMouseCtrl (DeviceIntPtr pDevice, PtrCtrl *pCtrl)
+{
+}
+
+
+/*
+ * See Porting Layer Definition - p. 18
+ * This is known as a DeviceProc
+ */
+
+int
+winMouseProc (DeviceIntPtr pDeviceInt, int iState)
+{
+  CARD8			map[6];
+  DevicePtr		pDevice = (DevicePtr) pDeviceInt;
+
+  switch (iState)
+    {
+    case DEVICE_INIT:
+      map[1] = 1;
+      map[2] = 2;
+      map[3] = 3;
+      map[4] = 4;
+      map[5] = 5;
+      InitPointerDeviceStruct (pDevice,
+			       map,
+			       5, /* Buttons 4 and 5 are mouse wheel events */
+			       miPointerGetMotionEvents,
+			       winMouseCtrl,
+			       miPointerGetMotionBufferSize ());
+      break;
+
+    case DEVICE_ON:
+      pDevice->on = TRUE;
+      break;
+
+    case DEVICE_CLOSE:
+    case DEVICE_OFF:
+      pDevice->on = FALSE;
+      break;
+    }
+  return Success;
+}
+
+
+/* Handle the mouse wheel */
+int
+winMouseWheel (ScreenPtr pScreen, int iDeltaZ)
+{
+  winScreenPriv(pScreen);
+  xEvent		xCurrentEvent;
+
+  /* Button4 = WheelUp */
+  /* Button5 = WheelDown */
+
+  /* Do we have any previous delta stored? */
+  if ((pScreenPriv->iDeltaZ > 0
+       && iDeltaZ > 0)
+      || (pScreenPriv->iDeltaZ < 0
+	  && iDeltaZ < 0))
+    {
+      /* Previous delta and of same sign as current delta */
+      iDeltaZ += pScreenPriv->iDeltaZ;
+      pScreenPriv->iDeltaZ = 0;
+    }
+  else
+    {
+      /*
+       * Previous delta of different sign, or zero.
+       * We will set it to zero for either case,
+       * as blindly setting takes just as much time
+       * as checking, then setting if necessary :)
+       */
+      pScreenPriv->iDeltaZ = 0;
+    }
+
+  /*
+   * Only process this message if the wheel has moved further than
+   * WHEEL_DELTA
+   */
+  if (iDeltaZ >= WHEEL_DELTA || (-1 * iDeltaZ) >= WHEEL_DELTA)
+    {
+      pScreenPriv->iDeltaZ = 0;
+	  
+      /* Figure out how many whole deltas of the wheel we have */
+      iDeltaZ /= WHEEL_DELTA;
+    }
+  else
+    {
+      /*
+       * Wheel has not moved past WHEEL_DELTA threshold;
+       * we will store the wheel delta until the threshold
+       * has been reached.
+       */
+      pScreenPriv->iDeltaZ = iDeltaZ;
+      return 0;
+    }
+
+  /* Set the button to indicate up or down wheel delta */
+  if (iDeltaZ > 0)
+    {
+      xCurrentEvent.u.u.detail = Button4;
+    }
+  else
+    {
+      xCurrentEvent.u.u.detail = Button5;
+    }
+
+  /*
+   * Flip iDeltaZ to positive, if negative,
+   * because always need to generate a *positive* number of
+   * button clicks for the Z axis.
+   */
+  if (iDeltaZ < 0)
+    {
+      iDeltaZ *= -1;
+    }
+
+  /* Generate X input messages for each wheel delta we have seen */
+  while (iDeltaZ--)
+    {
+      /* Push the wheel button */
+      xCurrentEvent.u.u.type = ButtonPress;
+      xCurrentEvent.u.keyButtonPointer.time
+	= g_c32LastInputEventTime = GetTickCount ();
+      mieqEnqueue (&xCurrentEvent);
+
+      /* Release the wheel button */
+      xCurrentEvent.u.u.type = ButtonRelease;
+      xCurrentEvent.u.keyButtonPointer.time
+	= g_c32LastInputEventTime = GetTickCount ();
+      mieqEnqueue (&xCurrentEvent);
+    }
+
+  return 0;
+}
+
+
+/*
+ * Enqueue a mouse button event
+ */
+
+void
+winMouseButtonsSendEvent (int iEventType, int iButton)
+{
+  xEvent		xCurrentEvent;
+
+  /* Load an xEvent and enqueue the event */
+  xCurrentEvent.u.u.type = iEventType;
+  xCurrentEvent.u.u.detail = iButton;
+  xCurrentEvent.u.keyButtonPointer.time
+    = g_c32LastInputEventTime = GetTickCount ();
+  mieqEnqueue (&xCurrentEvent);
+}
+
+
+/*
+ * Decide what to do with a Windows mouse message
+ */
+
+int
+winMouseButtonsHandle (ScreenPtr pScreen,
+		       int iEventType, int iButton,
+		       WPARAM wParam)
+{
+  winScreenPriv(pScreen);
+  winScreenInfo		*pScreenInfo = pScreenPriv->pScreenInfo;
+
+  /* Send button events right away if emulate 3 buttons is off */
+  if (pScreenInfo->iE3BTimeout == WIN_E3B_OFF)
+    {
+      /* Emulate 3 buttons is off, send the button event */
+      winMouseButtonsSendEvent (iEventType, iButton);
+      return 0;
+    }
+
+  /* Emulate 3 buttons is on, let the fun begin */
+  if (iEventType == ButtonPress
+      && pScreenPriv->iE3BCachedPress == 0
+      && !pScreenPriv->fE3BFakeButton2Sent)
+    {
+      /*
+       * Button was pressed, no press is cached,
+       * and there is no fake button 2 release pending.
+       */
+
+      /* Store button press type */
+      pScreenPriv->iE3BCachedPress = iButton;
+
+      /*
+       * Set a timer to send this button press if the other button
+       * is not pressed within the timeout time.
+       */
+      SetTimer (pScreenPriv->hwndScreen,
+		WIN_E3B_TIMER_ID,
+		pScreenInfo->iE3BTimeout,
+		NULL);
+    }
+  else if (iEventType == ButtonPress
+	   && pScreenPriv->iE3BCachedPress != 0
+	   && pScreenPriv->iE3BCachedPress != iButton
+	   && !pScreenPriv->fE3BFakeButton2Sent)
+    {
+      /*
+       * Button press is cached, other button was pressed,
+       * and there is no fake button 2 release pending.
+       */
+
+      /* Mouse button was cached and other button was pressed */
+      KillTimer (pScreenPriv->hwndScreen, WIN_E3B_TIMER_ID);
+      pScreenPriv->iE3BCachedPress = 0;
+
+      /* Send fake middle button */
+      winMouseButtonsSendEvent (ButtonPress, Button2);
+
+      /* Indicate that a fake middle button event was sent */
+      pScreenPriv->fE3BFakeButton2Sent = TRUE;
+    }
+  else if (iEventType == ButtonRelease
+	   && pScreenPriv->iE3BCachedPress == iButton)
+    {
+      /*
+       * Cached button was released before timer ran out,
+       * and before the other mouse button was pressed.
+       */
+      KillTimer (pScreenPriv->hwndScreen, WIN_E3B_TIMER_ID);
+      pScreenPriv->iE3BCachedPress = 0;
+
+      /* Send cached press, then send release */
+      winMouseButtonsSendEvent (ButtonPress, iButton);
+      winMouseButtonsSendEvent (ButtonRelease, iButton);
+    }
+  else if (iEventType == ButtonRelease
+	   && pScreenPriv->fE3BFakeButton2Sent
+	   && !(wParam & MK_LBUTTON)
+	   && !(wParam & MK_RBUTTON))
+    {
+      /*
+       * Fake button 2 was sent and both mouse buttons have now been released
+       */
+      pScreenPriv->fE3BFakeButton2Sent = FALSE;
+      
+      /* Send middle mouse button release */
+      winMouseButtonsSendEvent (ButtonRelease, Button2);
+    }
+  else if (iEventType == ButtonRelease
+	   && pScreenPriv->iE3BCachedPress == 0
+	   && !pScreenPriv->fE3BFakeButton2Sent)
+    {
+      /*
+       * Button was release, no button is cached,
+       * and there is no fake button 2 release is pending.
+       */
+      winMouseButtonsSendEvent (ButtonRelease, iButton);
+    }
+
+  return 0;
+}
+@
+
+
+1.1.9.1
+log
+@OpenBSD just has imported exactly this tree into their vendor branch,
+called the same tag, in XF4/xc
+This is, apparently, the last XFree86 snapshot before the licence change
+(ie, addition of the advertising clause)
+
+Since the developers don't see any problems with that, and we would like
+to integrate improvements done by the remaining one or two (or so) XFree86
+developers (j/k), this prepares enabling us to update X-Window in the future.
+@
+text
+@@
+
+
+1.1.1.1
+log
+@Import OpenBSD 3.3 XF4 repository from CTM 3132 the first time
+This finalizes starting an OpenBSD-mirabile (aka MirBSD) repository.
+
+### MirBSD is:
+# Copyright (c) 1982-2003 by Thorsten "mirabile" Glaser <x86@@ePost.de>
+# Copyright © 1968-2003  The authors of And contributors to UNIX®, the
+#       C Language, BSD/Berkeley Unix; 386BSD, NetBSD 1.1 and OpenBSD.
+#
+# Anyone who obtained a copy of this work is hereby permitted to freely use,
+# distribute, modify, merge, sublicence, give away or sell it as long as the
+# authors are given due credit and the following notice is retained:
+#
+# This work is provided "as is", with no explicit or implicit warranty what-
+# soever. Use it only at your own risk. In no event may an author or contri-
+# butor be held liable for any damage, directly or indirectly, that origina-
+# ted through or is caused by creation or modification of this work.
+
+MirBSD is my private tree. MirBSD does not differ very much from OpenBSD
+and intentionally tracks OpenBSD. That's why it _is_ OpenBSD, just not the
+official one. It's like with DarrenBSD.
+
+At time of this writing, no advertising for MirBSD must be done,
+because the advertising clause has not yet been sorted out.
+
+http://templeofhate.com/tglaser/MirBSD/index.php
+@
+text
+@@

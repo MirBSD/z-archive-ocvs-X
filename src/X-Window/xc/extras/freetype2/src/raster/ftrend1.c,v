@@ -1,0 +1,574 @@
+head	1.2;
+branch	1.1.1;
+access;
+symbols
+	tg-mergetmp-2:1.1.1.3
+	cvs-200410241530:1.1.1.3
+	cvs-200410012000:1.1.1.3
+	cvs-200407141120:1.1.1.3
+	cvs-200406231010:1.1.1.3
+	MIRBSD_7quater:1.1.1.2
+	cvs-200405271510:1.1.1.3
+	XFree86_4_4_0:1.1.9.1
+	cvs-200403021700:1.1.1.3
+	XFREE86_20040213:1.1.9.1
+	xc:1.1.9
+	cvs-200401291925:1.1.1.2
+	MIRBSD_7_ALPHA:1.1.1.2.0.4
+	MIRBSD_7:1.1.1.2.0.2
+	MIRBSD_7ter:1.1.1.2
+	cvs-20011091815:1.1.1.2
+	cvs-200309162130:1.1.1.2
+	cvs-200308302005:1.1.1.2
+	ctmx-0387:1.1.1.2
+	ctmx-0384:1.1.1.2
+	MIRBSD_5:1.1.1.2
+	ctmx-0375:1.1.1.2
+	ctmx-0373:1.1.1.2
+	ctm-0371:1.1.1.2
+	ctm-0370:1.1.1.2
+	MIRBSD_4:1.1.1.2
+	ctm-0363:1.1.1.2
+	ctm-0359:1.1.1.2
+	ctm-0349:1.1.1.1
+	openbsd:1.1.1;
+locks; strict;
+comment	@ * @;
+
+
+1.2
+date	2003.05.16.16.29.54;	author tg;	state dead;
+branches;
+next	1.1;
+
+1.1
+date	2003.03.22.20.01.23;	author tg;	state Exp;
+branches
+	1.1.1.1
+	1.1.9.1;
+next	;
+
+1.1.1.1
+date	2003.03.22.20.01.23;	author tg;	state Exp;
+branches;
+next	1.1.1.2;
+
+1.1.1.2
+date	2003.04.08.18.21.07;	author tg;	state Exp;
+branches;
+next	1.1.1.3;
+
+1.1.1.3
+date	2004.03.02.17.39.05;	author tg;	state Stab;
+branches;
+next	;
+
+1.1.9.1
+date	2004.02.14.19.09.09;	author tg;	state Exp;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.2
+log
+@remove a bunch of files not used in MirBSD - clean tree. People who want them got cvs.
+@
+text
+@/***************************************************************************/
+/*                                                                         */
+/*  ftrend1.c                                                              */
+/*                                                                         */
+/*    The FreeType glyph rasterizer interface (body).                      */
+/*                                                                         */
+/*  Copyright 1996-2001 by                                                 */
+/*  David Turner, Robert Wilhelm, and Werner Lemberg.                      */
+/*                                                                         */
+/*  This file is part of the FreeType project, and may only be used,       */
+/*  modified, and distributed under the terms of the FreeType project      */
+/*  license, LICENSE.TXT.  By continuing to use, modify, or distribute     */
+/*  this file you indicate that you have read the license and              */
+/*  understand and accept it fully.                                        */
+/*                                                                         */
+/***************************************************************************/
+
+
+#include <ft2build.h>
+#include FT_INTERNAL_OBJECTS_H
+#include FT_OUTLINE_H
+#include "ftrend1.h"
+#include "ftraster.h"
+
+#include "rasterrs.h"
+
+
+  /* initialize renderer -- init its raster */
+  static FT_Error
+  ft_raster1_init( FT_Renderer  render )
+  {
+    FT_Library  library = FT_MODULE_LIBRARY( render );
+
+
+    render->clazz->raster_class->raster_reset( render->raster,
+                                               library->raster_pool,
+                                               library->raster_pool_size );
+
+    return Raster_Err_Ok;
+  }
+
+
+  /* set render-specific mode */
+  static FT_Error
+  ft_raster1_set_mode( FT_Renderer  render,
+                       FT_ULong     mode_tag,
+                       FT_Pointer   data )
+  {
+    /* we simply pass it to the raster */
+    return render->clazz->raster_class->raster_set_mode( render->raster,
+                                                         mode_tag,
+                                                         data );
+  }
+
+
+  /* transform a given glyph image */
+  static FT_Error
+  ft_raster1_transform( FT_Renderer   render,
+                        FT_GlyphSlot  slot,
+                        FT_Matrix*    matrix,
+                        FT_Vector*    delta )
+  {
+    FT_Error error = Raster_Err_Ok;
+
+
+    if ( slot->format != render->glyph_format )
+    {
+      error = Raster_Err_Invalid_Argument;
+      goto Exit;
+    }
+
+    if ( matrix )
+      FT_Outline_Transform( &slot->outline, matrix );
+
+    if ( delta )
+      FT_Outline_Translate( &slot->outline, delta->x, delta->y );
+
+  Exit:
+    return error;
+  }
+
+
+  /* return the glyph's control box */
+  static void
+  ft_raster1_get_cbox( FT_Renderer   render,
+                       FT_GlyphSlot  slot,
+                       FT_BBox*      cbox )
+  {
+    MEM_Set( cbox, 0, sizeof ( *cbox ) );
+
+    if ( slot->format == render->glyph_format )
+      FT_Outline_Get_CBox( &slot->outline, cbox );
+  }
+
+
+  /* convert a slot's glyph image into a bitmap */
+  static FT_Error
+  ft_raster1_render( FT_Renderer   render,
+                     FT_GlyphSlot  slot,
+                     FT_UInt       mode,
+                     FT_Vector*    origin )
+  {
+    FT_Error     error;
+    FT_Outline*  outline;
+    FT_BBox      cbox;
+    FT_UInt      width, height, pitch;
+    FT_Bitmap*   bitmap;
+    FT_Memory    memory;
+
+    FT_Raster_Params  params;
+
+
+    /* check glyph image format */
+    if ( slot->format != render->glyph_format )
+    {
+      error = Raster_Err_Invalid_Argument;
+      goto Exit;
+    }
+
+    /* check rendering mode */
+    if ( mode != ft_render_mode_mono )
+    {
+      /* raster1 is only capable of producing monochrome bitmaps */
+      if ( render->clazz == &ft_raster1_renderer_class )
+        return Raster_Err_Cannot_Render_Glyph;
+    }
+    else
+    {
+      /* raster5 is only capable of producing 5-gray-levels bitmaps */
+      if ( render->clazz == &ft_raster5_renderer_class )
+        return Raster_Err_Cannot_Render_Glyph;
+    }
+
+    outline = &slot->outline;
+
+    /* translate the outline to the new origin if needed */
+    if ( origin )
+      FT_Outline_Translate( outline, origin->x, origin->y );
+
+    /* compute the control box, and grid fit it */
+    FT_Outline_Get_CBox( outline, &cbox );
+
+    cbox.xMin &= -64;
+    cbox.yMin &= -64;
+    cbox.xMax  = ( cbox.xMax + 63 ) & -64;
+    cbox.yMax  = ( cbox.yMax + 63 ) & -64;
+
+    width  = ( cbox.xMax - cbox.xMin ) >> 6;
+    height = ( cbox.yMax - cbox.yMin ) >> 6;
+    bitmap = &slot->bitmap;
+    memory = render->root.memory;
+
+    /* release old bitmap buffer */
+    if ( slot->flags & ft_glyph_own_bitmap )
+    {
+      FREE( bitmap->buffer );
+      slot->flags &= ~ft_glyph_own_bitmap;
+    }
+
+    /* allocate new one, depends on pixel format */
+    if ( !( mode & ft_render_mode_mono ) )
+    {
+      /* we pad to 32 bits, only for backwards compatibility with FT 1.x */
+      pitch = ( width + 3 ) & -4;
+      bitmap->pixel_mode = ft_pixel_mode_grays;
+      bitmap->num_grays  = 256;
+    }
+    else
+    {
+      pitch = ( width + 7 ) >> 3;
+      bitmap->pixel_mode = ft_pixel_mode_mono;
+    }
+
+    bitmap->width = width;
+    bitmap->rows  = height;
+    bitmap->pitch = pitch;
+
+    if ( ALLOC( bitmap->buffer, (FT_ULong)pitch * height ) )
+      goto Exit;
+
+    slot->flags |= ft_glyph_own_bitmap;
+
+    /* translate outline to render it into the bitmap */
+    FT_Outline_Translate( outline, -cbox.xMin, -cbox.yMin );
+
+    /* set up parameters */
+    params.target = bitmap;
+    params.source = outline;
+    params.flags  = 0;
+
+    if ( bitmap->pixel_mode == ft_pixel_mode_grays )
+      params.flags |= ft_raster_flag_aa;
+
+    /* render outline into the bitmap */
+    error = render->raster_render( render->raster, &params );
+    
+    FT_Outline_Translate( outline, cbox.xMin, cbox.yMin );
+    
+    if ( error )
+      goto Exit;
+
+    slot->format      = ft_glyph_format_bitmap;
+    slot->bitmap_left = cbox.xMin >> 6;
+    slot->bitmap_top  = cbox.yMax >> 6;
+
+  Exit:
+    return error;
+  }
+
+
+  FT_CALLBACK_TABLE_DEF
+  const FT_Renderer_Class  ft_raster1_renderer_class =
+  {
+    {
+      ft_module_renderer,
+      sizeof( FT_RendererRec ),
+
+      "raster1",
+      0x10000L,
+      0x20000L,
+
+      0,    /* module specific interface */
+
+      (FT_Module_Constructor)ft_raster1_init,
+      (FT_Module_Destructor) 0,
+      (FT_Module_Requester)  0
+    },
+
+    ft_glyph_format_outline,
+
+    (FTRenderer_render)   ft_raster1_render,
+    (FTRenderer_transform)ft_raster1_transform,
+    (FTRenderer_getCBox)  ft_raster1_get_cbox,
+    (FTRenderer_setMode)  ft_raster1_set_mode,
+
+    (FT_Raster_Funcs*)    &ft_standard_raster
+  };
+
+
+  /* This renderer is _NOT_ part of the default modules; you will need */
+  /* to register it by hand in your application.  It should only be    */
+  /* used for backwards-compatibility with FT 1.x anyway.              */
+  /*                                                                   */
+  FT_CALLBACK_TABLE_DEF
+  const FT_Renderer_Class  ft_raster5_renderer_class =
+  {
+    {
+      ft_module_renderer,
+      sizeof( FT_RendererRec ),
+
+      "raster5",
+      0x10000L,
+      0x20000L,
+
+      0,    /* module specific interface */
+
+      (FT_Module_Constructor)ft_raster1_init,
+      (FT_Module_Destructor) 0,
+      (FT_Module_Requester)  0
+    },
+
+    ft_glyph_format_outline,
+
+    (FTRenderer_render)   ft_raster1_render,
+    (FTRenderer_transform)ft_raster1_transform,
+    (FTRenderer_getCBox)  ft_raster1_get_cbox,
+    (FTRenderer_setMode)  ft_raster1_set_mode,
+
+    (FT_Raster_Funcs*)    &ft_standard_raster
+  };
+
+
+/* END */
+@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@@
+
+
+1.1.9.1
+log
+@OpenBSD just has imported exactly this tree into their vendor branch,
+called the same tag, in XF4/xc
+This is, apparently, the last XFree86 snapshot before the licence change
+(ie, addition of the advertising clause)
+
+Since the developers don't see any problems with that, and we would like
+to integrate improvements done by the remaining one or two (or so) XFree86
+developers (j/k), this prepares enabling us to update X-Window in the future.
+@
+text
+@d7 1
+a7 1
+/*  Copyright 1996-2001, 2002 by                                           */
+d89 1
+a89 1
+    FT_MEM_ZERO( cbox, sizeof ( *cbox ) );
+d98 4
+a101 4
+  ft_raster1_render( FT_Renderer     render,
+                     FT_GlyphSlot    slot,
+                     FT_Render_Mode  mode,
+                     FT_Vector*      origin )
+d121 1
+a121 1
+    if ( mode != FT_RENDER_MODE_MONO )
+d148 2
+a149 2
+    width  = (FT_UInt)( ( cbox.xMax - cbox.xMin ) >> 6 );
+    height = (FT_UInt)( ( cbox.yMax - cbox.yMin ) >> 6 );
+d154 1
+a154 1
+    if ( slot->flags & FT_GLYPH_OWN_BITMAP )
+d156 2
+a157 2
+      FT_FREE( bitmap->buffer );
+      slot->flags &= ~FT_GLYPH_OWN_BITMAP;
+d161 1
+a161 1
+    if ( !( mode & FT_RENDER_MODE_MONO ) )
+d165 1
+a165 1
+      bitmap->pixel_mode = FT_PIXEL_MODE_GRAY;
+d170 2
+a171 2
+      pitch = ( ( width + 15 ) >> 4 ) << 1;
+      bitmap->pixel_mode = FT_PIXEL_MODE_MONO;
+d178 1
+a178 1
+    if ( FT_ALLOC( bitmap->buffer, (FT_ULong)pitch * height ) )
+d181 1
+a181 1
+    slot->flags |= FT_GLYPH_OWN_BITMAP;
+d191 2
+a192 2
+    if ( bitmap->pixel_mode == FT_PIXEL_MODE_GRAY )
+      params.flags |= FT_RASTER_FLAG_AA;
+d202 3
+a204 3
+    slot->format      = FT_GLYPH_FORMAT_BITMAP;
+    slot->bitmap_left = (FT_Int)( cbox.xMin >> 6 );
+    slot->bitmap_top  = (FT_Int)( cbox.yMax >> 6 );
+d229 1
+a229 1
+    FT_GLYPH_FORMAT_OUTLINE,
+d231 4
+a234 4
+    (FT_Renderer_RenderFunc)   ft_raster1_render,
+    (FT_Renderer_TransformFunc)ft_raster1_transform,
+    (FT_Renderer_GetCBoxFunc)  ft_raster1_get_cbox,
+    (FT_Renderer_SetModeFunc)  ft_raster1_set_mode,
+d262 1
+a262 1
+    FT_GLYPH_FORMAT_OUTLINE,
+d264 4
+a267 4
+    (FT_Renderer_RenderFunc)   ft_raster1_render,
+    (FT_Renderer_TransformFunc)ft_raster1_transform,
+    (FT_Renderer_GetCBoxFunc)  ft_raster1_get_cbox,
+    (FT_Renderer_SetModeFunc)  ft_raster1_set_mode,
+@
+
+
+1.1.1.1
+log
+@Import OpenBSD 3.3 XF4 repository from CTM 3132 the first time
+This finalizes starting an OpenBSD-mirabile (aka MirBSD) repository.
+
+### MirBSD is:
+# Copyright (c) 1982-2003 by Thorsten "mirabile" Glaser <x86@@ePost.de>
+# Copyright © 1968-2003  The authors of And contributors to UNIX®, the
+#       C Language, BSD/Berkeley Unix; 386BSD, NetBSD 1.1 and OpenBSD.
+#
+# Anyone who obtained a copy of this work is hereby permitted to freely use,
+# distribute, modify, merge, sublicence, give away or sell it as long as the
+# authors are given due credit and the following notice is retained:
+#
+# This work is provided "as is", with no explicit or implicit warranty what-
+# soever. Use it only at your own risk. In no event may an author or contri-
+# butor be held liable for any damage, directly or indirectly, that origina-
+# ted through or is caused by creation or modification of this work.
+
+MirBSD is my private tree. MirBSD does not differ very much from OpenBSD
+and intentionally tracks OpenBSD. That's why it _is_ OpenBSD, just not the
+official one. It's like with DarrenBSD.
+
+At time of this writing, no advertising for MirBSD must be done,
+because the advertising clause has not yet been sorted out.
+
+http://templeofhate.com/tglaser/MirBSD/index.php
+@
+text
+@@
+
+
+1.1.1.2
+log
+@The X-Windowing System
+
+Import XFree86 4.3 from OpenBSD by CTM, in the hope it's stable
+@
+text
+@d7 1
+a7 1
+/*  Copyright 1996-2001, 2002 by                                           */
+d89 1
+a89 1
+    FT_MEM_SET( cbox, 0, sizeof ( *cbox ) );
+d154 1
+a154 1
+    if ( slot->flags & FT_GLYPH_OWN_BITMAP )
+d156 2
+a157 2
+      FT_FREE( bitmap->buffer );
+      slot->flags &= ~FT_GLYPH_OWN_BITMAP;
+d170 1
+a170 1
+      pitch = ( ( width + 15 ) >> 4 ) << 1;
+d178 1
+a178 1
+    if ( FT_ALLOC( bitmap->buffer, (FT_ULong)pitch * height ) )
+d181 1
+a181 1
+    slot->flags |= FT_GLYPH_OWN_BITMAP;
+@
+
+
+1.1.1.3
+log
+@That's what OpenBSD will, probably, ship as XF4 in 3.5
+their last sync against XFree86 4.3-current has been
+imported into our vendor branch, too
+@
+text
+@d89 1
+a89 1
+    FT_MEM_ZERO( cbox, sizeof ( *cbox ) );
+d98 4
+a101 4
+  ft_raster1_render( FT_Renderer     render,
+                     FT_GlyphSlot    slot,
+                     FT_Render_Mode  mode,
+                     FT_Vector*      origin )
+d121 1
+a121 1
+    if ( mode != FT_RENDER_MODE_MONO )
+d148 2
+a149 2
+    width  = (FT_UInt)( ( cbox.xMax - cbox.xMin ) >> 6 );
+    height = (FT_UInt)( ( cbox.yMax - cbox.yMin ) >> 6 );
+d161 1
+a161 1
+    if ( !( mode & FT_RENDER_MODE_MONO ) )
+d165 1
+a165 1
+      bitmap->pixel_mode = FT_PIXEL_MODE_GRAY;
+d171 1
+a171 1
+      bitmap->pixel_mode = FT_PIXEL_MODE_MONO;
+d191 2
+a192 2
+    if ( bitmap->pixel_mode == FT_PIXEL_MODE_GRAY )
+      params.flags |= FT_RASTER_FLAG_AA;
+d202 3
+a204 3
+    slot->format      = FT_GLYPH_FORMAT_BITMAP;
+    slot->bitmap_left = (FT_Int)( cbox.xMin >> 6 );
+    slot->bitmap_top  = (FT_Int)( cbox.yMax >> 6 );
+d229 1
+a229 1
+    FT_GLYPH_FORMAT_OUTLINE,
+d231 4
+a234 4
+    (FT_Renderer_RenderFunc)   ft_raster1_render,
+    (FT_Renderer_TransformFunc)ft_raster1_transform,
+    (FT_Renderer_GetCBoxFunc)  ft_raster1_get_cbox,
+    (FT_Renderer_SetModeFunc)  ft_raster1_set_mode,
+d262 1
+a262 1
+    FT_GLYPH_FORMAT_OUTLINE,
+d264 4
+a267 4
+    (FT_Renderer_RenderFunc)   ft_raster1_render,
+    (FT_Renderer_TransformFunc)ft_raster1_transform,
+    (FT_Renderer_GetCBoxFunc)  ft_raster1_get_cbox,
+    (FT_Renderer_SetModeFunc)  ft_raster1_set_mode,
+@
+
+

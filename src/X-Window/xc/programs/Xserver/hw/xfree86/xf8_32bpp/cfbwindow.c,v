@@ -1,0 +1,293 @@
+head	1.1;
+branch	1.1.1;
+access;
+symbols
+	tg-mergetmp-2:1.1.1.3
+	cvs-200410241530:1.1.1.3
+	cvs-200410012000:1.1.1.3
+	cvs-200407221130:1.1.1.3
+	cvs-200407141120:1.1.1.3
+	cvs-200406231010:1.1.1.3
+	MIRBSD_7quater:1.1.1.2
+	cvs-200405271510:1.1.1.3
+	XFree86_4_4_0:1.1.9.1
+	cvs-200403021700:1.1.1.3
+	XFREE86_20040213:1.1.9.1
+	xc:1.1.9
+	cvs-200401291925:1.1.1.2
+	MIRBSD_7_ALPHA:1.1.1.2.0.4
+	MIRBSD_7:1.1.1.2.0.2
+	MIRBSD_7ter:1.1.1.2
+	cvs-20011091815:1.1.1.2
+	cvs-200309162130:1.1.1.2
+	cvs-200308302005:1.1.1.2
+	ctmx-0387:1.1.1.2
+	ctmx-0384:1.1.1.2
+	MIRBSD_5:1.1.1.2
+	ctmx-0375:1.1.1.2
+	ctmx-0373:1.1.1.2
+	ctm-0371:1.1.1.2
+	ctm-0370:1.1.1.2
+	MIRBSD_4:1.1.1.2
+	ctm-0363:1.1.1.2
+	ctm-0359:1.1.1.2
+	ctm-0349:1.1.1.1
+	openbsd:1.1.1;
+locks; strict;
+comment	@ * @;
+
+
+1.1
+date	2003.03.22.20.09.19;	author tg;	state Exp;
+branches
+	1.1.1.1
+	1.1.9.1;
+next	;
+
+1.1.1.1
+date	2003.03.22.20.09.19;	author tg;	state Exp;
+branches;
+next	1.1.1.2;
+
+1.1.1.2
+date	2003.04.08.18.37.56;	author tg;	state Exp;
+branches;
+next	1.1.1.3;
+
+1.1.1.3
+date	2004.03.02.18.28.24;	author tg;	state Stab;
+branches;
+next	;
+
+1.1.9.1
+date	2004.02.14.19.26.01;	author tg;	state Exp;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@/* $XFree86: xc/programs/Xserver/hw/xfree86/xf8_32bpp/cfbwindow.c,v 1.6 2000/02/29 00:17:16 mvojkovi Exp $ */
+
+
+#include "X.h"
+#include "scrnintstr.h"
+#include "windowstr.h"
+#define PSZ 8
+#include "cfb.h"
+#undef PSZ
+#include "cfb32.h"
+#include "cfb8_32.h"
+#include "mistruct.h"
+#include "regionstr.h"
+#include "cfbmskbits.h"
+#include "mioverlay.h"
+
+
+/* We don't bother with cfb's fastBackground/Border so we don't
+   need to use the Window privates */
+
+extern WindowPtr *WindowTable;
+
+
+Bool
+cfb8_32CreateWindow(WindowPtr pWin)
+{
+    cfbPrivWin *pPrivWin = cfbGetWindowPrivate(pWin);
+
+    pPrivWin->fastBackground = FALSE;
+    pPrivWin->fastBorder = FALSE;
+
+    pWin->drawable.bitsPerPixel = 32;
+    return TRUE;
+}
+
+
+Bool
+cfb8_32DestroyWindow(WindowPtr pWin)
+{
+    return TRUE;
+}
+
+Bool
+cfb8_32PositionWindow(
+    WindowPtr pWin,
+    int x, int y
+){
+    return TRUE;
+}
+
+void 
+cfb8_32CopyWindow(pWin, ptOldOrg, prgnSrc)
+    WindowPtr pWin;
+    DDXPointRec ptOldOrg;
+    RegionPtr prgnSrc;
+{
+    ScreenPtr pScreen = pWin->drawable.pScreen;
+    DDXPointPtr ppt, pptSrc;
+    RegionRec rgnDst;
+    RegionPtr borderClip = &pWin->borderClip;
+    BoxPtr pbox;
+    int dx, dy, i, nbox;
+    WindowPtr pwinRoot;
+    Bool doUnderlay = miOverlayCopyUnderlay(pScreen);
+    Bool freeReg = FALSE;
+
+    pwinRoot = WindowTable[pScreen->myNum];
+
+    if(doUnderlay)
+	freeReg = miOverlayCollectUnderlayRegions(pWin, &borderClip);
+
+    REGION_INIT(pScreen, &rgnDst, NullBox, 0);
+
+    dx = ptOldOrg.x - pWin->drawable.x;
+    dy = ptOldOrg.y - pWin->drawable.y;
+    REGION_TRANSLATE(pScreen, prgnSrc, -dx, -dy);
+    REGION_INTERSECT(pScreen, &rgnDst, borderClip, prgnSrc);
+
+    pbox = REGION_RECTS(&rgnDst);
+    nbox = REGION_NUM_RECTS(&rgnDst);
+    if(!nbox || 
+       !(pptSrc = (DDXPointPtr )ALLOCATE_LOCAL(nbox * sizeof(DDXPointRec))))
+    {
+	REGION_UNINIT(pScreen, &rgnDst);
+	return;
+    }
+    ppt = pptSrc;
+
+    for (i = nbox; --i >= 0; ppt++, pbox++)
+    {
+	ppt->x = pbox->x1 + dx;
+	ppt->y = pbox->y1 + dy;
+    }
+
+    if(doUnderlay)
+	cfbDoBitblt24To24GXcopy((DrawablePtr)pwinRoot, (DrawablePtr)pwinRoot,
+			GXcopy, &rgnDst, pptSrc, ~0, 0);
+    else
+	cfbDoBitblt8To8GXcopy((DrawablePtr)pwinRoot, (DrawablePtr)pwinRoot,
+			GXcopy, &rgnDst, pptSrc, ~0, 0);
+
+    DEALLOCATE_LOCAL(pptSrc);
+    REGION_UNINIT(pScreen, &rgnDst);
+    if(freeReg) 
+	REGION_DESTROY(pScreen, borderClip);
+}
+
+Bool
+cfb8_32ChangeWindowAttributes(
+    WindowPtr pWin,
+    unsigned long mask
+){
+    return TRUE;
+}
+
+
+
+
+@
+
+
+1.1.9.1
+log
+@OpenBSD just has imported exactly this tree into their vendor branch,
+called the same tag, in XF4/xc
+This is, apparently, the last XFree86 snapshot before the licence change
+(ie, addition of the advertising clause)
+
+Since the developers don't see any problems with that, and we would like
+to integrate improvements done by the remaining one or two (or so) XFree86
+developers (j/k), this prepares enabling us to update X-Window in the future.
+@
+text
+@d1 1
+a1 1
+/* $XFree86: xc/programs/Xserver/hw/xfree86/xf8_32bpp/cfbwindow.c,v 1.9 2003/11/10 18:22:43 tsi Exp $ */
+d21 2
+d72 1
+a72 1
+    REGION_NULL(pScreen, &rgnDst);
+d97 1
+a97 1
+			GXcopy, &rgnDst, pptSrc, ~0);
+d100 1
+a100 1
+			GXcopy, &rgnDst, pptSrc, ~0);
+@
+
+
+1.1.1.1
+log
+@Import OpenBSD 3.3 XF4 repository from CTM 3132 the first time
+This finalizes starting an OpenBSD-mirabile (aka MirBSD) repository.
+
+### MirBSD is:
+# Copyright (c) 1982-2003 by Thorsten "mirabile" Glaser <x86@@ePost.de>
+# Copyright © 1968-2003  The authors of And contributors to UNIX®, the
+#       C Language, BSD/Berkeley Unix; 386BSD, NetBSD 1.1 and OpenBSD.
+#
+# Anyone who obtained a copy of this work is hereby permitted to freely use,
+# distribute, modify, merge, sublicence, give away or sell it as long as the
+# authors are given due credit and the following notice is retained:
+#
+# This work is provided "as is", with no explicit or implicit warranty what-
+# soever. Use it only at your own risk. In no event may an author or contri-
+# butor be held liable for any damage, directly or indirectly, that origina-
+# ted through or is caused by creation or modification of this work.
+
+MirBSD is my private tree. MirBSD does not differ very much from OpenBSD
+and intentionally tracks OpenBSD. That's why it _is_ OpenBSD, just not the
+official one. It's like with DarrenBSD.
+
+At time of this writing, no advertising for MirBSD must be done,
+because the advertising clause has not yet been sorted out.
+
+http://templeofhate.com/tglaser/MirBSD/index.php
+@
+text
+@@
+
+
+1.1.1.2
+log
+@The X-Windowing System
+
+Import XFree86 4.3 from OpenBSD by CTM, in the hope it's stable
+@
+text
+@d1 1
+a1 1
+/* $XFree86: xc/programs/Xserver/hw/xfree86/xf8_32bpp/cfbwindow.c,v 1.7 2003/02/17 16:08:30 dawes Exp $ */
+d20 2
+@
+
+
+1.1.1.3
+log
+@That's what OpenBSD will, probably, ship as XF4 in 3.5
+their last sync against XFree86 4.3-current has been
+imported into our vendor branch, too
+@
+text
+@d1 1
+a1 1
+/* $XFree86: xc/programs/Xserver/hw/xfree86/xf8_32bpp/cfbwindow.c,v 1.9 2003/11/10 18:22:43 tsi Exp $ */
+d70 1
+a70 1
+    REGION_NULL(pScreen, &rgnDst);
+d95 1
+a95 1
+			GXcopy, &rgnDst, pptSrc, ~0);
+d98 1
+a98 1
+			GXcopy, &rgnDst, pptSrc, ~0);
+@
+
+

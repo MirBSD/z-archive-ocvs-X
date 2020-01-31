@@ -1,0 +1,1065 @@
+head	1.2;
+branch	1.1.1;
+access;
+symbols
+	tg-mergetmp-2:1.1.1.2
+	cvs-200410241530:1.1.1.2
+	cvs-200410012000:1.1.1.2
+	cvs-200407141120:1.1.1.2
+	cvs-200406231010:1.1.1.2
+	MIRBSD_7quater:1.1.1.1
+	cvs-200405271510:1.1.1.2
+	XFree86_4_4_0:1.1.9.1
+	cvs-200403021700:1.1.1.2
+	XFREE86_20040213:1.1.9.1
+	xc:1.1.9
+	cvs-200401291925:1.1.1.1
+	MIRBSD_7_ALPHA:1.1.1.1.0.4
+	MIRBSD_7:1.1.1.1.0.2
+	MIRBSD_7ter:1.1.1.1
+	cvs-20011091815:1.1.1.1
+	cvs-200309162130:1.1.1.1
+	cvs-200308302005:1.1.1.1
+	ctmx-0387:1.1.1.1
+	ctmx-0384:1.1.1.1
+	MIRBSD_5:1.1.1.1
+	ctmx-0375:1.1.1.1
+	ctmx-0373:1.1.1.1
+	ctm-0371:1.1.1.1
+	ctm-0370:1.1.1.1
+	MIRBSD_4:1.1.1.1
+	ctm-0363:1.1.1.1
+	ctm-0359:1.1.1.1
+	openbsd:1.1.1;
+locks; strict;
+comment	@ * @;
+
+
+1.2
+date	2003.05.16.16.29.45;	author tg;	state dead;
+branches;
+next	1.1;
+
+1.1
+date	2003.04.08.18.20.59;	author tg;	state Exp;
+branches
+	1.1.1.1
+	1.1.9.1;
+next	;
+
+1.1.1.1
+date	2003.04.08.18.20.59;	author tg;	state Exp;
+branches;
+next	1.1.1.2;
+
+1.1.1.2
+date	2004.03.02.17.38.13;	author tg;	state Stab;
+branches;
+next	;
+
+1.1.9.1
+date	2004.02.14.19.08.55;	author tg;	state Exp;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.2
+log
+@remove a bunch of files not used in MirBSD - clean tree. People who want them got cvs.
+@
+text
+@#include "ftobject.c"
+
+#define  FT_MAGIC_DEATH   0xDEADdead
+#define  FT_MAGIC_CLASS   0x12345678
+
+#define  FT_OBJECT_CHECK(o)                                  \
+           ( FT_OBJECT(o)              != NULL            && \
+             FT_OBJECT(o)->clazz       != NULL            && \
+             FT_OBJECT(o)->ref_count   >= 1               && \
+             FT_OBJECT(o)->clazz->magic == FT_MAGIC_CLASS )
+
+
+ /*******************************************************************/
+ /*******************************************************************/
+ /*****                                                         *****/
+ /*****                                                         *****/
+ /*****                  M E T A - C L A S S                    *****/
+ /*****                                                         *****/
+ /*****                                                         *****/
+ /*******************************************************************/
+ /*******************************************************************/
+
+ /* we use a dynamic hash table to map types to classes */
+ /* this structure defines the layout of each node of   */
+ /* this table                                          */
+  typedef struct FT_ClassHNodeRec_
+  {
+    FT_HashNodeRec  hnode;
+    FT_Type         ctype;
+    FT_Class        clazz;
+
+  } FT_ClassHNodeRec, *FT_ClassHNode;
+
+
+ /* the meta class contains a type -> class mapping */
+ /* and owns all class objects..                    */
+ /*                                                 */
+  typedef struct FT_MetaClassRec_
+  {
+    FT_ClassRec  clazz;
+    FT_HashRec   type_to_class;
+
+  } FT_MetaClassRec, *FT_MetaClass;
+
+ /* forward declaration */
+  static const FT_TypeRec  ft_meta_class_type;
+
+
+ /* destroy a given class */
+  static void
+  ft_class_hnode_destroy( FT_ClassHNode  node )
+  {
+    FT_Clazz   clazz  = node->clazz;
+    FT_Memory  memory = clazz->memory;
+    FT_Type    ctype  = clazz->type;
+
+    if ( ctype->class_done )
+      ctype->class_done( clazz );
+
+    FT_FREE( clazz );
+
+    node->clazz = NULL;
+    node->type  = NULL;
+
+    FT_FREE( node );
+  }
+
+
+  static FT_Int
+  ft_class_hnode_compare( const FT_ClassHNode  node1,
+                          const FT_ClassHNode  node2 )
+  {
+    return ( node1->type == node2->type );
+  }
+
+
+  static void
+  ft_metaclass_done( FT_MetaClass  meta )
+  {
+    /* clear all objects */
+    ft_hash_done( &meta->type_to_class,
+                  (FT_Hash_ForeachFunc) ft_class_destroy,
+                   NULL );
+
+    meta->clazz->object.clazz    = NULL;
+    meta->clazz->object.ref_count = 0;
+    meta->clazz->magic            = FT_MAGIC_DEATH;
+  }
+
+
+  static void
+  ft_metaclass_init( FT_MetaClass  meta,
+                     FT_Library    library )
+  {
+    FT_ClassRec*  clazz = meta->clazz;
+
+    /* the meta-class is its OWN class !! */
+    clazz->object.clazz     = (FT_Class) clazz;
+    clazz->object.ref_count = 1;
+    clazz->magic            = FT_MAGIC_CLASS;
+    clazz->library          = library;
+    clazz->memory           = library->memory;
+    clazz->type             = &ft_metaclass_type;
+    clazz->info             = NULL;
+
+    clazz->obj_size         = sizeof( FT_ClassRec );
+    clazz->obj_init         = NULL;
+    clazz->obj_done         = NULL;
+
+    ft_hash_init( &meta->type_to_class,
+                  (FT_Hash_CompareFunc) ft_class_hnode_compare,
+                  library->memory );
+  }
+
+
+ /* find or create the class corresponding to a given type */
+  static FT_Class
+  ft_metaclass_get_class( FT_MetaClass  meta,
+                          FT_Type       ctype )
+  {
+    FT_ClassHNodeRec   keynode, *node, **pnode;
+    FT_Memory          memory;
+
+    keynode.hnode.hash = (FT_UInt32)( ctype >> 2 );
+    keynode.type       = type;
+
+    pnode = (FT_ClassHNode) ft_hash_lookup( &meta->type_to_class,
+                                            &noderec );
+    node  = *pnode;
+    if ( node != NULL )
+      return node->clazz;
+
+    memory = FT_CLASS__MEMORY(meta);
+    node   = FT_MEM_SAFE_ALLOC( sizeof(*node) );
+    if ( node != NULL )
+    {
+      FT_ClassRec*  clazz;
+
+      clazz = FT_MEM_SAFE_ALLOC( ctype->class_size );
+      if ( clazz == NULL )
+      {
+        FT_FREE( node );
+        FT_XTHROW( FT_Err_Out_Of_Memory );
+      }
+    }
+  }
+
+
+  static const FT_TypeRec  ft_meta_class_type =
+  {
+    "FT2.MetaClass",
+    NULL,
+
+    sizeof( FT_MetaClassRec ),
+    (FT_Object_InitFunc)  ft_metaclass_init,
+    (FT_Object_DoneFunc)  ft_metaclass_done,
+
+    sizeof( FT_ClassRec ),
+    (FT_Object_InitFunc)  ft_class_init,
+    (FT_Object_DoneFunc)  ft_class_done
+  };
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+  FT_BASE_DEF( FT_Int )
+  ft_object_check( FT_Pointer  obj )
+  {
+    return FT_OBJECT_CHECK(obj);
+  }
+
+
+  FT_BASE_DEF( FT_Int )
+  ft_object_is_a( FT_Pointer  obj,
+                  FT_Class    clazz )
+  {
+    if ( FT_OBJECT_CHECK(obj) )
+    {
+      FT_Object  o = FT_OBJECT(obj);
+      FT_Class   c = FT_OBJECT__CLASS(obj);
+
+      do
+      {
+        if ( c == clazz )
+          return 1;
+
+        c = c->super;
+      }
+      while ( c == NULL );
+
+      return (clazz == NULL);
+    }
+  }
+
+
+ /* the cleanup routine for all objects */
+  static void
+  ft_object_cleanup( FT_Object  object )
+  {
+    FT_Memory  memory = FT_OBJECT__MEMORY(object);
+    FT_Class   clazz  = FT_OBJECT__CLASS(object);
+
+    if ( clazz->obj_done )
+      clazz->obj_done( object );
+
+    FT_FREE( object );
+  }
+
+
+  FT_BASE_DEF( FT_Object )
+  ft_object_new( FT_Class    clazz,
+                 FT_Pointer  init_data )
+  {
+    FT_Memory  memory;
+    FT_Object  obj;
+
+
+    FT_ASSERT_IS_CLASS(clazz);
+
+    memory         = FT_CLASS__MEMORY(clazz);
+    obj            = ft_mem_alloc( clazz->obj_size, memory );
+    obj->clazz     = clazz;
+    obj->ref_count = 1;
+
+    if ( clazz->obj_init )
+    {
+      FT_CleanupStack  stack = FT_MEMORY__CLEANUP(memory);
+
+
+      ft_cleanup_push( stack, obj, (FT_CleanupFunc) ft_object_cleanup, NULL );
+
+      clazz->obj_init( obj, init_data );
+
+      ft_cleanup_pop( stack, obj, 0 );
+    }
+    return obj;
+  }
+
+
+
+  FT_BASE_DEF( void )
+  ft_object_create( FT_Object  *pobject,
+                    FT_Class    clazz,
+                    FT_Pointer  init_data )
+  {
+    FT_Memory  memory;
+    FT_Object  obj;
+
+    FT_ASSERT_IS_CLASS(clazz);
+
+    memory         = FT_CLASS__MEMORY(memory);
+    obj            = ft_mem_alloc( clazz->obj_size, memory );
+    obj->clazz     = clazz;
+    obj->ref_count = 1;
+    *pobject       = obj;
+
+    if ( clazz->obj_init )
+      clazz->obj_init( obj, init_data );
+  }
+
+
+  FT_BASE_DEF( FT_Class )
+  ft_class_find_by_type( FT_Type    type,
+                         FT_Memory  memory )
+  {
+  }
+
+
+  FT_BASE_DEF( FT_Class )
+  ft_class_find_by_name( FT_CString  class_name,
+                         FT_Memory   memory );
+
+  FT_BASE_DEF( FT_Object )
+  ft_object_new_from_type( FT_Type     type,
+                           FT_Pointer  data,
+                           FT_Memory   memory );
+
+  FT_BASE_DEF( void )
+  ft_object_create_from_type( FT_Object  *pobject,
+                              FT_Type     type,
+                              FT_Pointer  init_data,
+                              FT_Memory   memory );
+
+  FT_BASE_DEF( void )
+  ft_object_push( FT_Object  object );
+
+  FT_BASE_DEF( void )
+  ft_object_pop( FT_Object  object );
+
+  FT_BASE_DEF( void )
+  ft_object_pop_destroy( FT_Object  object );
+
+@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@@
+
+
+1.1.9.1
+log
+@OpenBSD just has imported exactly this tree into their vendor branch,
+called the same tag, in XF4/xc
+This is, apparently, the last XFree86 snapshot before the licence change
+(ie, addition of the advertising clause)
+
+Since the developers don't see any problems with that, and we would like
+to integrate improvements done by the remaining one or two (or so) XFree86
+developers (j/k), this prepares enabling us to update X-Window in the future.
+@
+text
+@d1 1
+a1 4
+#include <ft2build.h>
+#include FT_INTERNAL_OBJECT_H
+#include FT_INTERNAL_DEBUG_H
+#include FT_INTERNAL_OBJECTS_H
+a5 2
+#define  FT_TYPE_HASH(x)  (( (FT_UInt32)(x) >> 2 )^( (FT_UInt32)(x) >> 10 ))
+
+d7 3
+a9 3
+           ( FT_OBJECT(o)               != NULL           && \
+             FT_OBJECT(o)->clazz        != NULL           && \
+             FT_OBJECT(o)->ref_count    >= 1              && \
+a11 4
+#define  FT_CLASS_CHECK(c)  \
+           ( FT_CLASS(c) != NULL && FT_CLASS(c)->magic == FT_MAGIC_CLASS )
+
+#define  FT_ASSERT_IS_CLASS(c)  FT_ASSERT( FT_CLASS_CHECK(c) )
+d23 8
+a30 4
+ /* forward declaration */
+  FT_BASE_DEF( FT_Error )
+  ft_metaclass_init( FT_MetaClass  meta,
+                     FT_Library    library );
+d32 1
+a32 3
+  /* forward declaration */
+  FT_BASE_DEF( void )
+  ft_metaclass_done( FT_MetaClass  meta );
+d35 4
+a38 2
+  /* class type for the meta-class itself */
+  static const FT_TypeRec  ft_meta_class_type =
+d40 2
+a41 11
+    "FT2.MetaClass",
+    NULL,
+
+    sizeof( FT_MetaClassRec ),
+    (FT_Object_InitFunc)  ft_metaclass_init,
+    (FT_Object_DoneFunc)  ft_metaclass_done,
+
+    sizeof( FT_ClassRec ),
+    (FT_Object_InitFunc)  NULL,
+    (FT_Object_DoneFunc)  NULL
+  };
+d43 1
+d45 2
+d53 1
+a53 1
+    FT_Class   clazz  = node->clazz;
+d55 1
+d57 2
+a58 2
+    if ( clazz->class_done )
+      clazz->class_done( (FT_Object) clazz );
+d70 2
+a71 47
+  ft_type_equal( FT_Type  type1,
+                 FT_Type  type2 )
+  {
+    if ( type1 == type2 )
+      goto Ok;
+
+    if ( type1 == NULL || type2 == NULL )
+      goto Fail;
+
+    /* compare parent types */
+    if ( type1->super != type2->super )
+    {
+      if ( type1->super == NULL           ||
+           type2->super == NULL           ||
+           !ft_type_equal( type1, type2 ) )
+        goto Fail;
+    }
+
+    /* compare type names */
+    if ( type1->name != type2->name )
+    {
+      if ( type1->name == NULL                        ||
+           type2->name == NULL                        ||
+           ft_strcmp( type1->name, type2->name ) != 0 )
+        goto Fail;
+    }
+
+    /* compare the other type fields */
+    if ( type1->class_size != type2->class_size ||
+         type1->class_init != type2->class_init ||
+         type1->class_done != type2->class_done ||
+         type1->obj_size   != type2->obj_size   ||
+         type1->obj_init   != type2->obj_init   ||
+         type1->obj_done   != type2->obj_done   )
+      goto Fail;
+
+  Ok:
+    return 1;
+
+  Fail:
+    return 0;
+  }
+
+
+  static FT_Int
+  ft_class_hnode_equal( const FT_ClassHNode  node1,
+                        const FT_ClassHNode  node2 )
+d73 1
+a73 5
+    FT_Type  type1 = node1->type;
+    FT_Type  type2 = node2->type;
+
+    /* comparing the pointers should work in 99% of cases */
+    return ( type1 == type2 ) ? 1 : ft_type_equal( type1, type2 );
+d77 1
+a77 1
+  FT_BASE_DEF( void )
+d80 1
+a80 1
+    /* clear all classes */
+d82 1
+a82 1
+                  (FT_Hash_ForeachFunc) ft_class_hnode_destroy,
+d85 3
+a87 3
+    meta->clazz.object.clazz     = NULL;
+    meta->clazz.object.ref_count = 0;
+    meta->clazz.magic            = FT_MAGIC_DEATH;
+d91 1
+a91 1
+  FT_BASE_DEF( FT_Error )
+d95 1
+a95 1
+    FT_ClassRec*  clazz = (FT_ClassRec*) &meta->clazz;
+d103 1
+a103 1
+    clazz->type             = &ft_meta_class_type;
+a105 2
+    clazz->class_done       = (FT_Object_DoneFunc) ft_metaclass_done;
+
+d110 3
+a112 3
+    return ft_hash_init( &meta->type_to_class,
+                        (FT_Hash_EqualFunc) ft_class_hnode_equal,
+                        library->memory );
+a116 3
+ /* note that this function will retunr NULL in case of    */
+ /* memory overflow                                        */
+ /*                                                        */
+a122 3
+    FT_ClassRec*       clazz;
+    FT_Class           parent;
+    FT_Error           error;
+d124 2
+a125 2
+    keynode.hnode.hash = FT_TYPE_HASH( ctype );
+    keynode.type       = ctype;
+d127 2
+a128 2
+    pnode = (FT_ClassHNode*) ft_hash_lookup( &meta->type_to_class,
+                                             (FT_HashNode) &keynode );
+d131 1
+a131 4
+    {
+      clazz = (FT_ClassRec*) node->clazz;
+      goto Exit;
+    }
+d134 2
+a135 3
+    clazz  = NULL;
+    parent = NULL;
+    if ( ctype->super != NULL )
+d137 1
+a137 2
+      FT_ASSERT( ctype->super->class_size <= ctype->class_size );
+      FT_ASSERT( ctype->super->obj_size   <= ctype->obj_size   );
+d139 6
+a144 1
+      parent = ft_metaclass_get_class( meta, ctype->super );
+d146 1
+a147 6
+    if ( !FT_NEW( node ) )
+    {
+      if ( !FT_ALLOC( clazz, ctype->class_size ) )
+      {
+        if ( parent )
+          FT_MEM_COPY( (FT_ClassRec*)clazz, parent, parent->type->class_size );
+d149 4
+a152 2
+        clazz->object.clazz     = (FT_Class) meta;
+        clazz->object.ref_count = 1;
+d154 3
+a156 44
+        clazz->memory  = memory;
+        clazz->library = FT_CLASS__LIBRARY(meta);
+        clazz->super   = parent;
+        clazz->type    = ctype;
+        clazz->info    = NULL;
+        clazz->magic   = FT_MAGIC_CLASS;
+
+        clazz->class_done = ctype->class_done;
+        clazz->obj_size   = ctype->obj_size;
+        clazz->obj_init   = ctype->obj_init;
+        clazz->obj_done   = ctype->obj_done;
+
+        if ( parent )
+        {
+          if ( clazz->class_done == NULL )
+            clazz->class_done = parent->class_done;
+
+          if ( clazz->obj_init == NULL )
+            clazz->obj_init = parent->obj_init;
+
+          if ( clazz->obj_done == NULL )
+            clazz->obj_done = parent->obj_done;
+        }
+
+        /* find class initializer, if any */
+        {
+          FT_Type             ztype = ctype;
+          FT_Object_InitFunc  cinit = NULL;
+
+          do
+          {
+            cinit = ztype->class_init;
+            if ( cinit != NULL )
+              break;
+
+            ztype = ztype->super;
+          }
+          while ( ztype != NULL );
+
+          /* then call it when needed */
+          if ( cinit != NULL )
+            error = cinit( (FT_Object) clazz, NULL );
+        }
+      }
+d158 4
+a161 18
+      if (error)
+      {
+        if ( clazz )
+        {
+          /* we always call the class destructor when    */
+          /* an error was detected in the constructor !! */
+          if ( clazz->class_done )
+            clazz->class_done( (FT_Object) clazz );
+
+          FT_FREE( clazz );
+        }
+        FT_FREE( node );
+      }
+    }
+
+  Exit:
+    return  (FT_Class) clazz;
+  }
+d189 1
+a202 1
+    return 0;
+d206 46
+a251 1
+  FT_BASE_DEF( FT_Error )
+a256 1
+    FT_Error   error;
+d261 5
+a265 15
+    memory = FT_CLASS__MEMORY(clazz);
+    if ( !FT_ALLOC( obj, clazz->obj_size ) )
+    {
+      obj->clazz     = clazz;
+      obj->ref_count = 1;
+
+      if ( clazz->obj_init )
+      {
+        error = clazz->obj_init( obj, init_data );
+        if ( error )
+        {
+          /* IMPORTANT: call the destructor when an error  */
+          /*            was detected in the constructor !! */
+          if ( clazz->obj_done )
+            clazz->obj_done( obj );
+d267 2
+a268 6
+          FT_FREE( obj );
+        }
+      }
+    }
+    *pobject = obj;
+    return error;
+d273 2
+a274 2
+  ft_class_find_by_type( FT_Type     type,
+                         FT_Library  library )
+d276 1
+a276 1
+    FT_MetaClass  meta = &library->meta_class;
+a277 2
+    return ft_metaclass_get_class( meta, type );
+  }
+d279 8
+d288 1
+a288 1
+  FT_BASE_DEF( FT_Error )
+d292 7
+a298 4
+                              FT_Library  library )
+  {
+    FT_Class  clazz;
+    FT_Error  error;
+d300 2
+a301 8
+    clazz = ft_class_find_by_type( type, library );
+    if ( clazz )
+      error = ft_object_create( pobject, clazz, init_data );
+    else
+    {
+      *pobject = NULL;
+      error    = FT_Err_Out_Of_Memory;
+    }
+a302 2
+    return error;
+  }
+@
+
+
+1.1.1.1
+log
+@The X-Windowing System
+
+Import XFree86 4.3 from OpenBSD by CTM, in the hope it's stable
+@
+text
+@@
+
+
+1.1.1.2
+log
+@That's what OpenBSD will, probably, ship as XF4 in 3.5
+their last sync against XFree86 4.3-current has been
+imported into our vendor branch, too
+@
+text
+@d1 1
+a1 4
+#include <ft2build.h>
+#include FT_INTERNAL_OBJECT_H
+#include FT_INTERNAL_DEBUG_H
+#include FT_INTERNAL_OBJECTS_H
+a5 2
+#define  FT_TYPE_HASH(x)  (( (FT_UInt32)(x) >> 2 )^( (FT_UInt32)(x) >> 10 ))
+
+d7 3
+a9 3
+           ( FT_OBJECT(o)               != NULL           && \
+             FT_OBJECT(o)->clazz        != NULL           && \
+             FT_OBJECT(o)->ref_count    >= 1              && \
+a11 4
+#define  FT_CLASS_CHECK(c)  \
+           ( FT_CLASS(c) != NULL && FT_CLASS(c)->magic == FT_MAGIC_CLASS )
+
+#define  FT_ASSERT_IS_CLASS(c)  FT_ASSERT( FT_CLASS_CHECK(c) )
+d23 8
+a30 4
+ /* forward declaration */
+  FT_BASE_DEF( FT_Error )
+  ft_metaclass_init( FT_MetaClass  meta,
+                     FT_Library    library );
+d32 1
+a32 3
+  /* forward declaration */
+  FT_BASE_DEF( void )
+  ft_metaclass_done( FT_MetaClass  meta );
+d35 4
+a38 2
+  /* class type for the meta-class itself */
+  static const FT_TypeRec  ft_meta_class_type =
+d40 2
+a41 11
+    "FT2.MetaClass",
+    NULL,
+
+    sizeof( FT_MetaClassRec ),
+    (FT_Object_InitFunc)  ft_metaclass_init,
+    (FT_Object_DoneFunc)  ft_metaclass_done,
+
+    sizeof( FT_ClassRec ),
+    (FT_Object_InitFunc)  NULL,
+    (FT_Object_DoneFunc)  NULL
+  };
+d43 1
+d45 2
+d53 1
+a53 1
+    FT_Class   clazz  = node->clazz;
+d55 1
+d57 2
+a58 2
+    if ( clazz->class_done )
+      clazz->class_done( (FT_Object) clazz );
+d70 2
+a71 47
+  ft_type_equal( FT_Type  type1,
+                 FT_Type  type2 )
+  {
+    if ( type1 == type2 )
+      goto Ok;
+
+    if ( type1 == NULL || type2 == NULL )
+      goto Fail;
+
+    /* compare parent types */
+    if ( type1->super != type2->super )
+    {
+      if ( type1->super == NULL           ||
+           type2->super == NULL           ||
+           !ft_type_equal( type1, type2 ) )
+        goto Fail;
+    }
+
+    /* compare type names */
+    if ( type1->name != type2->name )
+    {
+      if ( type1->name == NULL                        ||
+           type2->name == NULL                        ||
+           ft_strcmp( type1->name, type2->name ) != 0 )
+        goto Fail;
+    }
+
+    /* compare the other type fields */
+    if ( type1->class_size != type2->class_size ||
+         type1->class_init != type2->class_init ||
+         type1->class_done != type2->class_done ||
+         type1->obj_size   != type2->obj_size   ||
+         type1->obj_init   != type2->obj_init   ||
+         type1->obj_done   != type2->obj_done   )
+      goto Fail;
+
+  Ok:
+    return 1;
+
+  Fail:
+    return 0;
+  }
+
+
+  static FT_Int
+  ft_class_hnode_equal( const FT_ClassHNode  node1,
+                        const FT_ClassHNode  node2 )
+d73 1
+a73 5
+    FT_Type  type1 = node1->type;
+    FT_Type  type2 = node2->type;
+
+    /* comparing the pointers should work in 99% of cases */
+    return ( type1 == type2 ) ? 1 : ft_type_equal( type1, type2 );
+d77 1
+a77 1
+  FT_BASE_DEF( void )
+d80 1
+a80 1
+    /* clear all classes */
+d82 1
+a82 1
+                  (FT_Hash_ForeachFunc) ft_class_hnode_destroy,
+d85 3
+a87 3
+    meta->clazz.object.clazz     = NULL;
+    meta->clazz.object.ref_count = 0;
+    meta->clazz.magic            = FT_MAGIC_DEATH;
+d91 1
+a91 1
+  FT_BASE_DEF( FT_Error )
+d95 1
+a95 1
+    FT_ClassRec*  clazz = (FT_ClassRec*) &meta->clazz;
+d103 1
+a103 1
+    clazz->type             = &ft_meta_class_type;
+a105 2
+    clazz->class_done       = (FT_Object_DoneFunc) ft_metaclass_done;
+
+d110 3
+a112 3
+    return ft_hash_init( &meta->type_to_class,
+                        (FT_Hash_EqualFunc) ft_class_hnode_equal,
+                        library->memory );
+a116 3
+ /* note that this function will retunr NULL in case of    */
+ /* memory overflow                                        */
+ /*                                                        */
+a122 3
+    FT_ClassRec*       clazz;
+    FT_Class           parent;
+    FT_Error           error;
+d124 2
+a125 2
+    keynode.hnode.hash = FT_TYPE_HASH( ctype );
+    keynode.type       = ctype;
+d127 2
+a128 2
+    pnode = (FT_ClassHNode*) ft_hash_lookup( &meta->type_to_class,
+                                             (FT_HashNode) &keynode );
+d131 1
+a131 4
+    {
+      clazz = (FT_ClassRec*) node->clazz;
+      goto Exit;
+    }
+d134 2
+a135 3
+    clazz  = NULL;
+    parent = NULL;
+    if ( ctype->super != NULL )
+d137 1
+a137 2
+      FT_ASSERT( ctype->super->class_size <= ctype->class_size );
+      FT_ASSERT( ctype->super->obj_size   <= ctype->obj_size   );
+d139 6
+a144 1
+      parent = ft_metaclass_get_class( meta, ctype->super );
+d146 1
+a147 6
+    if ( !FT_NEW( node ) )
+    {
+      if ( !FT_ALLOC( clazz, ctype->class_size ) )
+      {
+        if ( parent )
+          FT_MEM_COPY( (FT_ClassRec*)clazz, parent, parent->type->class_size );
+d149 4
+a152 2
+        clazz->object.clazz     = (FT_Class) meta;
+        clazz->object.ref_count = 1;
+d154 3
+a156 44
+        clazz->memory  = memory;
+        clazz->library = FT_CLASS__LIBRARY(meta);
+        clazz->super   = parent;
+        clazz->type    = ctype;
+        clazz->info    = NULL;
+        clazz->magic   = FT_MAGIC_CLASS;
+
+        clazz->class_done = ctype->class_done;
+        clazz->obj_size   = ctype->obj_size;
+        clazz->obj_init   = ctype->obj_init;
+        clazz->obj_done   = ctype->obj_done;
+
+        if ( parent )
+        {
+          if ( clazz->class_done == NULL )
+            clazz->class_done = parent->class_done;
+
+          if ( clazz->obj_init == NULL )
+            clazz->obj_init = parent->obj_init;
+
+          if ( clazz->obj_done == NULL )
+            clazz->obj_done = parent->obj_done;
+        }
+
+        /* find class initializer, if any */
+        {
+          FT_Type             ztype = ctype;
+          FT_Object_InitFunc  cinit = NULL;
+
+          do
+          {
+            cinit = ztype->class_init;
+            if ( cinit != NULL )
+              break;
+
+            ztype = ztype->super;
+          }
+          while ( ztype != NULL );
+
+          /* then call it when needed */
+          if ( cinit != NULL )
+            error = cinit( (FT_Object) clazz, NULL );
+        }
+      }
+d158 4
+a161 18
+      if (error)
+      {
+        if ( clazz )
+        {
+          /* we always call the class destructor when    */
+          /* an error was detected in the constructor !! */
+          if ( clazz->class_done )
+            clazz->class_done( (FT_Object) clazz );
+
+          FT_FREE( clazz );
+        }
+        FT_FREE( node );
+      }
+    }
+
+  Exit:
+    return  (FT_Class) clazz;
+  }
+d189 1
+a202 1
+    return 0;
+d206 46
+a251 1
+  FT_BASE_DEF( FT_Error )
+a256 1
+    FT_Error   error;
+d261 5
+a265 15
+    memory = FT_CLASS__MEMORY(clazz);
+    if ( !FT_ALLOC( obj, clazz->obj_size ) )
+    {
+      obj->clazz     = clazz;
+      obj->ref_count = 1;
+
+      if ( clazz->obj_init )
+      {
+        error = clazz->obj_init( obj, init_data );
+        if ( error )
+        {
+          /* IMPORTANT: call the destructor when an error  */
+          /*            was detected in the constructor !! */
+          if ( clazz->obj_done )
+            clazz->obj_done( obj );
+d267 2
+a268 6
+          FT_FREE( obj );
+        }
+      }
+    }
+    *pobject = obj;
+    return error;
+d273 2
+a274 2
+  ft_class_find_by_type( FT_Type     type,
+                         FT_Library  library )
+d276 1
+a276 1
+    FT_MetaClass  meta = &library->meta_class;
+a277 2
+    return ft_metaclass_get_class( meta, type );
+  }
+d279 8
+d288 1
+a288 1
+  FT_BASE_DEF( FT_Error )
+d292 7
+a298 4
+                              FT_Library  library )
+  {
+    FT_Class  clazz;
+    FT_Error  error;
+d300 2
+a301 8
+    clazz = ft_class_find_by_type( type, library );
+    if ( clazz )
+      error = ft_object_create( pobject, clazz, init_data );
+    else
+    {
+      *pobject = NULL;
+      error    = FT_Err_Out_Of_Memory;
+    }
+a302 2
+    return error;
+  }
+@
+

@@ -1,0 +1,1384 @@
+head	1.3;
+access;
+symbols
+	tg-mergetmp-2:1.3
+	cvs-200410241530:1.1.1.3
+	cvs-200410012000:1.1.1.3
+	cvs-200407141120:1.1.1.3
+	cvs-200406231010:1.1.1.3
+	MIRBSD_7quater:1.2
+	cvs-200405271510:1.1.1.3
+	XFree86_4_4_0:1.1.9.1
+	cvs-200403021700:1.1.1.3
+	XFREE86_20040213:1.1.9.1
+	xc:1.1.9
+	cvs-200401291925:1.1.1.2
+	MIRBSD_7_ALPHA:1.2.0.4
+	MIRBSD_7:1.2.0.2
+	MIRBSD_7ter:1.2
+	cvs-20011091815:1.1.1.2
+	cvs-200309162130:1.1.1.2
+	cvs-200308302005:1.1.1.2
+	ctmx-0387:1.1.1.2
+	ctmx-0384:1.1.1.2
+	MIRBSD_5:1.1.1.2
+	ctmx-0375:1.1.1.2
+	ctmx-0373:1.1.1.2
+	ctm-0371:1.1.1.2
+	ctm-0370:1.1.1.2
+	MIRBSD_4:1.1.1.2
+	ctm-0363:1.1.1.2
+	ctm-0359:1.1.1.2
+	ctm-0349:1.1.1.1
+	openbsd:1.1.1;
+locks; strict;
+comment	@ * @;
+
+
+1.3
+date	2004.03.02.20.11.33;	author tg;	state Stab;
+branches;
+next	1.2;
+
+1.2
+date	2003.07.19.12.04.24;	author tg;	state Exp;
+branches;
+next	1.1;
+
+1.1
+date	2003.03.22.20.04.11;	author tg;	state Exp;
+branches
+	1.1.1.1
+	1.1.9.1;
+next	;
+
+1.1.1.1
+date	2003.03.22.20.04.11;	author tg;	state Exp;
+branches;
+next	1.1.1.2;
+
+1.1.1.2
+date	2003.04.08.18.31.12;	author tg;	state Exp;
+branches;
+next	1.1.1.3;
+
+1.1.1.3
+date	2004.03.02.17.57.20;	author tg;	state Exp;
+branches;
+next	;
+
+1.1.9.1
+date	2004.02.14.19.17.40;	author tg;	state Exp;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.3
+log
+@semi-automatic merge and whitespace adjustment of OpenBSD XF4 subtree
+@
+text
+@/**************************************************************************
+
+Copyright 1998-1999 Precision Insight, Inc., Cedar Park, Texas.
+All Rights Reserved.
+
+Permission is hereby granted, free of charge, to any person obtaining a
+copy of this software and associated documentation files (the
+"Software"), to deal in the Software without restriction, including
+without limitation the rights to use, copy, modify, merge, publish,
+distribute, sub license, and/or sell copies of the Software, and to
+permit persons to whom the Software is furnished to do so, subject to
+the following conditions:
+
+The above copyright notice and this permission notice (including the
+next paragraph) shall be included in all copies or substantial portions
+of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
+OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NON-INFRINGEMENT.
+IN NO EVENT SHALL PRECISION INSIGHT AND/OR ITS SUPPLIERS BE LIABLE FOR
+ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,
+TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
+SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+**************************************************************************/
+/* $XFree86: xc/lib/GL/dri/dri_glx.c,v 1.15 2003/09/28 20:14:59 alanh Exp $ */
+
+/*
+ * Authors:
+ *   Kevin E. Martin <kevin@@precisioninsight.com>
+ *   Brian Paul <brian@@precisioninsight.com>
+ *
+ */
+
+#ifdef GLX_DIRECT_RENDERING
+
+#include <unistd.h>
+#include <X11/Xlibint.h>
+#include <X11/extensions/Xext.h>
+#include "extutil.h"
+#include "glxclient.h"
+#include "xf86dri.h"
+#include "sarea.h"
+#include <stdio.h>
+#include <dlfcn.h>
+#include "dri_glx.h"
+#include <sys/types.h>
+#include <stdarg.h>
+
+#ifndef RTLD_NOW
+#define RTLD_NOW 0
+#endif
+#ifndef RTLD_GLOBAL
+#define RTLD_GLOBAL 0
+#endif
+
+#ifdef BUILT_IN_DRI_DRIVER
+
+extern void *__driCreateScreen(Display *dpy, int scrn, __DRIscreen *psc,
+                               int numConfigs, __GLXvisualConfig *config);
+
+
+#else /* BUILT_IN_DRI_DRIVER */
+
+
+#ifndef DEFAULT_DRIVER_DIR
+/* this is normally defined in the Imakefile */
+#define DEFAULT_DRIVER_DIR "/usr/X11R6/lib/modules/dri"
+#endif
+
+static __DRIdriver *Drivers = NULL;
+
+
+/*
+ * printf wrappers
+ */
+
+static void InfoMessageF(const char *f, ...)
+{
+    va_list args;
+    const char *env;
+
+    if ((env = getenv("LIBGL_DEBUG")) && strstr(env, "verbose")) {
+	fprintf(stderr, "libGL: ");
+	va_start(args, f);
+	vfprintf(stderr, f, args);
+	va_end(args);
+    }
+}
+
+static void ErrorMessageF(const char *f, ...)
+{
+    va_list args;
+
+    if (getenv("LIBGL_DEBUG")) {
+	fprintf(stderr, "libGL error: ");
+	va_start(args, f);
+	vfprintf(stderr, f, args);
+	va_end(args);
+    }
+}
+
+
+/*
+ * We'll save a pointer to this function when we couldn't find a
+ * direct rendering driver for a given screen.
+ */
+static void *DummyCreateScreen(Display *dpy, int scrn, __DRIscreen *psc,
+                               int numConfigs, __GLXvisualConfig *config)
+{
+    (void) dpy;
+    (void) scrn;
+    (void) psc;
+    (void) numConfigs;
+    (void) config;
+    return NULL;
+}
+
+
+
+/*
+ * Extract the ith directory path out of a colon-separated list of
+ * paths.
+ * Input:
+ *   index - index of path to extract (starting at zero)
+ *   paths - the colon-separated list of paths
+ *   dirLen - max length of result to store in <dir>
+ * Output:
+ *   dir - the extracted directory path, dir[0] will be zero when
+ *         extraction fails.
+ */
+static void ExtractDir(int index, const char *paths, int dirLen, char *dir)
+{
+   int i, len;
+   const char *start, *end;
+
+   /* find ith colon */
+   start = paths;
+   i = 0;
+   while (i < index) {
+      if (*start == ':') {
+         i++;
+         start++;
+      }
+      else if (*start == 0) {
+         /* end of string and couldn't find ith colon */
+         dir[0] = 0;
+         return;
+      }
+      else {
+         start++;
+      }
+   }
+
+   while (*start == ':')
+      start++;
+
+   /* find next colon, or end of string */
+   end = start + 1;
+   while (*end != ':' && *end != 0) {
+      end++;
+   }
+
+   /* copy string between <start> and <end> into result string */
+   len = end - start;
+   if (len > dirLen - 1)
+      len = dirLen - 1;
+   strncpy(dir, start, len);
+   dir[len] = 0;
+}
+
+
+/*
+ * Try to dlopen() the named driver.  This function adds the
+ * "_dri.so" suffix to the driver name and searches the
+ * directories specified by the LIBGL_DRIVERS_PATH env var
+ * in order to find the driver.
+ * Input:
+ *   driverName - a name like "tdfx", "i810", "mga", etc.
+ * Return:
+ *   handle from dlopen, or NULL if driver file not found.
+ */
+static __DRIdriver *OpenDriver(const char *driverName)
+{
+   char *libPaths = NULL;
+   int i;
+   __DRIdriver *driver;
+
+   /* First, search Drivers list to see if we've already opened this driver */
+   for (driver = Drivers; driver; driver = driver->next) {
+      if (strcmp(driver->name, driverName) == 0) {
+         /* found it */
+         return driver;
+      }
+   }
+
+   if (geteuid() == getuid()) {
+      /* don't allow setuid apps to use LIBGL_DRIVERS_PATH */
+      libPaths = getenv("LIBGL_DRIVERS_PATH");
+      if (!libPaths)
+         libPaths = getenv("LIBGL_DRIVERS_DIR"); /* deprecated */
+   }
+   if (!libPaths)
+      libPaths = DEFAULT_DRIVER_DIR;
+
+   for (i = 0; ; i++) {
+      char libDir[1000], realDriverName[200];
+      void *handle;
+      ExtractDir(i, libPaths, 1000, libDir);
+      if (!libDir[0])
+         break; /* ran out of paths to search */
+      snprintf(realDriverName, 200, "%s/%s_dri.so", libDir, driverName);
+      InfoMessageF("OpenDriver: trying %s\n", realDriverName);
+      handle = dlopen(realDriverName,
+#ifndef	__OpenBSD__
+	RTLD_NOW | RTLD_GLOBAL
+#else
+	0
+#endif
+	);
+      if (handle) {
+         /* allocate __DRIdriver struct */
+         driver = (__DRIdriver *) Xmalloc(sizeof(__DRIdriver));
+         if (!driver)
+            return NULL; /* out of memory! */
+         /* init the struct */
+         driver->name = __glXstrdup(driverName);
+         if (!driver->name) {
+            Xfree(driver);
+            return NULL; /* out of memory! */
+         }
+         driver->createScreenFunc = (CreateScreenFunc)
+            dlsym(handle, "__driCreateScreen");
+         if (!driver->createScreenFunc) {
+            /* If the driver doesn't have this symbol then something's
+             * really, really wrong.
+             */
+            ErrorMessageF("__driCreateScreen() not defined in %s_dri.so!\n",
+                          driverName);
+            Xfree(driver);
+            dlclose(handle);
+            continue;
+         }
+         driver->handle = handle;
+         /* put at head of linked list */
+         driver->next = Drivers;
+         Drivers = driver;
+         return driver;
+      }
+      else {
+	 ErrorMessageF("dlopen %s failed (%s)\n", realDriverName, dlerror());
+      }
+   }
+
+   ErrorMessageF("unable to find driver: %s_dri.so\n", driverName);
+   return NULL;
+}
+
+
+/*
+ * Given a display pointer and screen number, determine the name of
+ * the DRI driver for the screen. (I.e. "r128", "tdfx", etc).
+ * Return True for success, False for failure.
+ */
+static Bool GetDriverName(Display *dpy, int scrNum, char **driverName)
+{
+   int directCapable;
+   Bool b;
+   int driverMajor, driverMinor, driverPatch;
+
+   *driverName = NULL;
+
+   if (!XF86DRIQueryDirectRenderingCapable(dpy, scrNum, &directCapable)) {
+      ErrorMessageF("XF86DRIQueryDirectRenderingCapable failed\n");
+      return False;
+   }
+   if (!directCapable) {
+      ErrorMessageF("XF86DRIQueryDirectRenderingCapable returned false\n");
+      return False;
+   }
+
+   b = XF86DRIGetClientDriverName(dpy, scrNum, &driverMajor, &driverMinor,
+                                  &driverPatch, driverName);
+   if (!b) {
+      ErrorMessageF("Cannot determine driver name for screen %d\n", scrNum);
+      return False;
+   }
+
+   InfoMessageF("XF86DRIGetClientDriverName: %d.%d.%d %s (screen %d)\n",
+	     driverMajor, driverMinor, driverPatch, *driverName, scrNum);
+
+   return True;
+}
+
+
+/*
+ * Given a display pointer and screen number, return a __DRIdriver handle.
+ * Return NULL if anything goes wrong.
+ */
+__DRIdriver *driGetDriver(Display *dpy, int scrNum)
+{
+   char *driverName;
+   if (GetDriverName(dpy, scrNum, &driverName)) {
+      __DRIdriver *ret;
+      ret = OpenDriver(driverName);
+      if (driverName)
+     	 Xfree(driverName);
+      return ret;
+   }
+   return NULL;
+}
+
+
+#endif /* BUILT_IN_DRI_DRIVER */
+
+
+/* This function isn't currently used.
+ */
+static void driDestroyDisplay(Display *dpy, void *private)
+{
+    __DRIdisplayPrivate *pdpyp = (__DRIdisplayPrivate *)private;
+
+    if (pdpyp) {
+        const int numScreens = ScreenCount(dpy);
+        int i;
+        for (i = 0; i < numScreens; i++) {
+            if (pdpyp->libraryHandles[i])
+                dlclose(pdpyp->libraryHandles[i]);
+        }
+        Xfree(pdpyp->libraryHandles);
+	Xfree(pdpyp);
+    }
+}
+
+
+/*
+ * Allocate, initialize and return a __DRIdisplayPrivate object.
+ * This is called from __glXInitialize() when we are given a new
+ * display pointer.
+ */
+void *driCreateDisplay(Display *dpy, __DRIdisplay *pdisp)
+{
+    const int numScreens = ScreenCount(dpy);
+    __DRIdisplayPrivate *pdpyp;
+    int eventBase, errorBase;
+    int major, minor, patch;
+    int scrn;
+
+    /* Initialize these fields to NULL in case we fail.
+     * If we don't do this we may later get segfaults trying to free random
+     * addresses when the display is closed.
+     */
+    pdisp->private = NULL;
+    pdisp->destroyDisplay = NULL;
+    pdisp->createScreen = NULL;
+
+    if (!XF86DRIQueryExtension(dpy, &eventBase, &errorBase)) {
+	return NULL;
+    }
+
+    if (!XF86DRIQueryVersion(dpy, &major, &minor, &patch)) {
+	return NULL;
+    }
+
+    pdpyp = (__DRIdisplayPrivate *)Xmalloc(sizeof(__DRIdisplayPrivate));
+    if (!pdpyp) {
+	return NULL;
+    }
+
+    pdpyp->driMajor = major;
+    pdpyp->driMinor = minor;
+    pdpyp->driPatch = patch;
+
+    pdisp->destroyDisplay = driDestroyDisplay;
+
+    /* allocate array of pointers to createScreen funcs */
+    pdisp->createScreen = (CreateScreenFunc *) Xmalloc(numScreens * sizeof(void *));
+    if (!pdisp->createScreen) {
+       XFree(pdpyp);
+       return NULL;
+    }
+
+    /* allocate array of library handles */
+    pdpyp->libraryHandles = (void **) Xmalloc(numScreens * sizeof(void*));
+    if (!pdpyp->libraryHandles) {
+       Xfree(pdisp->createScreen);
+       XFree(pdpyp);
+       return NULL;
+    }
+
+#ifdef BUILT_IN_DRI_DRIVER
+    /* we'll statically bind to the built-in __driCreateScreen function */
+    for (scrn = 0; scrn < numScreens; scrn++) {
+       pdisp->createScreen[scrn] = __driCreateScreen;
+       pdpyp->libraryHandles[scrn] = NULL;
+    }
+
+#else
+    /* dynamically discover DRI drivers for all screens, saving each
+     * driver's "__driCreateScreen" function pointer.  That's the bootstrap
+     * entrypoint for all DRI drivers.
+     */
+    for (scrn = 0; scrn < numScreens; scrn++) {
+        __DRIdriver *driver = driGetDriver(dpy, scrn);
+        if (driver) {
+           pdisp->createScreen[scrn] = driver->createScreenFunc;
+           pdpyp->libraryHandles[scrn] = driver->handle;
+        }
+        else {
+           pdisp->createScreen[scrn] = DummyCreateScreen;
+           pdpyp->libraryHandles[scrn] = NULL;
+        }
+    }
+#endif
+
+    return (void *)pdpyp;
+}
+
+#endif /* GLX_DIRECT_RENDERING */
+@
+
+
+1.2
+log
+@the usual RTLD_* issues
+@
+text
+@d27 1
+a27 1
+/* $XFree86: xc/lib/GL/dri/dri_glx.c,v 1.12 2003/02/06 12:42:10 alanh Exp $ */
+d51 6
+a56 6
+
+typedef void *(*CreateScreenFunc)(Display *dpy, int scrn, __DRIscreen *psc,
+                                  int numConfigs, __GLXvisualConfig *config);
+
+typedef void *(*RegisterExtensionsFunc)(void);
+
+a71 11
+/*
+ * We keep a linked list of these structures, one per DRI device driver.
+ */
+typedef struct __DRIdriverRec {
+   const char *name;
+   void *handle;
+   CreateScreenFunc createScreenFunc;
+   RegisterExtensionsFunc registerExtensionsFunc;
+   struct __DRIdriverRec *next;
+} __DRIdriver;
+
+a244 2
+         driver->registerExtensionsFunc = (RegisterExtensionsFunc)
+            dlsym(handle, "__driRegisterExtensions");
+d275 1
+a275 1
+      ErrorMessageF("XF86DRIQueryDirectRenderingCapable failed");
+d279 1
+a279 1
+      ErrorMessageF("XF86DRIQueryDirectRenderingCapable returned false");
+d301 1
+a301 1
+static __DRIdriver *GetDriver(Display *dpy, int scrNum)
+a303 2
+   __DRIdriver *ret;
+
+d305 1
+a310 1
+
+a403 1
+    __glXRegisterExtensions();
+d405 1
+a405 1
+        __DRIdriver *driver = GetDriver(dpy, scrn);
+a418 58
+
+
+
+/*
+** Here we'll query the DRI driver for each screen and let each
+** driver register its GL extension functions.  We only have to
+** do this once.  But it MUST be done before we create any contexts
+** (i.e. before any dispatch tables are created) and before
+** glXGetProcAddressARB() returns.
+**
+** Currently called by glXGetProcAddress(), __glXInitialize(), and
+** __glXNewIndirectAPI().
+*/
+void
+__glXRegisterExtensions(void)
+{
+#ifndef BUILT_IN_DRI_DRIVER
+   static GLboolean alreadyCalled = GL_FALSE;
+   int displayNum, maxDisplays;
+
+   if (alreadyCalled)
+      return;
+   alreadyCalled = GL_TRUE;
+
+   if (getenv("LIBGL_MULTIHEAD")) {
+      /* we'd like to always take this path but doing so causes a second
+       * or more of delay while the XOpenDisplay() function times out.
+       */
+      maxDisplays = 10;  /* infinity, really */
+   }
+   else {
+      /* just open the :0 display */
+      maxDisplays = 1;
+   }
+
+   for (displayNum = 0; displayNum < maxDisplays; displayNum++) {
+      char displayName[200];
+      Display *dpy;
+      snprintf(displayName, 199, ":%d.0", displayNum);
+      dpy = XOpenDisplay(displayName);
+      if (dpy) {
+         const int numScreens = ScreenCount(dpy);
+         int screenNum;
+         for (screenNum = 0; screenNum < numScreens; screenNum++) {
+            __DRIdriver *driver = GetDriver(dpy, screenNum);
+            if (driver && driver->registerExtensionsFunc) {
+               (*driver->registerExtensionsFunc)();
+            }
+         }
+         XCloseDisplay(dpy);
+      }
+      else {
+         break;
+      }
+   }
+#endif
+}
+
+@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@d27 1
+a27 1
+/* $XFree86: xc/lib/GL/dri/dri_glx.c,v 1.10 2001/08/27 17:40:57 dawes Exp $ */
+d55 1
+d72 17
+a114 30
+#if 0
+static void PrintF(const char *f, ...)
+{
+    va_list args;
+    const char *env;
+
+    if ((env = getenv("LIBGL_DEBUG")) && strstr(env, "verbose")) {
+	va_start(args, f);
+	vfprintf(stderr, f, args);
+	va_end(args);
+    }
+}
+#endif
+
+static void ErrorMessage(const char *msg)
+{
+    if (getenv("LIBGL_DEBUG")) {
+        fprintf(stderr, "libGL error: %s\n", msg);
+    }
+}
+
+
+static void InfoMessage(const char *msg)
+{
+    const char *env = getenv("LIBGL_DEBUG");
+    if (env && strstr(env, "verbose")) {
+        fprintf(stderr, "libGL: %s\n", msg);
+    }
+}
+
+a184 1
+
+d195 1
+a195 1
+static void *OpenDriver(const char *driverName)
+d199 9
+d223 1
+a223 1
+         return NULL;
+d226 7
+a232 1
+      handle = dlopen(realDriverName, RTLD_NOW | RTLD_GLOBAL);
+d234 29
+a262 1
+         return handle;
+d265 1
+a265 1
+         ErrorMessageF("dlopen failed: %s\n", dlerror());
+d269 1
+a273 1
+
+d275 3
+a277 5
+ * Initialize two arrays:  an array of createScreen function pointers
+ * and an array of dlopen library handles.  Arrays are indexed by
+ * screen number.
+ * We use the DRI in order to find the __driCreateScreen function
+ * exported by each screen on a display.
+d279 1
+a279 3
+static void Find_CreateScreenFuncs(Display *dpy,
+                                   CreateScreenFunc *createFuncs,
+                                   void **libraryHandles)
+d281 21
+a301 2
+    const int numScreens = ScreenCount(dpy);
+    int scrn;
+d303 2
+a304 1
+    __glXRegisterExtensions();
+d306 2
+a307 10
+    for (scrn = 0; scrn < numScreens; scrn++) {
+        int directCapable;
+        Bool b;
+        int driverMajor, driverMinor, driverPatch;
+        char *driverName = NULL;
+        void *handle;
+
+        /* defaults */
+        createFuncs[scrn] = DummyCreateScreen;
+        libraryHandles[scrn] = NULL;
+a308 8
+        if (!XF86DRIQueryDirectRenderingCapable(dpy, scrn, &directCapable)) {
+            ErrorMessage("XF86DRIQueryDirectRenderingCapable failed");
+            continue;
+        }
+        if (!directCapable) {
+            ErrorMessage("XF86DRIQueryDirectRenderingCapable returned false");
+            continue;
+        }
+d310 8
+a317 9
+        /*
+         * Use DRI to find the device driver for use on screen number 'scrn'.
+         */
+        b = XF86DRIGetClientDriverName(dpy, scrn, &driverMajor, &driverMinor,
+                                       &driverPatch, &driverName);
+        if (!b) {
+            ErrorMessageF("Cannot determine driver name for screen %d\n", scrn);
+            continue;
+        }
+d319 6
+d326 1
+a326 20
+        /*
+         * Open the driver module and save the pointer to its
+         * __driCreateScreen function.
+         */
+        handle = OpenDriver(driverName);
+        if (handle) {
+           CreateScreenFunc createScreenFunc;
+           createScreenFunc = (CreateScreenFunc) dlsym(handle, "__driCreateScreen");
+           if (createScreenFunc) {
+              /* success! */
+              createFuncs[scrn] = createScreenFunc;
+              libraryHandles[scrn] = handle;
+              continue;  /* onto the next screen */
+           }
+           else {
+              ErrorMessage("driCreateScreen() not defined in driver!");
+              dlclose(handle);
+           }
+        }
+    } /* for scrn */
+d329 1
+d333 2
+d352 5
+d363 1
+d394 2
+a395 1
+    if (!pdisp->createScreen)
+d397 1
+d403 1
+d408 4
+a411 7
+    /* we'll statically bind to the __driCreateScreen function */
+    {
+       int i;
+       for (i = 0; i < numScreens; i++) {
+          pdisp->createScreen[i] = __driCreateScreen;
+          pdpyp->libraryHandles[i] = NULL;
+       }
+d413 1
+d415 16
+a430 1
+    Find_CreateScreenFuncs(dpy, pdisp->createScreen, pdpyp->libraryHandles);
+a436 67
+#ifndef BUILT_IN_DRI_DRIVER
+/*
+ * Use the DRI and dlopen/dlsym facilities to find the GL extensions
+ * possible on the given display and screen.
+ */
+static void
+register_extensions_on_screen(Display *dpy, int scrNum)
+{
+   int eventBase, errorBase;
+   Bool b, b2;
+   int driMajor, driMinor, driPatch;
+   int driverMajor, driverMinor, driverPatch;
+   char *driverName = NULL;
+   void *handle;
+
+   /*
+    * Check if the DRI extension is available, check the DRI version,
+    * determine the 3D driver for the screen.
+    */
+   b = XF86DRIQueryExtension(dpy, &eventBase, &errorBase);
+   if (!b) {
+      InfoMessage("XF86DRIQueryExtension failed");
+      return;
+   }
+
+   b = XF86DRIQueryDirectRenderingCapable(dpy, scrNum, &b2);
+   if (!b || !b2) {
+      InfoMessage("XF86DRIQueryDirectRenderingCapable failed");
+      return;
+   }
+
+   b = XF86DRIQueryVersion(dpy, &driMajor, &driMinor, &driPatch);
+   if (!b) {
+      InfoMessage("XF86DRIQueryVersion failed");
+   }
+
+   b = XF86DRIGetClientDriverName(dpy, scrNum, &driverMajor, &driverMinor,
+                                  &driverPatch, &driverName);
+   if (!b) {
+      InfoMessage("XF86DRIGetClientDriverName failed");
+      return;
+   }
+   else {
+      InfoMessageF("XF86DRIGetClientDriverName: %d.%d.%d %s (screen %d)\n",
+	     driverMajor, driverMinor, driverPatch, driverName, scrNum);
+   }
+
+   /*
+    * OK, now we know the name of the relevant driver for this screen.
+    * dlopen() the driver library file, get a pointer to the driver's
+    * __driRegisterExtensions() function, and call it if it exists.
+    */
+   handle = OpenDriver(driverName);
+   if (handle) {
+      typedef void *(*RegisterExtFunc)(void);
+      RegisterExtFunc registerExtFunc = (RegisterExtFunc) dlsym(handle,
+                                                    "__driRegisterExtensions");
+      if (registerExtFunc) {
+         (*registerExtFunc)();
+      }
+      dlclose(handle);
+      return;
+   }
+}
+#endif /* !BUILT_IN_DRI_DRIVER */
+
+
+d451 1
+d453 1
+d455 1
+a455 1
+   if (alreadyCalled) {
+d457 11
+d470 12
+a481 17
+#ifndef BUILT_IN_DRI_DRIVER
+   {
+      int displayNum, maxDisplays;
+      if (getenv("LIBGL_MULTIHEAD"))
+          maxDisplays = 10;  /* infinity, really */
+      else
+          maxDisplays = 1;
+      for (displayNum = 0; displayNum < maxDisplays; displayNum++) {
+         char displayName[200];
+         Display *dpy;
+         snprintf(displayName, 199, ":%d.0", displayNum);
+         dpy = XOpenDisplay(displayName);
+         if (dpy) {
+            const int numScreens = ScreenCount(dpy);
+            int screenNum;
+            for (screenNum = 0; screenNum < numScreens; screenNum++) {
+               register_extensions_on_screen(dpy, screenNum);
+a482 4
+            XCloseDisplay(dpy);
+         }
+         else {
+            break;
+d484 4
+a489 2
+
+   alreadyCalled = GL_TRUE;
+@
+
+
+1.1.9.1
+log
+@OpenBSD just has imported exactly this tree into their vendor branch,
+called the same tag, in XF4/xc
+This is, apparently, the last XFree86 snapshot before the licence change
+(ie, addition of the advertising clause)
+
+Since the developers don't see any problems with that, and we would like
+to integrate improvements done by the remaining one or two (or so) XFree86
+developers (j/k), this prepares enabling us to update X-Window in the future.
+@
+text
+@d27 1
+a27 1
+/* $XFree86: xc/lib/GL/dri/dri_glx.c,v 1.15 2003/09/28 20:14:59 alanh Exp $ */
+d51 5
+a55 6
+#ifndef RTLD_NOW
+#define RTLD_NOW 0
+#endif
+#ifndef RTLD_GLOBAL
+#define RTLD_GLOBAL 0
+#endif
+a70 6
+static __DRIdriver *Drivers = NULL;
+
+
+/*
+ * printf wrappers
+ */
+d97 30
+d197 1
+d208 1
+a208 1
+static __DRIdriver *OpenDriver(const char *driverName)
+a211 9
+   __DRIdriver *driver;
+
+   /* First, search Drivers list to see if we've already opened this driver */
+   for (driver = Drivers; driver; driver = driver->next) {
+      if (strcmp(driver->name, driverName) == 0) {
+         /* found it */
+         return driver;
+      }
+   }
+d227 1
+a227 1
+         break; /* ran out of paths to search */
+d232 1
+a232 27
+         /* allocate __DRIdriver struct */
+         driver = (__DRIdriver *) Xmalloc(sizeof(__DRIdriver));
+         if (!driver)
+            return NULL; /* out of memory! */
+         /* init the struct */
+         driver->name = __glXstrdup(driverName);
+         if (!driver->name) {
+            Xfree(driver);
+            return NULL; /* out of memory! */
+         }
+         driver->createScreenFunc = (CreateScreenFunc)
+            dlsym(handle, "__driCreateScreen");
+         if (!driver->createScreenFunc) {
+            /* If the driver doesn't have this symbol then something's
+             * really, really wrong.
+             */
+            ErrorMessageF("__driCreateScreen() not defined in %s_dri.so!\n",
+                          driverName);
+            Xfree(driver);
+            dlclose(handle);
+            continue;
+         }
+         driver->handle = handle;
+         /* put at head of linked list */
+         driver->next = Drivers;
+         Drivers = driver;
+         return driver;
+d235 1
+a235 1
+	 ErrorMessageF("dlopen %s failed (%s)\n", realDriverName, dlerror());
+a238 1
+   ErrorMessageF("unable to find driver: %s_dri.so\n", driverName);
+d243 1
+d245 5
+a249 3
+ * Given a display pointer and screen number, determine the name of
+ * the DRI driver for the screen. (I.e. "r128", "tdfx", etc).
+ * Return True for success, False for failure.
+d251 3
+a253 1
+static Bool GetDriverName(Display *dpy, int scrNum, char **driverName)
+d255 2
+a256 3
+   int directCapable;
+   Bool b;
+   int driverMajor, driverMinor, driverPatch;
+d258 1
+a258 1
+   *driverName = NULL;
+d260 10
+a269 8
+   if (!XF86DRIQueryDirectRenderingCapable(dpy, scrNum, &directCapable)) {
+      ErrorMessageF("XF86DRIQueryDirectRenderingCapable failed\n");
+      return False;
+   }
+   if (!directCapable) {
+      ErrorMessageF("XF86DRIQueryDirectRenderingCapable returned false\n");
+      return False;
+   }
+d271 8
+a278 6
+   b = XF86DRIGetClientDriverName(dpy, scrNum, &driverMajor, &driverMinor,
+                                  &driverPatch, driverName);
+   if (!b) {
+      ErrorMessageF("Cannot determine driver name for screen %d\n", scrNum);
+      return False;
+   }
+d280 9
+a288 2
+   InfoMessageF("XF86DRIGetClientDriverName: %d.%d.%d %s (screen %d)\n",
+	     driverMajor, driverMinor, driverPatch, *driverName, scrNum);
+a289 2
+   return True;
+}
+d291 20
+a310 16
+
+/*
+ * Given a display pointer and screen number, return a __DRIdriver handle.
+ * Return NULL if anything goes wrong.
+ */
+__DRIdriver *driGetDriver(Display *dpy, int scrNum)
+{
+   char *driverName;
+   if (GetDriverName(dpy, scrNum, &driverName)) {
+      __DRIdriver *ret;
+      ret = OpenDriver(driverName);
+      if (driverName)
+     	 Xfree(driverName);
+      return ret;
+   }
+   return NULL;
+a312 1
+
+a315 2
+/* This function isn't currently used.
+ */
+a332 5
+/*
+ * Allocate, initialize and return a __DRIdisplayPrivate object.
+ * This is called from __glXInitialize() when we are given a new
+ * display pointer.
+ */
+a338 1
+    int scrn;
+d369 1
+a369 2
+    if (!pdisp->createScreen) {
+       XFree(pdpyp);
+a370 1
+    }
+a375 1
+       XFree(pdpyp);
+d380 7
+a386 4
+    /* we'll statically bind to the built-in __driCreateScreen function */
+    for (scrn = 0; scrn < numScreens; scrn++) {
+       pdisp->createScreen[scrn] = __driCreateScreen;
+       pdpyp->libraryHandles[scrn] = NULL;
+a387 1
+
+d389 1
+a389 15
+    /* dynamically discover DRI drivers for all screens, saving each
+     * driver's "__driCreateScreen" function pointer.  That's the bootstrap
+     * entrypoint for all DRI drivers.
+     */
+    for (scrn = 0; scrn < numScreens; scrn++) {
+        __DRIdriver *driver = driGetDriver(dpy, scrn);
+        if (driver) {
+           pdisp->createScreen[scrn] = driver->createScreenFunc;
+           pdpyp->libraryHandles[scrn] = driver->handle;
+        }
+        else {
+           pdisp->createScreen[scrn] = DummyCreateScreen;
+           pdpyp->libraryHandles[scrn] = NULL;
+        }
+    }
+d394 119
+@
+
+
+1.1.1.1
+log
+@Import OpenBSD 3.3 XF4 repository from CTM 3132 the first time
+This finalizes starting an OpenBSD-mirabile (aka MirBSD) repository.
+
+### MirBSD is:
+# Copyright (c) 1982-2003 by Thorsten "mirabile" Glaser <x86@@ePost.de>
+# Copyright © 1968-2003  The authors of And contributors to UNIX®, the
+#       C Language, BSD/Berkeley Unix; 386BSD, NetBSD 1.1 and OpenBSD.
+#
+# Anyone who obtained a copy of this work is hereby permitted to freely use,
+# distribute, modify, merge, sublicence, give away or sell it as long as the
+# authors are given due credit and the following notice is retained:
+#
+# This work is provided "as is", with no explicit or implicit warranty what-
+# soever. Use it only at your own risk. In no event may an author or contri-
+# butor be held liable for any damage, directly or indirectly, that origina-
+# ted through or is caused by creation or modification of this work.
+
+MirBSD is my private tree. MirBSD does not differ very much from OpenBSD
+and intentionally tracks OpenBSD. That's why it _is_ OpenBSD, just not the
+official one. It's like with DarrenBSD.
+
+At time of this writing, no advertising for MirBSD must be done,
+because the advertising clause has not yet been sorted out.
+
+http://templeofhate.com/tglaser/MirBSD/index.php
+@
+text
+@@
+
+
+1.1.1.2
+log
+@The X-Windowing System
+
+Import XFree86 4.3 from OpenBSD by CTM, in the hope it's stable
+@
+text
+@d27 1
+a27 1
+/* $XFree86: xc/lib/GL/dri/dri_glx.c,v 1.12 2003/02/06 12:42:10 alanh Exp $ */
+a54 1
+typedef void *(*RegisterExtensionsFunc)(void);
+a70 17
+/*
+ * We keep a linked list of these structures, one per DRI device driver.
+ */
+typedef struct __DRIdriverRec {
+   const char *name;
+   void *handle;
+   CreateScreenFunc createScreenFunc;
+   RegisterExtensionsFunc registerExtensionsFunc;
+   struct __DRIdriverRec *next;
+} __DRIdriver;
+
+static __DRIdriver *Drivers = NULL;
+
+
+/*
+ * printf wrappers
+ */
+d97 30
+d197 1
+d208 1
+a208 1
+static __DRIdriver *OpenDriver(const char *driverName)
+a211 9
+   __DRIdriver *driver;
+
+   /* First, search Drivers list to see if we've already opened this driver */
+   for (driver = Drivers; driver; driver = driver->next) {
+      if (strcmp(driver->name, driverName) == 0) {
+         /* found it */
+         return driver;
+      }
+   }
+d227 1
+a227 1
+         break; /* ran out of paths to search */
+d232 1
+a232 29
+         /* allocate __DRIdriver struct */
+         driver = (__DRIdriver *) Xmalloc(sizeof(__DRIdriver));
+         if (!driver)
+            return NULL; /* out of memory! */
+         /* init the struct */
+         driver->name = __glXstrdup(driverName);
+         if (!driver->name) {
+            Xfree(driver);
+            return NULL; /* out of memory! */
+         }
+         driver->createScreenFunc = (CreateScreenFunc)
+            dlsym(handle, "__driCreateScreen");
+         if (!driver->createScreenFunc) {
+            /* If the driver doesn't have this symbol then something's
+             * really, really wrong.
+             */
+            ErrorMessageF("__driCreateScreen() not defined in %s_dri.so!\n",
+                          driverName);
+            Xfree(driver);
+            dlclose(handle);
+            continue;
+         }
+         driver->registerExtensionsFunc = (RegisterExtensionsFunc)
+            dlsym(handle, "__driRegisterExtensions");
+         driver->handle = handle;
+         /* put at head of linked list */
+         driver->next = Drivers;
+         Drivers = driver;
+         return driver;
+d235 1
+a235 1
+	 ErrorMessageF("dlopen %s failed (%s)\n", realDriverName, dlerror());
+a238 1
+   ErrorMessageF("unable to find driver: %s_dri.so\n", driverName);
+d243 1
+d245 5
+a249 3
+ * Given a display pointer and screen number, determine the name of
+ * the DRI driver for the screen. (I.e. "r128", "tdfx", etc).
+ * Return True for success, False for failure.
+d251 3
+a253 1
+static Bool GetDriverName(Display *dpy, int scrNum, char **driverName)
+d255 2
+a256 3
+   int directCapable;
+   Bool b;
+   int driverMajor, driverMinor, driverPatch;
+d258 1
+a258 1
+   *driverName = NULL;
+d260 10
+a269 8
+   if (!XF86DRIQueryDirectRenderingCapable(dpy, scrNum, &directCapable)) {
+      ErrorMessageF("XF86DRIQueryDirectRenderingCapable failed");
+      return False;
+   }
+   if (!directCapable) {
+      ErrorMessageF("XF86DRIQueryDirectRenderingCapable returned false");
+      return False;
+   }
+d271 8
+a278 6
+   b = XF86DRIGetClientDriverName(dpy, scrNum, &driverMajor, &driverMinor,
+                                  &driverPatch, driverName);
+   if (!b) {
+      ErrorMessageF("Cannot determine driver name for screen %d\n", scrNum);
+      return False;
+   }
+d280 9
+a288 5
+   InfoMessageF("XF86DRIGetClientDriverName: %d.%d.%d %s (screen %d)\n",
+	     driverMajor, driverMinor, driverPatch, *driverName, scrNum);
+
+   return True;
+}
+d291 20
+a310 17
+/*
+ * Given a display pointer and screen number, return a __DRIdriver handle.
+ * Return NULL if anything goes wrong.
+ */
+static __DRIdriver *GetDriver(Display *dpy, int scrNum)
+{
+   char *driverName;
+   __DRIdriver *ret;
+
+   if (GetDriverName(dpy, scrNum, &driverName)) {
+      ret = OpenDriver(driverName);
+      if (driverName)
+     	 Xfree(driverName);
+      return ret;
+   }
+
+   return NULL;
+a312 1
+
+a315 2
+/* This function isn't currently used.
+ */
+a332 5
+/*
+ * Allocate, initialize and return a __DRIdisplayPrivate object.
+ * This is called from __glXInitialize() when we are given a new
+ * display pointer.
+ */
+a338 1
+    int scrn;
+d369 1
+a369 2
+    if (!pdisp->createScreen) {
+       XFree(pdpyp);
+a370 1
+    }
+a375 1
+       XFree(pdpyp);
+d380 7
+a386 4
+    /* we'll statically bind to the built-in __driCreateScreen function */
+    for (scrn = 0; scrn < numScreens; scrn++) {
+       pdisp->createScreen[scrn] = __driCreateScreen;
+       pdpyp->libraryHandles[scrn] = NULL;
+a387 1
+
+d389 1
+a389 16
+    /* dynamically discover DRI drivers for all screens, saving each
+     * driver's "__driCreateScreen" function pointer.  That's the bootstrap
+     * entrypoint for all DRI drivers.
+     */
+    __glXRegisterExtensions();
+    for (scrn = 0; scrn < numScreens; scrn++) {
+        __DRIdriver *driver = GetDriver(dpy, scrn);
+        if (driver) {
+           pdisp->createScreen[scrn] = driver->createScreenFunc;
+           pdpyp->libraryHandles[scrn] = driver->handle;
+        }
+        else {
+           pdisp->createScreen[scrn] = DummyCreateScreen;
+           pdpyp->libraryHandles[scrn] = NULL;
+        }
+    }
+d396 67
+a476 1
+#ifndef BUILT_IN_DRI_DRIVER
+a477 1
+   int displayNum, maxDisplays;
+d479 1
+a479 1
+   if (alreadyCalled)
+a480 11
+   alreadyCalled = GL_TRUE;
+
+   if (getenv("LIBGL_MULTIHEAD")) {
+      /* we'd like to always take this path but doing so causes a second
+       * or more of delay while the XOpenDisplay() function times out.
+       */
+      maxDisplays = 10;  /* infinity, really */
+   }
+   else {
+      /* just open the :0 display */
+      maxDisplays = 1;
+d483 17
+a499 12
+   for (displayNum = 0; displayNum < maxDisplays; displayNum++) {
+      char displayName[200];
+      Display *dpy;
+      snprintf(displayName, 199, ":%d.0", displayNum);
+      dpy = XOpenDisplay(displayName);
+      if (dpy) {
+         const int numScreens = ScreenCount(dpy);
+         int screenNum;
+         for (screenNum = 0; screenNum < numScreens; screenNum++) {
+            __DRIdriver *driver = GetDriver(dpy, screenNum);
+            if (driver && driver->registerExtensionsFunc) {
+               (*driver->registerExtensionsFunc)();
+d501 4
+a505 4
+         XCloseDisplay(dpy);
+      }
+      else {
+         break;
+d508 2
+@
+
+
+1.1.1.3
+log
+@That's what OpenBSD will, probably, ship as XF4 in 3.5
+their last sync against XFree86 4.3-current has been
+imported into our vendor branch, too
+@
+text
+@d27 1
+a27 1
+/* $XFree86: xc/lib/GL/dri/dri_glx.c,v 1.15 2003/09/28 20:14:59 alanh Exp $ */
+d51 6
+a56 6
+#ifndef RTLD_NOW
+#define RTLD_NOW 0
+#endif
+#ifndef RTLD_GLOBAL
+#define RTLD_GLOBAL 0
+#endif
+d72 11
+d250 2
+d282 1
+a282 1
+      ErrorMessageF("XF86DRIQueryDirectRenderingCapable failed\n");
+d286 1
+a286 1
+      ErrorMessageF("XF86DRIQueryDirectRenderingCapable returned false\n");
+d308 1
+a308 1
+__DRIdriver *driGetDriver(Display *dpy, int scrNum)
+d311 2
+a313 1
+      __DRIdriver *ret;
+d319 1
+d413 1
+d415 1
+a415 1
+        __DRIdriver *driver = driGetDriver(dpy, scrn);
+d429 58
+@
+
+

@@ -1,0 +1,436 @@
+head	1.8;
+access;
+symbols;
+locks; strict;
+comment	@# @;
+
+
+1.8
+date	2005.01.05.15.23.52;	author tg;	state dead;
+branches;
+next	1.7;
+
+1.7
+date	2004.12.16.19.42.30;	author tg;	state Exp;
+branches;
+next	1.6;
+
+1.6
+date	2004.11.30.18.30.14;	author tg;	state Exp;
+branches;
+next	1.5;
+
+1.5
+date	2004.11.28.22.36.53;	author tg;	state Exp;
+branches;
+next	1.4;
+
+1.4
+date	2004.11.04.20.48.22;	author tg;	state Exp;
+branches;
+next	1.3;
+
+1.3
+date	2004.10.27.18.36.52;	author tg;	state Exp;
+branches;
+next	1.2;
+
+1.2
+date	2004.10.27.18.28.39;	author tg;	state Exp;
+branches;
+next	1.1;
+
+1.1
+date	2004.10.27.18.27.43;	author tg;	state Exp;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.8
+log
+@move Setup.sh out of the way
+requested by bsiegert@@ fairly some time ago
+@
+text
+@#!/bin/ksh
+# $MirBSD: ports/Setup.sh,v 1.7 2004/12/16 19:42:30 tg Exp $
+#-
+# Copyright (c) 2004
+#	Thorsten "mirabile" Glaser <tg@@66h.42h.de>
+#
+# Licensee is hereby permitted to deal in this work without restric-
+# tion, including unlimited rights to use, publically perform, modi-
+# fy, merge, distribute, sell, give away or sublicence, provided the
+# above copyright notices, these terms and the disclaimer are retai-
+# ned in all redistributions, or reproduced in accompanying documen-
+# tation or other materials provided with binary redistributions.
+#
+# Licensor hereby provides this work "AS IS" and WITHOUT WARRANTY of
+# any kind, expressed or implied, to the maximum extent permitted by
+# applicable law, but with the warranty of being written without ma-
+# licious intent or gross negligence; in no event shall licensor, an
+# author or contributor be held liable for any damage, direct, indi-
+# rect or other, however caused, arising in any way out of the usage
+# of covered work, even if advised of the possibility of such damage.
+#-
+# MirPorts Framework - Installation script
+#
+# What does this thing do?
+# 1) detect which OS we are running on
+# 2) build and install package tools to
+#    /usr/sbin (MirOS), /usr/local/sbin (OpenBSD)
+# 3) patch <bsd.sys.mk> if necessary
+# 4) install generic makefile includes
+#    and, if necessary, mirports.osdep.mk
+# 5) patch /etc/mk.conf
+# 6) augment user and group list
+
+print "1. Detecting environment..."
+
+cd $(dirname $0)
+top=$(pwd)
+ti=$top/infrastructure
+if os="$(uname -M 2>/dev/null)"; then
+	os=${os%% *}
+else
+	os="$(uname -s)"
+fi
+osver=$(uname -r | sed 's/\./_/')
+[[ -z $SHELL ]] && SHELL=/bin/ksh
+export SHELL
+
+if ! tmp=$(mktemp); then
+	print cannot make temporary file
+	exit 1
+fi
+
+trap 'rm -f $tmp ; exit 0' 0
+trap 'rm -f $tmp ; exit 1' 1 2 3 13 15
+
+if ! chown root $tmp; then
+	print need root
+	exit 1
+fi
+
+case $os in
+OpenBSD)
+	( cd /usr/lib;
+	  [[ -e libresolv.a && ! -e libdl.a ]] \
+	    && ln libresolv.a libdl.a )
+	;;
+MirBSD)
+	ospl=$(uname -l | sed -e 's/^#//' -e 's/-.*$//' -e 's/^\(.\)./\1_/')
+	ospm=${ospl%_*}
+	ospl=${ospl#*_}
+	# test is ancient -current or older, or modern
+	if [[ $ospm -gt 7 ]]; then
+		mirosnew=1
+	else
+		mirosnew=0
+	fi
+	( cd /usr/lib;
+	  [[ -e libresolv.a && ! -e libdl.a ]] \
+	    && ln libresolv.a libdl.a; \
+	  [[ -e libexpat.so.0.0 && ! -e libexpat.so.4.0 ]] \
+	    && ln -s libexpat.so.0.0 libexpat.so.4.0; \
+	  for a in libpng.so.[01].*; do \
+		b="$a"; \
+		[[ -e $b ]] || b=nein; \
+	  done; \
+	  [[ $b != nein && ! -e libpng.so.4.0 ]] && ln -s $b libpng.so.4.0 )
+	;;
+*)
+	print No support for the $os operating system.
+	exit 1
+	;;
+esac
+
+# detect compiler version and if it's GCC
+if gv=$($ourCC -v 2>&1 | grep '/specs$'); then
+	gv=${gv%/specs}
+	gv=${gv##*/}
+else
+	gv=no
+fi
+
+print "2. Building package tools..."
+
+cd $ti/stools
+rm -rf */obj
+set -e
+make cleandir
+make obj
+make cleandir
+make depend
+if [[ $os = MirBSD ]]; then
+	if [[ $mirosnew = 1 ]]; then
+		make
+	else
+		make PORTABLE=1
+	fi
+	make install
+else
+	make PORTABLE=1
+	make install PREFIX=/usr/local MANDIR=/usr/local/man/cat
+fi
+set +e
+rm -rf */obj
+
+print -n "3. Patching <bsd.sys.mk>..."
+
+if grep '\.ifndef.TRUEPREFIX' /usr/share/mk/bsd.sys.mk >/dev/null 2>&1; then
+	print not needed.
+else
+	if patch /usr/share/mk/bsd.sys.mk \
+	    $ti/compat/generic/patch-bsd_sys_mk; then
+		print done.
+		rm -f /usr/share/mk/bsd.sys.mk.orig
+	else
+		print failed.
+		exit 1
+	fi
+fi
+
+print -n "4. Installing MirPorts system makefile includes..."
+
+case $os in
+OpenBSD)
+	if ! install -c -o root -g wsrc -m 664 \
+	    $ti/compat/osdep/obsd-mirports.osdep.mk \
+	    $ti/mk/mirports.osdep.mk; then
+		print failed.
+		exit 1
+	fi
+	print '/^#@@@@PKG_CMDDIR/s/^#@@@@//\nwq' | ed -s $ti/mk/mirports.osdep.mk
+	;;
+MirBSD)
+	if [[ $mirosnew = 0 ]]; then
+		if ! install -c -o root -g wsrc -m 664 \
+		    $ti/compat/osdep/mbsd-mirports.osdep.mk \
+		    $ti/mk/mirports.osdep.mk; then
+			print failed.
+			exit 1
+		fi
+	else
+		rm -f $ti/mk/mirports.osdep.mk
+	fi
+	;;
+esac
+
+if install -c -o root -g bin -m 444 \
+    $ti/compat/generic/*.mk /usr/share/mk/; then
+	print done.
+else
+	print failed.
+	exit 1
+fi
+
+print -n "5. Preparing /etc/mk.conf..."
+
+touch /etc/mk.conf
+if fgrep '#@@@@MIRPORTS' /etc/mk.conf >/dev/null 2>&1; then
+	print '/#@@@@MIRPORTS start/,/#@@@@MIRPORTS end/d\nwq' \
+	    | ed -s /etc/mk.conf
+fi
+
+cat >>/etc/mk.conf |&
+print -p
+print -p '#@@@@MIRPORTS start'
+print -p
+print -p "_CC_IS_GCC=		$gv"
+print -p
+
+case $os in
+OpenBSD)
+	if [[ $top = /usr/ports ]]; then
+		print -p "PKG_CMDDIR=		/usr/local/sbin"
+	else
+		print -p "USE_MIRPORTS?=\t	yes"
+		print -p
+		print -p '.if ${USE_MIRPORTS:L} == "yes"'
+		print -p "PORTSDIR=		$top"
+		print -p "PKG_CMDDIR=		/usr/local/sbin"
+		print -p ".else"
+		print -p "PORTSDIR=		/usr/ports"
+		print -p ".endif"
+	fi
+	print -p
+	;;
+MirBSD)
+	# nothing else here yet
+	;;
+esac
+
+print -p '#@@@@MIRPORTS end'
+exec 3>&p; exec 3>&-
+print done.
+
+print -n "6. Augmenting user and group database..."
+
+$SHELL $ti/db/mkuserdb
+
+cat <<EOF
+done.
+
+================================================
+               Congratulations!
+------------------------------------------------
+ Your MirPorts Framework system is now set up
+ completely and ready to run.
+ If you have not yet done so, read the README
+ file appropriate for your operating system for
+ further information about how to use MirPorts:
+ $ti/compat/README.${os}
+================================================
+
+EOF
+exit 0
+@
+
+
+1.7
+log
+@* document that people must use 'make setup' in order
+  to install the infrastructure - even #7-stable users
+  - agreed bsiegert@@ after quite some discussion
+* create a point in time which checks for that. manual
+  installation will not work any more, because a new
+  variable set in /etc/mk.conf will be checked by the
+  <*.mk> files now.
+* the new variable is ${_CC_IS_GCC} which contains
+  either "no" or the GCC version if ${CC} is a gcc
+  at the time of 'make setup' execution - this means
+  #7 users might have to type 'make setup MKC_EGCC=yes'
+  if they are going to use that.
+  - prodded by sap@@ for GNU emacs
+  and no, I don't know if you can use ${...} >= "3.4"
+* who volunteers to update /?ports in www?
+@
+text
+@d2 1
+a2 1
+# $MirBSD: ports/Setup.sh,v 1.5 2004/11/28 22:36:53 tg Exp $
+@
+
+
+1.6
+log
+@enforce libdl.a existence
+XXX breaks on systems (OpenBSD 2.1?) with a "real" libresolv.a
+@
+text
+@d94 8
+d182 7
+d192 1
+a192 8
+		cat >>/etc/mk.conf <<EOF
+#@@@@MIRPORTS start
+
+PKG_CMDDIR=	/usr/local/sbin
+
+#@@@@MIRPORTS end
+EOF
+
+d194 8
+a201 15
+		cat >>/etc/mk.conf <<EOF
+#@@@@MIRPORTS start
+
+USE_MIRPORTS?=	yes
+
+.if \${USE_MIRPORTS:L} == "yes"
+PORTSDIR=	$top
+PKG_CMDDIR=	/usr/local/sbin
+.else
+PORTSDIR=	/usr/ports
+.endif
+
+#@@@@MIRPORTS end
+EOF
+
+d203 1
+a203 1
+	print done.
+d206 1
+a206 1
+	print not needed.
+d209 4
+@
+
+
+1.5
+log
+@build with PORTABLE=1 on MirOS #7 and older
+(I thought I had already committed this)
+while retaining to throw it into /usr/sbin
+instead of /usr/local/sbin
+@
+text
+@d2 1
+a2 1
+# $MirBSD: ports/Setup.sh,v 1.4 2004/11/04 20:48:22 tg Exp $
+d63 3
+d78 2
+@
+
+
+1.4
+log
+@tab/space, we had both
+found by Benedikt "Hama" Steinbusch, the #1 PHP prodder
+@
+text
+@d2 1
+a2 1
+# $MirBSD: ports/Setup.sh,v 1.3 2004/10/27 18:36:52 tg Exp $
+d99 5
+a103 1
+	make
+@
+
+
+1.3
+log
+@plug a /tmp file leak
+@
+text
+@d2 1
+a2 1
+# $MirBSD: ports/Setup.sh,v 1.2 2004/10/27 18:28:39 tg Exp $
+d110 1
+a110 1
+if fgrep '.ifndef TRUEPREFIX' /usr/share/mk/bsd.sys.mk >/dev/null 2>&1; then
+@
+
+
+1.2
+log
+@better even: strip whitespace only for uname -M case
+@
+text
+@d2 1
+a2 1
+# $MirBSD: ports/Setup.sh,v 1.1 2004/10/27 18:27:43 tg Exp $
+d52 3
+@
+
+
+1.1
+log
+@* rename setup.sh to Setup.sh for easier tab-completing
+* nuke spaces and what's after them from uname -s output
+@
+text
+@d2 1
+a2 1
+# $MirBSD: ports/setup.sh,v 1.8 2004/10/22 08:46:27 tg Exp $
+d39 5
+a43 2
+os=$(uname -M 2>/dev/null || uname -s)
+os=${os%% *}
+@
+

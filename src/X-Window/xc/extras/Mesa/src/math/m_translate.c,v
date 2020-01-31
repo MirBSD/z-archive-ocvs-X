@@ -1,0 +1,1009 @@
+head	1.2;
+branch	1.1.1;
+access;
+symbols
+	tg-mergetmp-2:1.1.1.2
+	cvs-200410241530:1.1.1.2
+	cvs-200410012000:1.1.1.2
+	cvs-200407141120:1.1.1.2
+	cvs-200406231010:1.1.1.2
+	MIRBSD_7quater:1.1.1.1
+	cvs-200405271510:1.1.1.2
+	XFree86_4_4_0:1.1.9.1
+	cvs-200403021700:1.1.1.2
+	XFREE86_20040213:1.1.9.1
+	xc:1.1.9
+	cvs-200401291925:1.1.1.1
+	MIRBSD_7_ALPHA:1.1.1.1.0.4
+	MIRBSD_7:1.1.1.1.0.2
+	MIRBSD_7ter:1.1.1.1
+	cvs-20011091815:1.1.1.1
+	cvs-200309162130:1.1.1.1
+	cvs-200308302005:1.1.1.1
+	ctmx-0387:1.1.1.1
+	ctmx-0384:1.1.1.1
+	MIRBSD_5:1.1.1.1
+	ctmx-0375:1.1.1.1
+	ctmx-0373:1.1.1.1
+	ctm-0371:1.1.1.1
+	ctm-0370:1.1.1.1
+	MIRBSD_4:1.1.1.1
+	ctm-0363:1.1.1.1
+	ctm-0359:1.1.1.1
+	openbsd:1.1.1;
+locks; strict;
+comment	@ * @;
+
+
+1.2
+date	2003.05.16.16.28.39;	author tg;	state dead;
+branches;
+next	1.1;
+
+1.1
+date	2003.04.08.18.20.11;	author tg;	state Exp;
+branches
+	1.1.1.1
+	1.1.9.1;
+next	;
+
+1.1.1.1
+date	2003.04.08.18.20.11;	author tg;	state Exp;
+branches;
+next	1.1.1.2;
+
+1.1.1.2
+date	2004.03.02.17.29.51;	author tg;	state Stab;
+branches;
+next	;
+
+1.1.9.1
+date	2004.02.14.19.05.06;	author tg;	state Exp;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.2
+log
+@remove a bunch of files not used in MirBSD - clean tree. People who want them got cvs.
+@
+text
+@
+/*
+ * Mesa 3-D graphics library
+ * Version:  3.5
+ *
+ * Copyright (C) 1999-2001  Brian Paul   All Rights Reserved.
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a
+ * copy of this software and associated documentation files (the "Software"),
+ * to deal in the Software without restriction, including without limitation
+ * the rights to use, copy, modify, merge, publish, distribute, sublicense,
+ * and/or sell copies of the Software, and to permit persons to whom the
+ * Software is furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included
+ * in all copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
+ * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL
+ * BRIAN PAUL BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN
+ * AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
+ * CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+ */
+
+/*
+ * New (3.1) transformation code written by Keith Whitwell.
+ */
+
+
+#include "glheader.h"
+#include "mtypes.h"		/* GLchan hack */
+#include "colormac.h"
+#include "mem.h"
+#include "mmath.h"
+
+#include "m_translate.h"
+
+
+
+typedef void (*trans_1f_func)(GLfloat *to,
+			      CONST void *ptr,
+			      GLuint stride,
+			      GLuint start,
+			      GLuint n );
+
+typedef void (*trans_1ui_func)(GLuint *to,
+			       CONST void *ptr,
+			       GLuint stride,
+			       GLuint start,
+			       GLuint n );
+
+typedef void (*trans_1ub_func)(GLubyte *to,
+			       CONST void *ptr,
+			       GLuint stride,
+			       GLuint start,
+			       GLuint n );
+
+typedef void (*trans_4ub_func)(GLubyte (*to)[4],
+                               CONST void *ptr,
+                               GLuint stride,
+                               GLuint start,
+                               GLuint n );
+
+typedef void (*trans_4us_func)(GLushort (*to)[4],
+                               CONST void *ptr,
+                               GLuint stride,
+                               GLuint start,
+                               GLuint n );
+
+typedef void (*trans_4f_func)(GLfloat (*to)[4],
+			      CONST void *ptr,
+			      GLuint stride,
+			      GLuint start,
+			      GLuint n );
+
+typedef void (*trans_3f_func)(GLfloat (*to)[3],
+			      CONST void *ptr,
+			      GLuint stride,
+			      GLuint start,
+			      GLuint n );
+
+
+
+
+#define TYPE_IDX(t) ((t) & 0xf)
+#define MAX_TYPES TYPE_IDX(GL_DOUBLE)+1      /* 0xa + 1 */
+
+
+/* This macro is used on other systems, so undefine it for this module */
+
+#undef	CHECK
+
+static trans_1f_func  _math_trans_1f_tab[MAX_TYPES];
+static trans_1ui_func _math_trans_1ui_tab[MAX_TYPES];
+static trans_1ub_func _math_trans_1ub_tab[MAX_TYPES];
+static trans_3f_func  _math_trans_3f_tab[MAX_TYPES];
+static trans_4ub_func _math_trans_4ub_tab[5][MAX_TYPES];
+static trans_4us_func _math_trans_4us_tab[5][MAX_TYPES];
+static trans_4f_func  _math_trans_4f_tab[5][MAX_TYPES];
+
+
+#define PTR_ELT(ptr, elt) (((SRC *)ptr)[elt])
+
+
+#define TAB(x) _math_trans##x##_tab
+#define ARGS   GLuint start, GLuint n
+#define SRC_START  start
+#define DST_START  0
+#define STRIDE stride
+#define NEXT_F f += stride
+#define NEXT_F2
+#define CHECK
+
+
+
+
+/* GL_BYTE
+ */
+#define SRC GLbyte
+#define SRC_IDX TYPE_IDX(GL_BYTE)
+#define TRX_3F(f,n)   BYTE_TO_FLOAT( PTR_ELT(f,n) )
+#define TRX_4F(f,n)   BYTE_TO_FLOAT( PTR_ELT(f,n) )
+#define TRX_UB(ub, f,n)  ub = BYTE_TO_UBYTE( PTR_ELT(f,n) )
+#define TRX_US(ch, f,n)  ch = BYTE_TO_USHORT( PTR_ELT(f,n) )
+#define TRX_UI(f,n)  (PTR_ELT(f,n) < 0 ? 0 : (GLuint)  PTR_ELT(f,n))
+
+
+#define SZ 4
+#define INIT init_trans_4_GLbyte_raw
+#define DEST_4F trans_4_GLbyte_4f_raw
+#define DEST_4UB trans_4_GLbyte_4ub_raw
+#define DEST_4US trans_4_GLbyte_4us_raw
+#include "m_trans_tmp.h"
+
+#define SZ 3
+#define INIT init_trans_3_GLbyte_raw
+#define DEST_4F trans_3_GLbyte_4f_raw
+#define DEST_4UB trans_3_GLbyte_4ub_raw
+#define DEST_4US trans_3_GLbyte_4us_raw
+#define DEST_3F trans_3_GLbyte_3f_raw
+#include "m_trans_tmp.h"
+
+#define SZ 2
+#define INIT init_trans_2_GLbyte_raw
+#define DEST_4F trans_2_GLbyte_4f_raw
+#include "m_trans_tmp.h"
+
+#define SZ 1
+#define INIT init_trans_1_GLbyte_raw
+#define DEST_4F trans_1_GLbyte_4f_raw
+#define DEST_1UB trans_1_GLbyte_1ub_raw
+#define DEST_1UI trans_1_GLbyte_1ui_raw
+#include "m_trans_tmp.h"
+
+#undef SRC
+#undef TRX_3F
+#undef TRX_4F
+#undef TRX_UB
+#undef TRX_US
+#undef TRX_UI
+#undef SRC_IDX
+
+
+/* GL_UNSIGNED_BYTE
+ */
+#define SRC GLubyte
+#define SRC_IDX TYPE_IDX(GL_UNSIGNED_BYTE)
+#define TRX_3F(f,n)	     UBYTE_TO_FLOAT(PTR_ELT(f,n))
+#define TRX_4F(f,n)	     UBYTE_TO_FLOAT(PTR_ELT(f,n))
+#define TRX_UB(ub, f,n)	     ub = PTR_ELT(f,n)
+#define TRX_US(us, f,n)      us = UBYTE_TO_USHORT(PTR_ELT(f,n))
+#define TRX_UI(f,n)          (GLuint)PTR_ELT(f,n)
+
+/* 4ub->4ub handled in special case below.
+ */
+#define SZ 4
+#define INIT init_trans_4_GLubyte_raw
+#define DEST_4F trans_4_GLubyte_4f_raw
+#define DEST_4US trans_4_GLubyte_4us_raw
+#include "m_trans_tmp.h"
+
+
+#define SZ 3
+#define INIT init_trans_3_GLubyte_raw
+#define DEST_4UB trans_3_GLubyte_4ub_raw
+#define DEST_4US trans_3_GLubyte_4us_raw
+#define DEST_3F trans_3_GLubyte_3f_raw
+#define DEST_4F trans_3_GLubyte_4f_raw
+#include "m_trans_tmp.h"
+
+
+#define SZ 1
+#define INIT init_trans_1_GLubyte_raw
+#define DEST_1UI trans_1_GLubyte_1ui_raw
+#define DEST_1UB trans_1_GLubyte_1ub_raw
+#include "m_trans_tmp.h"
+
+#undef SRC
+#undef SRC_IDX
+#undef TRX_3F
+#undef TRX_4F
+#undef TRX_UB
+#undef TRX_US
+#undef TRX_UI
+
+
+/* GL_SHORT
+ */
+#define SRC GLshort
+#define SRC_IDX TYPE_IDX(GL_SHORT)
+#define TRX_3F(f,n)   SHORT_TO_FLOAT( PTR_ELT(f,n) )
+#define TRX_4F(f,n)   (GLfloat)( PTR_ELT(f,n) )
+#define TRX_UB(ub, f,n)  ub = SHORT_TO_UBYTE(PTR_ELT(f,n))
+#define TRX_US(us, f,n)  us = SHORT_TO_USHORT(PTR_ELT(f,n))
+#define TRX_UI(f,n)  (PTR_ELT(f,n) < 0 ? 0 : (GLuint)  PTR_ELT(f,n))
+
+
+#define SZ  4
+#define INIT init_trans_4_GLshort_raw
+#define DEST_4F trans_4_GLshort_4f_raw
+#define DEST_4UB trans_4_GLshort_4ub_raw
+#define DEST_4US trans_4_GLshort_4us_raw
+#include "m_trans_tmp.h"
+
+#define SZ 3
+#define INIT init_trans_3_GLshort_raw
+#define DEST_4F trans_3_GLshort_4f_raw
+#define DEST_4UB trans_3_GLshort_4ub_raw
+#define DEST_4US trans_3_GLshort_4us_raw
+#define DEST_3F trans_3_GLshort_3f_raw
+#include "m_trans_tmp.h"
+
+#define SZ 2
+#define INIT init_trans_2_GLshort_raw
+#define DEST_4F trans_2_GLshort_4f_raw
+#include "m_trans_tmp.h"
+
+#define SZ 1
+#define INIT init_trans_1_GLshort_raw
+#define DEST_4F trans_1_GLshort_4f_raw
+#define DEST_1UB trans_1_GLshort_1ub_raw
+#define DEST_1UI trans_1_GLshort_1ui_raw
+#include "m_trans_tmp.h"
+
+
+#undef SRC
+#undef SRC_IDX
+#undef TRX_3F
+#undef TRX_4F
+#undef TRX_UB
+#undef TRX_US
+#undef TRX_UI
+
+
+/* GL_UNSIGNED_SHORT
+ */
+#define SRC GLushort
+#define SRC_IDX TYPE_IDX(GL_UNSIGNED_SHORT)
+#define TRX_3F(f,n)   USHORT_TO_FLOAT( PTR_ELT(f,n) )
+#define TRX_4F(f,n)   (GLfloat)( PTR_ELT(f,n) )
+#define TRX_UB(ub,f,n)  ub = (GLubyte) (PTR_ELT(f,n) >> 8)
+#define TRX_US(us,f,n)  us = (GLushort) (PTR_ELT(f,n) >> 8)
+#define TRX_UI(f,n)  (GLuint)   PTR_ELT(f,n)
+
+
+#define SZ 4
+#define INIT init_trans_4_GLushort_raw
+#define DEST_4F trans_4_GLushort_4f_raw
+#define DEST_4UB trans_4_GLushort_4ub_raw
+#define DEST_4US trans_4_GLushort_4us_raw
+#include "m_trans_tmp.h"
+
+#define SZ 3
+#define INIT init_trans_3_GLushort_raw
+#define DEST_4F trans_3_GLushort_4f_raw
+#define DEST_4UB trans_3_GLushort_4ub_raw
+#define DEST_4US trans_3_GLushort_4us_raw
+#define DEST_3F trans_3_GLushort_3f_raw
+#include "m_trans_tmp.h"
+
+#define SZ 2
+#define INIT init_trans_2_GLushort_raw
+#define DEST_4F trans_2_GLushort_4f_raw
+#include "m_trans_tmp.h"
+
+#define SZ 1
+#define INIT init_trans_1_GLushort_raw
+#define DEST_4F trans_1_GLushort_4f_raw
+#define DEST_1UB trans_1_GLushort_1ub_raw
+#define DEST_1UI trans_1_GLushort_1ui_raw
+#include "m_trans_tmp.h"
+
+#undef SRC
+#undef SRC_IDX
+#undef TRX_3F
+#undef TRX_4F
+#undef TRX_UB
+#undef TRX_US
+#undef TRX_UI
+
+
+/* GL_INT
+ */
+#define SRC GLint
+#define SRC_IDX TYPE_IDX(GL_INT)
+#define TRX_3F(f,n)   INT_TO_FLOAT( PTR_ELT(f,n) )
+#define TRX_4F(f,n)   (GLfloat)( PTR_ELT(f,n) )
+#define TRX_UB(ub, f,n)  ub = INT_TO_UBYTE(PTR_ELT(f,n))
+#define TRX_US(us, f,n)  us = INT_TO_USHORT(PTR_ELT(f,n))
+#define TRX_UI(f,n)  (PTR_ELT(f,n) < 0 ? 0 : (GLuint)  PTR_ELT(f,n))
+
+
+#define SZ 4
+#define INIT init_trans_4_GLint_raw
+#define DEST_4F trans_4_GLint_4f_raw
+#define DEST_4UB trans_4_GLint_4ub_raw
+#define DEST_4US trans_4_GLint_4us_raw
+#include "m_trans_tmp.h"
+
+#define SZ 3
+#define INIT init_trans_3_GLint_raw
+#define DEST_4F trans_3_GLint_4f_raw
+#define DEST_4UB trans_3_GLint_4ub_raw
+#define DEST_4US trans_3_GLint_4us_raw
+#define DEST_3F trans_3_GLint_3f_raw
+#include "m_trans_tmp.h"
+
+#define SZ 2
+#define INIT init_trans_2_GLint_raw
+#define DEST_4F trans_2_GLint_4f_raw
+#include "m_trans_tmp.h"
+
+#define SZ 1
+#define INIT init_trans_1_GLint_raw
+#define DEST_4F trans_1_GLint_4f_raw
+#define DEST_1UB trans_1_GLint_1ub_raw
+#define DEST_1UI trans_1_GLint_1ui_raw
+#include "m_trans_tmp.h"
+
+
+#undef SRC
+#undef SRC_IDX
+#undef TRX_3F
+#undef TRX_4F
+#undef TRX_UB
+#undef TRX_US
+#undef TRX_UI
+
+
+/* GL_UNSIGNED_INT
+ */
+#define SRC GLuint
+#define SRC_IDX TYPE_IDX(GL_UNSIGNED_INT)
+#define TRX_3F(f,n)   INT_TO_FLOAT( PTR_ELT(f,n) )
+#define TRX_4F(f,n)   (GLfloat)( PTR_ELT(f,n) )
+#define TRX_UB(ub, f,n)  ub = (GLubyte) (PTR_ELT(f,n) >> 24)
+#define TRX_US(us, f,n)  us = (GLshort) (PTR_ELT(f,n) >> 16)
+#define TRX_UI(f,n)		PTR_ELT(f,n)
+
+
+#define SZ 4
+#define INIT init_trans_4_GLuint_raw
+#define DEST_4F trans_4_GLuint_4f_raw
+#define DEST_4UB trans_4_GLuint_4ub_raw
+#define DEST_4US trans_4_GLuint_4us_raw
+#include "m_trans_tmp.h"
+
+#define SZ 3
+#define INIT init_trans_3_GLuint_raw
+#define DEST_4F trans_3_GLuint_4f_raw
+#define DEST_4UB trans_3_GLuint_4ub_raw
+#define DEST_4US trans_3_GLuint_4us_raw
+#define DEST_3F trans_3_GLuint_3f_raw
+#include "m_trans_tmp.h"
+
+#define SZ 2
+#define INIT init_trans_2_GLuint_raw
+#define DEST_4F trans_2_GLuint_4f_raw
+#include "m_trans_tmp.h"
+
+#define SZ 1
+#define INIT init_trans_1_GLuint_raw
+#define DEST_4F trans_1_GLuint_4f_raw
+#define DEST_1UB trans_1_GLuint_1ub_raw
+#define DEST_1UI trans_1_GLuint_1ui_raw
+#include "m_trans_tmp.h"
+
+#undef SRC
+#undef SRC_IDX
+#undef TRX_3F
+#undef TRX_4F
+#undef TRX_UB
+#undef TRX_US
+#undef TRX_UI
+
+
+/* GL_DOUBLE
+ */
+#define SRC GLdouble
+#define SRC_IDX TYPE_IDX(GL_DOUBLE)
+#define TRX_3F(f,n)   (GLfloat) PTR_ELT(f,n)
+#define TRX_4F(f,n)   (GLfloat) PTR_ELT(f,n)
+#define TRX_UB(ub,f,n) UNCLAMPED_FLOAT_TO_UBYTE(ub, PTR_ELT(f,n))
+#define TRX_US(us,f,n) UNCLAMPED_FLOAT_TO_USHORT(us, PTR_ELT(f,n))
+#define TRX_UI(f,n)  (GLuint) (GLint) PTR_ELT(f,n)
+#define TRX_1F(f,n)   (GLfloat) PTR_ELT(f,n)
+
+
+#define SZ 4
+#define INIT init_trans_4_GLdouble_raw
+#define DEST_4F trans_4_GLdouble_4f_raw
+#define DEST_4UB trans_4_GLdouble_4ub_raw
+#define DEST_4US trans_4_GLdouble_4us_raw
+#include "m_trans_tmp.h"
+
+#define SZ 3
+#define INIT init_trans_3_GLdouble_raw
+#define DEST_4F trans_3_GLdouble_4f_raw
+#define DEST_4UB trans_3_GLdouble_4ub_raw
+#define DEST_4US trans_3_GLdouble_4us_raw
+#define DEST_3F trans_3_GLdouble_3f_raw
+#include "m_trans_tmp.h"
+
+#define SZ 2
+#define INIT init_trans_2_GLdouble_raw
+#define DEST_4F trans_2_GLdouble_4f_raw
+#include "m_trans_tmp.h"
+
+#define SZ 1
+#define INIT init_trans_1_GLdouble_raw
+#define DEST_4F trans_1_GLdouble_4f_raw
+#define DEST_1UB trans_1_GLdouble_1ub_raw
+#define DEST_1UI trans_1_GLdouble_1ui_raw
+#define DEST_1F trans_1_GLdouble_1f_raw
+#include "m_trans_tmp.h"
+
+#undef SRC
+#undef SRC_IDX
+
+/* GL_FLOAT
+ */
+#define SRC GLfloat
+#define SRC_IDX TYPE_IDX(GL_FLOAT)
+#define SZ 4
+#define INIT init_trans_4_GLfloat_raw
+#define DEST_4UB trans_4_GLfloat_4ub_raw
+#define DEST_4US trans_4_GLfloat_4us_raw
+#define DEST_4F  trans_4_GLfloat_4f_raw
+#include "m_trans_tmp.h"
+
+#define SZ 3
+#define INIT init_trans_3_GLfloat_raw
+#define DEST_4F  trans_3_GLfloat_4f_raw
+#define DEST_4UB trans_3_GLfloat_4ub_raw
+#define DEST_4US trans_3_GLfloat_4us_raw
+#define DEST_3F trans_3_GLfloat_3f_raw
+#include "m_trans_tmp.h"
+
+#define SZ 2
+#define INIT init_trans_2_GLfloat_raw
+#define DEST_4F trans_2_GLfloat_4f_raw
+#include "m_trans_tmp.h"
+
+#define SZ 1
+#define INIT init_trans_1_GLfloat_raw
+#define DEST_4F  trans_1_GLfloat_4f_raw
+#define DEST_1UB trans_1_GLfloat_1ub_raw
+#define DEST_1UI trans_1_GLfloat_1ui_raw
+#define DEST_1F trans_1_GLfloat_1f_raw
+
+#include "m_trans_tmp.h"
+
+#undef SRC
+#undef SRC_IDX
+#undef TRX_3F
+#undef TRX_4F
+#undef TRX_UB
+#undef TRX_US
+#undef TRX_UI
+
+
+static void trans_4_GLubyte_4ub_raw(GLubyte (*t)[4],
+				    CONST void *Ptr,
+				    GLuint stride,
+				    ARGS )
+{
+   const GLubyte *f = (GLubyte *) Ptr + SRC_START * stride;
+   GLuint i;
+
+   if (((((long) f | (long) stride)) & 3L) == 0L) {
+      /* Aligned.
+       */
+      for (i = DST_START ; i < n ; i++, f += stride) {
+	 COPY_4UBV( t[i], f );
+      }
+   } else {
+      for (i = DST_START ; i < n ; i++, f += stride) {
+	 t[i][0] = f[0];
+	 t[i][1] = f[1];
+	 t[i][2] = f[2];
+	 t[i][3] = f[3];
+      }
+   }
+}
+
+
+static void init_translate_raw(void)
+{
+   MEMSET( TAB(_1ui), 0, sizeof(TAB(_1ui)) );
+   MEMSET( TAB(_1ub), 0, sizeof(TAB(_1ub)) );
+   MEMSET( TAB(_3f),  0, sizeof(TAB(_3f)) );
+   MEMSET( TAB(_4ub), 0, sizeof(TAB(_4ub)) );
+   MEMSET( TAB(_4us), 0, sizeof(TAB(_4us)) );
+   MEMSET( TAB(_4f),  0, sizeof(TAB(_4f)) );
+
+   init_trans_4_GLbyte_raw();
+   init_trans_3_GLbyte_raw();
+   init_trans_2_GLbyte_raw();
+   init_trans_1_GLbyte_raw();
+   init_trans_1_GLubyte_raw();
+   init_trans_3_GLubyte_raw();
+   init_trans_4_GLubyte_raw();
+   init_trans_4_GLshort_raw();
+   init_trans_3_GLshort_raw();
+   init_trans_2_GLshort_raw();
+   init_trans_1_GLshort_raw();
+   init_trans_4_GLushort_raw();
+   init_trans_3_GLushort_raw();
+   init_trans_2_GLushort_raw();
+   init_trans_1_GLushort_raw();
+   init_trans_4_GLint_raw();
+   init_trans_3_GLint_raw();
+   init_trans_2_GLint_raw();
+   init_trans_1_GLint_raw();
+   init_trans_4_GLuint_raw();
+   init_trans_3_GLuint_raw();
+   init_trans_2_GLuint_raw();
+   init_trans_1_GLuint_raw();
+   init_trans_4_GLdouble_raw();
+   init_trans_3_GLdouble_raw();
+   init_trans_2_GLdouble_raw();
+   init_trans_1_GLdouble_raw();
+   init_trans_4_GLfloat_raw();
+   init_trans_3_GLfloat_raw();
+   init_trans_2_GLfloat_raw();
+   init_trans_1_GLfloat_raw();
+
+   TAB(_4ub)[4][TYPE_IDX(GL_UNSIGNED_BYTE)] = trans_4_GLubyte_4ub_raw;
+}
+
+
+#undef TAB
+#undef CLASS
+#undef ARGS
+#undef CHECK
+#undef SRC_START
+#undef DST_START
+#undef NEXT_F
+#undef NEXT_F2
+
+
+
+
+
+void _math_init_translate( void )
+{
+   init_translate_raw();
+}
+
+
+
+void _math_trans_1f(GLfloat *to,
+		    CONST void *ptr,
+		    GLuint stride,
+		    GLenum type,
+		    GLuint start,
+		    GLuint n )
+{
+   _math_trans_1f_tab[TYPE_IDX(type)]( to, ptr, stride, start, n );
+}
+
+void _math_trans_1ui(GLuint *to,
+		     CONST void *ptr,
+		     GLuint stride,
+		     GLenum type,
+		     GLuint start,
+		     GLuint n )
+{
+   _math_trans_1ui_tab[TYPE_IDX(type)]( to, ptr, stride, start, n );
+}
+
+void _math_trans_1ub(GLubyte *to,
+		     CONST void *ptr,
+		     GLuint stride,
+		     GLenum type,
+		     GLuint start,
+		     GLuint n )
+{
+   _math_trans_1ub_tab[TYPE_IDX(type)]( to, ptr, stride, start, n );
+}
+
+
+void _math_trans_4ub(GLubyte (*to)[4],
+		     CONST void *ptr,
+		     GLuint stride,
+		     GLenum type,
+		     GLuint size,
+		     GLuint start,
+		     GLuint n )
+{
+   _math_trans_4ub_tab[size][TYPE_IDX(type)]( to, ptr, stride, start, n );
+}
+
+void _math_trans_4chan( GLchan (*to)[4],
+			CONST void *ptr,
+			GLuint stride,
+			GLenum type,
+			GLuint size,
+			GLuint start,
+			GLuint n )
+{
+#if CHAN_TYPE == GL_UNSIGNED_BYTE
+   _math_trans_4ub( to, ptr, stride, type, size, start, n );
+#elif CHAN_TYPE == GL_UNSIGNED_SHORT
+   _math_trans_4us( to, ptr, stride, type, size, start, n );
+#elif CHAN_TYPE == GL_FLOAT
+   _math_trans_4f( to, ptr, stride, type, size, start, n );
+#endif
+}
+
+void _math_trans_4us(GLushort (*to)[4],
+		     CONST void *ptr,
+		     GLuint stride,
+		     GLenum type,
+		     GLuint size,
+		     GLuint start,
+		     GLuint n )
+{
+   _math_trans_4us_tab[size][TYPE_IDX(type)]( to, ptr, stride, start, n );
+}
+
+void _math_trans_4f(GLfloat (*to)[4],
+		    CONST void *ptr,
+		    GLuint stride,
+		    GLenum type,
+		    GLuint size,
+		    GLuint start,
+		    GLuint n )
+{
+   _math_trans_4f_tab[size][TYPE_IDX(type)]( to, ptr, stride, start, n );
+}
+
+void _math_trans_3f(GLfloat (*to)[3],
+		    CONST void *ptr,
+		    GLuint stride,
+		    GLenum type,
+		    GLuint start,
+		    GLuint n )
+{
+   _math_trans_3f_tab[TYPE_IDX(type)]( to, ptr, stride, start, n );
+}
+@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@@
+
+
+1.1.9.1
+log
+@OpenBSD just has imported exactly this tree into their vendor branch,
+called the same tag, in XF4/xc
+This is, apparently, the last XFree86 snapshot before the licence change
+(ie, addition of the advertising clause)
+
+Since the developers don't see any problems with that, and we would like
+to integrate improvements done by the remaining one or two (or so) XFree86
+developers (j/k), this prepares enabling us to update X-Window in the future.
+@
+text
+@d4 1
+a4 1
+ * Version:  4.1
+d6 1
+a6 1
+ * Copyright (C) 1999-2002  Brian Paul   All Rights Reserved.
+d34 1
+a100 1
+static trans_4f_func  _math_trans_4fc_tab[5][MAX_TYPES];
+a123 1
+#define TRX_4FC(f,n)   BYTE_TO_FLOAT( PTR_ELT(f,n) )
+a131 1
+#define DEST_4FC trans_4_GLbyte_4fc_raw
+a138 1
+#define DEST_4FC trans_3_GLbyte_4fc_raw
+a146 1
+#define DEST_4FC trans_2_GLbyte_4fc_raw
+a151 1
+#define DEST_4FC trans_1_GLbyte_4fc_raw
+a158 1
+#undef TRX_4FC
+a170 1
+#define TRX_4FC(f,n)	     UBYTE_TO_FLOAT(PTR_ELT(f,n))
+a179 1
+#define DEST_4FC trans_4_GLubyte_4fc_raw
+a189 1
+#define DEST_4FC trans_3_GLubyte_4fc_raw
+a202 1
+#undef TRX_4FC
+a213 1
+#define TRX_4FC(f,n)   (GLfloat)( PTR_ELT(f,n) )
+a221 1
+#define DEST_4FC trans_4_GLshort_4fc_raw
+a228 1
+#define DEST_4FC trans_3_GLshort_4fc_raw
+a236 1
+#define DEST_4FC trans_2_GLshort_4fc_raw
+a241 1
+#define DEST_4FC trans_1_GLshort_4fc_raw
+a250 1
+#undef TRX_4FC
+a261 1
+#define TRX_4FC(f,n)   (GLfloat)( PTR_ELT(f,n) )
+a269 1
+#define DEST_4FC trans_4_GLushort_4fc_raw
+a276 1
+#define DEST_4FC trans_3_GLushort_4fc_raw
+a284 1
+#define DEST_4FC trans_2_GLushort_4fc_raw
+a289 1
+#define DEST_4FC trans_1_GLushort_4fc_raw
+a297 1
+#undef TRX_4FC
+a308 1
+#define TRX_4FC(f,n)   (GLfloat)( PTR_ELT(f,n) )
+a316 1
+#define DEST_4FC trans_4_GLint_4fc_raw
+a323 1
+#define DEST_4FC trans_3_GLint_4fc_raw
+a331 1
+#define DEST_4FC trans_2_GLint_4fc_raw
+a336 1
+#define DEST_4FC trans_1_GLint_4fc_raw
+a345 1
+#undef TRX_4FC
+a356 1
+#define TRX_4FC(f,n)   (GLfloat)( PTR_ELT(f,n) )
+a364 1
+#define DEST_4FC trans_4_GLuint_4fc_raw
+a371 1
+#define DEST_4FC trans_3_GLuint_4fc_raw
+a379 1
+#define DEST_4FC trans_2_GLuint_4fc_raw
+a384 1
+#define DEST_4FC trans_1_GLuint_4fc_raw
+a392 1
+#undef TRX_4FC
+a403 1
+#define TRX_4FC(f,n)   (GLfloat) PTR_ELT(f,n)
+a412 1
+#define DEST_4FC trans_4_GLdouble_4fc_raw
+a419 1
+#define DEST_4FC trans_3_GLdouble_4fc_raw
+a427 1
+#define DEST_4FC trans_2_GLdouble_4fc_raw
+a432 1
+#define DEST_4FC trans_1_GLdouble_4fc_raw
+a449 1
+#define DEST_4FC  trans_4_GLfloat_4fc_raw
+a454 1
+#define DEST_4FC  trans_3_GLfloat_4fc_raw
+a462 1
+#define DEST_4FC trans_2_GLfloat_4fc_raw
+a467 1
+#define DEST_4FC  trans_1_GLfloat_4fc_raw
+a477 1
+#undef TRX_4FC
+a515 1
+   MEMSET( TAB(_4fc),  0, sizeof(TAB(_4fc)) );
+d628 1
+a628 1
+   _math_trans_4fc( to, ptr, stride, type, size, start, n );
+a651 11
+}
+
+void _math_trans_4fc(GLfloat (*to)[4],
+		    CONST void *ptr,
+		    GLuint stride,
+		    GLenum type,
+		    GLuint size,
+		    GLuint start,
+		    GLuint n )
+{
+   _math_trans_4fc_tab[size][TYPE_IDX(type)]( to, ptr, stride, start, n );
+@
+
+
+1.1.1.1
+log
+@The X-Windowing System
+
+Import XFree86 4.3 from OpenBSD by CTM, in the hope it's stable
+@
+text
+@@
+
+
+1.1.1.2
+log
+@That's what OpenBSD will, probably, ship as XF4 in 3.5
+their last sync against XFree86 4.3-current has been
+imported into our vendor branch, too
+@
+text
+@d4 1
+a4 1
+ * Version:  4.1
+d6 1
+a6 1
+ * Copyright (C) 1999-2002  Brian Paul   All Rights Reserved.
+d34 1
+a100 1
+static trans_4f_func  _math_trans_4fc_tab[5][MAX_TYPES];
+a123 1
+#define TRX_4FC(f,n)   BYTE_TO_FLOAT( PTR_ELT(f,n) )
+a131 1
+#define DEST_4FC trans_4_GLbyte_4fc_raw
+a138 1
+#define DEST_4FC trans_3_GLbyte_4fc_raw
+a146 1
+#define DEST_4FC trans_2_GLbyte_4fc_raw
+a151 1
+#define DEST_4FC trans_1_GLbyte_4fc_raw
+a158 1
+#undef TRX_4FC
+a170 1
+#define TRX_4FC(f,n)	     UBYTE_TO_FLOAT(PTR_ELT(f,n))
+a179 1
+#define DEST_4FC trans_4_GLubyte_4fc_raw
+a189 1
+#define DEST_4FC trans_3_GLubyte_4fc_raw
+a202 1
+#undef TRX_4FC
+a213 1
+#define TRX_4FC(f,n)   (GLfloat)( PTR_ELT(f,n) )
+a221 1
+#define DEST_4FC trans_4_GLshort_4fc_raw
+a228 1
+#define DEST_4FC trans_3_GLshort_4fc_raw
+a236 1
+#define DEST_4FC trans_2_GLshort_4fc_raw
+a241 1
+#define DEST_4FC trans_1_GLshort_4fc_raw
+a250 1
+#undef TRX_4FC
+a261 1
+#define TRX_4FC(f,n)   (GLfloat)( PTR_ELT(f,n) )
+a269 1
+#define DEST_4FC trans_4_GLushort_4fc_raw
+a276 1
+#define DEST_4FC trans_3_GLushort_4fc_raw
+a284 1
+#define DEST_4FC trans_2_GLushort_4fc_raw
+a289 1
+#define DEST_4FC trans_1_GLushort_4fc_raw
+a297 1
+#undef TRX_4FC
+a308 1
+#define TRX_4FC(f,n)   (GLfloat)( PTR_ELT(f,n) )
+a316 1
+#define DEST_4FC trans_4_GLint_4fc_raw
+a323 1
+#define DEST_4FC trans_3_GLint_4fc_raw
+a331 1
+#define DEST_4FC trans_2_GLint_4fc_raw
+a336 1
+#define DEST_4FC trans_1_GLint_4fc_raw
+a345 1
+#undef TRX_4FC
+a356 1
+#define TRX_4FC(f,n)   (GLfloat)( PTR_ELT(f,n) )
+a364 1
+#define DEST_4FC trans_4_GLuint_4fc_raw
+a371 1
+#define DEST_4FC trans_3_GLuint_4fc_raw
+a379 1
+#define DEST_4FC trans_2_GLuint_4fc_raw
+a384 1
+#define DEST_4FC trans_1_GLuint_4fc_raw
+a392 1
+#undef TRX_4FC
+a403 1
+#define TRX_4FC(f,n)   (GLfloat) PTR_ELT(f,n)
+a412 1
+#define DEST_4FC trans_4_GLdouble_4fc_raw
+a419 1
+#define DEST_4FC trans_3_GLdouble_4fc_raw
+a427 1
+#define DEST_4FC trans_2_GLdouble_4fc_raw
+a432 1
+#define DEST_4FC trans_1_GLdouble_4fc_raw
+a449 1
+#define DEST_4FC  trans_4_GLfloat_4fc_raw
+a454 1
+#define DEST_4FC  trans_3_GLfloat_4fc_raw
+a462 1
+#define DEST_4FC trans_2_GLfloat_4fc_raw
+a467 1
+#define DEST_4FC  trans_1_GLfloat_4fc_raw
+a477 1
+#undef TRX_4FC
+a515 1
+   MEMSET( TAB(_4fc),  0, sizeof(TAB(_4fc)) );
+d628 1
+a628 1
+   _math_trans_4fc( to, ptr, stride, type, size, start, n );
+a651 11
+}
+
+void _math_trans_4fc(GLfloat (*to)[4],
+		    CONST void *ptr,
+		    GLuint stride,
+		    GLenum type,
+		    GLuint size,
+		    GLuint start,
+		    GLuint n )
+{
+   _math_trans_4fc_tab[size][TYPE_IDX(type)]( to, ptr, stride, start, n );
+@
+

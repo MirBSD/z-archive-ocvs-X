@@ -1,0 +1,837 @@
+head	1.17;
+access;
+symbols;
+locks; strict;
+comment	@# @;
+
+
+1.17
+date	2004.11.07.19.19.02;	author tg;	state Exp;
+branches;
+next	1.16;
+
+1.16
+date	2004.11.07.18.43.31;	author tg;	state Exp;
+branches;
+next	1.15;
+
+1.15
+date	2004.11.07.17.47.55;	author tg;	state Exp;
+branches;
+next	1.14;
+
+1.14
+date	2004.11.07.13.51.31;	author tg;	state Exp;
+branches;
+next	1.13;
+
+1.13
+date	2004.11.07.13.49.37;	author tg;	state Exp;
+branches;
+next	1.12;
+
+1.12
+date	2004.11.07.13.31.07;	author tg;	state Exp;
+branches;
+next	1.11;
+
+1.11
+date	2004.11.07.13.15.44;	author tg;	state Exp;
+branches;
+next	1.10;
+
+1.10
+date	2004.11.06.23.46.38;	author tg;	state Exp;
+branches;
+next	1.9;
+
+1.9
+date	2004.11.06.21.46.16;	author tg;	state Exp;
+branches;
+next	1.8;
+
+1.8
+date	2004.11.06.21.32.51;	author tg;	state Exp;
+branches;
+next	1.7;
+
+1.7
+date	2004.11.06.18.23.18;	author tg;	state Exp;
+branches;
+next	1.6;
+
+1.6
+date	2004.10.05.21.03.41;	author tg;	state Exp;
+branches;
+next	1.5;
+
+1.5
+date	2004.10.05.20.51.59;	author tg;	state Exp;
+branches;
+next	1.4;
+
+1.4
+date	2004.10.05.20.44.48;	author tg;	state Exp;
+branches;
+next	1.3;
+
+1.3
+date	2004.10.05.20.40.59;	author tg;	state Exp;
+branches;
+next	1.2;
+
+1.2
+date	2004.10.05.20.32.48;	author tg;	state Exp;
+branches;
+next	1.1;
+
+1.1
+date	2004.10.05.10.34.52;	author tg;	state Exp;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.17
+log
+@hbClient: SixXS insists on the trailing NUL byte
+hbServer: log delta-t for heartbeats
+@
+text
+@#!/bin/ksh
+# $MirBSD: contrib/code/heartbeat/hbclient,v 1.16 2004/11/07 18:43:31 tg Exp $
+#-
+# Copyright (c) 2004
+#	Thorsten "mirabile" Glaser <tg@@66h.42h.de>
+#
+# Licensee is hereby permitted to deal in this work without restric-
+# tion, including unlimited rights to use, publicly perform, modify,
+# merge, distribute, sell, give away or sublicence, provided all co-
+# pyright notices above, these terms and the disclaimer are retained
+# in all redistributions or reproduced in accompanying documentation
+# or other materials provided with binary redistributions.
+#
+# All advertising materials mentioning features or use of this soft-
+# ware must display the following acknowledgement:
+#	This product includes material provided by Thorsten Glaser.
+#
+# Licensor hereby provides this work "AS IS" and WITHOUT WARRANTY of
+# any kind, expressed or implied, to the maximum extent permitted by
+# applicable law, but with the warranty of being written without ma-
+# licious intent or gross negligence; in no event shall licensor, an
+# author or contributor be held liable for any damage, direct, indi-
+# rect or other, however caused, arising in any way out of the usage
+# of covered work, even if advised of the possibility of such damage.
+#-
+# Sample implementation for the Heartbeat protocol, originally desi-
+# gned by the SixXS IPv6 tunnel provider. MirOS hbServer is not sup-
+# ported or endorsed by SixXS.
+# This is the client part of the implementation.
+#
+# Overview:
+# This script is intended to be both usable as standalone command as
+# well as a DJB-style "/service/*/run" script for supervision by djb
+# daemontools. Configuration is at the top of the script; first end-
+# user specific configuration such as passwords or interfaces; after
+# that, machine class configuration (such as adaptions for the OS).
+#
+# The script ought to be chmod'd 0500 so no password leakage occurs.
+#
+# Installation for the SixXS version of the script:
+# Put this into /service/sixxs/run chmod 0500. Create a subdirectory
+# log/main, chown it to the log user (for example _dnslog). Create a
+# /service/sixxs/log/run script (chmod 0555) containing these lines:
+#	#!/bin/sh
+#	exec setuidgid _dnslog multilog t ./main
+# Edit the configuration sections below and start the service.
+#
+# Invocation if not run via daemontools:
+# hbclient &		- run as background process, beating
+# hbclient down		- run once, tell the server the tunnel is down
+# hbclient pass		- run once, ask server for password change
+#			  (interactively asks for new password twice)
+#
+# Changing the password is only supported by the MirOS hbServer, not
+# by SixXS.
+
+
+#=== per-user configuration (SixXS mode) ===
+
+#-- user preferences
+
+# log to syslog (uncomment to enable)
+#SYSLOG="hbClient"			# syslog tag
+# log to stdout (comment to disable)
+STDOUT=1
+# execute script with "set -x" (uncomment to enable)
+#STDERR=1				# debug to stdout
+#STDERR=log				# debug to file
+
+# create PID file? (uncomment to enable)
+#GENPID=1				# /var/run/$TUNNEL.pid
+
+#-- SixXS login
+
+# my user name, a.k.a. IPv6 address of the tunnel
+MYUSER="2001:6f8:900:<xxxx>::2"
+# my password
+MYPASS="hagelslag"
+# IPv4 address of the tunnel server/endpoint
+SERVER="212.224.0.188"
+
+#-- machine specifics
+
+# where do I get my IP address from?
+EXT_IF="tun0"				# name of external interface
+#SENDER=1				# use "sender" (DANGEROUS, see below)
+
+# where do I want my tunnel to arrive?
+TUNNEL="gif0"				# name of external interface
+
+# do I have a subnet? (if yes, place a line similar to
+#	rdr on $TUNNEL inet6 from any to $MYUSER -> 2001:x:y:z:a:b:c:d
+# into your /etc/pf.conf file to be ping-able)
+SUBNET=1				# comment if you only have a tunnel
+
+#=== per-OS configuration (SixXS mode) ===
+
+# get IPv4 address of external interface
+function getip
+{
+	if [[ -n $SENDER ]]; then
+		# dangerous: changes to the IP address are never seen
+		# by the rest of the script, so the tunnel is not
+		# automatically configured
+		print sender
+	else
+		ifconfig $EXT_IF \
+		    | grep "^	inet " | head -1 \
+		    | while read a b c; do
+			print $b
+		done
+	fi
+}
+
+# set up tunnel interface
+function setup
+{
+	# just in case...
+	ifconfig $TUNNEL destroy >/dev/null 2>&1
+
+	# set up interface and default route
+	ifconfig $TUNNEL up
+	route -n add -inet6 default fe80::%$TUNNEL -mtu 1280
+
+	# set up point-to-point tunnel if needed
+	[[ -n $SUBNET ]] \
+	    || ifconfig $TUNNEL inet6 ${MYUSER} ${MYUSER%2}1 prefixlen 128
+}
+
+# throw the tunnel through IPv4 land
+function throw
+{
+	# never reached if SENDER is set
+	ifconfig $TUNNEL deletetunnel
+	[[ -z $1 ]] \
+	    || ifconfig $TUNNEL giftunnel $1 $SERVER
+}
+
+# clean up, remove interfaces and routes
+function clean
+{
+	route -n delete -inet6 default
+	ifconfig $TUNNEL destroy
+}
+
+#=== subroutines (not configurable) ===
+
+#-- logging
+
+# send a line to the log
+function log
+{
+	if [[ -n $STDOUT ]]; then
+		print "$@@"
+	fi
+	if [[ ${SYSLOG+set} = set ]]; then
+		print "$@@" | logger -t "${SYSLOG:-hbClient}"
+	fi
+}
+
+# send always; send to syslog if no stdout logging
+function logall
+{
+	if [[ -n $STDOUT ]]; then
+		log "$@@"
+	else
+		print "$@@" | logger -t "${SYSLOG:-hbClient}"
+	fi
+}
+
+#-- server communication
+
+# add date, password/hash and send to server
+function tell
+{
+	line="$* $(date +%s)"
+	cl="$line $MYPASS"
+	sl="$line $(print -nr -- $cl | md5)"
+	print -n -- $sl\\0 | nc -4nuw0 $SERVER 3740
+}
+
+# send DISABLE TUNNEL to server
+function do_disable
+{
+	log disabling tunnel for $MYUSER
+	tell DISABLE TUNNEL $MYUSER sender
+}
+
+# send HEARTBEAT TUNNEL to server
+function do_heartbeat
+{
+	log beating tunnel for $MYUSER ${1+on} $1
+	tell HEARTBEAT TUNNEL $MYUSER ${1:-sender}
+}
+
+# send change request for password to server
+function do_passwd
+{
+	log changing password for $MYUSER
+	tell PASSWD "$1" $MYUSER
+}
+
+#-- running the script
+
+# clean up
+function destruct
+{
+	logall received destruct
+	[[ -n $GENPID ]] && rm -f /var/run/$TUNNEL.pid
+	do_disable
+	throw
+	clean
+	log bye
+	exit ${1:-0}
+}
+
+pass=
+
+# read password
+function askpass
+{
+	set -o noglob
+	stty -echo
+	read pass?"$1 "
+	stty echo
+	set +o noglob
+	print
+}
+
+# abort with error
+function die
+{
+	print -- "${progname}:" "$@@"
+	exit 1
+}
+
+#=== main programme ===
+
+typeset -u parm="$1"
+
+if [[ $parm = DOWN ]]; then
+	do_disable
+	exit 0
+fi
+
+if [[ $parm = PASS ]]; then
+	print Changing password for $MYUSER
+	pass=
+	askpass "New password:"
+	np1="$pass"
+	askpass "Again please:"
+	np2="$pass"
+	[[ $np1 = $np2 ]] || die Passwords do not match
+	[[ -n $np1 ]] || die New password is empty
+	do_passwd "$np1"
+	me="$(cd $(dirname "$0"); pwd)$(basename "$0")"
+	print
+	print Do not forget to edit $me
+	print replacing the old password with the one just entered.
+	exit 0
+fi
+
+[[ -n $parm ]] && die Unknown command: $parm
+
+
+#-- we can run as hbClient now
+
+# daemonise or run under supervision
+exec 0<&-
+[[ -n $STDOUT || $STDERR = 1 ]] || exec 1>&-
+if [[ -z $STDERR ]]; then
+	exec 2>&-
+else
+	if [[ $STDERR = 1 ]]; then
+		exec 2>&1
+	else
+		eval "exec 2>>$STDERR"
+	fi
+	set -x
+fi
+
+# set up
+log Entering setup for $MYUSER
+[[ -n $GENPID ]] && print $$ >/var/run/$TUNNEL.pid
+setup
+
+# trap exits
+trap 'destruct 0' HUP TERM
+trap 'destruct 1' INT
+
+# main loop
+OLD_IP=sender
+while : ; do
+	NEW_IP=$(getip)
+	if [[ $NEW_IP != $OLD_IP ]]; then
+		# status change (never reached if SENDER)
+		if [[ -n $NEW_IP ]]; then
+			logall reconfiguring $MYUSER to $NEW_IP
+		else
+			logall ERROR: $MYUSER cannot find new IP, disabling
+			do_disable
+		fi
+		throw $NEW_IP
+		OLD_IP=$NEW_IP
+	fi
+	[[ -n $NEW_IP ]] && do_heartbeat $NEW_IP
+	sleep 60 & wait
+done
+# NOTREACHED
+@
+
+
+1.16
+log
+@fix sub tell
+no structural difference, but executes differently
+@
+text
+@d2 1
+a2 1
+# $MirBSD: contrib/code/heartbeat/hbclient,v 1.15 2004/11/07 17:47:55 tg Exp $
+d179 1
+a179 1
+	print -nr -- $sl | nc -4nuw0 $SERVER 3740
+@
+
+
+1.15
+log
+@rewrite hbClient and hbServer, in a more structured way
+fix typos and bugs in README and the backends
+add support for password changing to the clients
+@
+text
+@d2 1
+a2 1
+# $MirBSD: contrib/code/heartbeat/hbclient,v 1.14 2004/11/07 13:51:31 tg Exp $
+d177 3
+a179 2
+	print -n -- "$line $(print -n -- "$line $MYPASS" | md5)\0" \
+	    | nc -4nuw0 $SERVER 3740
+@
+
+
+1.14
+log
+@message DOWN to server if normally killed, too
+@
+text
+@d2 1
+a2 1
+# $MirBSD: contrib/code/heartbeat/hbclient,v 1.13 2004/11/07 13:49:37 tg Exp $
+d26 46
+a71 29
+# Clone of SixXS Heartbeat Protocol client (basic) in ksh
+# Instructions:
+# Put the following commands into /etc/rc.local in that order:
+#	nice -n -14 ppp -ddial MirADSL
+#	nice -n -12 ksh /etc/ppp/hbclient &
+# Alternatively and highly recommended, put hbclient under supervise
+# (part of djb daemontools - ports/sysutils/daemontools).
+#
+# If you're running a subnet-only configuration (officially NOT sup-
+# ported and not endorsed by SixXS), add an rdr similar to the below
+# line to your pf.conf(5):
+#	rdr on $MYEXT6 inet6 from any to $MYIPV6 -> 2001:x:y:1:a:b:c:d
+# This ensures your tunnel is ping-able. If running standard subnet-
+# with-tunnel or tunnel-only configuration, see below.
+#
+# If using 'sender', changes of the local IPv4 address are not seen
+# and thus not acted upon.
+#
+# This file must be chmod'd 500 to prevent password leak to users.
+
+#--- Configuration
+MYIPV6="2001:6f8:900:<xxxx>::2"		# IPv6 of tunnel (per config)
+MYEXT4="tun0"				# outgoing master interface
+MYEXT6="gif0"				# outgoing tunnel interface
+MYPASS="hagelslag"			# tunnel password
+YOURIP="212.224.0.188"			# IPv4 of tunnel broker
+SYSLOG="hbClient"			# Syslog tag (empty for no log)
+STDOUT=1				# log to stdout (comment for no)
+#SENDER=1				# use 'sender' instead of getip
+d73 43
+a115 1
+#--- Behaviour
+d118 82
+a199 5
+	ifconfig $MYEXT6 destroy
+	ifconfig $MYEXT6 up
+	route -n add -inet6 default fe80::%$MYEXT6 -mtu 1280
+	# if you're not running a subnet-only configuration, uncomment:
+	#ifconfig $MYEXT6 inet6 ${MYIPV6} ${MYIPV6%2}1 prefixlen 128
+d202 3
+d207 7
+a213 4
+	# message DISABLE to server
+	$0 DOWN &
+	# clean up locally
+	ifconfig $MYEXT6 destroy
+d216 4
+a219 1
+function reconfig
+d221 6
+a226 3
+	# $1 = my new IPv4 address
+	ifconfig $MYEXT6 deletetunnel
+	[[ -z $1 ]] || ifconfig $MYEXT6 giftunnel $1 $YOURIP
+d229 2
+a230 1
+function getip
+d232 2
+a233 6
+	ifconfig $MYEXT4 \
+	    | grep "^	inet " \
+	    | head -1 \
+	    | while read a b c; do
+		print $b
+	done
+d236 2
+a237 6
+#--- Action (don't change)
+exec 0</dev/null
+[[ -n $STDOUT ]] || exec 1>/dev/null
+exec 2>/dev/null
+SAVEIP=""
+MYIPV4=""
+d239 1
+d241 31
+a271 2
+	cmd=DISABLE
+	SENDER=1
+d273 6
+a278 4
+	cmd=HEARTBEAT
+	echo $$ >/var/run/${MYEXT6}.pid
+	trap "rm -f /var/run/${MYEXT6}.pid; destruct; exit 0" HUP TERM
+	setup
+d280 21
+a300 12
+while true; do
+	[[ -z $SENDER ]] && MYIPV4=$(getip)
+	if [[ $MYIPV4 != $SAVEIP ]]; then
+		SAVEIP=$MYIPV4
+		reconfig $MYIPV4
+		if [[ -z $MYIPV4 ]]; then
+			[[ -n $SYSLOG || -z $STDOUT ]] \
+			    && print -r -- "WARNING: no IPv4 found!" \
+			    | logger -t "${SYSLOG:-hbClient}"
+			[[ -n $STDOUT ]] \
+			    && print -r -- "WARNING: no IPv4 found!"
+			continue
+d302 2
+a303 12
+		[[ -n $SYSLOG || -z $STDOUT ]] \
+		    && print -r -- "Reconfiguring $MYEXT6 to $MYIPV4" \
+		    | logger -t "${SYSLOG:-hbClient}"
+		[[ -n $STDOUT ]] \
+		    && print -r -- "Reconfiguring $MYEXT6 to $MYIPV4"
+	fi
+	[[ -z $SENDER && -z $MYIPV4 ]] && continue
+	MYDATE="$(date +%s)"
+	if [[ -z $SENDER ]]; then
+		s="$cmd TUNNEL ${MYIPV6} ${MYIPV4} ${MYDATE}"
+	else
+		s="$cmd TUNNEL ${MYIPV6} sender ${MYDATE}"
+d305 1
+a305 6
+	sc="${s} ${MYPASS}"
+	sp="${s} $(print -nr -- $sc | md5)"
+	print -n -- "${sp}\0" | nc -4nuw0 $YOURIP 3740
+	[[ -n $SYSLOG ]] && print -r -- "Sending $sp" | logger -t "$SYSLOG"
+	[[ -n $STDOUT ]] && print -r -- "Sending $sp"
+	[[ $parm = DOWN ]] && exit 0
+d308 1
+@
+
+
+1.13
+log
+@client-side support for sender
+support for calling the scripts manually to "down" them
+@
+text
+@d2 1
+a2 1
+# $MirBSD: contrib/code/heartbeat/hbclient,v 1.12 2004/11/07 13:31:07 tg Exp $
+d68 3
+@
+
+
+1.12
+log
+@sort nc(1) options for consistency
+@
+text
+@d2 1
+a2 1
+# $MirBSD: contrib/code/heartbeat/hbclient,v 1.11 2004/11/07 13:15:44 tg Exp $
+d40 4
+d54 1
+a79 2
+	# this can simply echo 'sender', but reconfig() must do nothing
+	# in that case, since it will only be called at setup time!
+d93 11
+a103 3
+echo $$ >/var/run/${MYEXT6}.pid
+trap "rm -f /var/run/${MYEXT6}.pid; destruct; exit 0" HUP TERM
+setup
+d105 1
+a105 1
+	MYIPV4=$(getip)
+d123 1
+a123 1
+	[[ -z $MYIPV4 ]] && continue
+d125 5
+a129 1
+	s="HEARTBEAT TUNNEL ${MYIPV6} ${MYIPV4} ${MYDATE}"
+d135 1
+@
+
+
+1.11
+log
+@issue warnings if no IP found
+@
+text
+@d2 1
+a2 1
+# $MirBSD: contrib/code/heartbeat/hbclient,v 1.10 2004/11/06 23:46:38 tg Exp $
+d117 1
+a117 1
+	print -n -- "${sp}\0" | nc -4unw0 $YOURIP 3740
+@
+
+
+1.10
+log
+@advice to chmod 500 these
+@
+text
+@d2 1
+a2 1
+# $MirBSD: contrib/code/heartbeat/hbclient,v 1.9 2004/11/06 21:46:16 tg Exp $
+d70 1
+a70 1
+	ifconfig $MYEXT6 giftunnel $1 $YOURIP
+d98 8
+d112 1
+@
+
+
+1.9
+log
+@oups. log to stdout, but _do_ it.
+@
+text
+@d2 1
+a2 1
+# $MirBSD: contrib/code/heartbeat/hbclient,v 1.8 2004/11/06 21:32:51 tg Exp $
+d40 1
+a40 1
+
+@
+
+
+1.8
+log
+@add facility for stderr logging
+@
+text
+@d2 1
+a2 1
+# $MirBSD: contrib/code/heartbeat/hbclient,v 1.7 2004/11/06 18:23:18 tg Exp $
+d49 1
+a49 1
+STDERR=1				# log to stderr (comment for no)
+d87 1
+a87 1
+exec 1>/dev/null
+d98 1
+a98 1
+		[[ -n $SYSLOG || -z $STDERR ]] \
+d101 2
+a102 2
+		[[ -n $STDERR ]] \
+		    && print -r -- "Reconfiguring $MYEXT6 to $MYIPV4" >&2
+d110 1
+a110 1
+	[[ -n $STDERR ]] && print -r -- "Sending $sp" >&2
+@
+
+
+1.7
+log
+@finish testing
+now, the backends for IPv6-TSP and IPv4-MirDNSv2 have to be written
+@
+text
+@d2 1
+a2 1
+# $MirBSD: src/share/misc/licence.template,v 1.14 2004/08/15 15:29:11 tg Rel $
+d49 1
+d98 2
+a99 1
+		print -r -- "Reconfiguring $MYEXT6 to $MYIPV4" \
+d101 2
+d110 1
+@
+
+
+1.6
+log
+@sixxs staff doesn't officially support tunnel-less subnet operation,
+and since I'm publishing this in the forum, I ought to add a hint how
+to make it operate "properly".
+@
+text
+@d2 1
+a2 1
+# $MirBSD: contrib/code/heartbeat/hbclient,v 1.5 2004/10/05 20:51:59 tg Exp $
+d8 9
+a16 5
+# tion, including unlimited rights to use, publically perform, modi-
+# fy, merge, distribute, sell, give away or sublicence, provided the
+# above copyright notices, these terms and the disclaimer are retai-
+# ned in all redistributions, or reproduced in accompanying documen-
+# tation or other materials provided with binary redistributions.
+d31 9
+a39 5
+# If running a subnet-only configuration (NOT supported by SixXS), add
+# a like like the following into your pf.conf(5):
+#	rdr on $MYEXT6 inet6 from any to $MYIPV6 -> 2001:xxx:yyy:1:a:b:c:d
+# This ensures your tunnel is ping-able. If running an official SixXS
+# subnet-with-tunnel or tunnel-only configuration, uncomment a line below.
+d56 1
+a56 1
+	# if you're not running a subnet-only configuration:
+@
+
+
+1.5
+log
+@additional application notice
+
+PS: it works.
+@
+text
+@d2 1
+a2 1
+# $MirBSD: contrib/code/heartbeat/hbclient,v 1.4 2004/10/05 20:44:48 tg Exp $
+d27 6
+d48 2
+@
+
+
+1.4
+log
+@since I'm allowing to unset/set empty $SYSLOG (to prevent filling
+the logs, by wish of ciruZ), but still log IP changes, throw in a
+default syslog label for that case.
+@
+text
+@d2 1
+a2 1
+# $MirBSD: contrib/code/heartbeat/hbclient,v 1.3 2004/10/05 20:40:59 tg Exp $
+d58 2
+@
+
+
+1.3
+log
+@modularise
+@
+text
+@d2 1
+a2 1
+# $MirBSD: contrib/code/heartbeat/hbclient,v 1.2 2004/10/05 20:32:48 tg Exp $
+d80 1
+a80 1
+		    | logger -t "$SYSLOG"
+@
+
+
+1.2
+log
+@found while developing hbserver: -w0 worx(TM).
+@
+text
+@d2 1
+a2 1
+# $MirBSD: contrib/code/heartbeat/hbclient,v 1.1 2004/10/05 10:34:52 tg Exp $
+d34 1
+a34 1
+SYSLOG="hbClient"			# Syslog tag
+d36 31
+a66 1
+#--- Action
+d72 2
+a73 4
+trap "ifconfig $MYEXT6 destroy; exit 0" HUP TERM
+ifconfig $MYEXT6 destroy
+ifconfig $MYEXT6 up
+route -n add -inet6 default fe80::%$MYEXT6 -mtu 1280
+d75 1
+a75 2
+	MYIPV4="$(ifconfig $MYEXT4 | grep "inet " | head -1 \
+	    | while read a b c; do echo $b; done)"
+d78 1
+a78 2
+		ifconfig $MYEXT6 deletetunnel
+		ifconfig $MYEXT6 giftunnel $MYIPV4 $YOURIP
+d87 1
+a87 1
+	print -r -- "Sending $sp" | logger -t "$SYSLOG"
+@
+
+
+1.1
+log
+@major reorganisation of the contrib/ structure
+easier directory paths; code/ for MirSoftware
+XXX still a bit uneasy about gfdl-docs, but a
+XXX solution will come with the new gcc I think
+@
+text
+@d2 1
+a2 1
+# $MirBSD: contrib/samples/codesnippets/hbclient,v 1.2 2004/09/11 18:06:31 tg Exp $
+d60 1
+a60 1
+	print -n -- "${sp}\0" | nc -4unw1 $YOURIP 3740
+@
+

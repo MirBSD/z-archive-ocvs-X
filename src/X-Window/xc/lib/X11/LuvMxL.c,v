@@ -1,0 +1,363 @@
+head	1.1;
+branch	1.1.1;
+access;
+symbols
+	tg-mergetmp-2:1.1.1.2
+	cvs-200410241530:1.1.1.2
+	cvs-200410012000:1.1.1.2
+	cvs-200407141120:1.1.1.2
+	cvs-200406231010:1.1.1.2
+	MIRBSD_7quater:1.1.1.1
+	cvs-200405271510:1.1.1.2
+	XFree86_4_4_0:1.1.9.1
+	cvs-200403021700:1.1.1.2
+	XFREE86_20040213:1.1.9.1
+	xc:1.1.9
+	cvs-200401291925:1.1.1.1
+	MIRBSD_7_ALPHA:1.1.1.1.0.4
+	MIRBSD_7:1.1.1.1.0.2
+	MIRBSD_7ter:1.1.1.1
+	cvs-20011091815:1.1.1.1
+	cvs-200309162130:1.1.1.1
+	cvs-200308302005:1.1.1.1
+	ctmx-0387:1.1.1.1
+	ctmx-0384:1.1.1.1
+	MIRBSD_5:1.1.1.1
+	ctmx-0375:1.1.1.1
+	ctmx-0373:1.1.1.1
+	ctm-0371:1.1.1.1
+	ctm-0370:1.1.1.1
+	MIRBSD_4:1.1.1.1
+	ctm-0363:1.1.1.1
+	ctm-0359:1.1.1.1
+	ctm-0349:1.1.1.1
+	openbsd:1.1.1;
+locks; strict;
+comment	@ * @;
+
+
+1.1
+date	2003.03.22.20.04.31;	author tg;	state Exp;
+branches
+	1.1.1.1
+	1.1.9.1;
+next	;
+
+1.1.1.1
+date	2003.03.22.20.04.31;	author tg;	state Exp;
+branches;
+next	1.1.1.2;
+
+1.1.1.2
+date	2004.03.02.18.01.02;	author tg;	state Stab;
+branches;
+next	;
+
+1.1.9.1
+date	2004.02.14.19.18.32;	author tg;	state Exp;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@/* $Xorg: LuvMxL.c,v 1.3 2000/08/17 19:44:45 cpqbld Exp $ */
+
+/*
+ * Code and supporting documentation (c) Copyright 1990 1991 Tektronix, Inc.
+ * 	All Rights Reserved
+ * 
+ * This file is a component of an X Window System-specific implementation
+ * of XCMS based on the TekColor Color Management System.  Permission is
+ * hereby granted to use, copy, modify, sell, and otherwise distribute this
+ * software and its documentation for any purpose and without fee, provided
+ * that this copyright, permission, and disclaimer notice is reproduced in
+ * all copies of this software and in supporting documentation.  TekColor
+ * is a trademark of Tektronix, Inc.
+ * 
+ * Tektronix makes no representation about the suitability of this software
+ * for any purpose.  It is provided "as is" and with all faults.
+ * 
+ * TEKTRONIX DISCLAIMS ALL WARRANTIES APPLICABLE TO THIS SOFTWARE,
+ * INCLUDING THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A
+ * PARTICULAR PURPOSE.  IN NO EVENT SHALL TEKTRONIX BE LIABLE FOR ANY
+ * SPECIAL, INDIRECT OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES WHATSOEVER
+ * RESULTING FROM LOSS OF USE, DATA, OR PROFITS, WHETHER IN AN ACTION OF
+ * CONTRACT, NEGLIGENCE, OR OTHER TORTIOUS ACTION, ARISING OUT OF OR IN
+ * CONNECTION WITH THE USE OR THE PERFORMANCE OF THIS SOFTWARE.
+ *
+ *	NAME
+ *		CIELuvMxL.c
+ *
+ *	DESCRIPTION
+ *		Source for the XcmsCIELuvQueryMaxL() gamut boundary
+ *		querying routine.
+ *
+ */
+/* $XFree86: xc/lib/X11/LuvMxL.c,v 1.3 2001/01/17 19:41:40 dawes Exp $ */
+
+#include "Xlibint.h"
+#include "Xcmsint.h"
+#include <math.h>
+
+/*
+ *	DEFINES
+ */
+#define MAXBISECTCOUNT	100
+#define EPS		(XcmsFloat)0.001
+#define START_L_STAR	(XcmsFloat)40.0
+
+/*
+ *	EXTERNS
+ */
+extern Status _XcmsCIELuvQueryMaxLCRGB();
+
+/* CvColW.c */
+extern Status _XcmsConvertColorsWithWhitePt();
+
+
+/************************************************************************
+ *									*
+ *			 PUBLIC ROUTINES				*
+ *									*
+ ************************************************************************/
+
+/*
+ *	NAME
+ *		XcmsCIELuvQueryMaxL - Compute max Lstar for a hue and chroma
+ *
+ *	SYNOPSIS
+ */
+Status
+XcmsCIELuvQueryMaxL(ccc, hue_angle, chroma, pColor_return)
+    XcmsCCC ccc;
+    XcmsFloat hue_angle;	    /* hue angle in degrees */
+    XcmsFloat chroma;
+    XcmsColor *pColor_return;
+/*
+ *	DESCRIPTION
+ *		Return the maximum Lstar for a specified hue_angle and chroma.
+ *
+ *	ASSUMPTIONS
+ *		This routine assumes that the white point associated with
+ *		the color specification is the Screen White Point.  The
+ *		Screen White Point will also be associated with the
+ *		returned color specification.
+ *
+ *	RETURNS
+ *		XcmsFailure - Failure
+ *              XcmsSuccess - Succeeded with no modifications
+ *
+ */
+{
+    XcmsCCCRec	myCCC;
+    XcmsColor   max_lc, tmp, prev;
+    XcmsFloat   max_chroma, tmp_chroma;
+    XcmsFloat   hue, nT, nChroma, lastChroma, prevChroma;
+    XcmsFloat   rFactor;
+    XcmsRGBi    rgb_saved;
+    int         nCount, nMaxCount;
+
+    /*
+     * Check Arguments
+     */
+    if (ccc == NULL || pColor_return == NULL) {
+	return(XcmsFailure);
+    }
+
+    /* setup the CCC to use for the conversions. */
+    memcpy ((char *) &myCCC, (char *) ccc, sizeof(XcmsCCCRec));
+    myCCC.clientWhitePt.format = XcmsUndefinedFormat;
+    myCCC.gamutCompProc = (XcmsCompressionProc) NULL;
+
+    while (hue_angle < 0.0) {
+	hue_angle += 360.0;
+    }
+    while (hue_angle >= 360.0) {
+	hue_angle -= 360.0;
+    } 
+
+    hue = radians(hue_angle);
+    tmp.spec.CIELuv.L_star = START_L_STAR;
+    tmp.spec.CIELuv.u_star = XCMS_CIEUSTAROFHUE(hue, chroma);
+    tmp.spec.CIELuv.v_star = XCMS_CIEVSTAROFHUE(hue, chroma);
+    tmp.pixel = pColor_return->pixel;
+    tmp.format = XcmsCIELuvFormat;
+    
+    /* Step 1: Obtain the maximum L_star and chroma for this hue. */
+    if (_XcmsCIELuvQueryMaxLCRGB(&myCCC, hue, &max_lc, &rgb_saved)
+	    == XcmsFailure) {
+	return(XcmsFailure);
+    }
+
+    max_chroma = XCMS_CIELUV_PMETRIC_CHROMA(max_lc.spec.CIELuv.u_star,
+					    max_lc.spec.CIELuv.v_star);
+
+    if (max_chroma <= chroma) {
+	/*
+	 *  If the chroma is greater than the chroma for the 
+	 *  maximum L/chroma point then the L_star is the
+	 *  the L_star for the maximum L_star/chroma point.
+	 *  This is an error but I return the best approximation I can.
+         *  Thus the inconsistency.
+	 */
+	memcpy ((char *) pColor_return, (char *) &max_lc, sizeof (XcmsColor));
+	return(XcmsSuccess);
+    }
+
+    /*
+     *  If the chroma is equal to the chroma for the 
+     *  maximum L_star/chroma point then the L_star is the
+     *  the L_star for the maximum L* and chroma point.
+     */
+    /* if (max_chroma == chroma) {
+     *  memcpy ((char *) pColor_return, (char *) &max_lc, sizeof (XcmsColor));
+     *	return(XcmsSuccess);
+     *    }
+     */
+
+    /* must do a bisection here to compute the maximum L* */
+    /* save the structure input so that any elements that */
+    /* are not touched are recopied later in the routine. */
+    nChroma = chroma;
+    tmp_chroma = max_chroma;
+    lastChroma = -1.0;
+    nMaxCount = MAXBISECTCOUNT;
+    rFactor = 1.0;
+
+    for (nCount = 0; nCount < nMaxCount; nCount++) {
+	prevChroma = lastChroma;
+	lastChroma = tmp_chroma;
+	nT = (1.0 - (nChroma / max_chroma)) * rFactor;
+	memcpy ((char *)&prev, (char *)&tmp, sizeof(XcmsColor));
+	tmp.spec.RGBi.red   = rgb_saved.red * (1.0 - nT) + nT;
+	tmp.spec.RGBi.green = rgb_saved.green * (1.0 - nT) + nT;
+	tmp.spec.RGBi.blue  = rgb_saved.blue * (1.0 - nT) + nT;
+	tmp.format = XcmsRGBiFormat;
+
+	/* convert from RGB to CIELuv */
+	if (_XcmsConvertColorsWithWhitePt(&myCCC, &tmp,
+		ScreenWhitePointOfCCC(&myCCC), 1, XcmsCIELuvFormat,
+		(Bool *) NULL) == XcmsFailure) {
+	    return(XcmsFailure);
+	}
+
+	/* Now check the return against what is expected */
+	tmp_chroma = XCMS_CIELUV_PMETRIC_CHROMA(tmp.spec.CIELuv.u_star,
+						tmp.spec.CIELuv.v_star);
+	if (tmp_chroma <= chroma + EPS && tmp_chroma >= chroma - EPS) {
+	    /* Found It! */
+	    memcpy ((char *) pColor_return, (char *) &tmp, sizeof (XcmsColor));
+	    return(XcmsSuccess);
+	} 
+	nChroma += chroma - tmp_chroma;
+	if (nChroma > max_chroma) {
+	    nChroma = max_chroma;
+	    rFactor *= 0.5;  /* selective relaxation employed */
+	} else if (nChroma < 0.0) {
+	    if (XCMS_FABS(lastChroma - chroma) < 
+		XCMS_FABS(tmp_chroma - chroma)) {
+		memcpy ((char *)pColor_return, (char *)&prev,
+ 			sizeof(XcmsColor));
+	    } else {
+		memcpy ((char *)pColor_return, (char *)&tmp,
+ 			sizeof(XcmsColor));
+	    }
+	    return(XcmsSuccess);
+	} else if (tmp_chroma <= prevChroma + EPS &&
+		   tmp_chroma >= prevChroma - EPS) {
+	    rFactor *= 0.5;  /* selective relaxation employed */
+	}
+    }
+
+    if (nCount >= nMaxCount) {
+	if (XCMS_FABS(lastChroma - chroma) < 
+	    XCMS_FABS(tmp_chroma - chroma)) {
+		memcpy ((char *)pColor_return, (char *)&prev,
+ 			sizeof(XcmsColor));
+	    } else {
+		memcpy ((char *)pColor_return, (char *)&tmp,
+ 			sizeof(XcmsColor));
+	}
+    }
+    memcpy ((char *) pColor_return, (char *) &tmp, sizeof (XcmsColor));
+    return(XcmsSuccess);
+}
+@
+
+
+1.1.9.1
+log
+@OpenBSD just has imported exactly this tree into their vendor branch,
+called the same tag, in XF4/xc
+This is, apparently, the last XFree86 snapshot before the licence change
+(ie, addition of the advertising clause)
+
+Since the developers don't see any problems with that, and we would like
+to integrate improvements done by the remaining one or two (or so) XFree86
+developers (j/k), this prepares enabling us to update X-Window in the future.
+@
+text
+@d34 1
+a34 1
+/* $XFree86: xc/lib/X11/LuvMxL.c,v 1.4 2003/04/13 19:22:17 dawes Exp $ */
+a38 1
+#include "Cv.h"
+d46 8
+@
+
+
+1.1.1.1
+log
+@Import OpenBSD 3.3 XF4 repository from CTM 3132 the first time
+This finalizes starting an OpenBSD-mirabile (aka MirBSD) repository.
+
+### MirBSD is:
+# Copyright (c) 1982-2003 by Thorsten "mirabile" Glaser <x86@@ePost.de>
+# Copyright © 1968-2003  The authors of And contributors to UNIX®, the
+#       C Language, BSD/Berkeley Unix; 386BSD, NetBSD 1.1 and OpenBSD.
+#
+# Anyone who obtained a copy of this work is hereby permitted to freely use,
+# distribute, modify, merge, sublicence, give away or sell it as long as the
+# authors are given due credit and the following notice is retained:
+#
+# This work is provided "as is", with no explicit or implicit warranty what-
+# soever. Use it only at your own risk. In no event may an author or contri-
+# butor be held liable for any damage, directly or indirectly, that origina-
+# ted through or is caused by creation or modification of this work.
+
+MirBSD is my private tree. MirBSD does not differ very much from OpenBSD
+and intentionally tracks OpenBSD. That's why it _is_ OpenBSD, just not the
+official one. It's like with DarrenBSD.
+
+At time of this writing, no advertising for MirBSD must be done,
+because the advertising clause has not yet been sorted out.
+
+http://templeofhate.com/tglaser/MirBSD/index.php
+@
+text
+@@
+
+
+1.1.1.2
+log
+@That's what OpenBSD will, probably, ship as XF4 in 3.5
+their last sync against XFree86 4.3-current has been
+imported into our vendor branch, too
+@
+text
+@d34 1
+a34 1
+/* $XFree86: xc/lib/X11/LuvMxL.c,v 1.4 2003/04/13 19:22:17 dawes Exp $ */
+a38 1
+#include "Cv.h"
+d46 8
+@
+

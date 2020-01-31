@@ -1,0 +1,1687 @@
+head	1.2;
+branch	1.1.1;
+access;
+symbols
+	tg-mergetmp-2:1.1.1.3
+	cvs-200410241530:1.1.1.3
+	cvs-200410012000:1.1.1.3
+	cvs-200407141120:1.1.1.3
+	cvs-200406231010:1.1.1.3
+	MIRBSD_7quater:1.1.1.2
+	cvs-200405271510:1.1.1.3
+	XFree86_4_4_0:1.1.9.1
+	cvs-200403021700:1.1.1.3
+	XFREE86_20040213:1.1.9.1
+	xc:1.1.9
+	cvs-200401291925:1.1.1.2
+	MIRBSD_7_ALPHA:1.1.1.2.0.4
+	MIRBSD_7:1.1.1.2.0.2
+	MIRBSD_7ter:1.1.1.2
+	cvs-20011091815:1.1.1.2
+	cvs-200309162130:1.1.1.2
+	cvs-200308302005:1.1.1.2
+	ctmx-0387:1.1.1.2
+	ctmx-0384:1.1.1.2
+	MIRBSD_5:1.1.1.2
+	ctmx-0375:1.1.1.2
+	ctmx-0373:1.1.1.2
+	ctm-0371:1.1.1.2
+	ctm-0370:1.1.1.2
+	MIRBSD_4:1.1.1.2
+	ctm-0363:1.1.1.2
+	ctm-0359:1.1.1.2
+	ctm-0349:1.1.1.1
+	openbsd:1.1.1;
+locks; strict;
+comment	@ * @;
+
+
+1.2
+date	2003.05.16.16.28.11;	author tg;	state dead;
+branches;
+next	1.1;
+
+1.1
+date	2003.03.22.20.00.55;	author tg;	state Exp;
+branches
+	1.1.1.1
+	1.1.9.1;
+next	;
+
+1.1.1.1
+date	2003.03.22.20.00.55;	author tg;	state Exp;
+branches;
+next	1.1.1.2;
+
+1.1.1.2
+date	2003.04.08.18.19.55;	author tg;	state Exp;
+branches;
+next	1.1.1.3;
+
+1.1.1.3
+date	2004.03.02.17.28.22;	author tg;	state Stab;
+branches;
+next	;
+
+1.1.9.1
+date	2004.02.14.19.04.34;	author tg;	state Exp;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.2
+log
+@remove a bunch of files not used in MirBSD - clean tree. People who want them got cvs.
+@
+text
+@
+/*
+ * Mesa 3-D graphics library
+ * Version:  3.4
+ * 
+ * Copyright (C) 1999-2000  Brian Paul   All Rights Reserved.
+ * 
+ * Permission is hereby granted, free of charge, to any person obtaining a
+ * copy of this software and associated documentation files (the "Software"),
+ * to deal in the Software without restriction, including without limitation
+ * the rights to use, copy, modify, merge, publish, distribute, sublicense,
+ * and/or sell copies of the Software, and to permit persons to whom the
+ * Software is furnished to do so, subject to the following conditions:
+ * 
+ * The above copyright notice and this permission notice shall be included
+ * in all copies or substantial portions of the Software.
+ * 
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
+ * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL
+ * BRIAN PAUL BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN
+ * AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
+ * CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+ */
+
+
+#ifdef PC_HEADER
+#include "all.h"
+#else
+#include "glheader.h"
+#include "accum.h"
+#include "alphabuf.h"
+#include "buffers.h"
+#include "context.h"
+#include "depth.h"
+#include "enums.h"
+#include "macros.h"
+#include "masking.h"
+#include "mem.h"
+#include "stencil.h"
+#include "state.h"
+#include "types.h"
+#endif
+
+
+
+void
+_mesa_ClearIndex( GLfloat c )
+{
+   GET_CURRENT_CONTEXT(ctx);
+   ASSERT_OUTSIDE_BEGIN_END_AND_FLUSH(ctx, "glClearIndex");
+   ctx->Color.ClearIndex = (GLuint) c;
+   if (!ctx->Visual->RGBAflag) {
+      /* it's OK to call glClearIndex in RGBA mode but it should be a NOP */
+      (*ctx->Driver.ClearIndex)( ctx, ctx->Color.ClearIndex );
+   }
+}
+
+
+
+void
+_mesa_ClearColor( GLclampf red, GLclampf green,
+                  GLclampf blue, GLclampf alpha )
+{
+   GET_CURRENT_CONTEXT(ctx);
+   ASSERT_OUTSIDE_BEGIN_END_AND_FLUSH(ctx, "glClearColor");
+
+   ctx->Color.ClearColor[0] = CLAMP( red,   0.0F, 1.0F );
+   ctx->Color.ClearColor[1] = CLAMP( green, 0.0F, 1.0F );
+   ctx->Color.ClearColor[2] = CLAMP( blue,  0.0F, 1.0F );
+   ctx->Color.ClearColor[3] = CLAMP( alpha, 0.0F, 1.0F );
+
+   if (ctx->Visual->RGBAflag) {
+      GLubyte r = (GLint) (ctx->Color.ClearColor[0] * 255.0F);
+      GLubyte g = (GLint) (ctx->Color.ClearColor[1] * 255.0F);
+      GLubyte b = (GLint) (ctx->Color.ClearColor[2] * 255.0F);
+      GLubyte a = (GLint) (ctx->Color.ClearColor[3] * 255.0F);
+      (*ctx->Driver.ClearColor)( ctx, r, g, b, a );
+   }
+}
+
+
+
+
+/*
+ * Clear the color buffer when glColorMask or glIndexMask is in effect.
+ */
+static void
+clear_color_buffer_with_masking( GLcontext *ctx )
+{
+   const GLint x = ctx->DrawBuffer->Xmin;
+   const GLint y = ctx->DrawBuffer->Ymin;
+   const GLint height = ctx->DrawBuffer->Ymax - ctx->DrawBuffer->Ymin + 1;
+   const GLint width  = ctx->DrawBuffer->Xmax - ctx->DrawBuffer->Xmin + 1;
+
+   if (ctx->Visual->RGBAflag) {
+      /* RGBA mode */
+      const GLubyte r = (GLint) (ctx->Color.ClearColor[0] * 255.0F);
+      const GLubyte g = (GLint) (ctx->Color.ClearColor[1] * 255.0F);
+      const GLubyte b = (GLint) (ctx->Color.ClearColor[2] * 255.0F);
+      const GLubyte a = (GLint) (ctx->Color.ClearColor[3] * 255.0F);
+      GLint i;
+      for (i = 0; i < height; i++) {
+         GLubyte rgba[MAX_WIDTH][4];
+         GLint j;
+         for (j=0; j<width; j++) {
+            rgba[j][RCOMP] = r;
+            rgba[j][GCOMP] = g;
+            rgba[j][BCOMP] = b;
+            rgba[j][ACOMP] = a;
+         }
+         _mesa_mask_rgba_span( ctx, width, x, y + i, rgba );
+         (*ctx->Driver.WriteRGBASpan)( ctx, width, x, y + i,
+				       (CONST GLubyte (*)[4])rgba, NULL );
+      }
+   }
+   else {
+      /* Color index mode */
+      GLuint span[MAX_WIDTH];
+      GLubyte mask[MAX_WIDTH];
+      GLint i, j;
+      MEMSET( mask, 1, width );
+      for (i=0;i<height;i++) {
+         for (j=0;j<width;j++) {
+            span[j] = ctx->Color.ClearIndex;
+         }
+         _mesa_mask_index_span( ctx, width, x, y + i, span );
+         (*ctx->Driver.WriteCI32Span)( ctx, width, x, y + i, span, mask );
+      }
+   }
+}
+
+
+
+/*
+ * Clear a color buffer without index/channel masking.
+ */
+static void
+clear_color_buffer(GLcontext *ctx)
+{
+   const GLint x = ctx->DrawBuffer->Xmin;
+   const GLint y = ctx->DrawBuffer->Ymin;
+   const GLint height = ctx->DrawBuffer->Ymax - ctx->DrawBuffer->Ymin + 1;
+   const GLint width  = ctx->DrawBuffer->Xmax - ctx->DrawBuffer->Xmin + 1;
+
+   if (ctx->Visual->RGBAflag) {
+      /* RGBA mode */
+      const GLubyte r = (GLint) (ctx->Color.ClearColor[0] * 255.0F);
+      const GLubyte g = (GLint) (ctx->Color.ClearColor[1] * 255.0F);
+      const GLubyte b = (GLint) (ctx->Color.ClearColor[2] * 255.0F);
+      const GLubyte a = (GLint) (ctx->Color.ClearColor[3] * 255.0F);
+      GLubyte span[MAX_WIDTH][4];
+      GLint i;
+
+      ASSERT(!ctx->Color.SWmasking);
+
+      for (i = 0; i < width; i++) {
+         span[i][RCOMP] = r;
+         span[i][GCOMP] = g;
+         span[i][BCOMP] = b;
+         span[i][ACOMP] = a;
+      }
+      for (i = 0; i < height; i++) {
+         (*ctx->Driver.WriteRGBASpan)( ctx, width, x, y + i,
+                                       (CONST GLubyte (*)[4]) span, NULL );
+      }
+   }
+   else {
+      /* Color index mode */
+      ASSERT(ctx->Color.IndexMask == ((1 << ctx->Visual->IndexBits) - 1));
+      if (ctx->Visual->IndexBits == 8) {
+         /* 8-bit clear */
+         GLubyte span[MAX_WIDTH];
+         GLint i;
+         MEMSET(span, ctx->Color.ClearIndex, width);
+         for (i = 0; i < height; i++) {
+            (*ctx->Driver.WriteCI8Span)( ctx, width, x, y + i, span, NULL );
+         }
+      }
+      else {
+         /* non 8-bit clear */
+         GLuint span[MAX_WIDTH];
+         GLint i;
+         for (i = 0; i < width; i++) {
+            span[i] = ctx->Color.ClearIndex;
+         }
+         for (i = 0; i < height; i++) {
+            (*ctx->Driver.WriteCI32Span)( ctx, width, x, y + i, span, NULL );
+         }
+      }
+   }
+}
+
+
+
+/*
+ * Clear the front/back/left/right color buffers.
+ * This function is usually only called if we need to clear the
+ * buffers with masking.
+ */
+static void
+clear_color_buffers(GLcontext *ctx)
+{
+   GLuint bufferBit;
+
+   /* loop over four possible dest color buffers */
+   for (bufferBit = 1; bufferBit <= 8; bufferBit = bufferBit << 1) {
+      if (bufferBit & ctx->Color.DrawDestMask) {
+         if (bufferBit == FRONT_LEFT_BIT) {
+            (void) (*ctx->Driver.SetDrawBuffer)( ctx, GL_FRONT_LEFT);
+            (void) (*ctx->Driver.SetReadBuffer)( ctx, ctx->DrawBuffer, GL_FRONT_LEFT);
+         }
+         else if (bufferBit == FRONT_RIGHT_BIT) {
+            (void) (*ctx->Driver.SetDrawBuffer)( ctx, GL_FRONT_RIGHT);
+            (void) (*ctx->Driver.SetReadBuffer)( ctx, ctx->DrawBuffer, GL_FRONT_RIGHT);
+         }
+         else if (bufferBit == BACK_LEFT_BIT) {
+            (void) (*ctx->Driver.SetDrawBuffer)( ctx, GL_BACK_LEFT);
+            (void) (*ctx->Driver.SetReadBuffer)( ctx, ctx->DrawBuffer, GL_BACK_LEFT);
+         }
+         else {
+            (void) (*ctx->Driver.SetDrawBuffer)( ctx, GL_BACK_RIGHT);
+            (void) (*ctx->Driver.SetReadBuffer)( ctx, ctx->DrawBuffer, GL_BACK_RIGHT);
+         }
+         
+         if (ctx->Color.SWmasking) {
+            clear_color_buffer_with_masking(ctx);
+         }
+         else {
+            clear_color_buffer(ctx);
+         }
+      }
+   }
+
+   /* restore default read/draw buffers */
+   (void) (*ctx->Driver.SetDrawBuffer)( ctx, ctx->Color.DriverDrawBuffer );
+   (void) (*ctx->Driver.SetReadBuffer)( ctx, ctx->ReadBuffer, ctx->Pixel.DriverReadBuffer );
+}
+
+
+
+void 
+_mesa_Clear( GLbitfield mask )
+{
+   GET_CURRENT_CONTEXT(ctx);
+#ifdef PROFILE
+   GLdouble t0 = gl_time();
+#endif
+   ASSERT_OUTSIDE_BEGIN_END_AND_FLUSH(ctx, "glClear");
+
+   if (MESA_VERBOSE & VERBOSE_API)
+      fprintf(stderr, "glClear 0x%x\n", mask);
+
+   if (ctx->NewState) {
+      gl_update_state( ctx );
+   }
+
+   if (ctx->RenderMode==GL_RENDER) {
+      const GLint x = ctx->DrawBuffer->Xmin;
+      const GLint y = ctx->DrawBuffer->Ymin;
+      const GLint height = ctx->DrawBuffer->Ymax - ctx->DrawBuffer->Ymin + 1;
+      const GLint width  = ctx->DrawBuffer->Xmax - ctx->DrawBuffer->Xmin + 1;
+      GLbitfield ddMask;
+      GLbitfield newMask;
+
+      /* don't clear depth buffer if depth writing disabled */
+      if (!ctx->Depth.Mask)
+         CLEAR_BITS(mask, GL_DEPTH_BUFFER_BIT);
+
+      /* Build bitmask to send to driver Clear function */
+      ddMask = mask & (GL_DEPTH_BUFFER_BIT |
+                       GL_STENCIL_BUFFER_BIT |
+                       GL_ACCUM_BUFFER_BIT);
+      if (mask & GL_COLOR_BUFFER_BIT) {
+         ddMask |= ctx->Color.DrawDestMask;
+      }
+
+      ASSERT(ctx->Driver.Clear);
+      newMask = (*ctx->Driver.Clear)( ctx, ddMask, !ctx->Scissor.Enabled,
+                                      x, y, width, height );
+
+#ifdef DEBUG
+      {
+         GLbitfield legalBits = DD_FRONT_LEFT_BIT |
+                                DD_FRONT_RIGHT_BIT |
+                                DD_BACK_LEFT_BIT |
+                                DD_BACK_RIGHT_BIT |
+                                DD_DEPTH_BIT |
+                                DD_STENCIL_BIT |
+                                DD_ACCUM_BIT;
+         assert((newMask & (~legalBits)) == 0);
+      }
+#endif
+
+      RENDER_START(ctx);
+
+      /* do software clearing here */
+      if (newMask) {
+         if (newMask & ctx->Color.DrawDestMask)   clear_color_buffers(ctx);
+         if (newMask & GL_DEPTH_BUFFER_BIT)    _mesa_clear_depth_buffer(ctx);
+         if (newMask & GL_ACCUM_BUFFER_BIT)    _mesa_clear_accum_buffer(ctx);
+         if (newMask & GL_STENCIL_BUFFER_BIT)  _mesa_clear_stencil_buffer(ctx);
+      }
+
+      /* clear software-based alpha buffer(s) */
+      if ( (mask & GL_COLOR_BUFFER_BIT)
+           && ctx->DrawBuffer->UseSoftwareAlphaBuffers
+           && ctx->Color.ColorMask[ACOMP]) {
+         _mesa_clear_alpha_buffers( ctx );
+      }
+
+      RENDER_FINISH(ctx);
+
+#ifdef PROFILE
+      ctx->ClearTime += gl_time() - t0;
+      ctx->ClearCount++;
+#endif
+   }
+}
+
+
+void
+_mesa_DrawBuffer( GLenum mode )
+{
+   GET_CURRENT_CONTEXT(ctx);
+   ASSERT_OUTSIDE_BEGIN_END_AND_FLUSH(ctx, "glDrawBuffer");
+
+   if (MESA_VERBOSE & VERBOSE_API)
+      fprintf(stderr, "glDrawBuffer %s\n", gl_lookup_enum_by_nr(mode));
+
+   switch (mode) {
+      case GL_AUX0:
+      case GL_AUX1:
+      case GL_AUX2:
+      case GL_AUX3:
+         /* AUX buffers not implemented in Mesa at this time */
+         gl_error( ctx, GL_INVALID_OPERATION, "glDrawBuffer" );
+         return;
+      case GL_RIGHT:
+         if (!ctx->Visual->StereoFlag) {
+            gl_error( ctx, GL_INVALID_OPERATION, "glDrawBuffer" );
+            return;
+         }
+         if (ctx->Visual->DBflag)
+            ctx->Color.DrawDestMask = FRONT_RIGHT_BIT | BACK_RIGHT_BIT;
+         else
+            ctx->Color.DrawDestMask = FRONT_RIGHT_BIT;
+         break;
+      case GL_FRONT_RIGHT:
+         if (!ctx->Visual->StereoFlag) {
+            gl_error( ctx, GL_INVALID_OPERATION, "glDrawBuffer" );
+            return;
+         }
+         ctx->Color.DrawDestMask = FRONT_RIGHT_BIT;
+         break;
+      case GL_BACK_RIGHT:
+         if (!ctx->Visual->StereoFlag) {
+            gl_error( ctx, GL_INVALID_OPERATION, "glDrawBuffer" );
+            return;
+         }
+         if (!ctx->Visual->DBflag) {
+            gl_error( ctx, GL_INVALID_OPERATION, "glDrawBuffer" );
+            return;
+         }
+         ctx->Color.DrawDestMask = BACK_RIGHT_BIT;
+         break;
+      case GL_BACK_LEFT:
+         if (!ctx->Visual->DBflag) {
+            gl_error( ctx, GL_INVALID_OPERATION, "glDrawBuffer" );
+            return;
+         }
+         ctx->Color.DrawDestMask = BACK_LEFT_BIT;
+         break;
+      case GL_FRONT_AND_BACK:
+         if (!ctx->Visual->DBflag) {
+            gl_error( ctx, GL_INVALID_OPERATION, "glDrawBuffer" );
+            return;
+         }
+         if (ctx->Visual->StereoFlag)
+            ctx->Color.DrawDestMask = FRONT_LEFT_BIT | BACK_LEFT_BIT
+                                    | FRONT_RIGHT_BIT | BACK_RIGHT_BIT;
+         else
+            ctx->Color.DrawDestMask = FRONT_LEFT_BIT | BACK_LEFT_BIT;
+         break;
+      case GL_BACK:
+         if (!ctx->Visual->DBflag) {
+            gl_error( ctx, GL_INVALID_OPERATION, "glDrawBuffer" );
+            return;
+         }
+         if (ctx->Visual->StereoFlag)
+            ctx->Color.DrawDestMask = BACK_LEFT_BIT | BACK_RIGHT_BIT;
+         else
+            ctx->Color.DrawDestMask = BACK_LEFT_BIT;
+         break;
+      case GL_LEFT:
+         /* never an error */
+         if (ctx->Visual->DBflag)
+            ctx->Color.DrawDestMask = FRONT_LEFT_BIT | BACK_LEFT_BIT;
+         else
+            ctx->Color.DrawDestMask = FRONT_LEFT_BIT;
+         break;
+      case GL_FRONT_LEFT:
+         /* never an error */
+         ctx->Color.DrawDestMask = FRONT_LEFT_BIT;
+         break;
+      case GL_FRONT:
+         /* never an error */
+         if (ctx->Visual->StereoFlag)
+            ctx->Color.DrawDestMask = FRONT_LEFT_BIT | FRONT_RIGHT_BIT;
+         else
+            ctx->Color.DrawDestMask = FRONT_LEFT_BIT;
+         break;
+      case GL_NONE:
+         /* never an error */
+         ctx->Color.DrawDestMask = 0;
+         break;
+      default:
+         gl_error( ctx, GL_INVALID_ENUM, "glDrawBuffer" );
+         return;
+   }
+
+   /*
+    * Make the dest buffer mode more precise if possible
+    */
+   if (mode == GL_LEFT && !ctx->Visual->DBflag)
+      ctx->Color.DriverDrawBuffer = GL_FRONT_LEFT;
+   else if (mode == GL_RIGHT && !ctx->Visual->DBflag)
+      ctx->Color.DriverDrawBuffer = GL_FRONT_RIGHT;
+   else if (mode == GL_FRONT && !ctx->Visual->StereoFlag)
+      ctx->Color.DriverDrawBuffer = GL_FRONT_LEFT;
+   else if (mode == GL_BACK && !ctx->Visual->StereoFlag)
+      ctx->Color.DriverDrawBuffer = GL_BACK_LEFT;
+   else
+      ctx->Color.DriverDrawBuffer = mode;
+
+   /*
+    * Set current alpha buffer pointer
+    */
+   if (ctx->DrawBuffer->UseSoftwareAlphaBuffers) {
+      if (ctx->Color.DriverDrawBuffer == GL_FRONT_LEFT)
+         ctx->DrawBuffer->Alpha = ctx->DrawBuffer->FrontLeftAlpha;
+      else if (ctx->Color.DriverDrawBuffer == GL_BACK_LEFT)
+         ctx->DrawBuffer->Alpha = ctx->DrawBuffer->BackLeftAlpha;
+      else if (ctx->Color.DriverDrawBuffer == GL_FRONT_RIGHT)
+         ctx->DrawBuffer->Alpha = ctx->DrawBuffer->FrontRightAlpha;
+      else if (ctx->Color.DriverDrawBuffer == GL_BACK_RIGHT)
+         ctx->DrawBuffer->Alpha = ctx->DrawBuffer->BackRightAlpha;
+   }
+
+   /*
+    * If we get here there can't have been an error.
+    * Now see if device driver can implement the drawing to the target
+    * buffer(s).  The driver may not be able to do GL_FRONT_AND_BACK mode
+    * for example.  We'll take care of that in the core code by looping
+    * over the individual buffers.
+    */
+   ASSERT(ctx->Driver.SetDrawBuffer);
+   if ( (*ctx->Driver.SetDrawBuffer)(ctx, ctx->Color.DriverDrawBuffer) ) {
+      /* All OK, the driver will do all buffer writes */
+      ctx->Color.MultiDrawBuffer = GL_FALSE;
+   }
+   else {
+      /* We'll have to loop over the multiple draw buffer targets */
+      ctx->Color.MultiDrawBuffer = GL_TRUE;
+      /* Set drawing buffer to front for now */
+      (void) (*ctx->Driver.SetDrawBuffer)(ctx, GL_FRONT_LEFT);
+   }
+
+   ctx->Color.DrawBuffer = mode;
+   ctx->NewState |= NEW_RASTER_OPS;
+}
+
+
+
+void
+_mesa_ReadBuffer( GLenum mode )
+{
+   GET_CURRENT_CONTEXT(ctx);
+   ASSERT_OUTSIDE_BEGIN_END_AND_FLUSH(ctx, "glReadBuffer");
+
+   if (MESA_VERBOSE & VERBOSE_API)
+      fprintf(stderr, "glReadBuffer %s\n", gl_lookup_enum_by_nr(mode));
+
+   switch (mode) {
+      case GL_AUX0:
+      case GL_AUX1:
+      case GL_AUX2:
+      case GL_AUX3:
+         /* AUX buffers not implemented in Mesa at this time */
+         gl_error( ctx, GL_INVALID_OPERATION, "glReadBuffer" );
+         return;
+      case GL_LEFT:
+      case GL_FRONT:
+      case GL_FRONT_LEFT:
+         /* Front-Left buffer, always exists */
+         ctx->Pixel.DriverReadBuffer = GL_FRONT_LEFT;
+         break;
+      case GL_BACK:
+      case GL_BACK_LEFT:
+         /* Back-Left buffer, requires double buffering */
+         if (!ctx->Visual->DBflag) {
+            gl_error( ctx, GL_INVALID_OPERATION, "glReadBuffer" );
+            return;
+         }
+         ctx->Pixel.DriverReadBuffer = GL_BACK_LEFT;
+         break;
+      case GL_FRONT_RIGHT:
+      case GL_RIGHT:
+         if (!ctx->Visual->StereoFlag) {
+            gl_error( ctx, GL_INVALID_OPERATION, "glReadBuffer" );
+            return;
+         }
+         ctx->Pixel.DriverReadBuffer = GL_FRONT_RIGHT;
+         break;
+      case GL_BACK_RIGHT:
+         if (!ctx->Visual->StereoFlag || !ctx->Visual->DBflag) {
+            gl_error( ctx, GL_INVALID_OPERATION, "glReadBuffer" );
+            return;
+         }
+         ctx->Pixel.DriverReadBuffer = GL_BACK_RIGHT;
+         break;
+      default:
+         gl_error( ctx, GL_INVALID_ENUM, "glReadBuffer" );
+         return;
+   }
+
+   ctx->Pixel.ReadBuffer = mode;
+   ctx->NewState |= NEW_RASTER_OPS;
+}
+
+
+/*
+ * GL_MESA_resize_buffers extension
+ */
+void
+_mesa_ResizeBuffersMESA( void )
+{
+   GLcontext *ctx = gl_get_current_context();
+
+   GLuint buf_width, buf_height;
+
+   if (MESA_VERBOSE & VERBOSE_API)
+      fprintf(stderr, "glResizeBuffersMESA\n");
+
+   /* ask device driver for size of output buffer */
+   (*ctx->Driver.GetBufferSize)( ctx, &buf_width, &buf_height );
+
+   /* see if size of device driver's color buffer (window) has changed */
+   if (ctx->DrawBuffer->Width == (GLint) buf_width &&
+       ctx->DrawBuffer->Height == (GLint) buf_height)
+      return;
+
+   ctx->NewState |= NEW_RASTER_OPS;  /* to update scissor / window bounds */
+
+   /* save buffer size */
+   ctx->DrawBuffer->Width = buf_width;
+   ctx->DrawBuffer->Height = buf_height;
+
+   /* Reallocate other buffers if needed. */
+   if (ctx->DrawBuffer->UseSoftwareDepthBuffer) {
+      _mesa_alloc_depth_buffer( ctx );
+   }
+   if (ctx->DrawBuffer->UseSoftwareStencilBuffer) {
+      _mesa_alloc_stencil_buffer( ctx );
+   }
+   if (ctx->DrawBuffer->UseSoftwareAccumBuffer) {
+      _mesa_alloc_accum_buffer( ctx );
+   }
+   if (ctx->DrawBuffer->UseSoftwareAlphaBuffers) {
+      _mesa_alloc_alpha_buffers( ctx );
+   }
+}
+@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@@
+
+
+1.1.9.1
+log
+@OpenBSD just has imported exactly this tree into their vendor branch,
+called the same tag, in XF4/xc
+This is, apparently, the last XFree86 snapshot before the licence change
+(ie, addition of the advertising clause)
+
+Since the developers don't see any problems with that, and we would like
+to integrate improvements done by the remaining one or two (or so) XFree86
+developers (j/k), this prepares enabling us to update X-Window in the future.
+@
+text
+@d1 1
+d4 4
+a7 4
+ * Version:  5.0.2
+ *
+ * Copyright (C) 1999-2003  Brian Paul   All Rights Reserved.
+ *
+d14 1
+a14 1
+ *
+d17 1
+a17 1
+ *
+d27 3
+a30 1
+#include "imports.h"
+d32 1
+a33 1
+#include "colormac.h"
+d38 2
+d42 2
+a43 1
+#include "mtypes.h"
+d51 1
+a51 6
+   ASSERT_OUTSIDE_BEGIN_END(ctx);
+
+   if (ctx->Color.ClearIndex == (GLuint) c)
+      return;
+
+   FLUSH_VERTICES(ctx, _NEW_COLOR);
+d53 1
+a53 2
+
+   if (!ctx->Visual.rgbMode && ctx->Driver.ClearIndex) {
+d62 2
+a63 1
+_mesa_ClearColor( GLclampf red, GLclampf green, GLclampf blue, GLclampf alpha )
+a64 1
+   GLfloat tmp[4];
+d66 68
+a133 1
+   ASSERT_OUTSIDE_BEGIN_END(ctx);
+d135 56
+a190 14
+   tmp[0] = CLAMP(red,   0.0F, 1.0F);
+   tmp[1] = CLAMP(green, 0.0F, 1.0F);
+   tmp[2] = CLAMP(blue,  0.0F, 1.0F);
+   tmp[3] = CLAMP(alpha, 0.0F, 1.0F);
+
+   if (TEST_EQ_4V(tmp, ctx->Color.ClearColor))
+      return; /* no change */
+
+   FLUSH_VERTICES(ctx, _NEW_COLOR);
+   COPY_4V(ctx->Color.ClearColor, tmp);
+
+   if (ctx->Visual.rgbMode && ctx->Driver.ClearColor) {
+      /* it's OK to call glClearColor in CI mode but it should be a NOP */
+      (*ctx->Driver.ClearColor)(ctx, ctx->Color.ClearColor);
+d196 47
+a242 1
+void
+d246 4
+a249 1
+   ASSERT_OUTSIDE_BEGIN_END_AND_FLUSH(ctx);
+d252 1
+a252 10
+      _mesa_debug(ctx, "glClear 0x%x\n", mask);
+
+   if (mask & ~(GL_COLOR_BUFFER_BIT |
+                GL_DEPTH_BUFFER_BIT |
+                GL_STENCIL_BUFFER_BIT |
+                GL_ACCUM_BUFFER_BIT)) {
+      /* invalid bit set */
+      _mesa_error( ctx, GL_INVALID_VALUE, "glClear(mask)");
+      return;
+   }
+d255 1
+a255 1
+      _mesa_update_state( ctx );	/* update _Xmin, etc */
+d259 4
+a262 4
+      const GLint x = ctx->DrawBuffer->_Xmin;
+      const GLint y = ctx->DrawBuffer->_Ymin;
+      const GLint height = ctx->DrawBuffer->_Ymax - ctx->DrawBuffer->_Ymin;
+      const GLint width  = ctx->DrawBuffer->_Xmax - ctx->DrawBuffer->_Xmin;
+d264 1
+d268 1
+a268 1
+         mask &= ~GL_DEPTH_BUFFER_BIT;
+d270 7
+a276 13
+      /* Build the bitmask to send to device driver's Clear function.
+       * Note that the GL_COLOR_BUFFER_BIT flag will expand to 0, 1, 2 or 4
+       * of the FRONT/BACK_LEFT/RIGHT_BIT flags.
+       */
+      ddMask = 0;
+      if (mask & GL_COLOR_BUFFER_BIT)
+         ddMask |= ctx->Color._DrawDestMask;
+      if ((mask & GL_DEPTH_BUFFER_BIT) && ctx->Visual.depthBits > 0)
+         ddMask |= GL_DEPTH_BUFFER_BIT;
+      if ((mask & GL_STENCIL_BUFFER_BIT) && ctx->Visual.stencilBits > 0)
+         ddMask |= GL_STENCIL_BUFFER_BIT;
+      if ((mask & GL_ACCUM_BUFFER_BIT) && ctx->Visual.accumRedBits > 0)
+         ddMask |= GL_ACCUM_BUFFER_BIT;
+d279 39
+a317 2
+      ctx->Driver.Clear( ctx, ddMask, (GLboolean) !ctx->Scissor.Enabled,
+			 x, y, width, height );
+d326 1
+a326 1
+   ASSERT_OUTSIDE_BEGIN_END_AND_FLUSH(ctx); /* too complex... */
+d329 1
+a329 1
+      _mesa_debug(ctx, "glDrawBuffer %s\n", _mesa_lookup_enum_by_nr(mode));
+a330 3
+   /*
+    * Do error checking and compute the _DrawDestMask bitfield.
+    */
+d332 7
+d340 6
+a345 5
+         if (!ctx->Visual.stereoMode) {
+            _mesa_error( ctx, GL_INVALID_OPERATION, "glDrawBuffer" );
+            return;}
+         if (ctx->Visual.doubleBufferMode)
+            ctx->Color._DrawDestMask = FRONT_RIGHT_BIT | BACK_RIGHT_BIT;
+d347 1
+a347 1
+            ctx->Color._DrawDestMask = FRONT_RIGHT_BIT;
+d350 2
+a351 2
+         if (!ctx->Visual.stereoMode) {
+            _mesa_error( ctx, GL_INVALID_OPERATION, "glDrawBuffer" );
+d354 1
+a354 1
+         ctx->Color._DrawDestMask = FRONT_RIGHT_BIT;
+d357 2
+a358 2
+         if (!ctx->Visual.stereoMode || !ctx->Visual.doubleBufferMode) {
+            _mesa_error( ctx, GL_INVALID_OPERATION, "glDrawBuffer" );
+d361 5
+a365 1
+         ctx->Color._DrawDestMask = BACK_RIGHT_BIT;
+d368 2
+a369 2
+         if (!ctx->Visual.doubleBufferMode) {
+            _mesa_error( ctx, GL_INVALID_OPERATION, "glDrawBuffer" );
+d372 1
+a372 1
+         ctx->Color._DrawDestMask = BACK_LEFT_BIT;
+d375 2
+a376 2
+         if (!ctx->Visual.doubleBufferMode) {
+            _mesa_error( ctx, GL_INVALID_OPERATION, "glDrawBuffer" );
+d379 2
+a380 2
+         if (ctx->Visual.stereoMode)
+            ctx->Color._DrawDestMask = FRONT_LEFT_BIT | BACK_LEFT_BIT
+d383 1
+a383 1
+            ctx->Color._DrawDestMask = FRONT_LEFT_BIT | BACK_LEFT_BIT;
+d386 2
+a387 2
+         if (!ctx->Visual.doubleBufferMode) {
+            _mesa_error( ctx, GL_INVALID_OPERATION, "glDrawBuffer" );
+d390 2
+a391 2
+         if (ctx->Visual.stereoMode)
+            ctx->Color._DrawDestMask = BACK_LEFT_BIT | BACK_RIGHT_BIT;
+d393 1
+a393 1
+            ctx->Color._DrawDestMask = BACK_LEFT_BIT;
+d397 2
+a398 2
+         if (ctx->Visual.doubleBufferMode)
+            ctx->Color._DrawDestMask = FRONT_LEFT_BIT | BACK_LEFT_BIT;
+d400 1
+a400 1
+            ctx->Color._DrawDestMask = FRONT_LEFT_BIT;
+d404 1
+a404 1
+         ctx->Color._DrawDestMask = FRONT_LEFT_BIT;
+d408 2
+a409 2
+         if (ctx->Visual.stereoMode)
+            ctx->Color._DrawDestMask = FRONT_LEFT_BIT | FRONT_RIGHT_BIT;
+d411 1
+a411 1
+            ctx->Color._DrawDestMask = FRONT_LEFT_BIT;
+d415 1
+a415 37
+         ctx->Color._DrawDestMask = 0;
+         break;
+      case GL_AUX0:
+         if (ctx->Const.NumAuxBuffers >= 1) {
+            ctx->Color._DrawDestMask = AUX0_BIT;
+         }
+         else {
+            _mesa_error( ctx, GL_INVALID_OPERATION, "glDrawBuffer(GL_AUX0)" );
+            return;
+         }
+         break;
+      case GL_AUX1:
+         if (ctx->Const.NumAuxBuffers >= 2) {
+            ctx->Color._DrawDestMask = AUX1_BIT;
+         }
+         else {
+            _mesa_error( ctx, GL_INVALID_OPERATION, "glDrawBuffer(GL_AUX1)" );
+            return;
+         }
+         break;
+      case GL_AUX2:
+         if (ctx->Const.NumAuxBuffers >= 3) {
+            ctx->Color._DrawDestMask = AUX2_BIT;
+         }
+         else {
+            _mesa_error( ctx, GL_INVALID_OPERATION, "glDrawBuffer(GL_AUX2)" );
+            return;
+         }
+         break;
+      case GL_AUX3:
+         if (ctx->Const.NumAuxBuffers >= 4) {
+            ctx->Color._DrawDestMask = AUX3_BIT;
+         }
+         else {
+            _mesa_error( ctx, GL_INVALID_OPERATION, "glDrawBuffer(GL_AUX3)" );
+            return;
+         }
+d418 1
+a418 1
+         _mesa_error( ctx, GL_INVALID_ENUM, "glDrawBuffer" );
+d422 27
+a448 2
+   ctx->Color.DrawBuffer = mode;
+   ctx->NewState |= _NEW_COLOR;
+d451 5
+a455 1
+    * Call device driver function.
+d457 14
+a470 2
+   if (ctx->Driver.DrawBuffer)
+      (*ctx->Driver.DrawBuffer)(ctx, mode);
+d479 1
+a479 1
+   ASSERT_OUTSIDE_BEGIN_END_AND_FLUSH(ctx);
+d482 1
+a482 1
+      _mesa_debug(ctx, "glReadBuffer %s\n", _mesa_lookup_enum_by_nr(mode));
+a483 3
+   /*
+    * Do error checking and compute ctx->Pixel._ReadSrcMask.
+    */
+d485 7
+d496 1
+a496 1
+         ctx->Pixel._ReadSrcMask = FRONT_LEFT_BIT;
+d501 2
+a502 2
+         if (!ctx->Visual.doubleBufferMode) {
+            _mesa_error( ctx, GL_INVALID_OPERATION, "glReadBuffer" );
+d505 1
+a505 1
+         ctx->Pixel._ReadSrcMask = BACK_LEFT_BIT;
+d509 2
+a510 2
+         if (!ctx->Visual.stereoMode) {
+            _mesa_error( ctx, GL_INVALID_OPERATION, "glReadBuffer" );
+d513 1
+a513 1
+         ctx->Pixel._ReadSrcMask = FRONT_RIGHT_BIT;
+d516 2
+a517 39
+         if (!ctx->Visual.stereoMode || !ctx->Visual.doubleBufferMode) {
+            _mesa_error( ctx, GL_INVALID_OPERATION, "glReadBuffer" );
+            return;
+         }
+         ctx->Pixel._ReadSrcMask = BACK_RIGHT_BIT;
+         break;
+      case GL_AUX0:
+         if (ctx->Const.NumAuxBuffers >= 1) {
+            ctx->Pixel._ReadSrcMask = AUX0_BIT;
+         }
+         else {
+            _mesa_error( ctx, GL_INVALID_OPERATION, "glReadBuffer(GL_AUX0)" );
+            return;
+         }
+         break;
+      case GL_AUX1:
+         if (ctx->Const.NumAuxBuffers >= 2) {
+            ctx->Pixel._ReadSrcMask = AUX1_BIT;
+         }
+         else {
+            _mesa_error( ctx, GL_INVALID_OPERATION, "glReadBuffer(GL_AUX1)" );
+            return;
+         }
+         break;
+      case GL_AUX2:
+         if (ctx->Const.NumAuxBuffers >= 3) {
+            ctx->Pixel._ReadSrcMask = AUX2_BIT;
+         }
+         else {
+            _mesa_error( ctx, GL_INVALID_OPERATION, "glReadBuffer(GL_AUX2)" );
+            return;
+         }
+         break;
+      case GL_AUX3:
+         if (ctx->Const.NumAuxBuffers >= 4) {
+            ctx->Pixel._ReadSrcMask = AUX3_BIT;
+         }
+         else {
+            _mesa_error( ctx, GL_INVALID_OPERATION, "glReadBuffer(GL_AUX3)" );
+d520 1
+d523 1
+a523 1
+         _mesa_error( ctx, GL_INVALID_ENUM, "glReadBuffer" );
+d528 1
+a528 7
+   ctx->NewState |= _NEW_PIXEL;
+
+   /*
+    * Call device driver function.
+    */
+   if (ctx->Driver.ReadBuffer)
+      (*ctx->Driver.ReadBuffer)(ctx, mode);
+a533 3
+ * When this function is called, we'll ask the window system how large
+ * the current window is.  If it's not what we expect, we'll have to
+ * resize/reallocate the software accum/stencil/depth/alpha buffers.
+d538 3
+a540 1
+   GLcontext *ctx = _mesa_get_current_context();
+d543 1
+a543 1
+      _mesa_debug(ctx, "glResizeBuffersMESA\n");
+d545 2
+a546 2
+   if (ctx) {
+      ASSERT_OUTSIDE_BEGIN_END_AND_FLUSH( ctx );
+d548 4
+a551 3
+      if (ctx->DrawBuffer) {
+         GLuint buf_width, buf_height;
+         GLframebuffer *buffer = ctx->DrawBuffer;
+d553 1
+a553 2
+         /* ask device driver for size of output buffer */
+         (*ctx->Driver.GetBufferSize)( buffer, &buf_width, &buf_height );
+d555 10
+a564 28
+         /* see if size of device driver's color buffer (window) has changed */
+         if (buffer->Width == buf_width && buffer->Height == buf_height)
+            return; /* size is as expected */
+
+         buffer->Width = buf_width;
+         buffer->Height = buf_height;
+
+         ctx->Driver.ResizeBuffers( buffer );
+      }
+
+      if (ctx->ReadBuffer && ctx->ReadBuffer != ctx->DrawBuffer) {
+         GLuint buf_width, buf_height;
+         GLframebuffer *buffer = ctx->ReadBuffer;
+
+         /* ask device driver for size of read buffer */
+         (*ctx->Driver.GetBufferSize)( buffer, &buf_width, &buf_height );
+
+         /* see if size of device driver's color buffer (window) has changed */
+         if (buffer->Width == buf_width && buffer->Height == buf_height)
+            return; /* size is as expected */
+
+         buffer->Width = buf_width;
+         buffer->Height = buf_height;
+
+         ctx->Driver.ResizeBuffers( buffer );
+      }
+
+      ctx->NewState |= _NEW_BUFFERS;  /* to update scissor / window bounds */
+d566 2
+a567 12
+}
+
+
+void
+_mesa_Scissor( GLint x, GLint y, GLsizei width, GLsizei height )
+{
+   GET_CURRENT_CONTEXT(ctx);
+   ASSERT_OUTSIDE_BEGIN_END(ctx);
+
+   if (width < 0 || height < 0) {
+      _mesa_error( ctx, GL_INVALID_VALUE, "glScissor" );
+      return;
+d569 2
+a570 32
+
+   if (MESA_VERBOSE & VERBOSE_API)
+      _mesa_debug(ctx, "glScissor %d %d %d %d\n", x, y, width, height);
+
+   if (x == ctx->Scissor.X &&
+       y == ctx->Scissor.Y &&
+       width == ctx->Scissor.Width &&
+       height == ctx->Scissor.Height)
+      return;
+
+   FLUSH_VERTICES(ctx, _NEW_SCISSOR);
+   ctx->Scissor.X = x;
+   ctx->Scissor.Y = y;
+   ctx->Scissor.Width = width;
+   ctx->Scissor.Height = height;
+
+   if (ctx->Driver.Scissor)
+      ctx->Driver.Scissor( ctx, x, y, width, height );
+}
+
+
+/*
+ * XXX move somewhere else someday?
+ */
+void
+_mesa_SampleCoverageARB(GLclampf value, GLboolean invert)
+{
+   GLcontext *ctx = _mesa_get_current_context();
+
+   if (!ctx->Extensions.ARB_multisample) {
+      _mesa_error(ctx, GL_INVALID_OPERATION, "glSampleCoverageARB");
+      return;
+a571 5
+
+   ASSERT_OUTSIDE_BEGIN_END_AND_FLUSH( ctx );
+   ctx->Multisample.SampleCoverageValue = (GLfloat) CLAMP(value, 0.0, 1.0);
+   ctx->Multisample.SampleCoverageInvert = invert;
+   ctx->NewState |= _NEW_MULTISAMPLE;
+a572 1
+			   
+@
+
+
+1.1.1.1
+log
+@Import OpenBSD 3.3 XF4 repository from CTM 3132 the first time
+This finalizes starting an OpenBSD-mirabile (aka MirBSD) repository.
+
+### MirBSD is:
+# Copyright (c) 1982-2003 by Thorsten "mirabile" Glaser <x86@@ePost.de>
+# Copyright © 1968-2003  The authors of And contributors to UNIX®, the
+#       C Language, BSD/Berkeley Unix; 386BSD, NetBSD 1.1 and OpenBSD.
+#
+# Anyone who obtained a copy of this work is hereby permitted to freely use,
+# distribute, modify, merge, sublicence, give away or sell it as long as the
+# authors are given due credit and the following notice is retained:
+#
+# This work is provided "as is", with no explicit or implicit warranty what-
+# soever. Use it only at your own risk. In no event may an author or contri-
+# butor be held liable for any damage, directly or indirectly, that origina-
+# ted through or is caused by creation or modification of this work.
+
+MirBSD is my private tree. MirBSD does not differ very much from OpenBSD
+and intentionally tracks OpenBSD. That's why it _is_ OpenBSD, just not the
+official one. It's like with DarrenBSD.
+
+At time of this writing, no advertising for MirBSD must be done,
+because the advertising clause has not yet been sorted out.
+
+http://templeofhate.com/tglaser/MirBSD/index.php
+@
+text
+@@
+
+
+1.1.1.2
+log
+@The X-Windowing System
+
+Import XFree86 4.3 from OpenBSD by CTM, in the hope it's stable
+@
+text
+@d4 4
+a7 4
+ * Version:  4.0.3
+ *
+ * Copyright (C) 1999-2002  Brian Paul   All Rights Reserved.
+ *
+d14 1
+a14 1
+ *
+d17 1
+a17 1
+ *
+d32 1
+a33 1
+#include "colormac.h"
+d38 1
+d42 1
+a42 1
+#include "mtypes.h"
+d51 1
+a51 6
+   ASSERT_OUTSIDE_BEGIN_END(ctx);
+
+   if (ctx->Color.ClearIndex == (GLuint) c)
+      return;
+
+   FLUSH_VERTICES(ctx, _NEW_COLOR);
+d53 1
+a53 2
+
+   if (!ctx->Visual.rgbMode && ctx->Driver.ClearIndex) {
+d62 2
+a63 1
+_mesa_ClearColor( GLclampf red, GLclampf green, GLclampf blue, GLclampf alpha )
+a64 1
+   GLchan tmp[4];
+d66 127
+a192 1
+   ASSERT_OUTSIDE_BEGIN_END(ctx);
+a193 4
+   UNCLAMPED_FLOAT_TO_CHAN(tmp[0], red);
+   UNCLAMPED_FLOAT_TO_CHAN(tmp[1], green);
+   UNCLAMPED_FLOAT_TO_CHAN(tmp[2], blue);
+   UNCLAMPED_FLOAT_TO_CHAN(tmp[3], alpha);
+a194 2
+   if (TEST_EQ_4V(tmp, ctx->Color.ClearColor))
+      return;
+d196 9
+a204 2
+   FLUSH_VERTICES(ctx, _NEW_COLOR);
+   COPY_CHAN4(ctx->Color.ClearColor, tmp);
+d206 27
+a232 3
+   if (ctx->Visual.rgbMode && ctx->Driver.ClearColor) {
+      /* it's OK to call glClearColor in CI mode but it should be a NOP */
+      (*ctx->Driver.ClearColor)(ctx, ctx->Color.ClearColor);
+d234 4
+d242 1
+a242 1
+void
+d246 4
+a249 1
+   ASSERT_OUTSIDE_BEGIN_END_AND_FLUSH(ctx);
+d255 1
+a255 1
+      _mesa_update_state( ctx );	/* update _Xmin, etc */
+d259 4
+a262 4
+      const GLint x = ctx->DrawBuffer->_Xmin;
+      const GLint y = ctx->DrawBuffer->_Ymin;
+      const GLint height = ctx->DrawBuffer->_Ymax - ctx->DrawBuffer->_Ymin;
+      const GLint width  = ctx->DrawBuffer->_Xmax - ctx->DrawBuffer->_Xmin;
+d264 1
+d279 39
+a317 2
+      ctx->Driver.Clear( ctx, ddMask, (GLboolean) !ctx->Scissor.Enabled,
+			 x, y, width, height );
+d326 1
+a326 2
+   ASSERT_OUTSIDE_BEGIN_END_AND_FLUSH(ctx); /* too complex... */
+
+d329 1
+a329 1
+      fprintf(stderr, "glDrawBuffer %s\n", _mesa_lookup_enum_by_nr(mode));
+d337 1
+a337 1
+         _mesa_error( ctx, GL_INVALID_OPERATION, "glDrawBuffer" );
+d340 5
+a344 4
+         if (!ctx->Visual.stereoMode) {
+            _mesa_error( ctx, GL_INVALID_OPERATION, "glDrawBuffer" );
+            return;}
+         if (ctx->Visual.doubleBufferMode)
+d350 2
+a351 2
+         if (!ctx->Visual.stereoMode) {
+            _mesa_error( ctx, GL_INVALID_OPERATION, "glDrawBuffer" );
+d357 2
+a358 2
+         if (!ctx->Visual.stereoMode) {
+            _mesa_error( ctx, GL_INVALID_OPERATION, "glDrawBuffer" );
+d361 2
+a362 2
+         if (!ctx->Visual.doubleBufferMode) {
+            _mesa_error( ctx, GL_INVALID_OPERATION, "glDrawBuffer" );
+d368 2
+a369 2
+         if (!ctx->Visual.doubleBufferMode) {
+            _mesa_error( ctx, GL_INVALID_OPERATION, "glDrawBuffer" );
+d375 2
+a376 2
+         if (!ctx->Visual.doubleBufferMode) {
+            _mesa_error( ctx, GL_INVALID_OPERATION, "glDrawBuffer" );
+d379 1
+a379 1
+         if (ctx->Visual.stereoMode)
+d386 2
+a387 2
+         if (!ctx->Visual.doubleBufferMode) {
+            _mesa_error( ctx, GL_INVALID_OPERATION, "glDrawBuffer" );
+d390 1
+a390 1
+         if (ctx->Visual.stereoMode)
+d397 1
+a397 1
+         if (ctx->Visual.doubleBufferMode)
+d408 1
+a408 1
+         if (ctx->Visual.stereoMode)
+d418 1
+a418 1
+         _mesa_error( ctx, GL_INVALID_ENUM, "glDrawBuffer" );
+d425 1
+a425 1
+   if (mode == GL_LEFT && !ctx->Visual.doubleBufferMode)
+d427 1
+a427 1
+   else if (mode == GL_RIGHT && !ctx->Visual.doubleBufferMode)
+d429 1
+a429 1
+   else if (mode == GL_FRONT && !ctx->Visual.stereoMode)
+d431 1
+a431 1
+   else if (mode == GL_BACK && !ctx->Visual.stereoMode)
+d451 5
+a455 2
+    * If we get here there can't have been an error.  Now tell the
+    * device driver about it.  
+d458 10
+a467 1
+   (*ctx->Driver.SetDrawBuffer)(ctx, ctx->Color.DriverDrawBuffer);
+d470 1
+a470 1
+   ctx->NewState |= _NEW_COLOR;
+d479 1
+a479 1
+   ASSERT_OUTSIDE_BEGIN_END_AND_FLUSH(ctx);
+d482 1
+a482 1
+      fprintf(stderr, "glReadBuffer %s\n", _mesa_lookup_enum_by_nr(mode));
+d490 1
+a490 1
+         _mesa_error( ctx, GL_INVALID_OPERATION, "glReadBuffer" );
+d501 2
+a502 2
+         if (!ctx->Visual.doubleBufferMode) {
+            _mesa_error( ctx, GL_INVALID_OPERATION, "glReadBuffer" );
+d509 2
+a510 2
+         if (!ctx->Visual.stereoMode) {
+            _mesa_error( ctx, GL_INVALID_OPERATION, "glReadBuffer" );
+d516 2
+a517 2
+         if (!ctx->Visual.stereoMode || !ctx->Visual.doubleBufferMode) {
+            _mesa_error( ctx, GL_INVALID_OPERATION, "glReadBuffer" );
+d523 1
+a523 1
+         _mesa_error( ctx, GL_INVALID_ENUM, "glReadBuffer" );
+d528 1
+a528 1
+   ctx->NewState |= _NEW_PIXEL;
+a533 3
+ * When this function is called, we'll ask the window system how large
+ * the current window is.  If it's not what we expect, we'll have to
+ * resize/reallocate the software accum/stencil/depth/alpha buffers.
+d538 3
+a540 1
+   GLcontext *ctx = _mesa_get_current_context();
+d545 2
+a546 2
+   if (ctx) {
+      ASSERT_OUTSIDE_BEGIN_END_AND_FLUSH( ctx );
+d548 4
+a551 3
+      if (ctx->DrawBuffer) {
+         GLuint buf_width, buf_height;
+         GLframebuffer *buffer = ctx->DrawBuffer;
+d553 1
+a553 2
+         /* ask device driver for size of output buffer */
+         (*ctx->Driver.GetBufferSize)( buffer, &buf_width, &buf_height );
+d555 10
+a564 28
+         /* see if size of device driver's color buffer (window) has changed */
+         if (buffer->Width == buf_width && buffer->Height == buf_height)
+            return; /* size is as expected */
+
+         buffer->Width = buf_width;
+         buffer->Height = buf_height;
+
+         ctx->Driver.ResizeBuffers( buffer );
+      }
+
+      if (ctx->ReadBuffer && ctx->ReadBuffer != ctx->DrawBuffer) {
+         GLuint buf_width, buf_height;
+         GLframebuffer *buffer = ctx->DrawBuffer;
+
+         /* ask device driver for size of output buffer */
+         (*ctx->Driver.GetBufferSize)( buffer, &buf_width, &buf_height );
+
+         /* see if size of device driver's color buffer (window) has changed */
+         if (buffer->Width == buf_width && buffer->Height == buf_height)
+            return; /* size is as expected */
+
+         buffer->Width = buf_width;
+         buffer->Height = buf_height;
+
+         ctx->Driver.ResizeBuffers( buffer );
+      }
+
+      ctx->NewState |= _NEW_BUFFERS;  /* to update scissor / window bounds */
+d566 2
+a567 12
+}
+
+
+void
+_mesa_Scissor( GLint x, GLint y, GLsizei width, GLsizei height )
+{
+   GET_CURRENT_CONTEXT(ctx);
+   ASSERT_OUTSIDE_BEGIN_END(ctx);
+
+   if (width < 0 || height < 0) {
+      _mesa_error( ctx, GL_INVALID_VALUE, "glScissor" );
+      return;
+d569 2
+a570 32
+
+   if (MESA_VERBOSE & VERBOSE_API)
+      fprintf(stderr, "glScissor %d %d %d %d\n", x, y, width, height);
+
+   if (x == ctx->Scissor.X &&
+       y == ctx->Scissor.Y &&
+       width == ctx->Scissor.Width &&
+       height == ctx->Scissor.Height)
+      return;
+
+   FLUSH_VERTICES(ctx, _NEW_SCISSOR);
+   ctx->Scissor.X = x;
+   ctx->Scissor.Y = y;
+   ctx->Scissor.Width = width;
+   ctx->Scissor.Height = height;
+
+   if (ctx->Driver.Scissor)
+      ctx->Driver.Scissor( ctx, x, y, width, height );
+}
+
+
+/*
+ * XXX move somewhere else someday?
+ */
+void
+_mesa_SampleCoverageARB(GLclampf value, GLboolean invert)
+{
+   GLcontext *ctx = _mesa_get_current_context();
+
+   if (!ctx->Extensions.ARB_multisample) {
+      _mesa_error(ctx, GL_INVALID_OPERATION, "glSampleCoverageARB");
+      return;
+a571 5
+
+   ASSERT_OUTSIDE_BEGIN_END_AND_FLUSH( ctx );
+   ctx->Multisample.SampleCoverageValue = (GLfloat) CLAMP(value, 0.0, 1.0);
+   ctx->Multisample.SampleCoverageInvert = invert;
+   ctx->NewState |= _NEW_MULTISAMPLE;
+a572 1
+			   
+@
+
+
+1.1.1.3
+log
+@That's what OpenBSD will, probably, ship as XF4 in 3.5
+their last sync against XFree86 4.3-current has been
+imported into our vendor branch, too
+@
+text
+@d1 1
+d4 1
+a4 1
+ * Version:  5.0.2
+d6 1
+a6 1
+ * Copyright (C) 1999-2003  Brian Paul   All Rights Reserved.
+d27 3
+a30 1
+#include "imports.h"
+d38 1
+d42 1
+d69 1
+a69 1
+   GLfloat tmp[4];
+d73 4
+a76 4
+   tmp[0] = CLAMP(red,   0.0F, 1.0F);
+   tmp[1] = CLAMP(green, 0.0F, 1.0F);
+   tmp[2] = CLAMP(blue,  0.0F, 1.0F);
+   tmp[3] = CLAMP(alpha, 0.0F, 1.0F);
+d79 1
+a79 1
+      return; /* no change */
+d82 1
+a82 1
+   COPY_4V(ctx->Color.ClearColor, tmp);
+d99 1
+a99 10
+      _mesa_debug(ctx, "glClear 0x%x\n", mask);
+
+   if (mask & ~(GL_COLOR_BUFFER_BIT |
+                GL_DEPTH_BUFFER_BIT |
+                GL_STENCIL_BUFFER_BIT |
+                GL_ACCUM_BUFFER_BIT)) {
+      /* invalid bit set */
+      _mesa_error( ctx, GL_INVALID_VALUE, "glClear(mask)");
+      return;
+   }
+d114 1
+a114 1
+         mask &= ~GL_DEPTH_BUFFER_BIT;
+d116 7
+a122 13
+      /* Build the bitmask to send to device driver's Clear function.
+       * Note that the GL_COLOR_BUFFER_BIT flag will expand to 0, 1, 2 or 4
+       * of the FRONT/BACK_LEFT/RIGHT_BIT flags.
+       */
+      ddMask = 0;
+      if (mask & GL_COLOR_BUFFER_BIT)
+         ddMask |= ctx->Color._DrawDestMask;
+      if ((mask & GL_DEPTH_BUFFER_BIT) && ctx->Visual.depthBits > 0)
+         ddMask |= GL_DEPTH_BUFFER_BIT;
+      if ((mask & GL_STENCIL_BUFFER_BIT) && ctx->Visual.stencilBits > 0)
+         ddMask |= GL_STENCIL_BUFFER_BIT;
+      if ((mask & GL_ACCUM_BUFFER_BIT) && ctx->Visual.accumRedBits > 0)
+         ddMask |= GL_ACCUM_BUFFER_BIT;
+d137 1
+d139 1
+a139 1
+      _mesa_debug(ctx, "glDrawBuffer %s\n", _mesa_lookup_enum_by_nr(mode));
+a140 3
+   /*
+    * Do error checking and compute the _DrawDestMask bitfield.
+    */
+d142 7
+d154 1
+a154 1
+            ctx->Color._DrawDestMask = FRONT_RIGHT_BIT | BACK_RIGHT_BIT;
+d156 1
+a156 1
+            ctx->Color._DrawDestMask = FRONT_RIGHT_BIT;
+d163 1
+a163 1
+         ctx->Color._DrawDestMask = FRONT_RIGHT_BIT;
+d166 5
+a170 1
+         if (!ctx->Visual.stereoMode || !ctx->Visual.doubleBufferMode) {
+d174 1
+a174 1
+         ctx->Color._DrawDestMask = BACK_RIGHT_BIT;
+d181 1
+a181 1
+         ctx->Color._DrawDestMask = BACK_LEFT_BIT;
+d189 1
+a189 1
+            ctx->Color._DrawDestMask = FRONT_LEFT_BIT | BACK_LEFT_BIT
+d192 1
+a192 1
+            ctx->Color._DrawDestMask = FRONT_LEFT_BIT | BACK_LEFT_BIT;
+d200 1
+a200 1
+            ctx->Color._DrawDestMask = BACK_LEFT_BIT | BACK_RIGHT_BIT;
+d202 1
+a202 1
+            ctx->Color._DrawDestMask = BACK_LEFT_BIT;
+d207 1
+a207 1
+            ctx->Color._DrawDestMask = FRONT_LEFT_BIT | BACK_LEFT_BIT;
+d209 1
+a209 1
+            ctx->Color._DrawDestMask = FRONT_LEFT_BIT;
+d213 1
+a213 1
+         ctx->Color._DrawDestMask = FRONT_LEFT_BIT;
+d218 1
+a218 1
+            ctx->Color._DrawDestMask = FRONT_LEFT_BIT | FRONT_RIGHT_BIT;
+d220 1
+a220 1
+            ctx->Color._DrawDestMask = FRONT_LEFT_BIT;
+d224 1
+a224 37
+         ctx->Color._DrawDestMask = 0;
+         break;
+      case GL_AUX0:
+         if (ctx->Const.NumAuxBuffers >= 1) {
+            ctx->Color._DrawDestMask = AUX0_BIT;
+         }
+         else {
+            _mesa_error( ctx, GL_INVALID_OPERATION, "glDrawBuffer(GL_AUX0)" );
+            return;
+         }
+         break;
+      case GL_AUX1:
+         if (ctx->Const.NumAuxBuffers >= 2) {
+            ctx->Color._DrawDestMask = AUX1_BIT;
+         }
+         else {
+            _mesa_error( ctx, GL_INVALID_OPERATION, "glDrawBuffer(GL_AUX1)" );
+            return;
+         }
+         break;
+      case GL_AUX2:
+         if (ctx->Const.NumAuxBuffers >= 3) {
+            ctx->Color._DrawDestMask = AUX2_BIT;
+         }
+         else {
+            _mesa_error( ctx, GL_INVALID_OPERATION, "glDrawBuffer(GL_AUX2)" );
+            return;
+         }
+         break;
+      case GL_AUX3:
+         if (ctx->Const.NumAuxBuffers >= 4) {
+            ctx->Color._DrawDestMask = AUX3_BIT;
+         }
+         else {
+            _mesa_error( ctx, GL_INVALID_OPERATION, "glDrawBuffer(GL_AUX3)" );
+            return;
+         }
+d231 27
+a257 2
+   ctx->Color.DrawBuffer = mode;
+   ctx->NewState |= _NEW_COLOR;
+d260 2
+a261 1
+    * Call device driver function.
+d263 5
+a267 2
+   if (ctx->Driver.DrawBuffer)
+      (*ctx->Driver.DrawBuffer)(ctx, mode);
+d279 1
+a279 1
+      _mesa_debug(ctx, "glReadBuffer %s\n", _mesa_lookup_enum_by_nr(mode));
+a280 3
+   /*
+    * Do error checking and compute ctx->Pixel._ReadSrcMask.
+    */
+d282 7
+d293 1
+a293 1
+         ctx->Pixel._ReadSrcMask = FRONT_LEFT_BIT;
+d302 1
+a302 1
+         ctx->Pixel._ReadSrcMask = BACK_LEFT_BIT;
+d310 1
+a310 1
+         ctx->Pixel._ReadSrcMask = FRONT_RIGHT_BIT;
+d317 1
+a317 37
+         ctx->Pixel._ReadSrcMask = BACK_RIGHT_BIT;
+         break;
+      case GL_AUX0:
+         if (ctx->Const.NumAuxBuffers >= 1) {
+            ctx->Pixel._ReadSrcMask = AUX0_BIT;
+         }
+         else {
+            _mesa_error( ctx, GL_INVALID_OPERATION, "glReadBuffer(GL_AUX0)" );
+            return;
+         }
+         break;
+      case GL_AUX1:
+         if (ctx->Const.NumAuxBuffers >= 2) {
+            ctx->Pixel._ReadSrcMask = AUX1_BIT;
+         }
+         else {
+            _mesa_error( ctx, GL_INVALID_OPERATION, "glReadBuffer(GL_AUX1)" );
+            return;
+         }
+         break;
+      case GL_AUX2:
+         if (ctx->Const.NumAuxBuffers >= 3) {
+            ctx->Pixel._ReadSrcMask = AUX2_BIT;
+         }
+         else {
+            _mesa_error( ctx, GL_INVALID_OPERATION, "glReadBuffer(GL_AUX2)" );
+            return;
+         }
+         break;
+      case GL_AUX3:
+         if (ctx->Const.NumAuxBuffers >= 4) {
+            ctx->Pixel._ReadSrcMask = AUX3_BIT;
+         }
+         else {
+            _mesa_error( ctx, GL_INVALID_OPERATION, "glReadBuffer(GL_AUX3)" );
+            return;
+         }
+a325 6
+
+   /*
+    * Call device driver function.
+    */
+   if (ctx->Driver.ReadBuffer)
+      (*ctx->Driver.ReadBuffer)(ctx, mode);
+d341 1
+a341 1
+      _mesa_debug(ctx, "glResizeBuffersMESA\n");
+d365 1
+a365 1
+         GLframebuffer *buffer = ctx->ReadBuffer;
+d367 1
+a367 1
+         /* ask device driver for size of read buffer */
+d397 1
+a397 1
+      _mesa_debug(ctx, "glScissor %d %d %d %d\n", x, y, width, height);
+@
+
+

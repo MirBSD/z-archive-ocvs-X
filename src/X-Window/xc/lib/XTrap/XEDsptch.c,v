@@ -1,0 +1,224 @@
+head	1.1;
+branch	1.1.1;
+access;
+symbols
+	tg-mergetmp-2:1.1.1.1
+	cvs-200410241530:1.1.1.1
+	cvs-200410012000:1.1.1.1
+	cvs-200407141120:1.1.1.1
+	cvs-200406231010:1.1.1.1
+	MIRBSD_7quater:1.1.1.1
+	cvs-200405271510:1.1.1.1
+	XFree86_4_4_0:1.1.9.1
+	cvs-200403021700:1.1.1.1
+	XFREE86_20040213:1.1.9.1
+	xc:1.1.9
+	cvs-200401291925:1.1.1.1
+	MIRBSD_7_ALPHA:1.1.1.1.0.4
+	MIRBSD_7:1.1.1.1.0.2
+	MIRBSD_7ter:1.1.1.1
+	cvs-20011091815:1.1.1.1
+	cvs-200309162130:1.1.1.1
+	cvs-200308302005:1.1.1.1
+	ctmx-0387:1.1.1.1
+	ctmx-0384:1.1.1.1
+	MIRBSD_5:1.1.1.1
+	ctmx-0375:1.1.1.1
+	ctmx-0373:1.1.1.1
+	ctm-0371:1.1.1.1
+	ctm-0370:1.1.1.1
+	MIRBSD_4:1.1.1.1
+	ctm-0363:1.1.1.1
+	ctm-0359:1.1.1.1
+	ctm-0349:1.1.1.1
+	openbsd:1.1.1;
+locks; strict;
+comment	@ * @;
+
+
+1.1
+date	2003.03.22.20.04.45;	author tg;	state Exp;
+branches
+	1.1.1.1
+	1.1.9.1;
+next	;
+
+1.1.1.1
+date	2003.03.22.20.04.45;	author tg;	state Stab;
+branches;
+next	;
+
+1.1.9.1
+date	2004.02.14.19.19.02;	author tg;	state Exp;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@/* $XFree86: xc/lib/XTrap/XEDsptch.c,v 1.1 2001/11/02 23:29:27 dawes Exp $ */
+/*****************************************************************************
+Copyright 1987, 1988, 1989, 1990, 1991 by Digital Equipment Corp., Maynard, MA
+
+Permission to use, copy, modify, and distribute this software and its 
+documentation for any purpose and without fee is hereby granted, 
+provided that the above copyright notice appear in all copies and that
+both that copyright notice and this permission notice appear in 
+supporting documentation, and that the name of Digital not be
+used in advertising or publicity pertaining to distribution of the
+software without specific, written prior permission.  
+
+DIGITAL DISCLAIMS ALL WARRANTIES WITH REGARD TO THIS SOFTWARE, INCLUDING
+ALL IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS, IN NO EVENT SHALL
+DIGITAL BE LIABLE FOR ANY SPECIAL, INDIRECT OR CONSEQUENTIAL DAMAGES OR
+ANY DAMAGES WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS,
+WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION,
+ARISING OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS
+SOFTWARE.
+
+*****************************************************************************/
+/*
+ *
+ *  CONTRIBUTORS:
+ *
+ *      Dick Annicchiarico
+ *      Robert Chesler
+ *      Dan Coutu
+ *      Gene Durso
+ *      Marc Evans
+ *      Alan Jamison
+ *      Mark Henry
+ *      Ken Miller
+ *
+ */
+
+#include <stdio.h>
+#include <errno.h>
+#include <X11/extensions/xtraplib.h>
+#include <X11/extensions/xtraplibp.h>
+
+static void XETrapDispatchCB(XETC *tc, XETrapDatum *pdatum)
+{
+    void_function pfunc = NULL;
+    BYTE *userp = NULL;
+
+    /* Need to deal with Delta Timestamps here before calling client CB */
+    if (XETrapGetTCFlagDeltaTimes(tc))
+    {
+        CARD32 last_time = XETrapGetTCTime(tc);
+        if (XETrapHeaderIsEvent(&pdatum->hdr))
+        {   /* then we can play with the timestamps */
+            pdatum->hdr.timestamp = 
+                pdatum->u.event.u.keyButtonPointer.time;
+        }
+        else
+        {   /* 
+             * the current one from GetTimeInMillis is worthless
+             * as it's only updated during event instances (e.g. not
+             * wall clock).
+             */
+            pdatum->hdr.timestamp = last_time;
+        }
+        if (!pdatum->hdr.timestamp)
+        {   /* for dual monitor bug */
+            pdatum->hdr.timestamp = last_time;
+        }
+        if (!last_time)
+        {   /* first one!  Prime it! */
+            last_time = pdatum->hdr.timestamp;
+        }
+        tc->values.last_time = pdatum->hdr.timestamp;   /* no macro! */
+        if (pdatum->hdr.timestamp < last_time)
+        {   /* for clock rollover */
+            pdatum->hdr.timestamp = 0;
+        }
+        else
+        {   /* the real delta */
+            pdatum->hdr.timestamp = pdatum->hdr.timestamp - last_time;
+        }
+    }
+    /*  Get the user supplied callback function */
+    if (XETrapHeaderIsEvent(&pdatum->hdr))
+    {
+        pfunc = tc->values.evt_cb[pdatum->u.event.u.u.type].func;
+        userp = tc->values.evt_cb[pdatum->u.event.u.u.type].data;
+    }
+    else if (XETrapHeaderIsRequest(&pdatum->hdr) ||
+        XETrapHeaderIsReply(&pdatum->hdr))
+    {
+        pfunc = tc->values.req_cb[pdatum->u.req.reqType].func;
+        userp = tc->values.req_cb[pdatum->u.req.reqType].data;
+    }
+
+    /* If there is a callback then call it with the data */
+    if (pfunc != NULL)
+    { 
+        (*pfunc)(tc,pdatum,userp); 
+    }
+}
+
+Boolean XETrapDispatchXLib(XETrapDataEvent *event, XETC *tc)
+{   
+    memcpy(&tc->xbuff[event->idx*sz_EventData], event->data, sz_EventData);
+
+    if (event->detail == XETrapDataLast)
+    {
+        XETrapDispatchCB(tc, (XETrapDatum *)tc->xbuff);
+    }
+    return True;
+}
+@
+
+
+1.1.9.1
+log
+@OpenBSD just has imported exactly this tree into their vendor branch,
+called the same tag, in XF4/xc
+This is, apparently, the last XFree86 snapshot before the licence change
+(ie, addition of the advertising clause)
+
+Since the developers don't see any problems with that, and we would like
+to integrate improvements done by the remaining one or two (or so) XFree86
+developers (j/k), this prepares enabling us to update X-Window in the future.
+@
+text
+@@
+
+
+1.1.1.1
+log
+@Import OpenBSD 3.3 XF4 repository from CTM 3132 the first time
+This finalizes starting an OpenBSD-mirabile (aka MirBSD) repository.
+
+### MirBSD is:
+# Copyright (c) 1982-2003 by Thorsten "mirabile" Glaser <x86@@ePost.de>
+# Copyright © 1968-2003  The authors of And contributors to UNIX®, the
+#       C Language, BSD/Berkeley Unix; 386BSD, NetBSD 1.1 and OpenBSD.
+#
+# Anyone who obtained a copy of this work is hereby permitted to freely use,
+# distribute, modify, merge, sublicence, give away or sell it as long as the
+# authors are given due credit and the following notice is retained:
+#
+# This work is provided "as is", with no explicit or implicit warranty what-
+# soever. Use it only at your own risk. In no event may an author or contri-
+# butor be held liable for any damage, directly or indirectly, that origina-
+# ted through or is caused by creation or modification of this work.
+
+MirBSD is my private tree. MirBSD does not differ very much from OpenBSD
+and intentionally tracks OpenBSD. That's why it _is_ OpenBSD, just not the
+official one. It's like with DarrenBSD.
+
+At time of this writing, no advertising for MirBSD must be done,
+because the advertising clause has not yet been sorted out.
+
+http://templeofhate.com/tglaser/MirBSD/index.php
+@
+text
+@@

@@ -1,0 +1,338 @@
+head	1.1;
+branch	1.1.1;
+access;
+symbols
+	tg-mergetmp-2:1.1.1.2
+	cvs-200410241530:1.1.1.2
+	cvs-200410012000:1.1.1.2
+	cvs-200407221130:1.1.1.2
+	cvs-200407141120:1.1.1.2
+	cvs-200406231010:1.1.1.2
+	MIRBSD_7quater:1.1.1.2
+	cvs-200405271510:1.1.1.2
+	XFree86_4_4_0:1.1.9.1
+	cvs-200403021700:1.1.1.2
+	XFREE86_20040213:1.1.9.1
+	xc:1.1.9
+	cvs-200401291925:1.1.1.2
+	MIRBSD_7_ALPHA:1.1.1.2.0.4
+	MIRBSD_7:1.1.1.2.0.2
+	MIRBSD_7ter:1.1.1.2
+	cvs-20011091815:1.1.1.2
+	cvs-200309162130:1.1.1.2
+	cvs-200308302005:1.1.1.2
+	ctmx-0387:1.1.1.2
+	ctmx-0384:1.1.1.2
+	MIRBSD_5:1.1.1.2
+	ctmx-0375:1.1.1.2
+	ctmx-0373:1.1.1.2
+	ctm-0371:1.1.1.2
+	ctm-0370:1.1.1.2
+	MIRBSD_4:1.1.1.2
+	ctm-0363:1.1.1.2
+	ctm-0359:1.1.1.2
+	ctm-0349:1.1.1.1
+	openbsd:1.1.1;
+locks; strict;
+comment	@ * @;
+
+
+1.1
+date	2003.03.22.20.09.04;	author tg;	state Exp;
+branches
+	1.1.1.1
+	1.1.9.1;
+next	;
+
+1.1.1.1
+date	2003.03.22.20.09.04;	author tg;	state Exp;
+branches;
+next	1.1.1.2;
+
+1.1.1.2
+date	2003.04.08.18.37.48;	author tg;	state Stab;
+branches;
+next	;
+
+1.1.9.1
+date	2004.02.14.19.25.46;	author tg;	state Exp;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@/* $XFree86: xc/programs/Xserver/hw/xfree86/xaa/xaaPaintWin.c,v 1.10 2001/10/28 03:34:04 tsi Exp $ */
+
+#include "misc.h"
+#include "xf86.h"
+#include "xf86_ansic.h"
+#include "xf86_OSproc.h"
+
+#include "X.h"
+#include "scrnintstr.h"
+#include "windowstr.h"
+#include "xf86str.h"
+#include "xaa.h"
+#include "xaalocal.h"
+#include "gcstruct.h"
+#include "pixmapstr.h"
+#include "xaawrap.h"
+
+#ifdef PANORAMIX
+#include "panoramiX.h"
+#include "panoramiXsrv.h"
+#endif
+
+extern WindowPtr *WindowTable;
+
+void
+XAAPaintWindow(
+  WindowPtr pWin,
+  RegionPtr prgn,
+  int what 
+)
+{
+    ScreenPtr  pScreen = pWin->drawable.pScreen;
+    XAAInfoRecPtr infoRec = GET_XAAINFORECPTR_FROM_DRAWABLE((&pWin->drawable));
+    int nBox = REGION_NUM_RECTS(prgn);
+    BoxPtr pBox = REGION_RECTS(prgn);
+    int fg = -1;
+    PixmapPtr pPix = NULL;
+
+    if(!infoRec->pScrn->vtSema) goto BAILOUT;	
+
+    switch (what) {
+    case PW_BACKGROUND:
+	switch(pWin->backgroundState) {
+	case None: return;
+	case ParentRelative:
+	    do { pWin = pWin->parent; }
+	    while(pWin->backgroundState == ParentRelative);
+	    (*pWin->drawable.pScreen->PaintWindowBackground)(pWin, prgn, what);
+	    return;
+	case BackgroundPixel:
+	    fg = pWin->background.pixel;
+	    break;
+	case BackgroundPixmap:
+	    pPix = pWin->background.pixmap;
+	    break;
+	}
+	break;
+    case PW_BORDER:
+	if (pWin->borderIsPixel) 
+	    fg = pWin->border.pixel;
+	else 	/* pixmap */ 
+	    pPix = pWin->border.pixmap;
+	break;
+    default: return;
+    }
+
+
+    if(!pPix) {
+        if(infoRec->FillSolidRects &&
+           (!(infoRec->FillSolidRectsFlags & RGB_EQUAL) || 
+                (CHECK_RGB_EQUAL(fg))) )  {
+	    (*infoRec->FillSolidRects)(infoRec->pScrn, fg, GXcopy, ~0,
+					nBox, pBox);
+	    return;
+	}
+    } else {	/* pixmap */
+        XAAPixmapPtr pPriv = XAA_GET_PIXMAP_PRIVATE(pPix);
+	WindowPtr pBgWin = pWin;
+	Bool NoCache = FALSE;
+	int xorg, yorg;
+
+	/* Hack so we can use this with the dual framebuffer layers
+	   which only support the pixmap cache in the primary bpp */
+	if(pPix->drawable.bitsPerPixel != infoRec->pScrn->bitsPerPixel)
+	    NoCache = TRUE;
+
+	if (what == PW_BORDER) {
+	    for (pBgWin = pWin;
+		 pBgWin->backgroundState == ParentRelative;
+		 pBgWin = pBgWin->parent);
+	}
+
+        xorg = pBgWin->drawable.x;
+        yorg = pBgWin->drawable.y;
+
+#ifdef PANORAMIX
+	if(!noPanoramiXExtension) {
+	    int index = pScreen->myNum;
+	    if(WindowTable[index] == pBgWin) {
+		xorg -= panoramiXdataPtr[index].x;
+		yorg -= panoramiXdataPtr[index].y;
+	    }
+	}
+#endif
+
+	if(IS_OFFSCREEN_PIXMAP(pPix) && infoRec->FillCacheBltRects) {
+	    XAACacheInfoPtr pCache = &(infoRec->ScratchCacheInfoRec);
+
+	    pCache->x = pPriv->offscreenArea->box.x1;
+	    pCache->y = pPriv->offscreenArea->box.y1;
+	    pCache->w = pCache->orig_w = 
+		pPriv->offscreenArea->box.x2 - pCache->x;
+	    pCache->h = pCache->orig_h = 
+		pPriv->offscreenArea->box.y2 - pCache->y;
+	    pCache->trans_color = -1;
+	     
+	    (*infoRec->FillCacheBltRects)(infoRec->pScrn, GXcopy, ~0,
+				nBox, pBox, xorg, yorg, pCache);
+	    return;
+	}
+
+	if(pPriv->flags & DIRTY) {
+	    pPriv->flags &= ~(DIRTY | REDUCIBILITY_MASK);
+	    pPix->drawable.serialNumber = NEXT_SERIAL_NUMBER;
+        }
+
+    	if(!(pPriv->flags & REDUCIBILITY_CHECKED) &&
+	    (infoRec->CanDoMono8x8 || infoRec->CanDoColor8x8)) {
+	    XAACheckTileReducibility(pPix, infoRec->CanDoMono8x8);
+	}
+
+	if(pPriv->flags & REDUCIBLE_TO_8x8) {
+	    if((pPriv->flags & REDUCIBLE_TO_2_COLOR) &&
+		infoRec->CanDoMono8x8 && infoRec->FillMono8x8PatternRects &&
+		!(infoRec->FillMono8x8PatternRectsFlags & TRANSPARENCY_ONLY) && 
+		(!(infoRec->FillMono8x8PatternRectsFlags & RGB_EQUAL) || 
+		(CHECK_RGB_EQUAL(pPriv->fg) && CHECK_RGB_EQUAL(pPriv->bg)))) {
+
+	    	(*infoRec->FillMono8x8PatternRects)(infoRec->pScrn,
+			pPriv->fg, pPriv->bg, GXcopy, ~0, nBox, pBox,
+			pPriv->pattern0, pPriv->pattern1, xorg, yorg);
+		return;
+	    }
+	    if(infoRec->CanDoColor8x8 && !NoCache &&
+				infoRec->FillColor8x8PatternRects) {
+		XAACacheInfoPtr pCache = (*infoRec->CacheColor8x8Pattern)(
+					infoRec->pScrn, pPix, -1, -1);
+
+		(*infoRec->FillColor8x8PatternRects) ( infoRec->pScrn, 
+				GXcopy, ~0, nBox, pBox, xorg, yorg, pCache);
+		return;
+	    }        
+	}
+
+	/* The window size check is to reduce pixmap cache thrashing
+	   when there are lots of little windows with pixmap backgrounds
+	   like are sometimes used for buttons, etc... */
+
+	if(infoRec->UsingPixmapCache && 
+	    infoRec->FillCacheBltRects && !NoCache &&
+	    ((what == PW_BORDER) ||
+		(pPix->drawable.height != pWin->drawable.height) ||
+		(pPix->drawable.width != pWin->drawable.width)) &&
+	    (pPix->drawable.height <= infoRec->MaxCacheableTileHeight) &&
+	    (pPix->drawable.width <= infoRec->MaxCacheableTileWidth)) {
+
+	     XAACacheInfoPtr pCache = 
+			(*infoRec->CacheTile)(infoRec->pScrn, pPix);
+	     (*infoRec->FillCacheBltRects)(infoRec->pScrn, GXcopy, ~0,
+					nBox, pBox, xorg, yorg, pCache);
+	     return;
+	}
+
+	if(infoRec->FillImageWriteRects && 
+		!(infoRec->FillImageWriteRectsFlags & NO_GXCOPY)) {
+	    (*infoRec->FillImageWriteRects) (infoRec->pScrn, GXcopy, 
+                   		~0, nBox, pBox, xorg, yorg, pPix);
+	    return;
+	}
+    }
+
+
+    if(infoRec->NeedToSync) {
+	(*infoRec->Sync)(infoRec->pScrn);
+	infoRec->NeedToSync = FALSE;
+    }
+
+BAILOUT:
+
+    if(what == PW_BACKGROUND) {
+	XAA_SCREEN_PROLOGUE (pScreen, PaintWindowBackground);
+	(*pScreen->PaintWindowBackground) (pWin, prgn, what);
+	XAA_SCREEN_EPILOGUE(pScreen, PaintWindowBackground, XAAPaintWindow);
+    } else {
+	XAA_SCREEN_PROLOGUE (pScreen, PaintWindowBorder);
+	(*pScreen->PaintWindowBorder) (pWin, prgn, what);
+	XAA_SCREEN_EPILOGUE(pScreen, PaintWindowBorder, XAAPaintWindow);
+    }
+
+}
+@
+
+
+1.1.9.1
+log
+@OpenBSD just has imported exactly this tree into their vendor branch,
+called the same tag, in XF4/xc
+This is, apparently, the last XFree86 snapshot before the licence change
+(ie, addition of the advertising clause)
+
+Since the developers don't see any problems with that, and we would like
+to integrate improvements done by the remaining one or two (or so) XFree86
+developers (j/k), this prepares enabling us to update X-Window in the future.
+@
+text
+@d1 1
+a1 1
+/* $XFree86: xc/programs/Xserver/hw/xfree86/xaa/xaaPaintWin.c,v 1.11 2003/02/17 16:08:29 dawes Exp $ */
+d22 2
+@
+
+
+1.1.1.1
+log
+@Import OpenBSD 3.3 XF4 repository from CTM 3132 the first time
+This finalizes starting an OpenBSD-mirabile (aka MirBSD) repository.
+
+### MirBSD is:
+# Copyright (c) 1982-2003 by Thorsten "mirabile" Glaser <x86@@ePost.de>
+# Copyright © 1968-2003  The authors of And contributors to UNIX®, the
+#       C Language, BSD/Berkeley Unix; 386BSD, NetBSD 1.1 and OpenBSD.
+#
+# Anyone who obtained a copy of this work is hereby permitted to freely use,
+# distribute, modify, merge, sublicence, give away or sell it as long as the
+# authors are given due credit and the following notice is retained:
+#
+# This work is provided "as is", with no explicit or implicit warranty what-
+# soever. Use it only at your own risk. In no event may an author or contri-
+# butor be held liable for any damage, directly or indirectly, that origina-
+# ted through or is caused by creation or modification of this work.
+
+MirBSD is my private tree. MirBSD does not differ very much from OpenBSD
+and intentionally tracks OpenBSD. That's why it _is_ OpenBSD, just not the
+official one. It's like with DarrenBSD.
+
+At time of this writing, no advertising for MirBSD must be done,
+because the advertising clause has not yet been sorted out.
+
+http://templeofhate.com/tglaser/MirBSD/index.php
+@
+text
+@@
+
+
+1.1.1.2
+log
+@The X-Windowing System
+
+Import XFree86 4.3 from OpenBSD by CTM, in the hope it's stable
+@
+text
+@d1 1
+a1 1
+/* $XFree86: xc/programs/Xserver/hw/xfree86/xaa/xaaPaintWin.c,v 1.11 2003/02/17 16:08:29 dawes Exp $ */
+d22 2
+@
+

@@ -1,0 +1,378 @@
+head	1.1;
+branch	1.1.1;
+access;
+symbols
+	tg-mergetmp-2:1.1.1.2
+	cvs-200410241530:1.1.1.2
+	cvs-200410012000:1.1.1.2
+	cvs-200407141120:1.1.1.2
+	cvs-200406231010:1.1.1.2
+	MIRBSD_7quater:1.1.1.2
+	cvs-200405271510:1.1.1.2
+	XFree86_4_4_0:1.1.9.1
+	cvs-200403021700:1.1.1.2
+	XFREE86_20040213:1.1.9.1
+	xc:1.1.9
+	cvs-200401291925:1.1.1.2
+	MIRBSD_7_ALPHA:1.1.1.2.0.4
+	MIRBSD_7:1.1.1.2.0.2
+	MIRBSD_7ter:1.1.1.2
+	cvs-20011091815:1.1.1.2
+	cvs-200309162130:1.1.1.2
+	cvs-200308302005:1.1.1.2
+	ctmx-0387:1.1.1.2
+	ctmx-0384:1.1.1.2
+	MIRBSD_5:1.1.1.2
+	ctmx-0375:1.1.1.2
+	ctmx-0373:1.1.1.2
+	ctm-0371:1.1.1.2
+	ctm-0370:1.1.1.2
+	MIRBSD_4:1.1.1.2
+	ctm-0363:1.1.1.2
+	ctm-0359:1.1.1.2
+	ctm-0349:1.1.1.1
+	openbsd:1.1.1;
+locks; strict;
+comment	@ * @;
+
+
+1.1
+date	2003.03.22.20.05.13;	author tg;	state Exp;
+branches
+	1.1.1.1
+	1.1.9.1;
+next	;
+
+1.1.1.1
+date	2003.03.22.20.05.13;	author tg;	state Exp;
+branches;
+next	1.1.1.2;
+
+1.1.1.2
+date	2003.04.08.18.33.13;	author tg;	state Stab;
+branches;
+next	;
+
+1.1.9.1
+date	2004.02.14.19.20.08;	author tg;	state Exp;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@/* $Xorg: bitmaputil.c,v 1.5 2001/02/09 02:04:02 xorgcvs Exp $ */
+
+/*
+
+Copyright 1990, 1994, 1998  The Open Group
+
+Permission to use, copy, modify, distribute, and sell this software and its
+documentation for any purpose is hereby granted without fee, provided that
+the above copyright notice appear in all copies and that both that
+copyright notice and this permission notice appear in supporting
+documentation.
+
+The above copyright notice and this permission notice shall be included
+in all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
+OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
+IN NO EVENT SHALL THE OPEN GROUP BE LIABLE FOR ANY CLAIM, DAMAGES OR
+OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE,
+ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR
+OTHER DEALINGS IN THE SOFTWARE.
+
+Except as contained in this notice, the name of The Open Group shall
+not be used in advertising or otherwise to promote the sale, use or
+other dealings in this Software without prior written authorization
+from The Open Group.
+
+*/
+/* $XFree86: xc/lib/font/bitmap/bitmaputil.c,v 1.7 2001/12/14 19:56:46 dawes Exp $ */
+
+#include "fntfilst.h"
+#include "bitmap.h"
+#include "bdfint.h"
+
+#ifndef MAXSHORT
+#define MAXSHORT    32767
+#endif
+
+#ifndef MINSHORT
+#define MINSHORT    -32768
+#endif
+
+static xCharInfo initMinMetrics = {
+MAXSHORT, MAXSHORT, MAXSHORT, MAXSHORT, MAXSHORT, 0xFFFF};
+static xCharInfo initMaxMetrics = {
+MINSHORT, MINSHORT, MINSHORT, MINSHORT, MINSHORT, 0x0000};
+
+#define MINMAX(field,ci) \
+	if (minbounds->field > (ci)->field) \
+	     minbounds->field = (ci)->field; \
+	if (maxbounds->field < (ci)->field) \
+	     maxbounds->field = (ci)->field;
+
+#define COMPUTE_MINMAX(ci) \
+    if ((ci)->ascent != -(ci)->descent || \
+	(ci)->leftSideBearing != (ci)->rightSideBearing || \
+	(ci)->characterWidth) \
+    { \
+	MINMAX(ascent, (ci)); \
+	MINMAX(descent, (ci)); \
+	MINMAX(leftSideBearing, (ci)); \
+	MINMAX(rightSideBearing, (ci)); \
+	MINMAX(characterWidth, (ci)); \
+    }
+
+void
+bitmapComputeFontBounds(FontPtr pFont)
+{
+    BitmapFontPtr  bitmapFont = (BitmapFontPtr) pFont->fontPrivate;
+    int         nchars;
+    int         r,
+                c;
+    CharInfoPtr ci;
+    int         maxOverlap;
+    int         overlap;
+    xCharInfo  *minbounds,
+               *maxbounds;
+    int         i;
+    int		numneg = 0, numpos = 0;
+
+    if (bitmapFont->bitmapExtra) {
+	minbounds = &bitmapFont->bitmapExtra->info.minbounds;
+	maxbounds = &bitmapFont->bitmapExtra->info.maxbounds;
+    } else {
+	minbounds = &pFont->info.minbounds;
+	maxbounds = &pFont->info.maxbounds;
+    }
+    *minbounds = initMinMetrics;
+    *maxbounds = initMaxMetrics;
+    maxOverlap = MINSHORT;
+    nchars = bitmapFont->num_chars;
+    for (i = 0, ci = bitmapFont->metrics; i < nchars; i++, ci++) {
+	COMPUTE_MINMAX(&ci->metrics);
+	if (ci->metrics.characterWidth < 0)
+	    numneg++;
+	else
+	    numpos++;
+	minbounds->attributes &= ci->metrics.attributes;
+	maxbounds->attributes |= ci->metrics.attributes;
+	overlap = ci->metrics.rightSideBearing - ci->metrics.characterWidth;
+	if (maxOverlap < overlap)
+	    maxOverlap = overlap;
+    }
+    if (bitmapFont->bitmapExtra) {
+	if (numneg > numpos)
+	    bitmapFont->bitmapExtra->info.drawDirection = RightToLeft;
+	else
+	    bitmapFont->bitmapExtra->info.drawDirection = LeftToRight;
+	bitmapFont->bitmapExtra->info.maxOverlap = maxOverlap;
+	minbounds = &pFont->info.minbounds;
+	maxbounds = &pFont->info.maxbounds;
+	*minbounds = initMinMetrics;
+	*maxbounds = initMaxMetrics;
+        i = 0;
+	maxOverlap = MINSHORT;
+	for (r = pFont->info.firstRow; r <= pFont->info.lastRow; r++) {
+	    for (c = pFont->info.firstCol; c <= pFont->info.lastCol; c++) {
+		ci = ACCESSENCODING(bitmapFont->encoding, i);
+		if (ci) {
+		    COMPUTE_MINMAX(&ci->metrics);
+		    if (ci->metrics.characterWidth < 0)
+			numneg++;
+		    else
+			numpos++;
+		    minbounds->attributes &= ci->metrics.attributes;
+		    maxbounds->attributes |= ci->metrics.attributes;
+		    overlap = ci->metrics.rightSideBearing -
+			ci->metrics.characterWidth;
+		    if (maxOverlap < overlap)
+			maxOverlap = overlap;
+		}
+                i++;
+	    }
+	}
+    }
+    if (numneg > numpos)
+	pFont->info.drawDirection = RightToLeft;
+    else
+	pFont->info.drawDirection = LeftToRight;
+    pFont->info.maxOverlap = maxOverlap;
+}
+
+void
+bitmapComputeFontInkBounds(FontPtr pFont)
+{
+    BitmapFontPtr  bitmapFont = (BitmapFontPtr) pFont->fontPrivate;
+    int         nchars;
+    int         r,
+                c;
+    CharInfoPtr cit;
+    xCharInfo  *ci;
+    int         offset;
+    xCharInfo  *minbounds,
+               *maxbounds;
+    int         i;
+
+    if (!bitmapFont->ink_metrics) {
+	if (bitmapFont->bitmapExtra) {
+	    bitmapFont->bitmapExtra->info.ink_minbounds = bitmapFont->bitmapExtra->info.minbounds;
+	    bitmapFont->bitmapExtra->info.ink_maxbounds = bitmapFont->bitmapExtra->info.maxbounds;
+	}
+	pFont->info.ink_minbounds = pFont->info.minbounds;
+	pFont->info.ink_maxbounds = pFont->info.maxbounds;
+    } else {
+	if (bitmapFont->bitmapExtra) {
+	    minbounds = &bitmapFont->bitmapExtra->info.ink_minbounds;
+	    maxbounds = &bitmapFont->bitmapExtra->info.ink_maxbounds;
+	} else {
+	    minbounds = &pFont->info.ink_minbounds;
+	    maxbounds = &pFont->info.ink_maxbounds;
+	}
+	*minbounds = initMinMetrics;
+	*maxbounds = initMaxMetrics;
+	nchars = bitmapFont->num_chars;
+	for (i = 0, ci = bitmapFont->ink_metrics; i < nchars; i++, ci++) {
+	    COMPUTE_MINMAX(ci);
+	    minbounds->attributes &= ci->attributes;
+	    maxbounds->attributes |= ci->attributes;
+	}
+	if (bitmapFont->bitmapExtra) {
+	    minbounds = &pFont->info.ink_minbounds;
+	    maxbounds = &pFont->info.ink_maxbounds;
+	    *minbounds = initMinMetrics;
+	    *maxbounds = initMaxMetrics;
+            i=0;
+	    for (r = pFont->info.firstRow; r <= pFont->info.lastRow; r++) {
+		for (c = pFont->info.firstCol; c <= pFont->info.lastCol; c++) {
+		    cit = ACCESSENCODING(bitmapFont->encoding, i);
+		    if (cit) {
+			offset = cit - bitmapFont->metrics;
+			ci = &bitmapFont->ink_metrics[offset];
+			COMPUTE_MINMAX(ci);
+			minbounds->attributes &= ci->attributes;
+			maxbounds->attributes |= ci->attributes;
+		    }
+                    i++;
+		}
+	    }
+	}
+    }
+}
+
+Bool
+bitmapAddInkMetrics(FontPtr pFont)
+{
+    BitmapFontPtr  bitmapFont;
+    int         i;
+
+    bitmapFont = (BitmapFontPtr) pFont->fontPrivate;
+    bitmapFont->ink_metrics = (xCharInfo *) xalloc(bitmapFont->num_chars * sizeof(xCharInfo));
+    if (!bitmapFont->ink_metrics) {
+      fprintf(stderr, "Error: Couldn't allocate ink_metrics (%d*%d)\n", bitmapFont->num_chars, sizeof(xCharInfo));
+	return FALSE;
+    }
+    for (i = 0; i < bitmapFont->num_chars; i++)
+	FontCharInkMetrics(pFont, &bitmapFont->metrics[i], &bitmapFont->ink_metrics[i]);
+    pFont->info.inkMetrics = TRUE;
+    return TRUE;
+}
+
+/* ARGSUSED */
+int
+bitmapComputeWeight(FontPtr pFont)
+{
+    return 10;
+}
+@
+
+
+1.1.9.1
+log
+@OpenBSD just has imported exactly this tree into their vendor branch,
+called the same tag, in XF4/xc
+This is, apparently, the last XFree86 snapshot before the licence change
+(ie, addition of the advertising clause)
+
+Since the developers don't see any problems with that, and we would like
+to integrate improvements done by the remaining one or two (or so) XFree86
+developers (j/k), this prepares enabling us to update X-Window in the future.
+@
+text
+@d30 1
+a30 1
+/* $XFree86: xc/lib/font/bitmap/bitmaputil.c,v 1.11 2003/02/19 01:22:34 dawes Exp $ */
+d56 2
+a57 2
+    if ((ci)->ascent || (ci)->descent || \
+	(ci)->leftSideBearing || (ci)->rightSideBearing || \
+d213 1
+a213 2
+      fprintf(stderr, "Error: Couldn't allocate ink_metrics (%d*%ld)\n",
+	      bitmapFont->num_chars, (unsigned long)sizeof(xCharInfo));
+@
+
+
+1.1.1.1
+log
+@Import OpenBSD 3.3 XF4 repository from CTM 3132 the first time
+This finalizes starting an OpenBSD-mirabile (aka MirBSD) repository.
+
+### MirBSD is:
+# Copyright (c) 1982-2003 by Thorsten "mirabile" Glaser <x86@@ePost.de>
+# Copyright © 1968-2003  The authors of And contributors to UNIX®, the
+#       C Language, BSD/Berkeley Unix; 386BSD, NetBSD 1.1 and OpenBSD.
+#
+# Anyone who obtained a copy of this work is hereby permitted to freely use,
+# distribute, modify, merge, sublicence, give away or sell it as long as the
+# authors are given due credit and the following notice is retained:
+#
+# This work is provided "as is", with no explicit or implicit warranty what-
+# soever. Use it only at your own risk. In no event may an author or contri-
+# butor be held liable for any damage, directly or indirectly, that origina-
+# ted through or is caused by creation or modification of this work.
+
+MirBSD is my private tree. MirBSD does not differ very much from OpenBSD
+and intentionally tracks OpenBSD. That's why it _is_ OpenBSD, just not the
+official one. It's like with DarrenBSD.
+
+At time of this writing, no advertising for MirBSD must be done,
+because the advertising clause has not yet been sorted out.
+
+http://templeofhate.com/tglaser/MirBSD/index.php
+@
+text
+@@
+
+
+1.1.1.2
+log
+@The X-Windowing System
+
+Import XFree86 4.3 from OpenBSD by CTM, in the hope it's stable
+@
+text
+@d30 1
+a30 1
+/* $XFree86: xc/lib/font/bitmap/bitmaputil.c,v 1.11 2003/02/19 01:22:34 dawes Exp $ */
+d56 2
+a57 2
+    if ((ci)->ascent || (ci)->descent || \
+	(ci)->leftSideBearing || (ci)->rightSideBearing || \
+d213 1
+a213 2
+      fprintf(stderr, "Error: Couldn't allocate ink_metrics (%d*%ld)\n",
+	      bitmapFont->num_chars, (unsigned long)sizeof(xCharInfo));
+@
+

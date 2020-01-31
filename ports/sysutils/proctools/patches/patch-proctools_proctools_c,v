@@ -1,0 +1,191 @@
+head	1.1;
+branch	1.1.1;
+access;
+symbols
+	cvs-200405281530:1.1.1.1
+	cvs-200402211630:1.1.1.1
+	cvs-200401261625:1.1.1.1
+	cvs-200401162142:1.1.1.1
+	cvs-200301141450:1.1.1.1
+	cvs-200312021610:1.1.1.1
+	cvs-200311151930:1.1.1.1
+	cvs-200310311830:1.1.1.1
+	cvs-200310021000:1.1.1.1
+	cvs-200309281111:1.1.1.1
+	cvs-200309171515:1.1.1.1
+	cvs-200308302005:1.1.1.1
+	cvs-200308171200:1.1.1.1
+	ctm-3449:1.1.1.1
+	cvs-200307191610:1.1.1.1
+	ctm-3416:1.1.1.1
+	cvs-200307091500:1.1.1.1
+	ctm-3389:1.1.1.1
+	cvs-200306291800:1.1.1.1
+	ctm-3369:1.1.1.1
+	ctm-3341:1.1.1.1
+	MIRBSD_5:1.1.1.1
+	cvs-200306082100:1.1.1.1
+	ctm-3316:1.1.1.1
+	ctm-3272:1.1.1.1
+	ctm-3264:1.1.1.1
+	ctm-3258:1.1.1.1
+	MIRBSD_4:1.1.1.1
+	ctm-3200:1.1.1.1
+	ctm-3188:1.1.1.1
+	ctm-3155:1.1.1.1
+	ctm-3132:1.1.1.1
+	openbsd:1.1.1;
+locks; strict;
+comment	@# @;
+
+
+1.1
+date	2003.03.22.19.54.04;	author tg;	state Exp;
+branches
+	1.1.1.1;
+next	;
+
+1.1.1.1
+date	2003.03.22.19.54.04;	author tg;	state Stab;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@$OpenBSD: patch-proctools_proctools_c,v 1.1.1.1 2003/01/06 18:03:44 lebel Exp $
+Support the -V flag.
+Never match the current process.
+--- proctools/proctools.c.orig	Mon May 21 18:23:55 2001
++++ proctools/proctools.c	Mon Jan  6 12:18:57 2003
+@@@@ -316,6 +316,7 @@@@ matchTermList(termlist, term)
+ /*
+  * Pushes a new process and its executable name into a linked
+  * list of processes, creating the linked list if necessary.
++ * Ignores the current process.
+  */
+ int
+ pushProcList(proclist, pid, name)
+@@@@ -325,6 +326,8 @@@@ pushProcList(proclist, pid, name)
+ {
+ 	struct proclist *temppl;
+ 
++	if ( pid == getpid() ) return (0);
++
+ 	if ((temppl = calloc(1, sizeof(struct proclist))) == NULL)
+ 		err(EX_OSERR, NULL);
+ 	if ((temppl->name = strdup(name)) == NULL)
+@@@@ -339,10 +342,10 @@@@ pushProcList(proclist, pid, name)
+ /*
+  * Parses the kernel structures containing process information searching
+  * for processes that match the information stored in the linked lists
+- * and flags supplied.
++ * and flags supplied. Will not match the current process.
+  */
+ int
+-getProcList(proclist, euidlist, uidlist, gidlist, ppidlist, pgrouplist, termlist, fullmatch, lastonly, invert, exact, pattern)
++getProcList(proclist, euidlist, uidlist, gidlist, ppidlist, pgrouplist, termlist, fullmatch, lastonly, invert, partialInvert, exact, pattern)
+ 	struct proclist **proclist;
+ 	struct uidlist *euidlist;
+ 	struct uidlist *uidlist;
+@@@@ -353,6 +356,7 @@@@ getProcList(proclist, euidlist, uidlist,
+ 	int fullmatch;
+ 	int lastonly;
+ 	int invert;
++	int partialInvert;
+ 	int exact;
+ 	char *pattern;
+ {
+@@@@ -372,13 +376,10 @@@@ getProcList(proclist, euidlist, uidlist,
+ 	char **kvm_argv;
+ 	char *name;
+ 
+-	kd = kvm_openfiles(NULL, NULL, NULL, O_RDONLY, errbuf);
++	kd = kvm_openfiles(NULL, NULL, NULL, KVM_NO_FILES, errbuf);
+ 	if (kd == 0)
+ 		errx(EX_UNAVAILABLE, "%s", errbuf);
+ 
+-	setegid(getgid());
+-	setgid(getgid());
+-
+ 	if ((kp = kvm_getprocs(kd, KERN_PROC_ALL, 0, &nentries)) == 0)
+ 		errx(EX_UNAVAILABLE, "%s", kvm_geterr(kd));
+ 
+@@@@ -398,7 +399,7 @@@@ getProcList(proclist, euidlist, uidlist,
+ 		    matchUidList(euidlist, kpi.kp_eproc.e_pcred.p_svuid) &&
+ 		    matchUidList(uidlist, kpi.kp_eproc.e_pcred.p_ruid));
+ 		extmatch = pgrouplist || gidlist || ppidlist || termlist || euidlist || uidlist;
+-		if (match && !invert) {
++		if (match && !invert && !partialInvert) {
+ 			if (fullmatch) {
+ 				kvm_argv = kvm_getargv(kd, kp, 0);
+ 				if ((name = strdup(kvm_argv[0])) == NULL)
+@@@@ -456,7 +457,7 @@@@ getProcList(proclist, euidlist, uidlist,
+ 			} else
+ 				pushProcList(proclist, kpi.kp_proc.p_pid, kpi.kp_proc.p_comm);
+ 			free(name);
+-		} else if ((!match && invert) || (match && !extmatch && invert)) {
++		} else if ((!match && (invert || partialInvert)) || (match && !extmatch && (invert || partialInvert))) {
+ 			if (fullmatch) {
+ 				kvm_argv = kvm_getargv(kd, kp, 0);
+ 				if ((name = strdup(kvm_argv[0])) == NULL)
+@@@@ -483,12 +484,16 @@@@ getProcList(proclist, euidlist, uidlist,
+ 					latest.pid = kpi.kp_proc.p_pid;
+ 				}
+ 			} else if (pattern != NULL) {
++				int state;
+ 				if (exact) {
+-					if (strcmp(name, pattern) != 0)
++					state = strcmp(name, pattern) == 0;
++					if (partialInvert ? state : !state)
+ 						pushProcList(proclist, kpi.kp_proc.p_pid, kpi.kp_proc.p_comm);
+-				} else
+-					if (regexec(&regex, name, 0, NULL, NULL) == REG_NOMATCH)
++				} else {
++					state = regexec(&regex, name, 0, NULL, NULL) != REG_NOMATCH;
++					if (partialInvert ? state : !state)
+ 						pushProcList(proclist, kpi.kp_proc.p_pid, kpi.kp_proc.p_comm);
++				}
+ 			} else
+ 				pushProcList(proclist, kpi.kp_proc.p_pid, kpi.kp_proc.p_comm);
+ 			free(name);
+@
+
+
+1.1.1.1
+log
+@Import OpenBSD 3.3 ports repository from CTM 3132 the first time
+This continues opening an OpenBSD-mirabile (aka MirBSD) repository.
+
+### MirBSD is:
+# Copyright (c) 1982-2003 by Thorsten "mirabile" Glaser <x86@@ePost.de>
+# Copyright © 1968-2003  The authors of And contributors to UNIX®, the
+#       C Language, BSD/Berkeley Unix; 386BSD, NetBSD 1.1 and OpenBSD.
+#
+# Anyone who obtained a copy of this work is hereby permitted to freely use,
+# distribute, modify, merge, sublicence, give away or sell it as long as the
+# authors are given due credit and the following notice is retained:
+#
+# This work is provided "as is", with no explicit or implicit warranty what-
+# soever. Use it only at your own risk. In no event may an author or contri-
+# butor be held liable for any damage, directly or indirectly, that origina-
+# ted through or is caused by creation or modification of this work.
+
+MirBSD is my private tree. MirBSD does not differ very much from OpenBSD
+and intentionally tracks OpenBSD. That's why it _is_ OpenBSD, just not the
+official one. It's like with DarrenBSD.
+
+At time of this writing, no advertising for MirBSD must be done,
+because the advertising clause has not yet been sorted out.
+
+http://templeofhate.com/tglaser/MirBSD/index.php
+@
+text
+@@

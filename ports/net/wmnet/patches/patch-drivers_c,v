@@ -1,0 +1,427 @@
+head	1.1;
+branch	1.1.1;
+access;
+symbols
+	cvs-200405281530:1.1.1.2
+	cvs-200402211630:1.1.1.2
+	cvs-200401261625:1.1.1.2
+	cvs-200401162142:1.1.1.2
+	cvs-200301141450:1.1.1.2
+	cvs-200312021610:1.1.1.2
+	cvs-200311151930:1.1.1.2
+	cvs-200310311830:1.1.1.2
+	cvs-200310021000:1.1.1.2
+	cvs-200309281111:1.1.1.2
+	cvs-200309171515:1.1.1.2
+	cvs-200308302005:1.1.1.2
+	cvs-200308171200:1.1.1.2
+	ctm-3449:1.1.1.2
+	cvs-200307191610:1.1.1.2
+	ctm-3416:1.1.1.2
+	cvs-200307091500:1.1.1.2
+	ctm-3389:1.1.1.2
+	cvs-200306291800:1.1.1.2
+	ctm-3369:1.1.1.2
+	ctm-3341:1.1.1.2
+	MIRBSD_5:1.1.1.2
+	cvs-200306082100:1.1.1.2
+	ctm-3316:1.1.1.2
+	ctm-3272:1.1.1.2
+	ctm-3264:1.1.1.2
+	ctm-3258:1.1.1.2
+	MIRBSD_4:1.1.1.2
+	ctm-3200:1.1.1.2
+	ctm-3188:1.1.1.2
+	ctm-3155:1.1.1.1
+	ctm-3132:1.1.1.1
+	openbsd:1.1.1;
+locks; strict;
+comment	@# @;
+
+
+1.1
+date	2003.03.22.19.53.11;	author tg;	state Exp;
+branches
+	1.1.1.1;
+next	;
+
+1.1.1.1
+date	2003.03.22.19.53.11;	author tg;	state Exp;
+branches;
+next	1.1.1.2;
+
+1.1.1.2
+date	2003.04.10.14.16.07;	author tg;	state Stab;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@$OpenBSD: patch-drivers_c,v 1.1 2002/10/01 06:18:24 pvalchev Exp $
+--- drivers.c.orig	Fri May  5 06:34:29 2000
++++ drivers.c	Thu Sep 12 04:18:38 2002
+@@@@ -20,12 +20,15 @@@@
+ #include<unistd.h>
+ #include"config.h"
+ 
++#include "wmnet.h"
++
++char buffer[256];
+ 
+ /* For FreeBSD */
+ #ifdef USE_KVM
+-#include<net/if.h>
+-#include<kvm.h>
+-#include<nlist.h>
++#include <net/if.h>
++#include <kvm.h>
++#include <nlist.h>
+ 
+ kvm_t *kvmfd;
+ struct nlist symbols[] = {
+@@@@ -33,11 +36,10 @@@@ struct nlist symbols[] = {
+  { NULL }
+ };
+ unsigned long ifnet_savedaddr;
+-int kvm_test(void);
+-int kvm_updateStats(void);
++int kvm_test(struct if_data_t *);
++int kvm_updateStats(struct if_data_t *);
+ #endif /* USE_KVM */
+ 
+-
+ #ifdef USE_LINUX_PPP
+ #include<net/ppp_defs.h>
+ 
+@@@@ -57,18 +59,6 @@@@ static struct ifpppstatsreq ppp_stats_re
+ #define ACCOUNT_IN_FOUND        1
+ #define ACCOUNT_OUT_FOUND       2
+ 
+-extern char buffer[256];
+-extern char *in_rule_string, *out_rule_string, *device;
+-extern unsigned long totalbytes_in, totalbytes_out, lastbytes_in, lastbytes_out;
+-extern unsigned long totalpackets_in, totalpackets_out, lastpackets_in, lastpackets_out;
+-extern unsigned int diffpackets_in, diffpackets_out, diffbytes_in, diffbytes_out;
+-extern unsigned int out_rule, in_rule;  /* number of rule in /proc/net/ip_acct to use */
+-extern Bool current_tx, current_rx, rx, tx;
+-
+-
+-
+-char *available_drivers(void);
+-
+ #ifdef USE_IPFWADM
+ int updateStats_ipfwadm(void);
+ int ipfwadm_test(void);
+@@@@ -82,10 +72,8 @@@@ int updateStats_dev(void);
+ int dev_test(void);
+ #endif
+ 
+-
+-typedef int (*parser_func)(void);
+ static struct drivers_struct {
+- char * name;
++ char *name;
+  parser_func function;
+  parser_func test;
+ } drivers[] = {
+@@@@ -102,12 +90,13 @@@@ static struct drivers_struct {
+  {"pppstats",updateStats_ppp, ppp_test},
+ #endif
+ #ifdef USE_KVM
+- {"kmem",kvm_updateStats, kvm_test},
++ {"kmem", kvm_updateStats, kvm_test},
+ #endif
+  {NULL, NULL}
+ };
+ 
+-char* available_drivers(void) {
++char *
++available_drivers(void) {
+  int ind = 0;
+  int len = 0;
+  char *string, *ptr;
+@@@@ -127,14 +116,12 @@@@ char* available_drivers(void) {
+  *(--string) = '\0';
+  return ptr; 
+ } 
+-   
+ 
+-
+-parser_func find_driver(void) {
++parser_func find_driver(struct if_data_t *id) {
+  int ind = 0;
+  while(drivers[ind].name != NULL) {
+-  if(drivers[ind].test()) {
+-   return drivers[ind].function;
++  if(drivers[ind].test(id)) {
++   return (parser_func)drivers[ind].function;
+   }
+   ind++;
+  }
+@@@@ -143,12 +130,13 @@@@ parser_func find_driver(void) {
+ }
+ 
+ 
+-parser_func setup_driver(char * parser_name) {
++setup_func
++setup_driver(char *parser_name, struct if_data_t *id) {
+  int ind = 0;
+- if (parser_name == NULL) return find_driver(); 
++ if (parser_name == NULL) return (void *)find_driver(id); 
+  while(drivers[ind].name != NULL) {
+   if(!strcmp(parser_name, drivers[ind].name)) {
+-    if (drivers[ind].test()) return drivers[ind].function;
++    if (drivers[ind].test(id)) return (void *)drivers[ind].function;
+     fprintf(stderr, "wmnet: driver %s not appropriate for this machine\n", parser_name);
+     exit(18);
+   }
+@@@@ -157,9 +145,6 @@@@ parser_func setup_driver(char * parser_n
+  fprintf(stderr, "wmnet: no driver %s\n", parser_name);
+  exit(18);
+ }
+-  
+-
+-
+ 
+ #ifdef linux
+ /* All the data gathering is done in here. 
+@@@@ -441,20 +426,24 @@@@ int updateStats_ppp(void) {
+ #endif /* linux */
+ 
+ #ifdef USE_KVM
+-int kvm_test(void) {
++int kvm_test(struct if_data_t *id) {
+   if (((kvmfd = kvm_open(NULL, NULL, NULL, O_RDONLY, buffer)) == NULL) ||
+       (kvm_nlist(kvmfd, symbols) < 0) ||
+       kvm_read(kvmfd, (unsigned long)symbols[0].n_value, &ifnet_savedaddr, sizeof(unsigned long)) == -1 ) return False;
+-  if(device == NULL) device = "ec0";
+-  fprintf(stderr, "wmnet: using kmem driver to monitor %s\n", device);
++  if(id->device == NULL) id->device = "ec0";
++  fprintf(stderr, "wmnet: using kmem driver to monitor %s\n", id->device);
+   return True;
+ }
+ 
+-int kvm_updateStats(void) {
++int kvm_updateStats(struct if_data_t *id) {
+  struct ifnet * ifnet = (struct ifnet *)buffer;
+  unsigned long ifnet_addr = ifnet_savedaddr;
+  char devname[16];
+  int flag = 0;
++ unsigned long tp_in, tp_out, tb_in, tb_out;
++ static unsigned long lp_in, lp_out, lb_in, lb_out;
++ //static unsigned int dp_in, dp_out;
++
+  while (ifnet_addr && flag != (ACCOUNT_IN_FOUND|ACCOUNT_OUT_FOUND)) {
+   kvm_read(kvmfd, ifnet_addr, buffer, sizeof(struct ifnet));
+ #ifdef __OpenBSD__
+@@@@ -463,26 +452,27 @@@@ int kvm_updateStats(void) {
+   kvm_read(kvmfd, (unsigned long)ifnet->if_name, devname, 15);
+   snprintf(devname, 15, "%s%d", devname, ifnet->if_unit);
+ #endif
+-  if(!strncmp(devname, device, strlen(device))) { /* we found our struct */
+-        totalpackets_in =ifnet->if_ipackets;
+-        if (totalpackets_in != lastpackets_in) {
+-                totalbytes_in = ifnet->if_ibytes;
+-                diffpackets_in += totalpackets_in - lastpackets_in;
+-                diffbytes_in += totalbytes_in - lastbytes_in;
+-                lastpackets_in = totalpackets_in;
+-                lastbytes_in = totalbytes_in;
+-                rx = True;
++   /* we found our struct */
++  if(!strncmp(devname, id->device, strlen(id->device))) {
++        tp_in =ifnet->if_ipackets;
++        if (tp_in != lp_in) {
++                tb_in = ifnet->if_ibytes;
++                //dp_in += tp_in - lp_in;
++                id->db_in += tb_in - lb_in;
++                lp_in = tp_in;
++                lb_in = tb_in;
++                id->rx = True;
+         }
+ 
+ 
+-        totalpackets_out = ifnet->if_opackets;
+-        if (totalpackets_out != lastpackets_out) {
+-                totalbytes_out =ifnet->if_obytes;
+-                diffpackets_out += totalpackets_out - lastpackets_out;
+-                diffbytes_out += totalbytes_out - lastbytes_out;
+-                lastpackets_out = totalpackets_out;
+-                lastbytes_out = totalbytes_out;
+-                tx = True;
++        tp_out =ifnet->if_opackets;
++        if (tp_out != lp_out) {
++                tb_out = ifnet->if_obytes;
++                //dp_out += tp_out - lp_out;
++                id->db_out += tb_out - lb_out;
++                lp_out = tp_out;
++                lb_out = tb_out;
++                id->tx = True;
+         }
+         flag = (ACCOUNT_IN_FOUND|ACCOUNT_OUT_FOUND);
+ 
+@@@@ -498,12 +488,8 @@@@ int kvm_updateStats(void) {
+ /* return True if no change to tx/rx
+  * return False if display will need to be updated
+  */	 
+- return((rx == current_rx) && (tx == current_tx));
++ return((id->rx == id->current_rx) && (id->tx == id->current_tx));
+ }
+ 
+ 
+ #endif
+-  
+-
+-   
+-  
+@
+
+
+1.1.1.1
+log
+@Import OpenBSD 3.3 ports repository from CTM 3132 the first time
+This continues opening an OpenBSD-mirabile (aka MirBSD) repository.
+
+### MirBSD is:
+# Copyright (c) 1982-2003 by Thorsten "mirabile" Glaser <x86@@ePost.de>
+# Copyright © 1968-2003  The authors of And contributors to UNIX®, the
+#       C Language, BSD/Berkeley Unix; 386BSD, NetBSD 1.1 and OpenBSD.
+#
+# Anyone who obtained a copy of this work is hereby permitted to freely use,
+# distribute, modify, merge, sublicence, give away or sell it as long as the
+# authors are given due credit and the following notice is retained:
+#
+# This work is provided "as is", with no explicit or implicit warranty what-
+# soever. Use it only at your own risk. In no event may an author or contri-
+# butor be held liable for any damage, directly or indirectly, that origina-
+# ted through or is caused by creation or modification of this work.
+
+MirBSD is my private tree. MirBSD does not differ very much from OpenBSD
+and intentionally tracks OpenBSD. That's why it _is_ OpenBSD, just not the
+official one. It's like with DarrenBSD.
+
+At time of this writing, no advertising for MirBSD must be done,
+because the advertising clause has not yet been sorted out.
+
+http://templeofhate.com/tglaser/MirBSD/index.php
+@
+text
+@@
+
+
+1.1.1.2
+log
+@Import OpenBSD ports tree as of CTM 3188
+@
+text
+@d1 1
+a1 1
+$OpenBSD: patch-drivers_c,v 1.2 2003/04/06 00:43:21 naddy Exp $
+d3 4
+a6 27
++++ drivers.c	Mon Mar 24 19:34:43 2003
+@@@@ -9,35 +9,40 @@@@
+  *  great, but please send me the diff.  
+  */
+ 
+-#include<stdlib.h>
+-#include<stdio.h>
+-#include<string.h>
+-#include<X11/Xlib.h>
+-#include<fcntl.h>
+-#include<sys/types.h>
+-#include<sys/stat.h>
+-#include<sys/socket.h>
+-#include<unistd.h>
+-#include"config.h"
++#include <sys/types.h>
++#include <sys/socket.h>
++#include <sys/stat.h>
++
++#include <X11/Xlib.h>
++
++#include <err.h>
++#include <fcntl.h>
++#include <stdio.h>
++#include <stdlib.h>
++#include <string.h>
++#include <unistd.h>
+a7 1
++#include "config.h"
+d10 1
+a10 1
++static char buffer[512];
+d23 1
+a23 1
+  { "_ifnet" },
+d26 1
+a26 1
+-unsigned long ifnet_savedaddr;
+a28 1
++static unsigned long ifnet_savedaddr = -1;
+d37 1
+a37 1
+@@@@ -57,18 +62,6 @@@@ static struct ifpppstatsreq ppp_stats_re
+d56 1
+a56 1
+@@@@ -82,10 +75,8 @@@@ int updateStats_dev(void);
+d68 1
+a68 1
+@@@@ -102,12 +93,13 @@@@ static struct drivers_struct {
+d84 1
+a84 1
+@@@@ -127,14 +119,12 @@@@ char* available_drivers(void) {
+d89 1
+a90 1
+ 
+d102 1
+a102 1
+@@@@ -143,12 +133,13 @@@@ parser_func find_driver(void) {
+d119 1
+a119 1
+@@@@ -157,9 +148,6 @@@@ parser_func setup_driver(char * parser_n
+d129 1
+a129 1
+@@@@ -441,48 +429,58 @@@@ int updateStats_ppp(void) {
+d141 1
+a141 1
++  warnx("using kmem driver to monitor %s", id->device);
+a145 1
+- struct ifnet * ifnet = (struct ifnet *)buffer;
+d147 1
+a147 1
++ struct ifnet ifnetbuf, *ifnet;
+d153 1
+a153 2
++
++ ifnet = &ifnetbuf;
+d156 1
+a156 6
+-  kvm_read(kvmfd, ifnet_addr, buffer, sizeof(struct ifnet));
++  memset(ifnet, 0, sizeof(struct ifnet));
++  if (kvm_read(kvmfd, ifnet_addr, ifnet, sizeof(struct ifnet)) == -1) {
++	  warn("kvm_read() returned -1");
++	  break;
++  }
+d158 1
+a158 2
+   snprintf(devname, 15, "%s", ifnet->if_xname);
+ #else
+a170 2
+-        }
+ 
+d181 2
+a182 1
++        }
+d203 1
+a203 1
+@@@@ -498,12 +496,8 @@@@ int kvm_updateStats(void) {
+@
+

@@ -1,0 +1,240 @@
+head	1.1;
+branch	1.1.1;
+access;
+symbols
+	tg-mergetmp-2:1.1.1.1
+	cvs-200410241530:1.1.1.1
+	cvs-200410012000:1.1.1.1
+	cvs-200407141120:1.1.1.1
+	cvs-200406231010:1.1.1.1
+	MIRBSD_7quater:1.1.1.1
+	cvs-200405271510:1.1.1.1
+	XFree86_4_4_0:1.1.9.1
+	cvs-200403021700:1.1.1.1
+	XFREE86_20040213:1.1.9.1
+	xc:1.1.9
+	cvs-200401291925:1.1.1.1
+	MIRBSD_7_ALPHA:1.1.1.1.0.4
+	MIRBSD_7:1.1.1.1.0.2
+	MIRBSD_7ter:1.1.1.1
+	cvs-20011091815:1.1.1.1
+	cvs-200309162130:1.1.1.1
+	cvs-200308302005:1.1.1.1
+	ctmx-0387:1.1.1.1
+	ctmx-0384:1.1.1.1
+	MIRBSD_5:1.1.1.1
+	ctmx-0375:1.1.1.1
+	ctmx-0373:1.1.1.1
+	ctm-0371:1.1.1.1
+	ctm-0370:1.1.1.1
+	MIRBSD_4:1.1.1.1
+	ctm-0363:1.1.1.1
+	ctm-0359:1.1.1.1
+	openbsd:1.1.1;
+locks; strict;
+comment	@ * @;
+
+
+1.1
+date	2003.04.08.18.35.11;	author tg;	state Exp;
+branches
+	1.1.1.1
+	1.1.9.1;
+next	;
+
+1.1.1.1
+date	2003.04.08.18.35.11;	author tg;	state Stab;
+branches;
+next	;
+
+1.1.9.1
+date	2004.02.14.19.22.02;	author tg;	state Exp;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@/**************************************************************
+ * quartzPasteboard.c
+ *
+ * Aqua pasteboard <-> X cut buffer
+ * Greg Parker     gparker@@cs.stanford.edu     March 8, 2001
+ **************************************************************/
+/*
+ * Copyright (c) 2001 Greg Parker. All Rights Reserved.
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a
+ * copy of this software and associated documentation files (the "Software"),
+ * to deal in the Software without restriction, including without limitation
+ * the rights to use, copy, modify, merge, publish, distribute, sublicense,
+ * and/or sell copies of the Software, and to permit persons to whom the
+ * Software is furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in
+ * all copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
+ * THE ABOVE LISTED COPYRIGHT HOLDER(S) BE LIABLE FOR ANY CLAIM, DAMAGES OR
+ * OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE,
+ * ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+ * DEALINGS IN THE SOFTWARE.
+ *
+ * Except as contained in this notice, the name(s) of the above copyright
+ * holders shall not be used in advertising or otherwise to promote the sale,
+ * use or other dealings in this Software without prior written authorization.
+ */
+/* $XFree86: xc/programs/Xserver/hw/darwin/quartz/quartzPasteboard.c,v 1.1 2002/03/28 02:21:19 torrey Exp $ */
+
+#include "quartzPasteboard.h"
+
+#include "Xatom.h"
+#include "windowstr.h"
+#include "propertyst.h"
+#include "scrnintstr.h"
+#include "selection.h"
+#include "globals.h"
+
+extern Selection *CurrentSelections;
+extern int NumCurrentSelections;
+
+
+// Helper function to read the X11 cut buffer
+// FIXME: What about multiple screens? Currently, this reads the first
+// CUT_BUFFER0 from the first screen where the buffer content is a string.
+// Returns a string on the heap that the caller must free.
+// Returns NULL if there is no cut text or there is not enough memory.
+static char * QuartzReadCutBuffer(void)
+{
+    int i;
+    char *text = NULL;
+
+    for (i = 0; i < screenInfo.numScreens; i++) {
+        ScreenPtr pScreen = screenInfo.screens[i];
+        PropertyPtr pProp;
+
+        pProp = wUserProps (WindowTable[pScreen->myNum]);
+        while (pProp && pProp->propertyName != XA_CUT_BUFFER0) {
+	    pProp = pProp->next;
+        }
+        if (! pProp) continue;
+        if (pProp->type != XA_STRING) continue;
+        if (pProp->format != 8) continue;
+
+        text = xalloc(1 + pProp->size);
+        if (! text) continue;
+        memcpy(text, pProp->data, pProp->size);
+        text[pProp->size] = '\0';
+        return text;
+    }
+
+    // didn't find any text
+    return NULL;
+}
+
+// Write X cut buffer to Mac OS X pasteboard
+// Called by ProcessInputEvents() in response to request from X server thread.
+void QuartzWritePasteboard(void)
+{
+    char *text;
+    text = QuartzReadCutBuffer();
+    if (text) {
+        QuartzWriteCocoaPasteboard(text);
+        free(text);
+    }
+}
+
+#define strequal(a, b) (0 == strcmp((a), (b)))
+
+// Read Mac OS X pasteboard into X cut buffer
+// Called by ProcessInputEvents() in response to request from X server thread.
+void QuartzReadPasteboard(void)
+{
+    char *oldText = QuartzReadCutBuffer();
+    char *text = QuartzReadCocoaPasteboard();
+
+    // Compare text with current cut buffer contents.
+    // Change the buffer if both exist and are different
+    //   OR if there is new text but no old text.
+    // Otherwise, don't clear the selection unnecessarily.
+
+    if ((text && oldText && !strequal(text, oldText)) ||
+        (text && !oldText)) {
+        int scrn, sel;
+
+        for (scrn = 0; scrn < screenInfo.numScreens; scrn++) {
+	    ScreenPtr pScreen = screenInfo.screens[scrn];
+	    // Set the cut buffers on each screen
+	    // fixme really on each screen?
+	    ChangeWindowProperty(WindowTable[pScreen->myNum], XA_CUT_BUFFER0,
+				 XA_STRING, 8, PropModeReplace,
+				 strlen(text), (pointer)text, TRUE);
+        }
+
+        // Undo any current X selection (similar to code in dispatch.c)
+        // FIXME: what about secondary selection?
+        // FIXME: only touch first XA_PRIMARY selection?
+        sel = 0;
+        while ((sel < NumCurrentSelections)  &&
+	       CurrentSelections[sel].selection != XA_PRIMARY)
+	    sel++;
+        if (sel < NumCurrentSelections) {
+	    // Notify client if necessary
+	    if (CurrentSelections[sel].client) {
+	        xEvent event;
+
+	        event.u.u.type = SelectionClear;
+		event.u.selectionClear.time = GetTimeInMillis();
+		event.u.selectionClear.window = CurrentSelections[sel].window;
+		event.u.selectionClear.atom = CurrentSelections[sel].selection;
+		TryClientEvents(CurrentSelections[sel].client, &event, 1,
+				NoEventMask, NoEventMask /*CantBeFiltered*/,
+				NullGrab);
+	    }
+
+	    // Erase it
+	    // FIXME: need to erase .selection too? dispatch.c doesn't
+	    CurrentSelections[sel].pWin = NullWindow;
+	    CurrentSelections[sel].window = None;
+	    CurrentSelections[sel].client = NullClient;
+        }
+    }
+
+    if (text) free(text);
+    if (oldText) free(oldText);
+}
+@
+
+
+1.1.9.1
+log
+@OpenBSD just has imported exactly this tree into their vendor branch,
+called the same tag, in XF4/xc
+This is, apparently, the last XFree86 snapshot before the licence change
+(ie, addition of the advertising clause)
+
+Since the developers don't see any problems with that, and we would like
+to integrate improvements done by the remaining one or two (or so) XFree86
+developers (j/k), this prepares enabling us to update X-Window in the future.
+@
+text
+@@
+
+
+1.1.1.1
+log
+@The X-Windowing System
+
+Import XFree86 4.3 from OpenBSD by CTM, in the hope it's stable
+@
+text
+@@

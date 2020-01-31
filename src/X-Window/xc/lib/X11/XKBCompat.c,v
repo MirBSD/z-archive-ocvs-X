@@ -1,0 +1,426 @@
+head	1.1;
+branch	1.1.1;
+access;
+symbols
+	tg-mergetmp-2:1.1.1.2
+	cvs-200410241530:1.1.1.2
+	cvs-200410012000:1.1.1.2
+	cvs-200407141120:1.1.1.2
+	cvs-200406231010:1.1.1.2
+	MIRBSD_7quater:1.1.1.1
+	cvs-200405271510:1.1.1.2
+	XFree86_4_4_0:1.1.9.1
+	cvs-200403021700:1.1.1.2
+	XFREE86_20040213:1.1.9.1
+	xc:1.1.9
+	cvs-200401291925:1.1.1.1
+	MIRBSD_7_ALPHA:1.1.1.1.0.4
+	MIRBSD_7:1.1.1.1.0.2
+	MIRBSD_7ter:1.1.1.1
+	cvs-20011091815:1.1.1.1
+	cvs-200309162130:1.1.1.1
+	cvs-200308302005:1.1.1.1
+	ctmx-0387:1.1.1.1
+	ctmx-0384:1.1.1.1
+	MIRBSD_5:1.1.1.1
+	ctmx-0375:1.1.1.1
+	ctmx-0373:1.1.1.1
+	ctm-0371:1.1.1.1
+	ctm-0370:1.1.1.1
+	MIRBSD_4:1.1.1.1
+	ctm-0363:1.1.1.1
+	ctm-0359:1.1.1.1
+	ctm-0349:1.1.1.1
+	openbsd:1.1.1;
+locks; strict;
+comment	@ * @;
+
+
+1.1
+date	2003.03.22.20.04.36;	author tg;	state Exp;
+branches
+	1.1.1.1
+	1.1.9.1;
+next	;
+
+1.1.1.1
+date	2003.03.22.20.04.36;	author tg;	state Exp;
+branches;
+next	1.1.1.2;
+
+1.1.1.2
+date	2004.03.02.18.01.43;	author tg;	state Stab;
+branches;
+next	;
+
+1.1.9.1
+date	2004.02.14.19.18.42;	author tg;	state Exp;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@/* $Xorg: XKBCompat.c,v 1.3 2000/08/17 19:45:00 cpqbld Exp $ */
+/************************************************************
+Copyright (c) 1993 by Silicon Graphics Computer Systems, Inc.
+
+Permission to use, copy, modify, and distribute this
+software and its documentation for any purpose and without
+fee is hereby granted, provided that the above copyright
+notice appear in all copies and that both that copyright
+notice and this permission notice appear in supporting
+documentation, and that the name of Silicon Graphics not be 
+used in advertising or publicity pertaining to distribution 
+of the software without specific prior written permission.
+Silicon Graphics makes no representation about the suitability 
+of this software for any purpose. It is provided "as is"
+without any express or implied warranty.
+
+SILICON GRAPHICS DISCLAIMS ALL WARRANTIES WITH REGARD TO THIS 
+SOFTWARE, INCLUDING ALL IMPLIED WARRANTIES OF MERCHANTABILITY 
+AND FITNESS FOR A PARTICULAR PURPOSE. IN NO EVENT SHALL SILICON
+GRAPHICS BE LIABLE FOR ANY SPECIAL, INDIRECT OR CONSEQUENTIAL 
+DAMAGES OR ANY DAMAGES WHATSOEVER RESULTING FROM LOSS OF USE, 
+DATA OR PROFITS, WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE 
+OR OTHER TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION  WITH
+THE USE OR PERFORMANCE OF THIS SOFTWARE.
+
+********************************************************/
+
+#include <stdio.h>
+#define NEED_REPLIES
+#define NEED_EVENTS
+#define	NEED_MAP_READERS
+#include "Xlibint.h"
+#include <X11/extensions/XKBproto.h>
+#include "XKBlibint.h"
+
+Status
+#if NeedFunctionPrototypes
+_XkbReadGetCompatMapReply(	Display *		dpy,
+				xkbGetCompatMapReply *	rep,
+				XkbDescPtr		xkb,
+				int	*		nread_rtrn)
+#else
+_XkbReadGetCompatMapReply(dpy,rep,xkb,nread_rtrn)
+    Display *			dpy;
+    xkbGetCompatMapReply *	rep;
+    XkbDescPtr			xkb;
+    int	*			nread_rtrn;
+#endif
+{
+register int 		i;
+XkbReadBufferRec	buf;
+
+    if (!_XkbInitReadBuffer(dpy,&buf,(int)rep->length*4)) 
+	return BadAlloc;
+
+    if (nread_rtrn)
+	*nread_rtrn= (int)rep->length*4;
+
+    i= rep->firstSI+rep->nSI;
+    if ((!xkb->compat)&&
+	(XkbAllocCompatMap(xkb,XkbAllCompatMask,i)!=Success))
+	return BadAlloc;
+
+    if (rep->nSI!=0) {
+	XkbSymInterpretRec *syms;
+	xkbSymInterpretWireDesc *wire;
+
+	wire= (xkbSymInterpretWireDesc *)_XkbGetReadBufferPtr(&buf,
+				   rep->nSI*SIZEOF(xkbSymInterpretWireDesc));
+	if (wire==NULL)
+	    goto BAILOUT;
+	syms= &xkb->compat->sym_interpret[rep->firstSI];
+
+	for (i=0;i<rep->nSI;i++,syms++,wire++) {
+	    syms->sym= wire->sym;
+	    syms->mods= wire->mods;
+	    syms->match= wire->match;
+	    syms->virtual_mod= wire->virtualMod;
+	    syms->flags= wire->flags;
+	    syms->act= *((XkbAnyAction *)&wire->act);
+	}
+	xkb->compat->num_si+= rep->nSI;
+    }
+
+    if (rep->groups&XkbAllGroupsMask) {
+	register unsigned	bit,nGroups;
+	xkbModsWireDesc * 	wire;
+	for (i=0,nGroups=0,bit=1;i<XkbNumKbdGroups;i++,bit<<=1) {
+	    if (rep->groups&bit)
+		nGroups++;
+	}
+	wire= (xkbModsWireDesc *)_XkbGetReadBufferPtr(&buf,
+				  nGroups*SIZEOF(xkbModsWireDesc));
+	if (wire==NULL)
+	    goto BAILOUT;
+	for (i=0,bit=1;i<XkbNumKbdGroups;i++,bit<<=1) {
+	    if ((rep->groups&bit)==0)
+		continue;
+	    xkb->compat->groups[i].mask= wire->mask;
+	    xkb->compat->groups[i].real_mods= wire->realMods;
+	    xkb->compat->groups[i].vmods= wire->virtualMods;
+	    wire++;
+	}
+    }
+    i= _XkbFreeReadBuffer(&buf);
+    if (i) 
+	fprintf(stderr,"CompatMapReply! Bad length (%d extra bytes)\n",i);
+    if (i || buf.error)
+	return BadLength;
+    return Success;
+BAILOUT:
+    _XkbFreeReadBuffer(&buf);
+    return BadLength;
+}
+
+Status
+#if NeedFunctionPrototypes
+XkbGetCompatMap(Display *dpy,unsigned which,XkbDescPtr xkb)
+#else
+XkbGetCompatMap(dpy,which,xkb)
+    Display *	dpy;
+    unsigned 	which;
+    XkbDescPtr	xkb;
+#endif
+{
+    register xkbGetCompatMapReq *req;
+    xkbGetCompatMapReply	 rep;
+    Status			status;
+    XkbInfoPtr xkbi;
+
+    if ( (!dpy) || (!xkb) || (dpy->flags & XlibDisplayNoXkb) ||
+	((xkb->dpy!=NULL)&&(xkb->dpy!=dpy)) ||
+	(!dpy->xkb_info && (!XkbUseExtension(dpy,NULL,NULL))))
+	return BadAccess;
+    LockDisplay(dpy);
+    xkbi = dpy->xkb_info;
+    GetReq(kbGetCompatMap, req);
+    req->reqType = xkbi->codes->major_opcode;
+    req->xkbReqType = X_kbGetCompatMap;
+    req->deviceSpec = xkb->device_spec;
+    if (which&XkbSymInterpMask)
+	 req->getAllSI= True;
+    else req->getAllSI= False;
+    req->firstSI= req->nSI= 0;
+
+    if (which&XkbGroupCompatMask)
+	 req->groups= XkbAllGroupsMask;
+    else req->groups=  0;
+
+    if (!_XReply(dpy, (xReply *)&rep, 0, xFalse)) {
+	UnlockDisplay(dpy);
+	SyncHandle();
+	return BadLength;
+    }
+    if (xkb->dpy==NULL)
+	xkb->dpy= dpy;
+    if (xkb->device_spec==XkbUseCoreKbd)
+	xkb->device_spec= rep.deviceID;
+
+    status = _XkbReadGetCompatMapReply(dpy,&rep,xkb,NULL);
+    UnlockDisplay(dpy);
+    SyncHandle();
+    return status;
+}
+
+static Bool
+#if NeedFunctionPrototypes
+_XkbWriteSetCompatMap(Display *dpy,xkbSetCompatMapReq *req,XkbDescPtr xkb)
+#else
+_XkbWriteSetCompatMap(dpy,req,xkb)
+    Display *		dpy;
+    xkbSetCompatMapReq	*req;
+    XkbDescPtr		xkb;
+#endif
+{
+CARD16			firstSI;
+CARD16			nSI;
+int			size;
+register int 		i,nGroups;
+register unsigned	bit;
+unsigned		groups;
+char *			buf;
+
+    firstSI = req->firstSI;
+    nSI = req->nSI;
+    size= nSI*SIZEOF(xkbSymInterpretWireDesc);
+    nGroups= 0;
+    groups= req->groups;
+    if (groups&XkbAllGroupsMask) {
+	for (i=0,bit=1;i<XkbNumKbdGroups;i++,bit<<=1) {
+	    if (groups&bit)
+		nGroups++;
+	}
+	size+= SIZEOF(xkbModsWireDesc)*nGroups;
+    }
+    req->length+= size/4;
+    BufAlloc(char *,buf,size);
+    if (!buf)
+	return False;
+
+    if (nSI) {
+	XkbSymInterpretPtr sym= &xkb->compat->sym_interpret[firstSI];
+	xkbSymInterpretWireDesc *wire= (xkbSymInterpretWireDesc *)buf;
+	for (i=0;i<nSI;i++,wire++,sym++) {
+	    wire->sym= (CARD32)sym->sym;
+	    wire->mods= sym->mods;
+	    wire->match= sym->match;
+	    wire->flags= sym->flags;
+	    wire->virtualMod= sym->virtual_mod;
+	    memcpy(&wire->act,&sym->act,sz_xkbActionWireDesc);
+	}
+	buf+= nSI*SIZEOF(xkbSymInterpretWireDesc);
+    }
+    if (groups&XkbAllGroupsMask) {
+	xkbModsWireDesc *	out;
+
+	out= (xkbModsWireDesc *)buf;
+	for (i=0,bit=1;i<XkbNumKbdGroups;i++,bit<<=1) {
+	    if ((groups&bit)!=0) {
+		out->mask= xkb->compat->groups[i].mask;
+		out->realMods= xkb->compat->groups[i].real_mods;
+		out->virtualMods=  xkb->compat->groups[i].vmods;
+		out++;
+	    }
+	}
+	buf+= nGroups*SIZEOF(xkbModsWireDesc);
+    }
+    return True;
+}
+
+Bool
+#if NeedFunctionPrototypes
+XkbSetCompatMap(Display *dpy,unsigned which,XkbDescPtr xkb,Bool updateActions)
+#else
+XkbSetCompatMap(dpy,which,xkb,updateActions)
+    Display *		dpy;
+    unsigned 		which;
+    XkbDescPtr		xkb;
+    Bool		updateActions;
+#endif
+{
+    register xkbSetCompatMapReq *req;
+    Status		     ok;
+    XkbInfoPtr xkbi;
+
+    if ((dpy->flags & XlibDisplayNoXkb) || (dpy!=xkb->dpy) ||
+	(!dpy->xkb_info && !XkbUseExtension(dpy,NULL,NULL)))
+	return False;
+    if ((!xkb->compat) ||
+	((which&XkbSymInterpMask)&&(!xkb->compat->sym_interpret)))
+	return False;
+    LockDisplay(dpy);
+    xkbi = dpy->xkb_info;
+    GetReq(kbSetCompatMap, req);
+    req->reqType = xkbi->codes->major_opcode;
+    req->xkbReqType = X_kbSetCompatMap;
+    req->deviceSpec = xkb->device_spec;
+    req->recomputeActions = updateActions;
+    if (which&XkbSymInterpMask) {
+	req->truncateSI = True;
+	req->firstSI= 0;
+	req->nSI= xkb->compat->num_si;
+    }
+    else {
+	req->truncateSI = False;
+	req->firstSI= 0;
+	req->nSI= 0;
+    }
+    if (which&XkbGroupCompatMask)
+	 req->groups= XkbAllGroupsMask;
+    else req->groups=  0;
+    ok= _XkbWriteSetCompatMap(dpy,req,xkb);
+    UnlockDisplay(dpy);
+    SyncHandle();
+    return ok;
+}
+
+@
+
+
+1.1.9.1
+log
+@OpenBSD just has imported exactly this tree into their vendor branch,
+called the same tag, in XF4/xc
+This is, apparently, the last XFree86 snapshot before the licence change
+(ie, addition of the advertising clause)
+
+Since the developers don't see any problems with that, and we would like
+to integrate improvements done by the remaining one or two (or so) XFree86
+developers (j/k), this prepares enabling us to update X-Window in the future.
+@
+text
+@a26 1
+/* $XFree86: xc/lib/X11/XKBCompat.c,v 3.2 2003/11/17 22:20:09 dawes Exp $ */
+d37 1
+d42 7
+d117 1
+d119 6
+d167 1
+d169 6
+d232 1
+d234 7
+@
+
+
+1.1.1.1
+log
+@Import OpenBSD 3.3 XF4 repository from CTM 3132 the first time
+This finalizes starting an OpenBSD-mirabile (aka MirBSD) repository.
+
+### MirBSD is:
+# Copyright (c) 1982-2003 by Thorsten "mirabile" Glaser <x86@@ePost.de>
+# Copyright © 1968-2003  The authors of And contributors to UNIX®, the
+#       C Language, BSD/Berkeley Unix; 386BSD, NetBSD 1.1 and OpenBSD.
+#
+# Anyone who obtained a copy of this work is hereby permitted to freely use,
+# distribute, modify, merge, sublicence, give away or sell it as long as the
+# authors are given due credit and the following notice is retained:
+#
+# This work is provided "as is", with no explicit or implicit warranty what-
+# soever. Use it only at your own risk. In no event may an author or contri-
+# butor be held liable for any damage, directly or indirectly, that origina-
+# ted through or is caused by creation or modification of this work.
+
+MirBSD is my private tree. MirBSD does not differ very much from OpenBSD
+and intentionally tracks OpenBSD. That's why it _is_ OpenBSD, just not the
+official one. It's like with DarrenBSD.
+
+At time of this writing, no advertising for MirBSD must be done,
+because the advertising clause has not yet been sorted out.
+
+http://templeofhate.com/tglaser/MirBSD/index.php
+@
+text
+@@
+
+
+1.1.1.2
+log
+@That's what OpenBSD will, probably, ship as XF4 in 3.5
+their last sync against XFree86 4.3-current has been
+imported into our vendor branch, too
+@
+text
+@a26 1
+/* $XFree86: xc/lib/X11/XKBCompat.c,v 3.2 2003/11/17 22:20:09 dawes Exp $ */
+d37 1
+d42 7
+d117 1
+d119 6
+d167 1
+d169 6
+d232 1
+d234 7
+@
+

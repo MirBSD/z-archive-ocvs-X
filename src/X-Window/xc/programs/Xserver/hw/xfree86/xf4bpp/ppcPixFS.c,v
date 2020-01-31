@@ -1,0 +1,686 @@
+head	1.1;
+branch	1.1.1;
+access;
+symbols
+	tg-mergetmp-2:1.1.1.2
+	cvs-200410241530:1.1.1.2
+	cvs-200410012000:1.1.1.2
+	cvs-200407221130:1.1.1.2
+	cvs-200407141120:1.1.1.2
+	cvs-200406231010:1.1.1.2
+	MIRBSD_7quater:1.1.1.1
+	cvs-200405271510:1.1.1.2
+	XFree86_4_4_0:1.1.9.1
+	cvs-200403021700:1.1.1.2
+	XFREE86_20040213:1.1.9.1
+	xc:1.1.9
+	cvs-200401291925:1.1.1.1
+	MIRBSD_7_ALPHA:1.1.1.1.0.4
+	MIRBSD_7:1.1.1.1.0.2
+	MIRBSD_7ter:1.1.1.1
+	cvs-20011091815:1.1.1.1
+	cvs-200309162130:1.1.1.1
+	cvs-200308302005:1.1.1.1
+	ctmx-0387:1.1.1.1
+	ctmx-0384:1.1.1.1
+	MIRBSD_5:1.1.1.1
+	ctmx-0375:1.1.1.1
+	ctmx-0373:1.1.1.1
+	ctm-0371:1.1.1.1
+	ctm-0370:1.1.1.1
+	MIRBSD_4:1.1.1.1
+	ctm-0363:1.1.1.1
+	ctm-0359:1.1.1.1
+	ctm-0349:1.1.1.1
+	openbsd:1.1.1;
+locks; strict;
+comment	@ * @;
+
+
+1.1
+date	2003.03.22.20.09.10;	author tg;	state Exp;
+branches
+	1.1.1.1
+	1.1.9.1;
+next	;
+
+1.1.1.1
+date	2003.03.22.20.09.10;	author tg;	state Exp;
+branches;
+next	1.1.1.2;
+
+1.1.1.2
+date	2004.03.02.18.27.31;	author tg;	state Stab;
+branches;
+next	;
+
+1.1.9.1
+date	2004.02.14.19.25.52;	author tg;	state Exp;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@/* $XFree86: xc/programs/Xserver/hw/xfree86/xf4bpp/ppcPixFS.c,v 1.4 2001/08/01 00:44:56 tsi Exp $ */
+/*
+ * Copyright IBM Corporation 1987,1988,1989
+ *
+ * All Rights Reserved
+ *
+ * Permission to use, copy, modify, and distribute this software and its
+ * documentation for any purpose and without fee is hereby granted,
+ * provided that the above copyright notice appear in all copies and that 
+ * both that copyright notice and this permission notice appear in
+ * supporting documentation, and that the name of IBM not be
+ * used in advertising or publicity pertaining to distribution of the
+ * software without specific, written prior permission.
+ *
+ * IBM DISCLAIMS ALL WARRANTIES WITH REGARD TO THIS SOFTWARE, INCLUDING
+ * ALL IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS, IN NO EVENT SHALL
+ * IBM BE LIABLE FOR ANY SPECIAL, INDIRECT OR CONSEQUENTIAL DAMAGES OR
+ * ANY DAMAGES WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS,
+ * WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION,
+ * ARISING OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS
+ * SOFTWARE.
+ *
+*/
+
+/******************************************************************
+Copyright 1987 by Digital Equipment Corporation, Maynard, Massachusetts.
+
+                        All Rights Reserved
+
+Permission to use, copy, modify, and distribute this software and its
+documentation for any purpose and without fee is hereby granted,
+provided that the above copyright notice appear in all copies and that
+both that copyright notice and this permission notice appear in
+supporting documentation, and that the name of Digital not be
+used in advertising or publicity pertaining to distribution of the
+software without specific, written prior permission.
+
+DIGITAL DISCLAIMS ALL WARRANTIES WITH REGARD TO THIS SOFTWARE, INCLUDING
+ALL IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS, IN NO EVENT SHALL
+DIGITAL BE LIABLE FOR ANY SPECIAL, INDIRECT OR CONSEQUENTIAL DAMAGES OR
+ANY DAMAGES WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS,
+WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION,
+ARISING OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS
+SOFTWARE.
+
+******************************************************************/
+/* $XConsortium: ppcPixFS.c /main/3 1996/02/21 17:57:57 kaleb $ */
+
+#include "xf4bpp.h"
+#include "mfbmap.h"
+#include "mfb.h"
+#include "maskbits.h"
+#include "mi.h"
+#include "mispans.h"
+#include "ppcGCstr.h"
+#include "ppcSpMcro.h"
+#include "vgaVideo.h"
+#include "ibmTrace.h"
+
+#define LeftMostBitInScreenLongWord SCRLEFT( 0xFFFFFFFF, 31 )
+
+/* GJA -- copied this from VGA */
+#define SCRLEFT8(lw, n)	( (unsigned char) (((unsigned char) lw) << (n)) )
+#define SCRRIGHT8(lw, n)	( (unsigned char) (((unsigned char)lw) >> (n)) )
+/*
+********** ********** ********** ********** ********** ********** **********
+   these routines all clip.  they assume that anything that has called
+them has already translated the points (i.e. pGC->miTranslate is
+non-zero, which is howit gets set in mfbCreateGC().)
+
+   the number of new scnalines created by clipping ==
+MaxRectsPerBand * nSpans.
+********** ********** ********** ********** ********** ********** **********
+*/
+/* A mod definition that goes smoothly into the negative.
+ */
+static int
+modulo
+(
+      int n1,
+      int n2
+)
+{
+      int tmp;
+      if ( n1 < 0 ) {
+              tmp = (-n1) % n2;
+              if ( tmp == 0 ) {
+                      return 0;
+              } else {
+                      return n2 - tmp;
+              }
+      } else {
+              return n1 % n2;
+      }
+}
+
+void
+xf4bppSolidPixmapFS( pDrawable, pGC, nInit, pptInit, pwidthInit, fSorted )
+    DrawablePtr pDrawable ;
+    GCPtr	pGC ;
+    int		nInit ;			/* number of spans to fill */
+    DDXPointPtr pptInit ;		/* pointer to list of start points */
+    int		*pwidthInit ;		/* pointer to list of n widths */
+    int 	fSorted ;
+{
+    register unsigned long int pm, npm ;
+    register unsigned long int fg ;
+    register int alu ;
+				/* next three parameters are post-clip */
+    int n ;			/* number of spans to fill */
+    register DDXPointPtr ppt ;	/* pointer to list of start points */
+    register int *pwidth ;	/* pointer to list of n widths */
+    register unsigned char *addrl ;	/* pointer to current longword in bitmap */
+    int i ;
+    int *pwidthFree ;		/* copies of the pointers to free */
+    DDXPointPtr pptFree ;
+
+    TRACE(("xf4bppSolidPixmapFS(pDrawable=0x%x, pGC=0x%x, nInit=%d, pptInit=0x%x, pwidthInit=0x%x, fSorted=%d)\n", pDrawable, pGC, nInit, pptInit, pwidthInit, fSorted)) ;
+
+    if ( pDrawable->type != DRAWABLE_PIXMAP ) {
+	ErrorF("xf4bppSolidPixmapFS: drawable is not a pixmap\n") ;
+	return ;
+    }
+
+    if ( ( alu = ( (ppcPrivGC *) pGC->devPrivates[mfbGCPrivateIndex].ptr )->colorRrop.alu ) == GXnoop )
+	return ;
+
+    n = nInit * miFindMaxBand(pGC->pCompositeClip) ;
+    if ( !( pwidth = (int *) ALLOCATE_LOCAL( n * sizeof( int ) ) ) )
+	return ;
+    pwidthFree = pwidth ;
+
+    if ( !( ppt = (DDXPointRec *)
+	    ALLOCATE_LOCAL( n * sizeof( DDXPointRec ) ) ) ) {
+	DEALLOCATE_LOCAL( pwidth ) ;
+	return ;
+    }
+    pptFree = ppt ;
+
+    n = miClipSpans( pGC->pCompositeClip, pptInit, pwidthInit, nInit,
+	ppt, pwidth, fSorted ) ;
+
+    pm = ( (ppcPrivGC *) pGC->devPrivates[mfbGCPrivateIndex].ptr )->colorRrop.planemask ;
+    fg = ( (ppcPrivGC *) pGC->devPrivates[mfbGCPrivateIndex].ptr )->colorRrop.fgPixel ;
+    npm = ( ~ pm ) & ( ( 1 << pDrawable->depth ) - 1 ) ;
+
+    for ( ; n-- ; ppt++, pwidth++ ) {
+        addrl = ( (unsigned char *) ( ( (PixmapPtr) pDrawable )->devPrivate.ptr ) )
+	      + ( ppt->y * ( (int) ( ( (PixmapPtr) pDrawable )->devKind ) ) )
+	      + ppt->x ;
+	for ( i = *pwidth ; i-- ; addrl++ )
+	    {
+	    unsigned _p;
+	    DoRop( _p, alu, fg, *addrl );
+	    *addrl = ( *addrl & npm ) | ( pm & _p ) ;
+	    }
+#ifdef notdef /* PURDUE */
+	    *addrl = ( *addrl & npm ) | ( pm & DoRop( alu, fg, *addrl ) ) ;
+#endif /* PURDUE */
+    }
+    DEALLOCATE_LOCAL( pptFree ) ;
+    DEALLOCATE_LOCAL( pwidthFree ) ;
+    return ;
+}
+
+/* GJA -- copied from vgaStipple.c */
+static unsigned char
+vgagetbits
+(
+	register const int x,
+	register const unsigned int patternWidth,
+	register const unsigned char * const lineptr
+)
+{
+register unsigned char bits ;
+register const unsigned char *cptr ;
+register int shift ;
+register int wrap ;
+
+cptr = lineptr + ( x >> 3 ) ;
+bits = *cptr ;
+if ((shift = x & 7))
+      bits = SCRLEFT8( bits, shift ) | SCRRIGHT8( cptr[1], ( 8 - shift ) ) ;
+if ( ( wrap = x + 8 - patternWidth ) > 0 ) {
+      bits &= SCRLEFT8( 0xFF, wrap ) ;
+      bits |= SCRRIGHT8( *lineptr, ( 8 - wrap ) ) ;
+}
+
+/* GJA -- Handle extraction of 8 bits from < 8 bits wide stipple.
+ * I duplicated case 4,5,6,7 to give the compiler a chance to optimize.
+ */
+switch (patternWidth) {
+case 1:	/* Not really useful. */
+	bits &= ~SCRRIGHT8(0xFF,1);
+	bits |= SCRRIGHT8(bits,1); 
+	bits |= SCRRIGHT8(bits,2);
+	bits |= SCRRIGHT8(bits,4);
+	break;
+case 2:
+	bits &= ~SCRRIGHT8(0xFF,2);
+	bits |= SCRRIGHT8(bits,2); bits |= SCRRIGHT8(bits,4); break;
+case 3:
+	bits &= ~SCRRIGHT8(0xFF,3);
+	bits |= (SCRRIGHT8(bits,3) | SCRRIGHT8(bits,6)); break;
+case 4:
+	bits = (bits & ~SCRRIGHT8(0xFF,4)) | SCRRIGHT8(bits,4); break;
+case 5:
+	bits = (bits & ~SCRRIGHT8(0xFF,5)) | SCRRIGHT8(bits,5); break;
+case 6:
+	bits = (bits & ~SCRRIGHT8(0xFF,6)) | SCRRIGHT8(bits,6); break;
+case 7:
+	bits = (bits & ~SCRRIGHT8(0xFF,7)) | SCRRIGHT8(bits,7); break;
+default:
+	;
+	/* Do nothing, of course */
+}
+
+return bits ;
+}
+
+void
+xf4bppStipplePixmapFS( pDrawable, pGC, nInit, pptInit, pwidthInit, fSorted )
+register DrawablePtr pDrawable ;
+GC *pGC ;
+int nInit ;			/* number of spans to fill */
+DDXPointPtr pptInit ;		/* pointer to list of start points */
+int *pwidthInit ;		/* pointer to list of n widths */
+int fSorted ;
+{
+    register unsigned char *pdst ; /* pointer to current word in bitmap */
+    register int *psrc ;		/* pointer to current word in tile */
+    register unsigned long int pm, npm ;
+    register unsigned long int fg ;
+    register int alu ;
+				/* next three parameters are post-clip */
+    int n ;			/* number of spans to fill */
+    register DDXPointPtr ppt ;	/* pointer to list of start points */
+    register int *pwidth ;	/* pointer to list of n widths */
+    PixmapPtr	pTile ;		/* pointer to tile we want to fill with */
+    int		width,  x, xSrc, ySrc ;
+    int 	tlwidth, tileWidth ;
+    unsigned char *psrcT ;
+    int *pwidthFree ;		/* copies of the pointers to free */
+    DDXPointPtr pptFree ;
+    int xoff, count, stip, i ;
+
+    TRACE(("xf4bppStipplePixmapFS(pDrawable=0x%x, pGC=0x%x, nInit=%d, pptInit=0x%x, pwidthInit=0x%x, fSorted=%d)\n",
+		 pDrawable, pGC, nInit, pptInit, pwidthInit, fSorted)) ;
+
+    if ( pDrawable->type != DRAWABLE_PIXMAP ) {
+	ErrorF( "xf4bppStippleWindowFS: drawable is not a pixmap\n") ;
+	return ;
+    }
+    if ( pGC->stipple->drawable.depth != 1 ) {
+	ErrorF( "ppcStippleFS: bad depth\ntype = %d, depth = %d\n",
+		pDrawable->type, pGC->stipple->drawable.depth ) ;
+	return ;
+    }
+
+    if ( ( alu = ( (ppcPrivGC *) pGC->devPrivates[mfbGCPrivateIndex].ptr )->colorRrop.alu ) == GXnoop )
+	return ;
+
+    SETSPANPTRS( nInit, n, pwidthInit, pwidth, pptInit,
+		ppt, pwidthFree, pptFree, fSorted ) ;
+
+    pm = ( (ppcPrivGC *) pGC->devPrivates[mfbGCPrivateIndex].ptr )->colorRrop.planemask ;
+    fg = ( (ppcPrivGC *) pGC->devPrivates[mfbGCPrivateIndex].ptr )->colorRrop.fgPixel ;
+
+    pTile = pGC->stipple ;
+    tlwidth = pTile->devKind ;
+
+    tileWidth = pTile->drawable.width ;
+
+    npm = ( ~ pm ) & ( ( 1 << pDrawable->depth ) - 1 ) ;
+
+    /* this replaces rotating the stipple.  Instead, we just adjust the offset
+     * at which we start grabbing bits from the stipple */
+    xSrc = pGC->patOrg.x + pDrawable->x;
+    ySrc = pGC->patOrg.y + pDrawable->y;
+
+    while ( n-- ) {
+        pdst = ( (unsigned char *) ( (PixmapPtr) pDrawable )->devPrivate.ptr )
+	     + ( ppt->y * ( (int) ( ( (PixmapPtr) pDrawable )->devKind ) ) )
+	     + ppt->x ;
+        psrcT = (unsigned char *)pTile->devPrivate.ptr
+	      + ( modulo( ppt->y - ySrc, pTile->drawable.height ) * tlwidth ) ;
+	x = ppt->x ;
+
+        xoff = modulo( x - xSrc, tileWidth) ;
+        for ( width = *pwidth ; width ; psrc++, width -= count, xoff+=count ) {
+ 
+            if ( xoff >= tileWidth ) xoff -= tileWidth;
+ 
+            if ( width < 8 )
+                count = width;
+            else
+                count = 8;
+ 
+            stip = vgagetbits( xoff, tileWidth, psrcT ) ;
+ 
+            for ( i = count ; i-- ; ) {
+                if ( stip & 128 )
+		    {
+		    unsigned _p;
+		    DoRop( _p, alu, fg, *pdst ) ;
+		    *pdst = ( *pdst & npm ) | ( pm & _p ) ;
+		    }
+#ifdef notdef /* PURDUE */
+		    *pdst = ( *pdst & npm ) | ( pm & DoRop( alu, fg, *pdst ) ) ;
+#endif /* PURDUE */
+		pdst++ ;
+		stip = SCRLEFT( stip, 1 ) ;
+	    }
+	}
+	ppt++ ;
+	pwidth++ ;
+    }
+    DEALLOCATE_LOCAL( pptFree ) ;
+    DEALLOCATE_LOCAL( pwidthFree ) ;
+    return ;
+}
+
+void
+xf4bppOpStipplePixmapFS( pDrawable, pGC, nInit, pptInit, pwidthInit, fSorted )
+DrawablePtr pDrawable ;
+GC *pGC ;
+int nInit ;			/* number of spans to fill */
+DDXPointPtr pptInit ;		/* pointer to list of start points */
+int *pwidthInit ;		/* pointer to list of n widths */
+int fSorted ;
+{
+    register unsigned char *pdst ;	/* pointer to current word in bitmap */
+    register unsigned long int pm, npm ;
+    register unsigned long int fg, bg ;
+    register int alu ;
+				/* next three parameters are post-clip */
+    int n ;			/* number of spans to fill */
+    register DDXPointPtr ppt ;	/* pointer to list of start points */
+    register int *pwidth ;	/* pointer to list of n widths */
+    register int *psrc ;	/* pointer to current word in tile */
+    PixmapPtr pTile ;		/* pointer to tile we want to fill with */
+    int	width ;
+    int xSrc, ySrc ;
+    int tlwidth, tileWidth ;
+    unsigned char *psrcT ;
+    int *pwidthFree ;		/* copies of the pointers to free */
+    DDXPointPtr pptFree ;
+    int xoff, count, stip, i ;
+
+    TRACE( ( "xf4bppOpStipplePixmapFS(pDrawable=0x%x,pGC=0x%x,nInit=%d,pptInit=0x%x,pwidthInit=0x%x,fSorted=%d)\n",
+	   pDrawable, pGC, nInit, pptInit, pwidthInit, fSorted ) ) ;
+
+    if ( pGC->stipple->drawable.depth != 1 ) {
+	ErrorF( "xf4bppOpStipplePixmapFS: bad depth\ntype = %d, depth = %d\n",
+		pDrawable->type, pGC->stipple->drawable.depth ) ;
+	return ;
+    }
+
+    if ( ( alu = ( (ppcPrivGC *) pGC->devPrivates[mfbGCPrivateIndex].ptr )->colorRrop.alu ) == GXnoop )
+	return ;
+
+    SETSPANPTRS( nInit, n, pwidthInit, pwidth, pptInit,
+		 ppt, pwidthFree, pptFree, fSorted ) ;
+
+    fg = ( (ppcPrivGC *) pGC->devPrivates[mfbGCPrivateIndex].ptr )->colorRrop.fgPixel ;
+    bg = ( (ppcPrivGC *) pGC->devPrivates[mfbGCPrivateIndex].ptr )->colorRrop.bgPixel ;
+    pm = ( (ppcPrivGC *) pGC->devPrivates[mfbGCPrivateIndex].ptr )->colorRrop.planemask ;
+    npm = ( ~ pm ) & ( ( 1 << pDrawable->depth ) - 1 ) ;
+
+    pTile = pGC->stipple ;
+    tlwidth = pTile->devKind ;
+    tileWidth = pTile->drawable.width ;
+
+    xSrc = pGC->patOrg.x + pDrawable->x;
+    ySrc = pGC->patOrg.y + pDrawable->y;
+
+    /* this replaces rotating the stipple.  Instead, we just adjust the offset
+     * at which we start grabbing bits from the stipple */
+    for ( ; n-- ; ppt++, pwidth++ ) {
+        pdst = ( (unsigned char *) ( (PixmapPtr) pDrawable )->devPrivate.ptr )
+	     + ( ppt->y * ( (int) ( (PixmapPtr) pDrawable )->devKind ) )
+	     + ppt->x ;
+        psrcT = (unsigned char *)pTile->devPrivate.ptr
+            + ( modulo( ppt->y - ySrc, pTile->drawable.height ) * tlwidth ) ;
+ 
+        xoff = modulo( ppt->x - xSrc, tileWidth) ;
+ 
+        for ( width = *pwidth ; width ; psrc++, width -= count, xoff+=count ) {
+ 
+            if ( xoff >= tileWidth ) xoff -= tileWidth;
+ 
+            if ( width < 8 )
+                count = width;
+            else
+                count = 8;
+ 
+            stip = vgagetbits( xoff, tileWidth, psrcT ) ;
+            for ( i = count ; i-- ; pdst++, stip = SCRLEFT( stip, 1 ) )
+                if ( stip & 128 )
+		    {
+		    unsigned _p;
+		    DoRop( _p, alu, fg, *pdst ) ;
+		    *pdst = ( *pdst & npm ) | ( pm & _p ) ;
+		    }
+#ifdef notdef /* PURDUE */
+		    *pdst = ( *pdst & npm ) | ( pm & DoRop( alu, fg, *pdst ) ) ;
+#endif /* PURDUE */
+		else
+		    {
+		    unsigned _p;
+		    DoRop( _p, alu, bg, *pdst ) ;
+		    *pdst = ( *pdst & npm ) | ( pm & _p ) ;
+		    }
+#ifdef notdef /* PURDUE */
+		    *pdst = ( *pdst & npm ) | ( pm & DoRop( alu, bg, *pdst ) ) ;
+#endif /* PURDUE */
+	}
+    }
+    DEALLOCATE_LOCAL( pptFree ) ;
+    DEALLOCATE_LOCAL( pwidthFree ) ;
+    return ;
+}
+
+void
+xf4bppTilePixmapFS( pDrawable, pGC, nInit, pptInit, pwidthInit, fSorted )
+register DrawablePtr pDrawable ;
+GC *pGC ;
+int nInit ;			/* number of spans to fill */
+DDXPointPtr pptInit ;		/* pointer to list of start points */
+int *pwidthInit ;		/* pointer to list of n widths */
+int fSorted ;
+{
+    register DDXPointPtr ppt ;	/* pointer to list of start points */
+    register int *pwidth ;	/* pointer to list of n widths */
+    register unsigned char *pdst ;	/* pointer to current word in bitmap */
+    register unsigned char *psrc ;	/* pointer to current word in tile */
+    register PixmapPtr pTile ;	/* pointer to tile we want to fill with */
+    int i ;
+    int alu ;
+    unsigned char pm, npm ;
+				/* next three parameters are post-clip */
+    int n ;			/* number of spans to fill */
+    int tileWidth ;
+    int xSrc, ySrc;
+    unsigned char *psrcT ;
+    int *pwidthFree ;		/* copies of the pointers to free */
+    DDXPointPtr pptFree ;
+
+    TRACE( ( "ppcTileFS(pDrawable=0x%x,pGC=0x%x,nInit=%d,pptInit=0x%x,pwidthInit=0x%x,fSorted=%d)\n",
+	    pDrawable, pGC, nInit, pptInit, pwidthInit, fSorted ) ) ;
+
+    if ( ( pDrawable->depth == 1 ) && ( pDrawable->type == DRAWABLE_PIXMAP ) ) {
+	mfbTileFS( pDrawable, pGC, nInit, pptInit, pwidthInit, fSorted ) ;
+	return ;
+    }
+    if ( !xf4bppDepthOK( pDrawable, pGC->tile.pixmap->drawable.depth ) ) {
+	ErrorF( "ppcTileFS: bad depth\ntype = %d, depth = %d\n",
+		pDrawable->type, pDrawable->depth) ;
+	return ;
+    }
+
+    if ( ( alu = ( (ppcPrivGC *) pGC->devPrivates[mfbGCPrivateIndex].ptr )->colorRrop.alu ) == GXnoop )
+	return ;
+
+    SETSPANPTRS( nInit, n, pwidthInit, pwidth, pptInit,
+		 ppt, pwidthFree, pptFree, fSorted ) ;
+
+    /* the following code is for 8 bits per pixel addressable memory only */
+    pm = ( (ppcPrivGC *) pGC->devPrivates[mfbGCPrivateIndex].ptr )->colorRrop.planemask ;
+    npm = ( ~ pm ) & ( ( 1 << pDrawable->depth ) - 1 ) ;
+    pTile = pGC->tile.pixmap ;
+    tileWidth = pTile->drawable.width ;
+
+     xSrc = pGC->patOrg.x + pDrawable->x;
+     ySrc = pGC->patOrg.y + pDrawable->y;
+    /* this replaces rotating the tile. Instead we just adjust the offset
+     * at which we start grabbing bits from the tile */
+    for ( ; n-- ; ppt++, pwidth++ ) {
+        pdst = ( (unsigned char *) ( (PixmapPtr) pDrawable )->devPrivate.ptr )
+	     + ( ppt->y * ( (int) ( (PixmapPtr) pDrawable )->devKind ) )
+	     + ppt->x ;
+        psrcT = (unsigned char *) pTile->devPrivate.ptr
+        + ( modulo( ppt->y - ySrc, pTile->drawable.height) * pTile->devKind ) ;
+ 
+        psrc = psrcT + modulo( ppt->x - xSrc, tileWidth ) ;
+	for ( i = *pwidth ; i-- ; pdst++, psrc++ ) {
+	    if ( psrc >= ( psrcT + tileWidth ) )
+		psrc = psrcT ;
+	    {
+	    unsigned _p;
+	    DoRop( _p, alu, *psrc, *pdst ) ;
+	    *pdst = ( *pdst & npm ) | ( pm & _p ) ;
+	    }
+#ifdef notdef /* PURDUE */
+	    *pdst = ( *pdst & npm ) | ( pm & DoRop( alu, *psrc, *pdst ) ) ;
+#endif /* PURDUE */
+	}
+    }
+    DEALLOCATE_LOCAL( pptFree ) ;
+    DEALLOCATE_LOCAL( pwidthFree ) ;
+    return ;
+}
+@
+
+
+1.1.9.1
+log
+@OpenBSD just has imported exactly this tree into their vendor branch,
+called the same tag, in XF4/xc
+This is, apparently, the last XFree86 snapshot before the licence change
+(ie, addition of the advertising clause)
+
+Since the developers don't see any problems with that, and we would like
+to integrate improvements done by the remaining one or two (or so) XFree86
+developers (j/k), this prepares enabling us to update X-Window in the future.
+@
+text
+@d1 1
+a1 1
+/* $XFree86: xc/programs/Xserver/hw/xfree86/xf4bpp/ppcPixFS.c,v 1.5 2003/11/03 05:11:57 tsi Exp $ */
+d129 1
+a129 1
+    if ( !( pwidthFree = (int *) ALLOCATE_LOCAL( n * sizeof( int ) ) ) )
+d131 1
+a131 1
+    pwidth = pwidthFree ;
+d133 1
+a133 1
+    if ( !( pptFree = (DDXPointRec *)
+d138 1
+a138 1
+    ppt = pptFree ;
+d263 2
+a264 2
+    SETSPANPTRS( nInit, n, pwidthInit, pwidthFree, pptInit,
+		pptFree, pwidth, ppt, fSorted ) ;
+d362 2
+a363 2
+    SETSPANPTRS( nInit, n, pwidthInit, pwidthFree, pptInit,
+		 pptFree, pwidth, ppt, fSorted ) ;
+d465 2
+a466 2
+    SETSPANPTRS( nInit, n, pwidthInit, pwidthFree, pptInit,
+		 pptFree, pwidth, ppt, fSorted ) ;
+@
+
+
+1.1.1.1
+log
+@Import OpenBSD 3.3 XF4 repository from CTM 3132 the first time
+This finalizes starting an OpenBSD-mirabile (aka MirBSD) repository.
+
+### MirBSD is:
+# Copyright (c) 1982-2003 by Thorsten "mirabile" Glaser <x86@@ePost.de>
+# Copyright © 1968-2003  The authors of And contributors to UNIX®, the
+#       C Language, BSD/Berkeley Unix; 386BSD, NetBSD 1.1 and OpenBSD.
+#
+# Anyone who obtained a copy of this work is hereby permitted to freely use,
+# distribute, modify, merge, sublicence, give away or sell it as long as the
+# authors are given due credit and the following notice is retained:
+#
+# This work is provided "as is", with no explicit or implicit warranty what-
+# soever. Use it only at your own risk. In no event may an author or contri-
+# butor be held liable for any damage, directly or indirectly, that origina-
+# ted through or is caused by creation or modification of this work.
+
+MirBSD is my private tree. MirBSD does not differ very much from OpenBSD
+and intentionally tracks OpenBSD. That's why it _is_ OpenBSD, just not the
+official one. It's like with DarrenBSD.
+
+At time of this writing, no advertising for MirBSD must be done,
+because the advertising clause has not yet been sorted out.
+
+http://templeofhate.com/tglaser/MirBSD/index.php
+@
+text
+@@
+
+
+1.1.1.2
+log
+@That's what OpenBSD will, probably, ship as XF4 in 3.5
+their last sync against XFree86 4.3-current has been
+imported into our vendor branch, too
+@
+text
+@d1 1
+a1 1
+/* $XFree86: xc/programs/Xserver/hw/xfree86/xf4bpp/ppcPixFS.c,v 1.5 2003/11/03 05:11:57 tsi Exp $ */
+d129 1
+a129 1
+    if ( !( pwidthFree = (int *) ALLOCATE_LOCAL( n * sizeof( int ) ) ) )
+d131 1
+a131 1
+    pwidth = pwidthFree ;
+d133 1
+a133 1
+    if ( !( pptFree = (DDXPointRec *)
+d138 1
+a138 1
+    ppt = pptFree ;
+d263 2
+a264 2
+    SETSPANPTRS( nInit, n, pwidthInit, pwidthFree, pptInit,
+		pptFree, pwidth, ppt, fSorted ) ;
+d362 2
+a363 2
+    SETSPANPTRS( nInit, n, pwidthInit, pwidthFree, pptInit,
+		 pptFree, pwidth, ppt, fSorted ) ;
+d465 2
+a466 2
+    SETSPANPTRS( nInit, n, pwidthInit, pwidthFree, pptInit,
+		 pptFree, pwidth, ppt, fSorted ) ;
+@
+

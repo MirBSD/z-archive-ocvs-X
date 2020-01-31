@@ -1,0 +1,308 @@
+head	1.1;
+branch	1.1.1;
+access;
+symbols
+	tg-mergetmp-2:1.1.1.2
+	cvs-200410241530:1.1.1.2
+	cvs-200410012000:1.1.1.2
+	cvs-200407221130:1.1.1.2
+	cvs-200407141120:1.1.1.2
+	cvs-200406231010:1.1.1.2
+	MIRBSD_7quater:1.1.1.2
+	cvs-200405271510:1.1.1.2
+	XFree86_4_4_0:1.1.9.1
+	cvs-200403021700:1.1.1.2
+	XFREE86_20040213:1.1.9.1
+	xc:1.1.9
+	cvs-200401291925:1.1.1.2
+	MIRBSD_7_ALPHA:1.1.1.2.0.4
+	MIRBSD_7:1.1.1.2.0.2
+	MIRBSD_7ter:1.1.1.2
+	cvs-20011091815:1.1.1.2
+	cvs-200309162130:1.1.1.2
+	cvs-200308302005:1.1.1.2
+	ctmx-0387:1.1.1.2
+	ctmx-0384:1.1.1.2
+	MIRBSD_5:1.1.1.2
+	ctmx-0375:1.1.1.2
+	ctmx-0373:1.1.1.2
+	ctm-0371:1.1.1.2
+	ctm-0370:1.1.1.2
+	MIRBSD_4:1.1.1.2
+	ctm-0363:1.1.1.2
+	ctm-0359:1.1.1.2
+	ctm-0349:1.1.1.1
+	openbsd:1.1.1;
+locks; strict;
+comment	@ * @;
+
+
+1.1
+date	2003.03.22.20.07.20;	author tg;	state Exp;
+branches
+	1.1.1.1
+	1.1.9.1;
+next	;
+
+1.1.1.1
+date	2003.03.22.20.07.20;	author tg;	state Exp;
+branches;
+next	1.1.1.2;
+
+1.1.1.2
+date	2003.04.08.18.36.24;	author tg;	state Stab;
+branches;
+next	;
+
+1.1.9.1
+date	2004.02.14.19.23.24;	author tg;	state Exp;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@/* 
+ * Id: newport_shadow.c,v 1.3 2000/11/29 20:58:10 agx Exp $
+ */
+/* $XFree86: xc/programs/Xserver/hw/xfree86/drivers/newport/newport_shadow.c,v 1.2 2001/11/23 19:50:45 dawes Exp $ */
+
+#include "newport.h"
+
+void
+NewportRefreshArea8(ScrnInfoPtr pScrn, int num, BoxPtr pbox)
+{
+	unsigned long *base, *src;
+	int dx, dy, x;
+	NewportPtr pNewport = NEWPORTPTR(pScrn);
+	NewportRegsPtr pNewportRegs = pNewport->pNewportRegs;
+
+#define RA8_PIXELS	4	/* burst 4 pixels each time */
+#define RA8_PIXEL_SHIFT 2 	/* 4 Pixels on each burst   */
+#define RA8_MASK        0xffc   /* move to 4 byte boundary   */
+
+	TRACE_ENTER("NewportRefreshArea8");
+	NewportWait(pNewportRegs);
+	pNewportRegs->set.drawmode0 = (NPORT_DMODE0_DRAW | 
+					NPORT_DMODE0_BLOCK | 
+					NPORT_DMODE0_CHOST);
+	while(num--) {
+		NewportWait(pNewportRegs);
+		x = pbox->x1 & RA8_MASK;  	/* move x to 4 byte boundary */
+		base = (unsigned long*)pNewport->ShadowPtr 
+				+ (pbox->y1 * (pNewport->ShadowPitch >> RA8_PIXEL_SHIFT) ) 
+				+ ( x >> RA8_PIXEL_SHIFT);
+
+		pNewportRegs->set.xystarti = (x << 16) | pbox->y1;
+		pNewportRegs->set.xyendi = (pbox->x2 << 16) | pbox->y2;
+
+		for ( dy = pbox->y1; dy <= pbox->y2; dy++) {
+
+			src = base;
+			for ( dx = x; dx <= pbox->x2; dx += RA8_PIXELS) {
+				pNewportRegs->go.hostrw0 = *src;  
+				src++;
+			}
+			base += ( pNewport->ShadowPitch >> RA8_PIXEL_SHIFT );
+		}
+		pbox++;
+	}
+	TRACE_EXIT("NewportRefreshArea8");
+}
+
+void
+NewportRefreshArea24(ScrnInfoPtr pScrn, int num, BoxPtr pbox)
+{
+	NewportPtr pNewport = NEWPORTPTR(pScrn);
+	NewportRegsPtr pNewportRegs = pNewport->pNewportRegs;
+	int dx, dy;
+	CARD8 *src, *base;
+	CARD32 dest;
+
+	TRACE_ENTER("NewportRefreshArea24");
+	NewportWait(pNewportRegs);
+
+	/* block transfers */
+	pNewportRegs->set.drawmode0 = (NPORT_DMODE0_DRAW | 
+					NPORT_DMODE0_BLOCK | 
+					NPORT_DMODE0_CHOST);
+
+	while(num--) {
+		base = (CARD8*)pNewport->ShadowPtr + pbox->y1 * pNewport->ShadowPitch + pbox->x1 * 3;
+		
+		pNewportRegs->set.xystarti = (pbox->x1 << 16) | pbox->y1;
+		pNewportRegs->set.xyendi = (pbox->x2 << 16) | pbox->y2;
+		
+		for ( dy = pbox->y1; dy <= pbox->y2; dy++) {
+			src = base;
+			for ( dx = pbox->x1 ;  dx <= pbox->x2 ; dx++) {
+				dest = src[0] | src[1] << 8 | src[2] << 16;
+				pNewportRegs->go.hostrw0 = dest;	
+				src+=3;
+ 			}
+			base += pNewport->ShadowPitch;
+ 		}
+ 		pbox++;
+ 	}
+	TRACE_EXIT("NewportRefreshArea24");
+}
+@
+
+
+1.1.9.1
+log
+@OpenBSD just has imported exactly this tree into their vendor branch,
+called the same tag, in XF4/xc
+This is, apparently, the last XFree86 snapshot before the licence change
+(ie, addition of the advertising clause)
+
+Since the developers don't see any problems with that, and we would like
+to integrate improvements done by the remaining one or two (or so) XFree86
+developers (j/k), this prepares enabling us to update X-Window in the future.
+@
+text
+@d4 1
+a4 1
+/* $XFree86: xc/programs/Xserver/hw/xfree86/drivers/newport/newport_shadow.c,v 1.3 2002/09/30 22:17:55 alanh Exp $ */
+d11 1
+a12 1
+	CARD32 *base, *src;
+d16 2
+a17 2
+#define RA8_BYTES	4	/* burst 4 pixels each time */
+#define RA8_BYTE_SHIFT  2 	/* 4 Pixels on each burst, so divide ShadowPitch by 4 */
+d28 3
+a30 3
+		base = pNewport->ShadowPtr 
+				+ (pbox->y1 * (pNewport->ShadowPitch >> RA8_BYTE_SHIFT) ) 
+				+ ( x >> RA8_BYTE_SHIFT);
+d33 1
+a33 1
+		pNewportRegs->set.xyendi = ((pbox->x2-1) << 16) | (pbox->y2-1);
+d35 1
+a35 1
+		for ( dy = pbox->y1; dy < pbox->y2; dy++) {
+d38 1
+a38 1
+			for ( dx = x; dx < pbox->x2; dx += RA8_BYTES) {
+d42 1
+a42 1
+			base += ( pNewport->ShadowPitch >> RA8_BYTE_SHIFT );
+a48 1
+
+d52 2
+a56 2
+	NewportPtr pNewport = NEWPORTPTR(pScrn);
+	NewportRegsPtr pNewportRegs = pNewport->pNewportRegs;
+d70 1
+a70 1
+		pNewportRegs->set.xyendi = ((pbox->x2-1) << 16) | (pbox->y2-1);
+d72 1
+a72 1
+		for ( dy = pbox->y1; dy < pbox->y2; dy++) {
+d74 1
+a74 4
+			for ( dx = pbox->x1 ;  dx < pbox->x2 ; dx++) {
+				/* Removing these shifts by using 32bpp fb
+				 * yields < 2% percent performance gain and wastes 25% memory 
+				 */
+a84 1
+
+@
+
+
+1.1.1.1
+log
+@Import OpenBSD 3.3 XF4 repository from CTM 3132 the first time
+This finalizes starting an OpenBSD-mirabile (aka MirBSD) repository.
+
+### MirBSD is:
+# Copyright (c) 1982-2003 by Thorsten "mirabile" Glaser <x86@@ePost.de>
+# Copyright © 1968-2003  The authors of And contributors to UNIX®, the
+#       C Language, BSD/Berkeley Unix; 386BSD, NetBSD 1.1 and OpenBSD.
+#
+# Anyone who obtained a copy of this work is hereby permitted to freely use,
+# distribute, modify, merge, sublicence, give away or sell it as long as the
+# authors are given due credit and the following notice is retained:
+#
+# This work is provided "as is", with no explicit or implicit warranty what-
+# soever. Use it only at your own risk. In no event may an author or contri-
+# butor be held liable for any damage, directly or indirectly, that origina-
+# ted through or is caused by creation or modification of this work.
+
+MirBSD is my private tree. MirBSD does not differ very much from OpenBSD
+and intentionally tracks OpenBSD. That's why it _is_ OpenBSD, just not the
+official one. It's like with DarrenBSD.
+
+At time of this writing, no advertising for MirBSD must be done,
+because the advertising clause has not yet been sorted out.
+
+http://templeofhate.com/tglaser/MirBSD/index.php
+@
+text
+@@
+
+
+1.1.1.2
+log
+@The X-Windowing System
+
+Import XFree86 4.3 from OpenBSD by CTM, in the hope it's stable
+@
+text
+@d4 1
+a4 1
+/* $XFree86: xc/programs/Xserver/hw/xfree86/drivers/newport/newport_shadow.c,v 1.3 2002/09/30 22:17:55 alanh Exp $ */
+d11 1
+a12 1
+	CARD32 *base, *src;
+d16 2
+a17 2
+#define RA8_BYTES	4	/* burst 4 pixels each time */
+#define RA8_BYTE_SHIFT  2 	/* 4 Pixels on each burst, so divide ShadowPitch by 4 */
+d28 3
+a30 3
+		base = pNewport->ShadowPtr 
+				+ (pbox->y1 * (pNewport->ShadowPitch >> RA8_BYTE_SHIFT) ) 
+				+ ( x >> RA8_BYTE_SHIFT);
+d33 1
+a33 1
+		pNewportRegs->set.xyendi = ((pbox->x2-1) << 16) | (pbox->y2-1);
+d35 1
+a35 1
+		for ( dy = pbox->y1; dy < pbox->y2; dy++) {
+d38 1
+a38 1
+			for ( dx = x; dx < pbox->x2; dx += RA8_BYTES) {
+d42 1
+a42 1
+			base += ( pNewport->ShadowPitch >> RA8_BYTE_SHIFT );
+a48 1
+
+d52 2
+a56 2
+	NewportPtr pNewport = NEWPORTPTR(pScrn);
+	NewportRegsPtr pNewportRegs = pNewport->pNewportRegs;
+d70 1
+a70 1
+		pNewportRegs->set.xyendi = ((pbox->x2-1) << 16) | (pbox->y2-1);
+d72 1
+a72 1
+		for ( dy = pbox->y1; dy < pbox->y2; dy++) {
+d74 1
+a74 4
+			for ( dx = pbox->x1 ;  dx < pbox->x2 ; dx++) {
+				/* Removing these shifts by using 32bpp fb
+				 * yields < 2% percent performance gain and wastes 25% memory 
+				 */
+a84 1
+
+@
+

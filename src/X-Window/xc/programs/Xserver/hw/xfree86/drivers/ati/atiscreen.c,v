@@ -1,0 +1,555 @@
+head	1.1;
+branch	1.1.1;
+access;
+symbols
+	tg-mergetmp-2:1.1.1.3
+	cvs-200410241530:1.1.1.3
+	cvs-200410012000:1.1.1.3
+	cvs-200407221130:1.1.1.3
+	cvs-200407141120:1.1.1.3
+	cvs-200406231010:1.1.1.3
+	MIRBSD_7quater:1.1.1.2
+	cvs-200405271510:1.1.1.3
+	XFree86_4_4_0:1.1.9.1
+	cvs-200403021700:1.1.1.3
+	XFREE86_20040213:1.1.9.1
+	xc:1.1.9
+	cvs-200401291925:1.1.1.2
+	MIRBSD_7_ALPHA:1.1.1.2.0.4
+	MIRBSD_7:1.1.1.2.0.2
+	MIRBSD_7ter:1.1.1.2
+	cvs-20011091815:1.1.1.2
+	cvs-200309162130:1.1.1.2
+	cvs-200308302005:1.1.1.2
+	ctmx-0387:1.1.1.2
+	ctmx-0384:1.1.1.2
+	MIRBSD_5:1.1.1.2
+	ctmx-0375:1.1.1.2
+	ctmx-0373:1.1.1.2
+	ctm-0371:1.1.1.2
+	ctm-0370:1.1.1.2
+	MIRBSD_4:1.1.1.2
+	ctm-0363:1.1.1.2
+	ctm-0359:1.1.1.2
+	ctm-0349:1.1.1.1
+	openbsd:1.1.1;
+locks; strict;
+comment	@ * @;
+
+
+1.1
+date	2003.03.22.20.06.57;	author tg;	state Exp;
+branches
+	1.1.1.1
+	1.1.9.1;
+next	;
+
+1.1.1.1
+date	2003.03.22.20.06.57;	author tg;	state Exp;
+branches;
+next	1.1.1.2;
+
+1.1.1.2
+date	2003.04.08.18.36.02;	author tg;	state Exp;
+branches;
+next	1.1.1.3;
+
+1.1.1.3
+date	2004.03.02.18.16.20;	author tg;	state Stab;
+branches;
+next	;
+
+1.1.9.1
+date	2004.02.14.19.22.53;	author tg;	state Exp;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@/* $XFree86: xc/programs/Xserver/hw/xfree86/drivers/ati/atiscreen.c,v 1.28 2002/01/16 16:22:28 tsi Exp $ */
+/*
+ * Copyright 1999 through 2002 by Marc Aurele La France (TSI @@ UQV), tsi@@xfree86.org
+ *
+ * Permission to use, copy, modify, distribute, and sell this software and its
+ * documentation for any purpose is hereby granted without fee, provided that
+ * the above copyright notice appear in all copies and that both that copyright
+ * notice and this permission notice appear in supporting documentation, and
+ * that the name of Marc Aurele La France not be used in advertising or
+ * publicity pertaining to distribution of the software without specific,
+ * written prior permission.  Marc Aurele La France makes no representations
+ * about the suitability of this software for any purpose.  It is provided
+ * "as-is" without express or implied warranty.
+ *
+ * MARC AURELE LA FRANCE DISCLAIMS ALL WARRANTIES WITH REGARD TO THIS SOFTWARE,
+ * INCLUDING ALL IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS.  IN NO
+ * EVENT SHALL MARC AURELE LA FRANCE BE LIABLE FOR ANY SPECIAL, INDIRECT OR
+ * CONSEQUENTIAL DAMAGES OR ANY DAMAGES WHATSOEVER RESULTING FROM LOSS OF USE,
+ * DATA OR PROFITS, WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER
+ * TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR
+ * PERFORMANCE OF THIS SOFTWARE.
+ */
+
+#include "ati.h"
+#include "atiaccel.h"
+#include "aticonsole.h"
+#include "aticursor.h"
+#include "atidac.h"
+#include "atidga.h"
+#include "atiscreen.h"
+#include "atistruct.h"
+#include "atixv.h"
+
+#include "shadowfb.h"
+#include "xf86cmap.h"
+
+#include "xf1bpp.h"
+#include "xf4bpp.h"
+
+#include "fb.h"
+
+#include "mibank.h"
+#include "micmap.h"
+#include "mipointer.h"
+
+/*
+ * ATIRefreshArea --
+ *
+ * This function is called by the shadow frame buffer code to refresh the
+ * hardware frame buffer.
+ */
+static void
+ATIRefreshArea
+(
+    ScrnInfoPtr pScreenInfo,
+    int         nBox,
+    BoxPtr      pBox
+)
+{
+    ATIPtr  pATI = ATIPTR(pScreenInfo);
+    pointer pSrc, pDst;
+    int     offset, w, h;
+
+    while (nBox-- > 0)
+    {
+        w = (pBox->x2 - pBox->x1) * pATI->FBBytesPerPixel;
+        h = pBox->y2 - pBox->y1;
+        offset =
+            (pBox->y1 * pATI->FBPitch) + (pBox->x1 * pATI->FBBytesPerPixel);
+        pSrc = (char *)pATI->pShadow + offset;
+        pDst = (char *)pATI->pMemory + offset;
+
+        while (h-- > 0)
+        {
+            (void)memcpy(pDst, pSrc, w);
+            pSrc = (char *)pSrc + pATI->FBPitch;
+            pDst = (char *)pDst + pATI->FBPitch;
+        }
+
+        pBox++;
+    }
+}
+
+/*
+ * ATIScreenInit --
+ *
+ * This function is called by DIX to initialise the screen.
+ */
+Bool
+ATIScreenInit
+(
+    int       iScreen,
+    ScreenPtr pScreen,
+    int       argc,
+    char      **argv
+)
+{
+    ScrnInfoPtr  pScreenInfo = xf86Screens[iScreen];
+    ATIPtr       pATI        = ATIPTR(pScreenInfo);
+    pointer      pFB;
+    int          VisualMask;
+
+    /* Set video hardware state */
+    if (!ATIEnterGraphics(pScreen, pScreenInfo, pATI))
+        return FALSE;
+
+    /* Re-initialise mi's visual list */
+    miClearVisualTypes();
+
+    if ((pATI->depth > 8) && (pATI->DAC == ATI_DAC_INTERNAL))
+        VisualMask = TrueColorMask;
+    else
+        VisualMask = miGetDefaultVisualMask(pATI->depth);
+
+    if (!miSetVisualTypes(pATI->depth, VisualMask, pATI->rgbBits,
+                          pScreenInfo->defaultVisual))
+        return FALSE;
+
+    if (!miSetPixmapDepths())
+        return FALSE;
+
+    pFB = pATI->pMemory;
+    if (pATI->OptionShadowFB)
+    {
+        pATI->FBBytesPerPixel = pATI->bitsPerPixel >> 3;
+        pATI->FBPitch = PixmapBytePad(pATI->displayWidth, pATI->depth);
+        if ((pATI->pShadow = xalloc(pATI->FBPitch * pScreenInfo->virtualY)))
+            pFB = pATI->pShadow;
+        else
+        {
+            xf86DrvMsg(pScreenInfo->scrnIndex, X_WARNING,
+                "Insufficient virtual memory for shadow frame buffer.\n");
+            pATI->OptionShadowFB = FALSE;
+        }
+    }
+
+    /* Initialise framebuffer layer */
+    switch (pATI->bitsPerPixel)
+    {
+
+#ifndef AVOID_CPIO
+
+        case 1:
+            pATI->Closeable = xf1bppScreenInit(pScreen, pFB,
+                pScreenInfo->virtualX, pScreenInfo->virtualY,
+                pScreenInfo->xDpi, pScreenInfo->yDpi, pATI->displayWidth);
+            break;
+
+        case 4:
+            pATI->Closeable = xf4bppScreenInit(pScreen, pFB,
+                pScreenInfo->virtualX, pScreenInfo->virtualY,
+                pScreenInfo->xDpi, pScreenInfo->yDpi, pATI->displayWidth);
+            break;
+
+#endif /* AVOID_CPIO */
+
+        case 8:
+        case 16:
+        case 24:
+        case 32:
+            pATI->Closeable = fbScreenInit(pScreen, pFB,
+                pScreenInfo->virtualX, pScreenInfo->virtualY,
+                pScreenInfo->xDpi, pScreenInfo->yDpi, pATI->displayWidth,
+                pATI->bitsPerPixel);
+            break;
+
+        default:
+            return FALSE;
+    }
+
+    if (!pATI->Closeable)
+        return FALSE;
+
+    /* Fixup RGB ordering */
+    if (pATI->depth > 8)
+    {
+        VisualPtr pVisual = pScreen->visuals + pScreen->numVisuals;
+
+        while (--pVisual >= pScreen->visuals)
+        {
+            if ((pVisual->class | DynamicClass) != DirectColor)
+                continue;
+
+            pVisual->offsetRed = pScreenInfo->offset.red;
+            pVisual->offsetGreen = pScreenInfo->offset.green;
+            pVisual->offsetBlue = pScreenInfo->offset.blue;
+
+            pVisual->redMask = pScreenInfo->mask.red;
+            pVisual->greenMask = pScreenInfo->mask.green;
+            pVisual->blueMask = pScreenInfo->mask.blue;
+        }
+    }
+
+    /* If applicable, initialise RENDER extension */
+    if (pATI->bitsPerPixel > 4)
+    {
+        if (pATI->OptionShadowFB)
+        {
+            if (serverGeneration == 1)
+                xf86DrvMsg(pScreenInfo->scrnIndex, X_WARNING,
+                    "RENDER extension not supported with a shadowed"
+                    " framebuffer.\n");
+        }
+
+#ifndef AVOID_CPIO
+
+        else if (pATI->BankInfo.BankSize)
+        {
+            if (serverGeneration == 1)
+                xf86DrvMsg(pScreenInfo->scrnIndex, X_WARNING,
+                    "RENDER extension not supported with a banked"
+                    " framebuffer.\n");
+        }
+
+#endif /* AVOID_CPIO */
+
+        else if (!fbPictureInit(pScreen, NULL, 0) &&
+                 (serverGeneration == 1))
+            xf86DrvMsg(pScreenInfo->scrnIndex, X_WARNING,
+                "RENDER extension initialisation failed.\n");
+    }
+
+    xf86SetBlackWhitePixels(pScreen);
+
+#ifndef AVOID_CPIO
+
+    /* Initialise banking if needed */
+    if (!miInitializeBanking(pScreen,
+                             pScreenInfo->virtualX, pScreenInfo->virtualY,
+                             pATI->displayWidth, &pATI->BankInfo))
+        return FALSE;
+
+#endif /* AVOID_CPIO */
+
+    /* Setup acceleration */
+    if (!ATIInitializeAcceleration(pScreen, pScreenInfo, pATI))
+        return FALSE;
+
+#ifndef AVOID_DGA
+
+    /* Initialise DGA support */
+    (void)ATIDGAInit(pScreenInfo, pScreen, pATI);
+
+#endif /* AVOID_DGA */
+
+    /* Initialise backing store */
+    miInitializeBackingStore(pScreen);
+    xf86SetBackingStore(pScreen);
+
+    /* Initialise cursor */
+    if (!ATIInitializeCursor(pScreen, pATI))
+        return FALSE;
+
+    /* Create default colourmap */
+    if (!miCreateDefColormap(pScreen))
+        return FALSE;
+
+#ifdef AVOID_CPIO
+
+    if (!xf86HandleColormaps(pScreen, 256, pATI->rgbBits, ATILoadPalette, NULL,
+                             CMAP_PALETTED_TRUECOLOR |
+                             CMAP_LOAD_EVEN_IF_OFFSCREEN))
+            return FALSE;
+
+#else /* AVOID_CPIO */
+
+    if (pATI->depth > 1)
+        if (!xf86HandleColormaps(pScreen, (pATI->depth == 4) ? 16 : 256,
+                                 pATI->rgbBits, ATILoadPalette, NULL,
+                                 CMAP_PALETTED_TRUECOLOR |
+                                 CMAP_LOAD_EVEN_IF_OFFSCREEN))
+            return FALSE;
+
+#endif /* AVOID_CPIO */
+
+    /* Initialise shadow framebuffer */
+    if (pATI->OptionShadowFB &&
+        !ShadowFBInit(pScreen, ATIRefreshArea))
+        return FALSE;
+
+    /* Initialise DPMS support */
+    (void)xf86DPMSInit(pScreen, ATISetDPMSMode, 0);
+
+    /* Initialise XVideo support */
+    (void)ATIInitializeXVideo(pScreen, pScreenInfo, pATI);
+
+    /* Set pScreen->SaveScreen and wrap CloseScreen vector */
+    pScreen->SaveScreen = ATISaveScreen;
+    pATI->CloseScreen = pScreen->CloseScreen;
+    pScreen->CloseScreen = ATICloseScreen;
+
+    if (serverGeneration == 1)
+        xf86ShowUnusedOptions(pScreenInfo->scrnIndex, pScreenInfo->options);
+
+    return TRUE;
+}
+
+/*
+ * ATICloseScreen --
+ *
+ * This function is called by DIX to close the screen.
+ */
+Bool
+ATICloseScreen
+(
+    int       iScreen,
+    ScreenPtr pScreen
+)
+{
+    ScrnInfoPtr pScreenInfo = xf86Screens[iScreen];
+    ATIPtr      pATI        = ATIPTR(pScreenInfo);
+    Bool        Closed      = TRUE;
+
+    if (pATI->pXAAInfo)
+    {
+        XAADestroyInfoRec(pATI->pXAAInfo);
+        pATI->pXAAInfo = NULL;
+    }
+
+    if ((pScreen->CloseScreen = pATI->CloseScreen))
+    {
+        pATI->CloseScreen = NULL;
+        Closed = (*pScreen->CloseScreen)(iScreen, pScreen);
+    }
+
+    pATI->Closeable = FALSE;
+
+    if (pATI->pCursorInfo)
+    {
+        xf86DestroyCursorInfoRec(pATI->pCursorInfo);
+        pATI->pCursorInfo = NULL;
+    }
+
+    ATILeaveGraphics(pScreenInfo, pATI);
+
+    xfree(pATI->ExpansionBitmapScanlinePtr[1]);
+    pATI->ExpansionBitmapScanlinePtr[0] =
+        pATI->ExpansionBitmapScanlinePtr[1] = NULL;
+
+    xfree(pATI->pShadow);
+    pATI->pShadow = NULL;
+    pScreenInfo->pScreen = NULL;
+
+    return Closed;
+}
+@
+
+
+1.1.9.1
+log
+@OpenBSD just has imported exactly this tree into their vendor branch,
+called the same tag, in XF4/xc
+This is, apparently, the last XFree86 snapshot before the licence change
+(ie, addition of the advertising clause)
+
+Since the developers don't see any problems with that, and we would like
+to integrate improvements done by the remaining one or two (or so) XFree86
+developers (j/k), this prepares enabling us to update X-Window in the future.
+@
+text
+@d1 1
+a1 1
+/* $XFree86: xc/programs/Xserver/hw/xfree86/drivers/ati/atiscreen.c,v 1.31 2004/01/05 16:42:04 tsi Exp $ */
+d3 1
+a3 1
+ * Copyright 1999 through 2004 by Marc Aurele La France (TSI @@ UQV), tsi@@xfree86.org
+d66 1
+a66 1
+        w = (pBox->x2 - pBox->x1) * pATI->AdjustDepth;
+d68 2
+a69 1
+        offset = (pBox->y1 * pATI->FBPitch) + (pBox->x1 * pATI->AdjustDepth);
+a122 1
+    pATI->FBPitch = PixmapBytePad(pATI->displayWidth, pATI->depth);
+d125 2
+a127 1
+        {
+a128 1
+        }
+a218 1
+        {
+a220 1
+        }
+d242 1
+a242 1
+    (void)ATIDGAInit(pScreen, pScreenInfo, pATI);
+a312 2
+
+    ATICloseXVideo(pScreen, pScreenInfo, pATI);
+@
+
+
+1.1.1.1
+log
+@Import OpenBSD 3.3 XF4 repository from CTM 3132 the first time
+This finalizes starting an OpenBSD-mirabile (aka MirBSD) repository.
+
+### MirBSD is:
+# Copyright (c) 1982-2003 by Thorsten "mirabile" Glaser <x86@@ePost.de>
+# Copyright © 1968-2003  The authors of And contributors to UNIX®, the
+#       C Language, BSD/Berkeley Unix; 386BSD, NetBSD 1.1 and OpenBSD.
+#
+# Anyone who obtained a copy of this work is hereby permitted to freely use,
+# distribute, modify, merge, sublicence, give away or sell it as long as the
+# authors are given due credit and the following notice is retained:
+#
+# This work is provided "as is", with no explicit or implicit warranty what-
+# soever. Use it only at your own risk. In no event may an author or contri-
+# butor be held liable for any damage, directly or indirectly, that origina-
+# ted through or is caused by creation or modification of this work.
+
+MirBSD is my private tree. MirBSD does not differ very much from OpenBSD
+and intentionally tracks OpenBSD. That's why it _is_ OpenBSD, just not the
+official one. It's like with DarrenBSD.
+
+At time of this writing, no advertising for MirBSD must be done,
+because the advertising clause has not yet been sorted out.
+
+http://templeofhate.com/tglaser/MirBSD/index.php
+@
+text
+@@
+
+
+1.1.1.2
+log
+@The X-Windowing System
+
+Import XFree86 4.3 from OpenBSD by CTM, in the hope it's stable
+@
+text
+@d1 1
+a1 1
+/* $XFree86: xc/programs/Xserver/hw/xfree86/drivers/ati/atiscreen.c,v 1.29 2003/01/01 19:16:34 tsi Exp $ */
+d3 1
+a3 1
+ * Copyright 1999 through 2003 by Marc Aurele La France (TSI @@ UQV), tsi@@xfree86.org
+@
+
+
+1.1.1.3
+log
+@That's what OpenBSD will, probably, ship as XF4 in 3.5
+their last sync against XFree86 4.3-current has been
+imported into our vendor branch, too
+@
+text
+@d1 1
+a1 1
+/* $XFree86: xc/programs/Xserver/hw/xfree86/drivers/ati/atiscreen.c,v 1.31 2004/01/05 16:42:04 tsi Exp $ */
+d3 1
+a3 1
+ * Copyright 1999 through 2004 by Marc Aurele La France (TSI @@ UQV), tsi@@xfree86.org
+d66 1
+a66 1
+        w = (pBox->x2 - pBox->x1) * pATI->AdjustDepth;
+d68 2
+a69 1
+        offset = (pBox->y1 * pATI->FBPitch) + (pBox->x1 * pATI->AdjustDepth);
+a122 1
+    pATI->FBPitch = PixmapBytePad(pATI->displayWidth, pATI->depth);
+d125 2
+a127 1
+        {
+a128 1
+        }
+a218 1
+        {
+a220 1
+        }
+d242 1
+a242 1
+    (void)ATIDGAInit(pScreen, pScreenInfo, pATI);
+a312 2
+
+    ATICloseXVideo(pScreen, pScreenInfo, pATI);
+@
+
+

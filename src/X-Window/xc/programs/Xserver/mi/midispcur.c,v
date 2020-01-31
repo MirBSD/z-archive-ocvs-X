@@ -1,0 +1,1271 @@
+head	1.1;
+branch	1.1.1;
+access;
+symbols
+	tg-mergetmp-2:1.1.1.3
+	cvs-200410241530:1.1.1.3
+	cvs-200410012000:1.1.1.3
+	cvs-200407141120:1.1.1.3
+	cvs-200406231010:1.1.1.3
+	MIRBSD_7quater:1.1.1.2
+	cvs-200405271510:1.1.1.3
+	XFree86_4_4_0:1.1.9.1
+	cvs-200403021700:1.1.1.3
+	XFREE86_20040213:1.1.9.1
+	xc:1.1.9
+	cvs-200401291925:1.1.1.2
+	MIRBSD_7_ALPHA:1.1.1.2.0.4
+	MIRBSD_7:1.1.1.2.0.2
+	MIRBSD_7ter:1.1.1.2
+	cvs-20011091815:1.1.1.2
+	cvs-200309162130:1.1.1.2
+	cvs-200308302005:1.1.1.2
+	ctmx-0387:1.1.1.2
+	ctmx-0384:1.1.1.2
+	MIRBSD_5:1.1.1.2
+	ctmx-0375:1.1.1.2
+	ctmx-0373:1.1.1.2
+	ctm-0371:1.1.1.2
+	ctm-0370:1.1.1.2
+	MIRBSD_4:1.1.1.2
+	ctm-0363:1.1.1.2
+	ctm-0359:1.1.1.2
+	ctm-0349:1.1.1.1
+	openbsd:1.1.1;
+locks; strict;
+comment	@ * @;
+
+
+1.1
+date	2003.03.22.20.09.34;	author tg;	state Exp;
+branches
+	1.1.1.1
+	1.1.9.1;
+next	;
+
+1.1.1.1
+date	2003.03.22.20.09.34;	author tg;	state Exp;
+branches;
+next	1.1.1.2;
+
+1.1.1.2
+date	2003.04.08.18.38.14;	author tg;	state Exp;
+branches;
+next	1.1.1.3;
+
+1.1.1.3
+date	2004.03.02.18.30.06;	author tg;	state Stab;
+branches;
+next	;
+
+1.1.9.1
+date	2004.02.14.19.26.28;	author tg;	state Exp;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@/*
+ * midispcur.c
+ *
+ * machine independent cursor display routines
+ */
+
+/* $Xorg: midispcur.c,v 1.4 2001/02/09 02:05:20 xorgcvs Exp $ */
+
+/*
+
+Copyright 1989, 1998  The Open Group
+
+Permission to use, copy, modify, distribute, and sell this software and its
+documentation for any purpose is hereby granted without fee, provided that
+the above copyright notice appear in all copies and that both that
+copyright notice and this permission notice appear in supporting
+documentation.
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
+OPEN GROUP BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN
+AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
+CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+Except as contained in this notice, the name of The Open Group shall not be
+used in advertising or otherwise to promote the sale, use or other dealings
+in this Software without prior written authorization from The Open Group.
+*/
+/* $XFree86: xc/programs/Xserver/mi/midispcur.c,v 1.6 2001/12/14 20:00:21 dawes Exp $ */
+
+#define NEED_EVENTS
+# include   "X.h"
+# include   "misc.h"
+# include   "input.h"
+# include   "cursorstr.h"
+# include   "windowstr.h"
+# include   "regionstr.h"
+# include   "dixstruct.h"
+# include   "scrnintstr.h"
+# include   "servermd.h"
+# include   "mipointer.h"
+# include   "misprite.h"
+# include   "gcstruct.h"
+
+/* per-screen private data */
+
+static int	miDCScreenIndex;
+static unsigned long miDCGeneration = 0;
+
+static Bool	miDCCloseScreen(int index, ScreenPtr pScreen);
+
+typedef struct {
+    GCPtr	    pSourceGC, pMaskGC;
+    GCPtr	    pSaveGC, pRestoreGC;
+    GCPtr	    pMoveGC;
+    GCPtr	    pPixSourceGC, pPixMaskGC;
+    CloseScreenProcPtr CloseScreen;
+    PixmapPtr	    pSave, pTemp;
+} miDCScreenRec, *miDCScreenPtr;
+
+/* per-cursor per-screen private data */
+typedef struct {
+    PixmapPtr		sourceBits;	    /* source bits */
+    PixmapPtr		maskBits;	    /* mask bits */
+} miDCCursorRec, *miDCCursorPtr;
+
+/*
+ * sprite/cursor method table
+ */
+
+static Bool	miDCRealizeCursor(ScreenPtr pScreen, CursorPtr pCursor);
+static Bool	miDCUnrealizeCursor(ScreenPtr pScreen, CursorPtr pCursor);
+static Bool	miDCPutUpCursor(ScreenPtr pScreen, CursorPtr pCursor,
+				int x, int y, unsigned long source,
+				unsigned long mask);
+static Bool	miDCSaveUnderCursor(ScreenPtr pScreen, int x, int y,
+				    int w, int h);
+static Bool	miDCRestoreUnderCursor(ScreenPtr pScreen, int x, int y,
+				       int w, int h);
+static Bool	miDCMoveCursor(ScreenPtr pScreen, CursorPtr pCursor,
+			       int x, int y, int w, int h, int dx, int dy,
+			       unsigned long source, unsigned long mask);
+static Bool	miDCChangeSave(ScreenPtr pScreen, int x, int y, int w, int h,	
+			       int dx, int dy);
+
+static miSpriteCursorFuncRec miDCFuncs = {
+    miDCRealizeCursor,
+    miDCUnrealizeCursor,
+    miDCPutUpCursor,
+    miDCSaveUnderCursor,
+    miDCRestoreUnderCursor,
+    miDCMoveCursor,
+    miDCChangeSave,
+};
+
+Bool
+miDCInitialize (pScreen, screenFuncs)
+    ScreenPtr		    pScreen;
+    miPointerScreenFuncPtr  screenFuncs;
+{
+    miDCScreenPtr   pScreenPriv;
+
+    if (miDCGeneration != serverGeneration)
+    {
+	miDCScreenIndex = AllocateScreenPrivateIndex ();
+	if (miDCScreenIndex < 0)
+	    return FALSE;
+	miDCGeneration = serverGeneration;
+    }
+    pScreenPriv = (miDCScreenPtr) xalloc (sizeof (miDCScreenRec));
+    if (!pScreenPriv)
+	return FALSE;
+
+    /*
+     * initialize the entire private structure to zeros
+     */
+
+    pScreenPriv->pSourceGC =
+	pScreenPriv->pMaskGC =
+	pScreenPriv->pSaveGC =
+ 	pScreenPriv->pRestoreGC =
+ 	pScreenPriv->pMoveGC =
+ 	pScreenPriv->pPixSourceGC =
+	pScreenPriv->pPixMaskGC = NULL;
+    
+    pScreenPriv->pSave = pScreenPriv->pTemp = NULL;
+
+    pScreenPriv->CloseScreen = pScreen->CloseScreen;
+    pScreen->CloseScreen = miDCCloseScreen;
+    
+    pScreen->devPrivates[miDCScreenIndex].ptr = (pointer) pScreenPriv;
+
+    if (!miSpriteInitialize (pScreen, &miDCFuncs, screenFuncs))
+    {
+	xfree ((pointer) pScreenPriv);
+	return FALSE;
+    }
+    return TRUE;
+}
+
+#define tossGC(gc)  (gc ? FreeGC (gc, (GContext) 0) : 0)
+#define tossPix(pix)	(pix ? (*pScreen->DestroyPixmap) (pix) : TRUE)
+
+static Bool
+miDCCloseScreen (index, pScreen)
+    ScreenPtr	pScreen;
+{
+    miDCScreenPtr   pScreenPriv;
+
+    pScreenPriv = (miDCScreenPtr) pScreen->devPrivates[miDCScreenIndex].ptr;
+    pScreen->CloseScreen = pScreenPriv->CloseScreen;
+    tossGC (pScreenPriv->pSourceGC);
+    tossGC (pScreenPriv->pMaskGC);
+    tossGC (pScreenPriv->pSaveGC);
+    tossGC (pScreenPriv->pRestoreGC);
+    tossGC (pScreenPriv->pMoveGC);
+    tossGC (pScreenPriv->pPixSourceGC);
+    tossGC (pScreenPriv->pPixMaskGC);
+    tossPix (pScreenPriv->pSave);
+    tossPix (pScreenPriv->pTemp);
+    xfree ((pointer) pScreenPriv);
+    return (*pScreen->CloseScreen) (index, pScreen);
+}
+
+static Bool
+miDCRealizeCursor (pScreen, pCursor)
+    ScreenPtr	pScreen;
+    CursorPtr	pCursor;
+{
+    if (pCursor->bits->refcnt <= 1)
+	pCursor->bits->devPriv[pScreen->myNum] = (pointer)NULL;
+    return TRUE;
+}
+
+static miDCCursorPtr
+miDCRealize (
+    ScreenPtr	pScreen,
+    CursorPtr	pCursor)
+{
+    miDCCursorPtr   pPriv;
+    GCPtr	    pGC;
+    XID		    gcvals[3];
+
+    pPriv = (miDCCursorPtr) xalloc (sizeof (miDCCursorRec));
+    if (!pPriv)
+	return (miDCCursorPtr)NULL;
+    pPriv->sourceBits = (*pScreen->CreatePixmap) (pScreen, pCursor->bits->width, pCursor->bits->height, 1);
+    if (!pPriv->sourceBits)
+    {
+	xfree ((pointer) pPriv);
+	return (miDCCursorPtr)NULL;
+    }
+    pPriv->maskBits =  (*pScreen->CreatePixmap) (pScreen, pCursor->bits->width, pCursor->bits->height, 1);
+    if (!pPriv->maskBits)
+    {
+	(*pScreen->DestroyPixmap) (pPriv->sourceBits);
+	xfree ((pointer) pPriv);
+	return (miDCCursorPtr)NULL;
+    }
+    pCursor->bits->devPriv[pScreen->myNum] = (pointer) pPriv;
+
+    /* create the two sets of bits, clipping as appropriate */
+
+    pGC = GetScratchGC (1, pScreen);
+    if (!pGC)
+    {
+	(void) miDCUnrealizeCursor (pScreen, pCursor);
+	return (miDCCursorPtr)NULL;
+    }
+
+    ValidateGC ((DrawablePtr)pPriv->sourceBits, pGC);
+    (*pGC->ops->PutImage) ((DrawablePtr)pPriv->sourceBits, pGC, 1,
+			   0, 0, pCursor->bits->width, pCursor->bits->height,
+ 			   0, XYPixmap, (char *)pCursor->bits->source);
+    gcvals[0] = GXand;
+    ChangeGC (pGC, GCFunction, gcvals);
+    ValidateGC ((DrawablePtr)pPriv->sourceBits, pGC);
+    (*pGC->ops->PutImage) ((DrawablePtr)pPriv->sourceBits, pGC, 1,
+			   0, 0, pCursor->bits->width, pCursor->bits->height,
+ 			   0, XYPixmap, (char *)pCursor->bits->mask);
+
+    /* mask bits -- pCursor->mask & ~pCursor->source */
+    gcvals[0] = GXcopy;
+    ChangeGC (pGC, GCFunction, gcvals);
+    ValidateGC ((DrawablePtr)pPriv->maskBits, pGC);
+    (*pGC->ops->PutImage) ((DrawablePtr)pPriv->maskBits, pGC, 1,
+			   0, 0, pCursor->bits->width, pCursor->bits->height,
+ 			   0, XYPixmap, (char *)pCursor->bits->mask);
+    gcvals[0] = GXandInverted;
+    ChangeGC (pGC, GCFunction, gcvals);
+    ValidateGC ((DrawablePtr)pPriv->maskBits, pGC);
+    (*pGC->ops->PutImage) ((DrawablePtr)pPriv->maskBits, pGC, 1,
+			   0, 0, pCursor->bits->width, pCursor->bits->height,
+ 			   0, XYPixmap, (char *)pCursor->bits->source);
+    FreeScratchGC (pGC);
+    return pPriv;
+}
+
+static Bool
+miDCUnrealizeCursor (pScreen, pCursor)
+    ScreenPtr	pScreen;
+    CursorPtr	pCursor;
+{
+    miDCCursorPtr   pPriv;
+
+    pPriv = (miDCCursorPtr) pCursor->bits->devPriv[pScreen->myNum];
+    if (pPriv && (pCursor->bits->refcnt <= 1))
+    {
+	(*pScreen->DestroyPixmap) (pPriv->sourceBits);
+	(*pScreen->DestroyPixmap) (pPriv->maskBits);
+	xfree ((pointer) pPriv);
+	pCursor->bits->devPriv[pScreen->myNum] = (pointer)NULL;
+    }
+    return TRUE;
+}
+
+static void
+miDCPutBits (
+    DrawablePtr	    pDrawable,
+    miDCCursorPtr   pPriv,
+    GCPtr	    sourceGC,
+    GCPtr	    maskGC,
+    int             x,
+    int             y,
+    unsigned        w,
+    unsigned        h,
+    unsigned long   source,
+    unsigned long   mask)
+{
+    XID	    gcvals[1];
+
+    if (sourceGC->fgPixel != source)
+    {
+	gcvals[0] = source;
+	DoChangeGC (sourceGC, GCForeground, gcvals, 0);
+    }
+    if (sourceGC->serialNumber != pDrawable->serialNumber)
+	ValidateGC (pDrawable, sourceGC);
+    (*sourceGC->ops->PushPixels) (sourceGC, pPriv->sourceBits, pDrawable, w, h, x, y);
+    if (maskGC->fgPixel != mask)
+    {
+	gcvals[0] = mask;
+	DoChangeGC (maskGC, GCForeground, gcvals, 0);
+    }
+    if (maskGC->serialNumber != pDrawable->serialNumber)
+	ValidateGC (pDrawable, maskGC);
+    (*maskGC->ops->PushPixels) (maskGC, pPriv->maskBits, pDrawable, w, h, x, y);
+}
+
+#define EnsureGC(gc,win) (gc || miDCMakeGC(&gc, win))
+
+static GCPtr
+miDCMakeGC(
+    GCPtr	*ppGC,
+    WindowPtr	pWin)
+{
+    GCPtr pGC;
+    int   status;
+    XID   gcvals[2];
+
+    gcvals[0] = IncludeInferiors;
+    gcvals[1] = FALSE;
+    pGC = CreateGC((DrawablePtr)pWin,
+		   GCSubwindowMode|GCGraphicsExposures, gcvals, &status);
+    if (pGC && pWin->drawable.pScreen->DrawGuarantee)
+	(*pWin->drawable.pScreen->DrawGuarantee) (pWin, pGC, GuaranteeVisBack);
+    *ppGC = pGC;
+    return pGC;
+}
+
+static Bool
+miDCPutUpCursor (pScreen, pCursor, x, y, source, mask)
+    ScreenPtr	    pScreen;
+    CursorPtr	    pCursor;
+    int		    x, y;
+    unsigned long   source, mask;
+{
+    miDCScreenPtr   pScreenPriv;
+    miDCCursorPtr   pPriv;
+    WindowPtr	    pWin;
+
+    pPriv = (miDCCursorPtr) pCursor->bits->devPriv[pScreen->myNum];
+    if (!pPriv)
+    {
+	pPriv = miDCRealize(pScreen, pCursor);
+	if (!pPriv)
+	    return FALSE;
+    }
+    pScreenPriv = (miDCScreenPtr) pScreen->devPrivates[miDCScreenIndex].ptr;
+    pWin = WindowTable[pScreen->myNum];
+    if (!EnsureGC(pScreenPriv->pSourceGC, pWin))
+	return FALSE;
+    if (!EnsureGC(pScreenPriv->pMaskGC, pWin))
+    {
+	FreeGC (pScreenPriv->pSourceGC, (GContext) 0);
+	pScreenPriv->pSourceGC = 0;
+	return FALSE;
+    }
+    miDCPutBits ((DrawablePtr)pWin, pPriv,
+		 pScreenPriv->pSourceGC, pScreenPriv->pMaskGC,
+		 x, y, pCursor->bits->width, pCursor->bits->height,
+		 source, mask);
+    return TRUE;
+}
+
+static Bool
+miDCSaveUnderCursor (pScreen, x, y, w, h)
+    ScreenPtr	pScreen;
+    int		x, y, w, h;
+{
+    miDCScreenPtr   pScreenPriv;
+    PixmapPtr	    pSave;
+    WindowPtr	    pWin;
+    GCPtr	    pGC;
+
+    pScreenPriv = (miDCScreenPtr) pScreen->devPrivates[miDCScreenIndex].ptr;
+    pSave = pScreenPriv->pSave;
+    pWin = WindowTable[pScreen->myNum];
+    if (!pSave || pSave->drawable.width < w || pSave->drawable.height < h)
+    {
+	if (pSave)
+	    (*pScreen->DestroyPixmap) (pSave);
+	pScreenPriv->pSave = pSave =
+		(*pScreen->CreatePixmap) (pScreen, w, h, pScreen->rootDepth);
+	if (!pSave)
+	    return FALSE;
+    }
+    if (!EnsureGC(pScreenPriv->pSaveGC, pWin))
+	return FALSE;
+    pGC = pScreenPriv->pSaveGC;
+    if (pSave->drawable.serialNumber != pGC->serialNumber)
+	ValidateGC ((DrawablePtr) pSave, pGC);
+    (*pGC->ops->CopyArea) ((DrawablePtr) pWin, (DrawablePtr) pSave, pGC,
+			    x, y, w, h, 0, 0);
+    return TRUE;
+}
+
+static Bool
+miDCRestoreUnderCursor (pScreen, x, y, w, h)
+    ScreenPtr	pScreen;
+    int		x, y, w, h;
+{
+    miDCScreenPtr   pScreenPriv;
+    PixmapPtr	    pSave;
+    WindowPtr	    pWin;
+    GCPtr	    pGC;
+
+    pScreenPriv = (miDCScreenPtr) pScreen->devPrivates[miDCScreenIndex].ptr;
+    pSave = pScreenPriv->pSave;
+    pWin = WindowTable[pScreen->myNum];
+    if (!pSave)
+	return FALSE;
+    if (!EnsureGC(pScreenPriv->pRestoreGC, pWin))
+	return FALSE;
+    pGC = pScreenPriv->pRestoreGC;
+    if (pWin->drawable.serialNumber != pGC->serialNumber)
+	ValidateGC ((DrawablePtr) pWin, pGC);
+    (*pGC->ops->CopyArea) ((DrawablePtr) pSave, (DrawablePtr) pWin, pGC,
+			    0, 0, w, h, x, y);
+    return TRUE;
+}
+
+static Bool
+miDCChangeSave (pScreen, x, y, w, h, dx, dy)
+    ScreenPtr	    pScreen;
+    int		    x, y, w, h, dx, dy;
+{
+    miDCScreenPtr   pScreenPriv;
+    PixmapPtr	    pSave;
+    WindowPtr	    pWin;
+    GCPtr	    pGC;
+    int		    sourcex, sourcey, destx, desty, copyw, copyh;
+
+    pScreenPriv = (miDCScreenPtr) pScreen->devPrivates[miDCScreenIndex].ptr;
+    pSave = pScreenPriv->pSave;
+    pWin = WindowTable[pScreen->myNum];
+    /*
+     * restore the bits which are about to get trashed
+     */
+    if (!pSave)
+	return FALSE;
+    if (!EnsureGC(pScreenPriv->pRestoreGC, pWin))
+	return FALSE;
+    pGC = pScreenPriv->pRestoreGC;
+    if (pWin->drawable.serialNumber != pGC->serialNumber)
+	ValidateGC ((DrawablePtr) pWin, pGC);
+    /*
+     * copy the old bits to the screen.
+     */
+    if (dy > 0)
+    {
+	(*pGC->ops->CopyArea) ((DrawablePtr) pSave, (DrawablePtr) pWin, pGC,
+			       0, h - dy, w, dy, x + dx, y + h);
+    }
+    else if (dy < 0)
+    {
+	(*pGC->ops->CopyArea) ((DrawablePtr) pSave, (DrawablePtr) pWin, pGC,
+			       0, 0, w, -dy, x + dx, y + dy);
+    }
+    if (dy >= 0)
+    {
+	desty = y + dy;
+	sourcey = 0;
+	copyh = h - dy;
+    }
+    else
+    {
+	desty = y;
+	sourcey = - dy;
+	copyh = h + dy;
+    }
+    if (dx > 0)
+    {
+	(*pGC->ops->CopyArea) ((DrawablePtr) pSave, (DrawablePtr) pWin, pGC,
+			       w - dx, sourcey, dx, copyh, x + w, desty);
+    }
+    else if (dx < 0)
+    {
+	(*pGC->ops->CopyArea) ((DrawablePtr) pSave, (DrawablePtr) pWin, pGC,
+			       0, sourcey, -dx, copyh, x + dx, desty);
+    }
+    if (!EnsureGC(pScreenPriv->pSaveGC, pWin))
+	return FALSE;
+    pGC = pScreenPriv->pSaveGC;
+    if (pSave->drawable.serialNumber != pGC->serialNumber)
+	ValidateGC ((DrawablePtr) pSave, pGC);
+    /*
+     * move the bits that are still valid within the pixmap
+     */
+    if (dx >= 0)
+    {
+	sourcex = 0;
+	destx = dx;
+	copyw = w - dx;
+    }
+    else
+    {
+	destx = 0;
+	sourcex = - dx;
+	copyw = w + dx;
+    }
+    if (dy >= 0)
+    {
+	sourcey = 0;
+	desty = dy;
+	copyh = h - dy;
+    }
+    else
+    {
+	desty = 0;
+	sourcey = -dy;
+	copyh = h + dy;
+    }
+    (*pGC->ops->CopyArea) ((DrawablePtr) pSave, (DrawablePtr) pSave, pGC,
+			   sourcex, sourcey, copyw, copyh, destx, desty);
+    /*
+     * copy the new bits from the screen into the remaining areas of the
+     * pixmap
+     */
+    if (dy > 0)
+    {
+	(*pGC->ops->CopyArea) ((DrawablePtr) pWin, (DrawablePtr) pSave, pGC,
+			       x, y, w, dy, 0, 0);
+    }
+    else if (dy < 0)
+    {
+	(*pGC->ops->CopyArea) ((DrawablePtr) pWin, (DrawablePtr) pSave, pGC,
+			       x, y + h + dy, w, -dy, 0, h + dy);
+    }
+    if (dy >= 0)
+    {
+	desty = dy;
+	sourcey = y + dy;
+	copyh = h - dy;
+    }
+    else
+    {
+	desty = 0;
+	sourcey = y;
+	copyh = h + dy;
+    }
+    if (dx > 0)
+    {
+	(*pGC->ops->CopyArea) ((DrawablePtr) pWin, (DrawablePtr) pSave, pGC,
+			       x, sourcey, dx, copyh, 0, desty);
+    }
+    else if (dx < 0)
+    {
+	(*pGC->ops->CopyArea) ((DrawablePtr) pWin, (DrawablePtr) pSave, pGC,
+			       x + w + dx, sourcey, -dx, copyh, w + dx, desty);
+    }
+    return TRUE;
+}
+
+static Bool
+miDCMoveCursor (pScreen, pCursor, x, y, w, h, dx, dy, source, mask)
+    ScreenPtr	    pScreen;
+    CursorPtr	    pCursor;
+    int		    x, y, w, h, dx, dy;
+    unsigned long   source, mask;
+{
+    miDCCursorPtr   pPriv;
+    miDCScreenPtr   pScreenPriv;
+    int		    status;
+    WindowPtr	    pWin;
+    GCPtr	    pGC;
+    XID		    gcval = FALSE;
+    PixmapPtr	    pTemp;
+
+    pPriv = (miDCCursorPtr) pCursor->bits->devPriv[pScreen->myNum];
+    if (!pPriv)
+    {
+	pPriv = miDCRealize(pScreen, pCursor);
+	if (!pPriv)
+	    return FALSE;
+    }
+    pScreenPriv = (miDCScreenPtr) pScreen->devPrivates[miDCScreenIndex].ptr;
+    pWin = WindowTable[pScreen->myNum];
+    pTemp = pScreenPriv->pTemp;
+    if (!pTemp ||
+	pTemp->drawable.width != pScreenPriv->pSave->drawable.width ||
+	pTemp->drawable.height != pScreenPriv->pSave->drawable.height)
+    {
+	if (pTemp)
+	    (*pScreen->DestroyPixmap) (pTemp);
+	pScreenPriv->pTemp = pTemp = (*pScreen->CreatePixmap)
+	    (pScreen, w, h, pScreenPriv->pSave->drawable.depth);
+	if (!pTemp)
+	    return FALSE;
+    }
+    if (!pScreenPriv->pMoveGC)
+    {
+	pScreenPriv->pMoveGC = CreateGC ((DrawablePtr)pTemp,
+	    GCGraphicsExposures, &gcval, &status);
+	if (!pScreenPriv->pMoveGC)
+	    return FALSE;
+    }
+    /*
+     * copy the saved area to a temporary pixmap
+     */
+    pGC = pScreenPriv->pMoveGC;
+    if (pGC->serialNumber != pTemp->drawable.serialNumber)
+	ValidateGC ((DrawablePtr) pTemp, pGC);
+    (*pGC->ops->CopyArea)((DrawablePtr)pScreenPriv->pSave,
+			  (DrawablePtr)pTemp, pGC, 0, 0, w, h, 0, 0);
+    
+    /*
+     * draw the cursor in the temporary pixmap
+     */
+    if (!pScreenPriv->pPixSourceGC)
+    {
+	pScreenPriv->pPixSourceGC = CreateGC ((DrawablePtr)pTemp,
+	    GCGraphicsExposures, &gcval, &status);
+	if (!pScreenPriv->pPixSourceGC)
+	    return FALSE;
+    }
+    if (!pScreenPriv->pPixMaskGC)
+    {
+	pScreenPriv->pPixMaskGC = CreateGC ((DrawablePtr)pTemp,
+	    GCGraphicsExposures, &gcval, &status);
+	if (!pScreenPriv->pPixMaskGC)
+	    return FALSE;
+    }
+    miDCPutBits ((DrawablePtr)pTemp, pPriv,
+		 pScreenPriv->pPixSourceGC, pScreenPriv->pPixMaskGC,
+ 		 dx, dy, pCursor->bits->width, pCursor->bits->height,
+		 source, mask);
+
+    /*
+     * copy the temporary pixmap onto the screen
+     */
+
+    if (!EnsureGC(pScreenPriv->pRestoreGC, pWin))
+	return FALSE;
+    pGC = pScreenPriv->pRestoreGC;
+    if (pWin->drawable.serialNumber != pGC->serialNumber)
+	ValidateGC ((DrawablePtr) pWin, pGC);
+
+    (*pGC->ops->CopyArea) ((DrawablePtr) pTemp, (DrawablePtr) pWin,
+			    pGC,
+			    0, 0, w, h, x, y);
+    return TRUE;
+}
+@
+
+
+1.1.9.1
+log
+@OpenBSD just has imported exactly this tree into their vendor branch,
+called the same tag, in XF4/xc
+This is, apparently, the last XFree86 snapshot before the licence change
+(ie, addition of the advertising clause)
+
+Since the developers don't see any problems with that, and we would like
+to integrate improvements done by the remaining one or two (or so) XFree86
+developers (j/k), this prepares enabling us to update X-Window in the future.
+@
+text
+@d33 1
+a33 1
+/* $XFree86: xc/programs/Xserver/mi/midispcur.c,v 1.10 2003/03/06 05:52:58 mvojkovi Exp $ */
+a47 3
+#ifdef ARGB_CURSOR
+# include   "picturestr.h"
+#endif
+a62 4
+#ifdef ARGB_CURSOR
+    PicturePtr	    pRootPicture;
+    PicturePtr	    pTempPicture;
+#endif
+a68 3
+#ifdef ARGB_CURSOR
+    PicturePtr		pPicture;
+#endif
+a128 4
+#ifdef ARGB_CURSOR
+    pScreenPriv->pRootPicture = NULL;
+    pScreenPriv->pTempPicture = NULL;
+#endif
+a146 1
+#define tossPict(pict)	(pict ? FreePicture (pict, 0) : 0)
+a149 1
+    int		index;
+a164 4
+#ifdef ARGB_CURSOR
+    tossPict (pScreenPriv->pRootPicture);
+    tossPict (pScreenPriv->pTempPicture);
+#endif
+a178 40
+#ifdef ARGB_CURSOR
+#define EnsurePicture(picture,draw,win) (picture || miDCMakePicture(&picture,draw,win))
+
+static VisualPtr
+miDCGetWindowVisual (WindowPtr pWin)
+{
+    ScreenPtr	    pScreen = pWin->drawable.pScreen;
+    VisualID	    vid = wVisual (pWin);
+    int		    i;
+
+    for (i = 0; i < pScreen->numVisuals; i++)
+	if (pScreen->visuals[i].vid == vid)
+	    return &pScreen->visuals[i];
+    return 0;
+}
+
+static PicturePtr
+miDCMakePicture (PicturePtr *ppPicture, DrawablePtr pDraw, WindowPtr pWin)
+{
+    ScreenPtr	    pScreen = pDraw->pScreen;
+    VisualPtr	    pVisual;
+    PictFormatPtr   pFormat;
+    XID		    subwindow_mode = IncludeInferiors;
+    PicturePtr	    pPicture;
+    int		    error;
+    
+    pVisual = miDCGetWindowVisual (pWin);
+    if (!pVisual)
+	return 0;
+    pFormat = PictureMatchVisual (pScreen, pDraw->depth, pVisual);
+    if (!pFormat)
+	return 0;
+    pPicture = CreatePicture (0, pDraw, pFormat,
+			      CPSubwindowMode, &subwindow_mode,
+			      serverClient, &error);
+    *ppPicture = pPicture;
+    return pPicture;
+}
+#endif
+
+a190 49
+#ifdef ARGB_CURSOR
+    if (pCursor->bits->argb)
+    {
+	PixmapPtr	pPixmap;
+	PictFormatPtr	pFormat;
+	int		error;
+	
+	pFormat = PictureMatchFormat (pScreen, 32, PICT_a8r8g8b8);
+	if (!pFormat)
+	{
+	    xfree ((pointer) pPriv);
+	    return (miDCCursorPtr)NULL;
+	}
+	
+	pPriv->sourceBits = 0;
+	pPriv->maskBits = 0;
+	pPixmap = (*pScreen->CreatePixmap) (pScreen, pCursor->bits->width,
+					    pCursor->bits->height, 32);
+	if (!pPixmap)
+	{
+	    xfree ((pointer) pPriv);
+	    return (miDCCursorPtr)NULL;
+	}
+	pGC = GetScratchGC (32, pScreen);
+	if (!pGC)
+	{
+	    (*pScreen->DestroyPixmap) (pPixmap);
+	    xfree ((pointer) pPriv);
+	    return (miDCCursorPtr)NULL;
+	}
+	ValidateGC (&pPixmap->drawable, pGC);
+	(*pGC->ops->PutImage) (&pPixmap->drawable, pGC, 32,
+			       0, 0, pCursor->bits->width,
+			       pCursor->bits->height,
+			       0, ZPixmap, (char *) pCursor->bits->argb);
+	FreeScratchGC (pGC);
+	pPriv->pPicture = CreatePicture (0, &pPixmap->drawable,
+					pFormat, 0, 0, serverClient, &error);
+        (*pScreen->DestroyPixmap) (pPixmap);
+	if (!pPriv->pPicture)
+	{
+	    xfree ((pointer) pPriv);
+	    return (miDCCursorPtr)NULL;
+	}
+	pCursor->bits->devPriv[pScreen->myNum] = (pointer) pPriv;
+	return pPriv;
+    }
+    pPriv->pPicture = 0;
+#endif
+d253 2
+a254 8
+	if (pPriv->sourceBits)
+	    (*pScreen->DestroyPixmap) (pPriv->sourceBits);
+	if (pPriv->maskBits)
+	    (*pScreen->DestroyPixmap) (pPriv->maskBits);
+#ifdef ARGB_CURSOR
+	if (pPriv->pPicture)
+	    FreePicture (pPriv->pPicture, 0);
+#endif
+d267 2
+a268 2
+    int             x_org,
+    int             y_org,
+a274 1
+    int     x, y;
+a282 12
+
+    if(sourceGC->miTranslate) 
+    {
+        x = pDrawable->x + x_org;
+        y = pDrawable->y + y_org;
+    } 
+    else
+    {
+        x = x_org;
+        y = y_org;
+    }
+
+a290 12
+
+    if(maskGC->miTranslate) 
+    {
+        x = pDrawable->x + x_org;
+        y = pDrawable->y + y_org;
+    } 
+    else
+    {
+        x = x_org;
+        y = y_org;
+    }
+
+a314 1
+
+d335 3
+a337 2
+#ifdef ARGB_CURSOR
+    if (pPriv->pPicture)
+d339 3
+a341 26
+	if (!EnsurePicture(pScreenPriv->pRootPicture, &pWin->drawable, pWin))
+	    return FALSE;
+	CompositePicture (PictOpOver,
+			  pPriv->pPicture,
+			  NULL,
+			  pScreenPriv->pRootPicture,
+			  0, 0, 0, 0, 
+			  x, y, 
+			  pCursor->bits->width,
+			  pCursor->bits->height);
+    }
+    else
+#endif
+    {
+	if (!EnsureGC(pScreenPriv->pSourceGC, pWin))
+	    return FALSE;
+	if (!EnsureGC(pScreenPriv->pMaskGC, pWin))
+	{
+	    FreeGC (pScreenPriv->pSourceGC, (GContext) 0);
+	    pScreenPriv->pSourceGC = 0;
+	    return FALSE;
+	}
+	miDCPutBits ((DrawablePtr)pWin, pPriv,
+		     pScreenPriv->pSourceGC, pScreenPriv->pMaskGC,
+		     x, y, pCursor->bits->width, pCursor->bits->height,
+		     source, mask);
+d343 4
+a569 7
+#ifdef ARGB_CURSOR
+	if (pScreenPriv->pTempPicture)
+	{
+	    FreePicture (pScreenPriv->pTempPicture, 0);
+	    pScreenPriv->pTempPicture = 0;
+	}
+#endif
+d594 1
+a594 2
+#ifdef ARGB_CURSOR
+    if (pPriv->pPicture)
+d596 3
+a598 1
+	if (!EnsurePicture(pScreenPriv->pTempPicture, &pTemp->drawable, pWin))
+a599 8
+	CompositePicture (PictOpOver,
+			  pPriv->pPicture,
+			  NULL,
+			  pScreenPriv->pTempPicture,
+			  0, 0, 0, 0, 
+			  dx, dy, 
+			  pCursor->bits->width,
+			  pCursor->bits->height);
+d601 1
+a601 2
+    else
+#endif
+d603 2
+a604 7
+	if (!pScreenPriv->pPixSourceGC)
+	{
+	    pScreenPriv->pPixSourceGC = CreateGC ((DrawablePtr)pTemp,
+		GCGraphicsExposures, &gcval, &status);
+	    if (!pScreenPriv->pPixSourceGC)
+		return FALSE;
+	}
+d606 1
+a606 10
+	{
+	    pScreenPriv->pPixMaskGC = CreateGC ((DrawablePtr)pTemp,
+		GCGraphicsExposures, &gcval, &status);
+	    if (!pScreenPriv->pPixMaskGC)
+		return FALSE;
+	}
+	miDCPutBits ((DrawablePtr)pTemp, pPriv,
+		     pScreenPriv->pPixSourceGC, pScreenPriv->pPixMaskGC,
+		     dx, dy, pCursor->bits->width, pCursor->bits->height,
+		     source, mask);
+d608 4
+@
+
+
+1.1.1.1
+log
+@Import OpenBSD 3.3 XF4 repository from CTM 3132 the first time
+This finalizes starting an OpenBSD-mirabile (aka MirBSD) repository.
+
+### MirBSD is:
+# Copyright (c) 1982-2003 by Thorsten "mirabile" Glaser <x86@@ePost.de>
+# Copyright © 1968-2003  The authors of And contributors to UNIX®, the
+#       C Language, BSD/Berkeley Unix; 386BSD, NetBSD 1.1 and OpenBSD.
+#
+# Anyone who obtained a copy of this work is hereby permitted to freely use,
+# distribute, modify, merge, sublicence, give away or sell it as long as the
+# authors are given due credit and the following notice is retained:
+#
+# This work is provided "as is", with no explicit or implicit warranty what-
+# soever. Use it only at your own risk. In no event may an author or contri-
+# butor be held liable for any damage, directly or indirectly, that origina-
+# ted through or is caused by creation or modification of this work.
+
+MirBSD is my private tree. MirBSD does not differ very much from OpenBSD
+and intentionally tracks OpenBSD. That's why it _is_ OpenBSD, just not the
+official one. It's like with DarrenBSD.
+
+At time of this writing, no advertising for MirBSD must be done,
+because the advertising clause has not yet been sorted out.
+
+http://templeofhate.com/tglaser/MirBSD/index.php
+@
+text
+@@
+
+
+1.1.1.2
+log
+@The X-Windowing System
+
+Import XFree86 4.3 from OpenBSD by CTM, in the hope it's stable
+@
+text
+@d33 1
+a33 1
+/* $XFree86: xc/programs/Xserver/mi/midispcur.c,v 1.9 2002/12/09 04:10:57 tsi Exp $ */
+a47 3
+#ifdef ARGB_CURSOR
+# include   "picturestr.h"
+#endif
+a62 4
+#ifdef ARGB_CURSOR
+    PicturePtr	    pRootPicture;
+    PicturePtr	    pTempPicture;
+#endif
+a68 3
+#ifdef ARGB_CURSOR
+    PicturePtr		pPicture;
+#endif
+a128 4
+#ifdef ARGB_CURSOR
+    pScreenPriv->pRootPicture = NULL;
+    pScreenPriv->pTempPicture = NULL;
+#endif
+a146 1
+#define tossPict(pict)	(pict ? FreePicture (pict, 0) : 0)
+a149 1
+    int		index;
+a164 4
+#ifdef ARGB_CURSOR
+    tossPict (pScreenPriv->pRootPicture);
+    tossPict (pScreenPriv->pTempPicture);
+#endif
+a178 40
+#ifdef ARGB_CURSOR
+#define EnsurePicture(picture,draw,win) (picture || miDCMakePicture(&picture,draw,win))
+
+static VisualPtr
+miDCGetWindowVisual (WindowPtr pWin)
+{
+    ScreenPtr	    pScreen = pWin->drawable.pScreen;
+    VisualID	    vid = wVisual (pWin);
+    int		    i;
+
+    for (i = 0; i < pScreen->numVisuals; i++)
+	if (pScreen->visuals[i].vid == vid)
+	    return &pScreen->visuals[i];
+    return 0;
+}
+
+static PicturePtr
+miDCMakePicture (PicturePtr *ppPicture, DrawablePtr pDraw, WindowPtr pWin)
+{
+    ScreenPtr	    pScreen = pDraw->pScreen;
+    VisualPtr	    pVisual;
+    PictFormatPtr   pFormat;
+    XID		    subwindow_mode = IncludeInferiors;
+    PicturePtr	    pPicture;
+    int		    error;
+    
+    pVisual = miDCGetWindowVisual (pWin);
+    if (!pVisual)
+	return 0;
+    pFormat = PictureMatchVisual (pScreen, pDraw->depth, pVisual);
+    if (!pFormat)
+	return 0;
+    pPicture = CreatePicture (0, pDraw, pFormat,
+			      CPSubwindowMode, &subwindow_mode,
+			      serverClient, &error);
+    *ppPicture = pPicture;
+    return pPicture;
+}
+#endif
+
+a190 49
+#ifdef ARGB_CURSOR
+    if (pCursor->bits->argb)
+    {
+	PixmapPtr	pPixmap;
+	PictFormatPtr	pFormat;
+	int		error;
+	
+	pFormat = PictureMatchFormat (pScreen, 32, PICT_a8r8g8b8);
+	if (!pFormat)
+	{
+	    xfree ((pointer) pPriv);
+	    return (miDCCursorPtr)NULL;
+	}
+	
+	pPriv->sourceBits = 0;
+	pPriv->maskBits = 0;
+	pPixmap = (*pScreen->CreatePixmap) (pScreen, pCursor->bits->width,
+					    pCursor->bits->height, 32);
+	if (!pPixmap)
+	{
+	    xfree ((pointer) pPriv);
+	    return (miDCCursorPtr)NULL;
+	}
+	pGC = GetScratchGC (32, pScreen);
+	if (!pGC)
+	{
+	    (*pScreen->DestroyPixmap) (pPixmap);
+	    xfree ((pointer) pPriv);
+	    return (miDCCursorPtr)NULL;
+	}
+	ValidateGC (&pPixmap->drawable, pGC);
+	(*pGC->ops->PutImage) (&pPixmap->drawable, pGC, 32,
+			       0, 0, pCursor->bits->width,
+			       pCursor->bits->height,
+			       0, ZPixmap, (char *) pCursor->bits->argb);
+	FreeScratchGC (pGC);
+	pPriv->pPicture = CreatePicture (0, &pPixmap->drawable,
+					pFormat, 0, 0, serverClient, &error);
+        (*pScreen->DestroyPixmap) (pPixmap);
+	if (!pPriv->pPicture)
+	{
+	    xfree ((pointer) pPriv);
+	    return (miDCCursorPtr)NULL;
+	}
+	pCursor->bits->devPriv[pScreen->myNum] = (pointer) pPriv;
+	return pPriv;
+    }
+    pPriv->pPicture = 0;
+#endif
+d253 2
+a254 8
+	if (pPriv->sourceBits)
+	    (*pScreen->DestroyPixmap) (pPriv->sourceBits);
+	if (pPriv->maskBits)
+	    (*pScreen->DestroyPixmap) (pPriv->maskBits);
+#ifdef ARGB_CURSOR
+	if (pPriv->pPicture)
+	    FreePicture (pPriv->pPicture, 0);
+#endif
+a314 1
+
+d335 3
+a337 2
+#ifdef ARGB_CURSOR
+    if (pPriv->pPicture)
+d339 3
+a341 26
+	if (!EnsurePicture(pScreenPriv->pRootPicture, &pWin->drawable, pWin))
+	    return FALSE;
+	CompositePicture (PictOpOver,
+			  pPriv->pPicture,
+			  NULL,
+			  pScreenPriv->pRootPicture,
+			  0, 0, 0, 0, 
+			  x, y, 
+			  pCursor->bits->width,
+			  pCursor->bits->height);
+    }
+    else
+#endif
+    {
+	if (!EnsureGC(pScreenPriv->pSourceGC, pWin))
+	    return FALSE;
+	if (!EnsureGC(pScreenPriv->pMaskGC, pWin))
+	{
+	    FreeGC (pScreenPriv->pSourceGC, (GContext) 0);
+	    pScreenPriv->pSourceGC = 0;
+	    return FALSE;
+	}
+	miDCPutBits ((DrawablePtr)pWin, pPriv,
+		     pScreenPriv->pSourceGC, pScreenPriv->pMaskGC,
+		     x, y, pCursor->bits->width, pCursor->bits->height,
+		     source, mask);
+d343 4
+a569 7
+#ifdef ARGB_CURSOR
+	if (pScreenPriv->pTempPicture)
+	{
+	    FreePicture (pScreenPriv->pTempPicture, 0);
+	    pScreenPriv->pTempPicture = 0;
+	}
+#endif
+d594 1
+a594 2
+#ifdef ARGB_CURSOR
+    if (pPriv->pPicture)
+d596 3
+a598 1
+	if (!EnsurePicture(pScreenPriv->pTempPicture, &pTemp->drawable, pWin))
+a599 8
+	CompositePicture (PictOpOver,
+			  pPriv->pPicture,
+			  NULL,
+			  pScreenPriv->pTempPicture,
+			  0, 0, 0, 0, 
+			  dx, dy, 
+			  pCursor->bits->width,
+			  pCursor->bits->height);
+d601 1
+a601 2
+    else
+#endif
+d603 2
+a604 7
+	if (!pScreenPriv->pPixSourceGC)
+	{
+	    pScreenPriv->pPixSourceGC = CreateGC ((DrawablePtr)pTemp,
+		GCGraphicsExposures, &gcval, &status);
+	    if (!pScreenPriv->pPixSourceGC)
+		return FALSE;
+	}
+d606 1
+a606 10
+	{
+	    pScreenPriv->pPixMaskGC = CreateGC ((DrawablePtr)pTemp,
+		GCGraphicsExposures, &gcval, &status);
+	    if (!pScreenPriv->pPixMaskGC)
+		return FALSE;
+	}
+	miDCPutBits ((DrawablePtr)pTemp, pPriv,
+		     pScreenPriv->pPixSourceGC, pScreenPriv->pPixMaskGC,
+		     dx, dy, pCursor->bits->width, pCursor->bits->height,
+		     source, mask);
+d608 4
+@
+
+
+1.1.1.3
+log
+@That's what OpenBSD will, probably, ship as XF4 in 3.5
+their last sync against XFree86 4.3-current has been
+imported into our vendor branch, too
+@
+text
+@d33 1
+a33 1
+/* $XFree86: xc/programs/Xserver/mi/midispcur.c,v 1.10 2003/03/06 05:52:58 mvojkovi Exp $ */
+d382 2
+a383 2
+    int             x_org,
+    int             y_org,
+a389 1
+    int     x, y;
+a397 12
+
+    if(sourceGC->miTranslate) 
+    {
+        x = pDrawable->x + x_org;
+        y = pDrawable->y + y_org;
+    } 
+    else
+    {
+        x = x_org;
+        y = y_org;
+    }
+
+a405 12
+
+    if(maskGC->miTranslate) 
+    {
+        x = pDrawable->x + x_org;
+        y = pDrawable->y + y_org;
+    } 
+    else
+    {
+        x = x_org;
+        y = y_org;
+    }
+
+@
+
+

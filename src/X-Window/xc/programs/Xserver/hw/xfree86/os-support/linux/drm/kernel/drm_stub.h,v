@@ -1,0 +1,469 @@
+head	1.1;
+branch	1.1.1;
+access;
+symbols
+	tg-mergetmp-2:1.1.1.3
+	cvs-200410241530:1.1.1.3
+	cvs-200410012000:1.1.1.3
+	cvs-200407221130:1.1.1.3
+	cvs-200407141120:1.1.1.3
+	cvs-200406231010:1.1.1.3
+	MIRBSD_7quater:1.1.1.2
+	cvs-200405271510:1.1.1.3
+	XFree86_4_4_0:1.1.9.1
+	cvs-200403021700:1.1.1.3
+	XFREE86_20040213:1.1.9.1
+	xc:1.1.9
+	cvs-200401291925:1.1.1.2
+	MIRBSD_7_ALPHA:1.1.1.2.0.4
+	MIRBSD_7:1.1.1.2.0.2
+	MIRBSD_7ter:1.1.1.2
+	cvs-20011091815:1.1.1.2
+	cvs-200309162130:1.1.1.2
+	cvs-200308302005:1.1.1.2
+	ctmx-0387:1.1.1.2
+	ctmx-0384:1.1.1.2
+	MIRBSD_5:1.1.1.2
+	ctmx-0375:1.1.1.2
+	ctmx-0373:1.1.1.2
+	ctm-0371:1.1.1.2
+	ctm-0370:1.1.1.2
+	MIRBSD_4:1.1.1.2
+	ctm-0363:1.1.1.2
+	ctm-0359:1.1.1.2
+	ctm-0349:1.1.1.1
+	openbsd:1.1.1;
+locks; strict;
+comment	@ * @;
+
+
+1.1
+date	2003.03.22.20.08.44;	author tg;	state Exp;
+branches
+	1.1.1.1
+	1.1.9.1;
+next	;
+
+1.1.1.1
+date	2003.03.22.20.08.44;	author tg;	state Exp;
+branches;
+next	1.1.1.2;
+
+1.1.1.2
+date	2003.04.08.18.37.35;	author tg;	state Exp;
+branches;
+next	1.1.1.3;
+
+1.1.1.3
+date	2004.03.02.18.25.18;	author tg;	state Stab;
+branches;
+next	;
+
+1.1.9.1
+date	2004.02.14.19.25.14;	author tg;	state Exp;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@/* drm_stub.h -- -*- linux-c -*-
+ * Created: Fri Jan 19 10:48:35 2001 by faith@@acm.org
+ *
+ * Copyright 2001 VA Linux Systems, Inc., Sunnyvale, California.
+ * All Rights Reserved.
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a
+ * copy of this software and associated documentation files (the "Software"),
+ * to deal in the Software without restriction, including without limitation
+ * the rights to use, copy, modify, merge, publish, distribute, sublicense,
+ * and/or sell copies of the Software, and to permit persons to whom the
+ * Software is furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice (including the next
+ * paragraph) shall be included in all copies or substantial portions of the
+ * Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL
+ * PRECISION INSIGHT AND/OR ITS SUPPLIERS BE LIABLE FOR ANY CLAIM, DAMAGES OR
+ * OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE,
+ * ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+ * DEALINGS IN THE SOFTWARE.
+ *
+ * Authors:
+ *    Rickard E. (Rik) Faith <faith@@valinux.com>
+ *
+ */
+
+#define __NO_VERSION__
+#include "drmP.h"
+
+#define DRM_STUB_MAXCARDS 16	/* Enough for one machine */
+
+static struct drm_stub_list {
+	const char             *name;
+	struct file_operations *fops;
+	struct proc_dir_entry  *dev_root;
+} *DRM(stub_list);
+
+static struct proc_dir_entry *DRM(stub_root);
+
+static struct drm_stub_info {
+	int (*info_register)(const char *name, struct file_operations *fops,
+			     drm_device_t *dev);
+	int (*info_unregister)(int minor);
+} DRM(stub_info);
+
+static int DRM(stub_open)(struct inode *inode, struct file *filp)
+{
+	int                    minor = MINOR(inode->i_rdev);
+	int                    err   = -ENODEV;
+	struct file_operations *old_fops;
+
+	if (!DRM(stub_list) || !DRM(stub_list)[minor].fops) return -ENODEV;
+	old_fops   = filp->f_op;
+	filp->f_op = fops_get(DRM(stub_list)[minor].fops);
+	if (filp->f_op->open && (err = filp->f_op->open(inode, filp))) {
+		fops_put(filp->f_op);
+		filp->f_op = fops_get(old_fops);
+	}
+	fops_put(old_fops);
+
+	return err;
+}
+
+static struct file_operations DRM(stub_fops) = {
+	owner:   THIS_MODULE,
+	open:	 DRM(stub_open)
+};
+
+static int DRM(stub_getminor)(const char *name, struct file_operations *fops,
+			      drm_device_t *dev)
+{
+	int i;
+
+	if (!DRM(stub_list)) {
+		DRM(stub_list) = DRM(alloc)(sizeof(*DRM(stub_list))
+					    * DRM_STUB_MAXCARDS, DRM_MEM_STUB);
+		if(!DRM(stub_list)) return -1;
+		for (i = 0; i < DRM_STUB_MAXCARDS; i++) {
+			DRM(stub_list)[i].name = NULL;
+			DRM(stub_list)[i].fops = NULL;
+		}
+	}
+	for (i = 0; i < DRM_STUB_MAXCARDS; i++) {
+		if (!DRM(stub_list)[i].fops) {
+			DRM(stub_list)[i].name = name;
+			DRM(stub_list)[i].fops = fops;
+			DRM(stub_root) = DRM(proc_init)(dev, i, DRM(stub_root),
+							&DRM(stub_list)[i]
+							.dev_root);
+			return i;
+		}
+	}
+	return -1;
+}
+
+static int DRM(stub_putminor)(int minor)
+{
+	if (minor < 0 || minor >= DRM_STUB_MAXCARDS) return -1;
+	DRM(stub_list)[minor].name = NULL;
+	DRM(stub_list)[minor].fops = NULL;
+	DRM(proc_cleanup)(minor, DRM(stub_root),
+			  DRM(stub_list)[minor].dev_root);
+	if (minor) {
+		inter_module_put("drm");
+	} else {
+		inter_module_unregister("drm");
+		DRM(free)(DRM(stub_list),
+			  sizeof(*DRM(stub_list)) * DRM_STUB_MAXCARDS,
+			  DRM_MEM_STUB);
+		unregister_chrdev(DRM_MAJOR, "drm");
+	}
+	return 0;
+}
+
+
+int DRM(stub_register)(const char *name, struct file_operations *fops,
+		       drm_device_t *dev)
+{
+	struct drm_stub_info *i = NULL;
+
+	DRM_DEBUG("\n");
+	if (register_chrdev(DRM_MAJOR, "drm", &DRM(stub_fops)))
+		i = (struct drm_stub_info *)inter_module_get("drm");
+
+	if (i) {
+				/* Already registered */
+		DRM(stub_info).info_register   = i->info_register;
+		DRM(stub_info).info_unregister = i->info_unregister;
+		DRM_DEBUG("already registered\n");
+	} else if (DRM(stub_info).info_register != DRM(stub_getminor)) {
+		DRM(stub_info).info_register   = DRM(stub_getminor);
+		DRM(stub_info).info_unregister = DRM(stub_putminor);
+		DRM_DEBUG("calling inter_module_register\n");
+		inter_module_register("drm", THIS_MODULE, &DRM(stub_info));
+	}
+	if (DRM(stub_info).info_register)
+		return DRM(stub_info).info_register(name, fops, dev);
+	return -1;
+}
+
+int DRM(stub_unregister)(int minor)
+{
+	DRM_DEBUG("%d\n", minor);
+	if (DRM(stub_info).info_unregister)
+		return DRM(stub_info).info_unregister(minor);
+	return -1;
+}
+@
+
+
+1.1.9.1
+log
+@OpenBSD just has imported exactly this tree into their vendor branch,
+called the same tag, in XF4/xc
+This is, apparently, the last XFree86 snapshot before the licence change
+(ie, addition of the advertising clause)
+
+Since the developers don't see any problems with that, and we would like
+to integrate improvements done by the remaining one or two (or so) XFree86
+developers (j/k), this prepares enabling us to update X-Window in the future.
+@
+text
+@d1 1
+a1 8
+/**
+ * \file drm_stub.h
+ * Stub support
+ *
+ * \author Rickard E. (Rik) Faith <faith@@valinux.com>
+ */
+
+/*
+d25 4
+a35 1
+/** Stub list. One for each minor. */
+d38 2
+a39 2
+	struct file_operations *fops;	/**< file operations */
+	struct proc_dir_entry  *dev_root;	/**< proc directory entry */
+a43 1
+/** Stub information */
+a49 9
+/**
+ * File \c open operation.
+ *
+ * \param inode device inode.
+ * \param filp file pointer.
+ *
+ * Puts the drm_stub_list::fops corresponding to the device minor number into
+ * \p filp, call the \c open method, and restore the file operations.
+ */
+d52 1
+a52 1
+	int                    minor = minor(inode->i_rdev);
+a67 1
+/** File operations structure */
+d69 2
+a70 2
+	.owner = THIS_MODULE,
+	.open  = DRM(stub_open)
+a72 12
+/**
+ * Get a device minor number.
+ *
+ * \param name driver name.
+ * \param fops file operations.
+ * \param dev DRM device.
+ * \return minor number on success, or a negative number on failure.
+ *
+ * Allocate and initialize ::stub_list if one doesn't exist already.  Search an
+ * empty entry and initialize it to the given parameters, and create the proc
+ * init entry via proc_init().
+ */
+a99 10
+/**
+ * Put a device minor number.
+ *
+ * \param minor minor number.
+ * \return always zero.
+ *
+ * Cleans up the proc resources. If a minor is zero then release the foreign
+ * "drm" data, otherwise unregisters the "drm" data, frees the stub list and
+ * unregisters the character device. 
+ */
+d119 1
+a119 14
+/**
+ * Register.
+ *
+ * \param name driver name.
+ * \param fops file operations
+ * \param dev DRM device.
+ * \return zero on success or a negative number on failure.
+ *
+ * Attempt to register the char device and get the foreign "drm" data. If
+ * successful then another module already registered so gets the stub info,
+ * otherwise use this module stub info and make it available for other modules.
+ *
+ * Finally calls stub_info::info_register.
+ */
+a144 7
+/**
+ * Unregister.
+ *
+ * \param minor
+ *
+ * Calls drm_stub_info::unregister.
+ */
+@
+
+
+1.1.1.1
+log
+@Import OpenBSD 3.3 XF4 repository from CTM 3132 the first time
+This finalizes starting an OpenBSD-mirabile (aka MirBSD) repository.
+
+### MirBSD is:
+# Copyright (c) 1982-2003 by Thorsten "mirabile" Glaser <x86@@ePost.de>
+# Copyright © 1968-2003  The authors of And contributors to UNIX®, the
+#       C Language, BSD/Berkeley Unix; 386BSD, NetBSD 1.1 and OpenBSD.
+#
+# Anyone who obtained a copy of this work is hereby permitted to freely use,
+# distribute, modify, merge, sublicence, give away or sell it as long as the
+# authors are given due credit and the following notice is retained:
+#
+# This work is provided "as is", with no explicit or implicit warranty what-
+# soever. Use it only at your own risk. In no event may an author or contri-
+# butor be held liable for any damage, directly or indirectly, that origina-
+# ted through or is caused by creation or modification of this work.
+
+MirBSD is my private tree. MirBSD does not differ very much from OpenBSD
+and intentionally tracks OpenBSD. That's why it _is_ OpenBSD, just not the
+official one. It's like with DarrenBSD.
+
+At time of this writing, no advertising for MirBSD must be done,
+because the advertising clause has not yet been sorted out.
+
+http://templeofhate.com/tglaser/MirBSD/index.php
+@
+text
+@@
+
+
+1.1.1.2
+log
+@The X-Windowing System
+
+Import XFree86 4.3 from OpenBSD by CTM, in the hope it's stable
+@
+text
+@d52 1
+a52 1
+	int                    minor = minor(inode->i_rdev);
+d69 2
+a70 2
+	.owner = THIS_MODULE,
+	.open  = DRM(stub_open)
+@
+
+
+1.1.1.3
+log
+@That's what OpenBSD will, probably, ship as XF4 in 3.5
+their last sync against XFree86 4.3-current has been
+imported into our vendor branch, too
+@
+text
+@d1 1
+a1 8
+/**
+ * \file drm_stub.h
+ * Stub support
+ *
+ * \author Rickard E. (Rik) Faith <faith@@valinux.com>
+ */
+
+/*
+d25 4
+a35 1
+/** Stub list. One for each minor. */
+d38 2
+a39 2
+	struct file_operations *fops;	/**< file operations */
+	struct proc_dir_entry  *dev_root;	/**< proc directory entry */
+a43 1
+/** Stub information */
+a49 9
+/**
+ * File \c open operation.
+ *
+ * \param inode device inode.
+ * \param filp file pointer.
+ *
+ * Puts the drm_stub_list::fops corresponding to the device minor number into
+ * \p filp, call the \c open method, and restore the file operations.
+ */
+a67 1
+/** File operations structure */
+a72 12
+/**
+ * Get a device minor number.
+ *
+ * \param name driver name.
+ * \param fops file operations.
+ * \param dev DRM device.
+ * \return minor number on success, or a negative number on failure.
+ *
+ * Allocate and initialize ::stub_list if one doesn't exist already.  Search an
+ * empty entry and initialize it to the given parameters, and create the proc
+ * init entry via proc_init().
+ */
+a99 10
+/**
+ * Put a device minor number.
+ *
+ * \param minor minor number.
+ * \return always zero.
+ *
+ * Cleans up the proc resources. If a minor is zero then release the foreign
+ * "drm" data, otherwise unregisters the "drm" data, frees the stub list and
+ * unregisters the character device. 
+ */
+d119 1
+a119 14
+/**
+ * Register.
+ *
+ * \param name driver name.
+ * \param fops file operations
+ * \param dev DRM device.
+ * \return zero on success or a negative number on failure.
+ *
+ * Attempt to register the char device and get the foreign "drm" data. If
+ * successful then another module already registered so gets the stub info,
+ * otherwise use this module stub info and make it available for other modules.
+ *
+ * Finally calls stub_info::info_register.
+ */
+a144 7
+/**
+ * Unregister.
+ *
+ * \param minor
+ *
+ * Calls drm_stub_info::unregister.
+ */
+@
+
+

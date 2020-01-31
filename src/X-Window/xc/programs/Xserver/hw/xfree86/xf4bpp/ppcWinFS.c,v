@@ -1,0 +1,462 @@
+head	1.1;
+branch	1.1.1;
+access;
+symbols
+	tg-mergetmp-2:1.1.1.2
+	cvs-200410241530:1.1.1.2
+	cvs-200410012000:1.1.1.2
+	cvs-200407221130:1.1.1.2
+	cvs-200407141120:1.1.1.2
+	cvs-200406231010:1.1.1.2
+	MIRBSD_7quater:1.1.1.1
+	cvs-200405271510:1.1.1.2
+	XFree86_4_4_0:1.1.9.1
+	cvs-200403021700:1.1.1.2
+	XFREE86_20040213:1.1.9.1
+	xc:1.1.9
+	cvs-200401291925:1.1.1.1
+	MIRBSD_7_ALPHA:1.1.1.1.0.4
+	MIRBSD_7:1.1.1.1.0.2
+	MIRBSD_7ter:1.1.1.1
+	cvs-20011091815:1.1.1.1
+	cvs-200309162130:1.1.1.1
+	cvs-200308302005:1.1.1.1
+	ctmx-0387:1.1.1.1
+	ctmx-0384:1.1.1.1
+	MIRBSD_5:1.1.1.1
+	ctmx-0375:1.1.1.1
+	ctmx-0373:1.1.1.1
+	ctm-0371:1.1.1.1
+	ctm-0370:1.1.1.1
+	MIRBSD_4:1.1.1.1
+	ctm-0363:1.1.1.1
+	ctm-0359:1.1.1.1
+	ctm-0349:1.1.1.1
+	openbsd:1.1.1;
+locks; strict;
+comment	@ * @;
+
+
+1.1
+date	2003.03.22.20.09.11;	author tg;	state Exp;
+branches
+	1.1.1.1
+	1.1.9.1;
+next	;
+
+1.1.1.1
+date	2003.03.22.20.09.11;	author tg;	state Exp;
+branches;
+next	1.1.1.2;
+
+1.1.1.2
+date	2004.03.02.18.27.37;	author tg;	state Stab;
+branches;
+next	;
+
+1.1.9.1
+date	2004.02.14.19.25.52;	author tg;	state Exp;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@/* $XFree86: xc/programs/Xserver/hw/xfree86/xf4bpp/ppcWinFS.c,v 1.3 1999/06/06 08:49:02 dawes Exp $ */
+/*
+ * Copyright IBM Corporation 1987,1988,1989
+ *
+ * All Rights Reserved
+ *
+ * Permission to use, copy, modify, and distribute this software and its
+ * documentation for any purpose and without fee is hereby granted,
+ * provided that the above copyright notice appear in all copies and that 
+ * both that copyright notice and this permission notice appear in
+ * supporting documentation, and that the name of IBM not be
+ * used in advertising or publicity pertaining to distribution of the
+ * software without specific, written prior permission.
+ *
+ * IBM DISCLAIMS ALL WARRANTIES WITH REGARD TO THIS SOFTWARE, INCLUDING
+ * ALL IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS, IN NO EVENT SHALL
+ * IBM BE LIABLE FOR ANY SPECIAL, INDIRECT OR CONSEQUENTIAL DAMAGES OR
+ * ANY DAMAGES WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS,
+ * WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION,
+ * ARISING OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS
+ * SOFTWARE.
+ *
+*/
+
+/******************************************************************
+Copyright 1987 by Digital Equipment Corporation, Maynard, Massachusetts.
+
+                        All Rights Reserved
+
+Permission to use, copy, modify, and distribute this software and its
+documentation for any purpose and without fee is hereby granted,
+provided that the above copyright notice appear in all copies and that
+both that copyright notice and this permission notice appear in
+supporting documentation, and that the name of Digital not be
+used in advertising or publicity pertaining to distribution of the
+software without specific, written prior permission.
+
+DIGITAL DISCLAIMS ALL WARRANTIES WITH REGARD TO THIS SOFTWARE, INCLUDING
+ALL IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS, IN NO EVENT SHALL
+DIGITAL BE LIABLE FOR ANY SPECIAL, INDIRECT OR CONSEQUENTIAL DAMAGES OR
+ANY DAMAGES WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS,
+WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION,
+ARISING OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS
+SOFTWARE.
+
+******************************************************************/
+/* $XConsortium: ppcWinFS.c /main/3 1996/02/21 17:58:39 kaleb $ */
+
+#include "xf4bpp.h"
+#include "mfbmap.h"
+#include "mfb.h"
+#include "mi.h"
+#include "mispans.h"
+#include "ppcGCstr.h"
+#include "ppcSpMcro.h"
+#include "ibmTrace.h"
+
+#define LeftMostBitInScreenLongWord SCRLEFT( 0xFFFFFFFF, 31 )
+/*
+********** ********** ********** ********** ********** ********** **********
+   these routines all clip.  they assume that anything that has called
+them has already translated the points (i.e. pGC->miTranslate is
+non-zero, which is howit gets set in mfbCreateGC().)
+
+   the number of new scanlines created by clipping ==
+MaxRectsPerBand * nSpans.
+********** ********** ********** ********** ********** ********** **********
+*/
+
+void
+xf4bppSolidWindowFS( pDrawable, pGC, nInit, pptInit, pwidthInit, fSorted )
+    DrawablePtr pDrawable ;
+    GCPtr	pGC ;
+    int		nInit ;			/* number of spans to fill */
+    DDXPointPtr pptInit ;		/* pointer to list of start points */
+    int		*pwidthInit ;		/* pointer to list of n widths */
+    int 	fSorted ;
+{
+    register unsigned long int pm ;
+    register unsigned long int fg ;
+    register int alu ;
+				/* next three parameters are post-clip */
+    int n ;			/* number of spans to fill */
+    register DDXPointPtr ppt ;	/* pointer to list of start points */
+    register int *pwidth ;	/* pointer to list of n widths */
+    int *pwidthFree ;		/* copies of the pointers to free */
+    DDXPointPtr pptFree ;
+
+    TRACE( ( "xf4bppSolidWindowFS(pDrawable=0x%x,pGC=0x%x,nInit=%d,pptInit=0x%x,pwidthInit=0x%x,fSorted=%d)\n",
+	    pDrawable, pGC, nInit, pptInit, pwidthInit, fSorted ) ) ;
+
+    if ( pDrawable->type != DRAWABLE_WINDOW ) {
+	ErrorF( "xf4bppSolidWindowFS: drawable is not a window\n") ;
+	return ;
+    }
+
+    if ( ( alu = ( (ppcPrivGC *) pGC->devPrivates[mfbGCPrivateIndex].ptr )->colorRrop.alu ) == GXnoop )
+	return ;
+
+    n = nInit * miFindMaxBand( pGC->pCompositeClip ) ;
+    if ( !( pwidth = (int *) ALLOCATE_LOCAL( n * sizeof( int ) ) ) )
+	return ;
+    pwidthFree = pwidth ;
+
+    if ( !( ppt = (DDXPointRec *)
+			ALLOCATE_LOCAL( n * sizeof( DDXPointRec ) ) ) ) {
+	DEALLOCATE_LOCAL( pwidth ) ;
+	return ;
+    }
+    pptFree = ppt ;
+
+    n = miClipSpans( pGC->pCompositeClip, pptInit, pwidthInit, nInit,
+	ppt, pwidth, fSorted ) ;
+
+    pm = ( (ppcPrivGC *) pGC->devPrivates[mfbGCPrivateIndex].ptr )->colorRrop.planemask ;
+    fg = ( (ppcPrivGC *) pGC->devPrivates[mfbGCPrivateIndex].ptr )->colorRrop.fgPixel ;
+
+    for ( ; n-- ; ppt++, pwidth++ )
+	if ( *pwidth )
+	    xf4bppFillSolid( (WindowPtr)pDrawable,
+		           fg, alu, pm, ppt->x, ppt->y, *pwidth, 1 ) ;
+
+    DEALLOCATE_LOCAL( pptFree ) ;
+    DEALLOCATE_LOCAL( pwidthFree ) ;
+    return ;
+}
+
+void
+xf4bppStippleWindowFS( pDrawable, pGC, nInit, pptInit, pwidthInit, fSorted )
+DrawablePtr pDrawable ;
+register GC *pGC ;
+int nInit ;			/* number of spans to fill */
+DDXPointPtr pptInit ;		/* pointer to list of start points */
+int *pwidthInit ;		/* pointer to list of n widths */
+int fSorted ;
+{
+    register unsigned long int pm ;
+    register unsigned long int fg ;
+    register int alu ;
+				/* next three parameters are post-clip */
+    int n ;			/* number of spans to fill */
+    register DDXPointPtr ppt ;	/* pointer to list of start points */
+    register int *pwidth ;	/* pointer to list of n widths */
+    PixmapPtr	pTile ;		/* pointer to tile we want to fill with */
+    int xSrc ;
+    int ySrc ;
+    int *pwidthFree ;		/* copies of the pointers to free */
+    DDXPointPtr pptFree ;
+
+    TRACE( ( "xf4bppStippleWindowFS(pDrawable=0x%x,pGC=0x%x,nInit=%d,pptInit=0x%x,pwidthInit=0x%x,fSorted=%d)\n",
+	   pDrawable, pGC, nInit, pptInit, pwidthInit, fSorted ) ) ;
+
+    if ( pDrawable->type != DRAWABLE_WINDOW ) {
+	ErrorF( "xf4bppStippleWindowFS: drawable is not a window\n" ) ;
+	return ;
+    }
+
+    if ( pGC->stipple->drawable.depth != 1 ) {
+	ErrorF("ppcStippleFS: bad depth\ntype = %d, depth = %d\n",
+		pDrawable->type, pGC->stipple->drawable.depth ) ;
+	return ;
+    }
+
+    if ( ( alu = ( (ppcPrivGC *) pGC->devPrivates[mfbGCPrivateIndex].ptr )->colorRrop.alu ) == GXnoop )
+	return ;
+
+    SETSPANPTRS( nInit, n, pwidthInit, pwidth, pptInit,
+		 ppt, pwidthFree, pptFree, fSorted ) ;
+
+    pm = ( (ppcPrivGC *) pGC->devPrivates[mfbGCPrivateIndex].ptr )->colorRrop.planemask ;
+    fg = ( (ppcPrivGC *) pGC->devPrivates[mfbGCPrivateIndex].ptr )->colorRrop.fgPixel ;
+
+    xSrc = pGC->patOrg.x + pDrawable->x ;
+    ySrc = pGC->patOrg.y + pDrawable->y ;
+    pTile = pGC->stipple ;
+
+    for ( ; n-- ; ppt++, pwidth++ )
+	xf4bppFillStipple( (WindowPtr)pDrawable, pTile, fg, alu, pm,
+			ppt->x, ppt->y, *pwidth, 1, xSrc, ySrc ) ;
+
+    DEALLOCATE_LOCAL( pptFree ) ;
+    DEALLOCATE_LOCAL( pwidthFree ) ;
+
+    return ;
+}
+
+void
+xf4bppOpStippleWindowFS( pDrawable, pGC, nInit, pptInit, pwidthInit, fSorted )
+DrawablePtr pDrawable ;
+register GC *pGC ;
+int nInit ;			/* number of spans to fill */
+DDXPointPtr pptInit ;		/* pointer to list of start points */
+int *pwidthInit ;		/* pointer to list of n widths */
+int fSorted ;
+{
+    register DDXPointPtr ppt ;	/* pointer to list of start points */
+    register int *pwidth ;	/* pointer to list of n widths */
+    int n ;			/* number of spans to fill */
+    int xSrc ;
+    int ySrc ;
+    unsigned long int pm ;
+    unsigned long int fg, bg ;
+    int alu ;
+    int *pwidthFree ;		/* copies of the pointers to free */
+    DDXPointPtr pptFree ;
+
+    TRACE( ( "xf4bppOpStippleWindowFS(pDrawable=0x%x,pGC=0x%x,nInit=%d,pptInit=0x%x,pwidthInit=0x%x,fSorted=%d)\n",
+	    pDrawable, pGC, nInit, pptInit, pwidthInit, fSorted ) ) ;
+
+    if ( pGC->stipple->drawable.depth != 1 ) {
+	ErrorF( "xf4bppOpStippleWindowFS: bad depth\ntype = %d, depth = %d\n",
+		pDrawable->type, pGC->stipple->drawable.depth ) ;
+	return ;
+    }
+
+    if ( ( alu = ( (ppcPrivGC *) pGC->devPrivates[mfbGCPrivateIndex].ptr )->colorRrop.alu ) == GXnoop )
+	return ;
+
+    SETSPANPTRS( nInit, n, pwidthInit, pwidth, pptInit,
+		 ppt, pwidthFree, pptFree, fSorted ) ;
+
+    pm = ( (ppcPrivGC *) pGC->devPrivates[mfbGCPrivateIndex].ptr )->colorRrop.planemask ;
+    fg = ( (ppcPrivGC *) pGC->devPrivates[mfbGCPrivateIndex].ptr )->colorRrop.fgPixel ;
+    bg = ( (ppcPrivGC *) pGC->devPrivates[mfbGCPrivateIndex].ptr )->colorRrop.bgPixel ;
+
+    xSrc = pGC->patOrg.x + pDrawable->x ;
+    ySrc = pGC->patOrg.y + pDrawable->y ;
+
+    for ( ; n-- ; ppt++, pwidth++ )
+	xf4bppOpaqueStipple( (WindowPtr)pDrawable, pGC->stipple, fg, bg, alu, pm,
+		ppt->x, ppt->y, *pwidth, 1, xSrc, ySrc ) ;
+
+    DEALLOCATE_LOCAL( pptFree ) ;
+    DEALLOCATE_LOCAL( pwidthFree ) ;
+    return ;
+}
+
+void
+xf4bppTileWindowFS( pDrawable, pGC, nInit, pptInit, pwidthInit, fSorted )
+DrawablePtr pDrawable ;
+register GC *pGC ;
+int nInit ;			/* number of spans to fill */
+DDXPointPtr pptInit ;		/* pointer to list of start points */
+int *pwidthInit ;		/* pointer to list of n widths */
+int fSorted ;
+{
+				/* next three parameters are post-clip */
+    register DDXPointPtr ppt ;	/* pointer to list of start points */
+    register int *pwidth ;	/* pointer to list of n widths */
+    int n ;			/* number of spans to fill */
+    unsigned char pm ;
+    int alu ;
+    int xSrc ;
+    int ySrc ;
+    int *pwidthFree ;		/* copies of the pointers to free */
+    DDXPointPtr pptFree ;
+
+    TRACE( ( "xf4bppTileWindowFS(pDrawable=0x%x,pGC=0x%x,nInit=%d,pptInit=0x%x,pwidthInit=0x%x,fSorted=%d)\n",
+	    pDrawable, pGC, nInit, pptInit, pwidthInit, fSorted ) ) ;
+
+    if ( ( alu = ( (ppcPrivGC *) pGC->devPrivates[mfbGCPrivateIndex].ptr )->colorRrop.alu ) == GXnoop )
+	return ;
+
+    SETSPANPTRS( nInit, n, pwidthInit, pwidth, pptInit,
+		 ppt, pwidthFree, pptFree, fSorted ) ;
+
+    xSrc = pGC->patOrg.x + pDrawable->x ;
+    ySrc = pGC->patOrg.y + pDrawable->y ;
+    pm = ( (ppcPrivGC *) pGC->devPrivates[mfbGCPrivateIndex].ptr )->colorRrop.planemask ;
+
+    for ( ; n-- ; ppt++, pwidth++ )
+	    xf4bppTileRect( (WindowPtr)pDrawable, pGC->tile.pixmap, alu, pm,
+		     ppt->x, ppt->y, *pwidth, 1, xSrc, ySrc ) ;
+
+    DEALLOCATE_LOCAL( pptFree ) ;
+    DEALLOCATE_LOCAL( pwidthFree ) ;
+    return ;
+}
+@
+
+
+1.1.9.1
+log
+@OpenBSD just has imported exactly this tree into their vendor branch,
+called the same tag, in XF4/xc
+This is, apparently, the last XFree86 snapshot before the licence change
+(ie, addition of the advertising clause)
+
+Since the developers don't see any problems with that, and we would like
+to integrate improvements done by the remaining one or two (or so) XFree86
+developers (j/k), this prepares enabling us to update X-Window in the future.
+@
+text
+@d1 1
+a1 1
+/* $XFree86: xc/programs/Xserver/hw/xfree86/xf4bpp/ppcWinFS.c,v 1.4 2003/11/03 05:11:57 tsi Exp $ */
+d101 1
+a101 1
+    if ( !( pwidthFree = (int *) ALLOCATE_LOCAL( n * sizeof( int ) ) ) )
+d103 1
+a103 1
+    pwidth = pwidthFree ;
+d105 1
+a105 1
+    if ( !( pptFree = (DDXPointRec *)
+d110 1
+a110 1
+    ppt = pptFree ;
+d167 2
+a168 2
+    SETSPANPTRS( nInit, n, pwidthInit, pwidthFree, pptInit,
+		 pptFree, pwidth, ppt, fSorted ) ;
+d219 2
+a220 2
+    SETSPANPTRS( nInit, n, pwidthInit, pwidthFree, pptInit,
+		 pptFree, pwidth, ppt, fSorted ) ;
+d264 2
+a265 2
+    SETSPANPTRS( nInit, n, pwidthInit, pwidthFree, pptInit,
+		 pptFree, pwidth, ppt, fSorted ) ;
+@
+
+
+1.1.1.1
+log
+@Import OpenBSD 3.3 XF4 repository from CTM 3132 the first time
+This finalizes starting an OpenBSD-mirabile (aka MirBSD) repository.
+
+### MirBSD is:
+# Copyright (c) 1982-2003 by Thorsten "mirabile" Glaser <x86@@ePost.de>
+# Copyright © 1968-2003  The authors of And contributors to UNIX®, the
+#       C Language, BSD/Berkeley Unix; 386BSD, NetBSD 1.1 and OpenBSD.
+#
+# Anyone who obtained a copy of this work is hereby permitted to freely use,
+# distribute, modify, merge, sublicence, give away or sell it as long as the
+# authors are given due credit and the following notice is retained:
+#
+# This work is provided "as is", with no explicit or implicit warranty what-
+# soever. Use it only at your own risk. In no event may an author or contri-
+# butor be held liable for any damage, directly or indirectly, that origina-
+# ted through or is caused by creation or modification of this work.
+
+MirBSD is my private tree. MirBSD does not differ very much from OpenBSD
+and intentionally tracks OpenBSD. That's why it _is_ OpenBSD, just not the
+official one. It's like with DarrenBSD.
+
+At time of this writing, no advertising for MirBSD must be done,
+because the advertising clause has not yet been sorted out.
+
+http://templeofhate.com/tglaser/MirBSD/index.php
+@
+text
+@@
+
+
+1.1.1.2
+log
+@That's what OpenBSD will, probably, ship as XF4 in 3.5
+their last sync against XFree86 4.3-current has been
+imported into our vendor branch, too
+@
+text
+@d1 1
+a1 1
+/* $XFree86: xc/programs/Xserver/hw/xfree86/xf4bpp/ppcWinFS.c,v 1.4 2003/11/03 05:11:57 tsi Exp $ */
+d101 1
+a101 1
+    if ( !( pwidthFree = (int *) ALLOCATE_LOCAL( n * sizeof( int ) ) ) )
+d103 1
+a103 1
+    pwidth = pwidthFree ;
+d105 1
+a105 1
+    if ( !( pptFree = (DDXPointRec *)
+d110 1
+a110 1
+    ppt = pptFree ;
+d167 2
+a168 2
+    SETSPANPTRS( nInit, n, pwidthInit, pwidthFree, pptInit,
+		 pptFree, pwidth, ppt, fSorted ) ;
+d219 2
+a220 2
+    SETSPANPTRS( nInit, n, pwidthInit, pwidthFree, pptInit,
+		 pptFree, pwidth, ppt, fSorted ) ;
+d264 2
+a265 2
+    SETSPANPTRS( nInit, n, pwidthInit, pwidthFree, pptInit,
+		 pptFree, pwidth, ppt, fSorted ) ;
+@
+

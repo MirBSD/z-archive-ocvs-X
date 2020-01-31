@@ -1,0 +1,538 @@
+head	1.1;
+branch	1.1.1;
+access;
+symbols
+	tg-mergetmp-2:1.1.1.2
+	cvs-200410241530:1.1.1.2
+	cvs-200410012000:1.1.1.2
+	cvs-200407141120:1.1.1.2
+	cvs-200406231010:1.1.1.2
+	MIRBSD_7quater:1.1.1.1
+	cvs-200405271510:1.1.1.2
+	XFree86_4_4_0:1.1.9.1
+	cvs-200403021700:1.1.1.2
+	XFREE86_20040213:1.1.9.1
+	xc:1.1.9
+	cvs-200401291925:1.1.1.1
+	MIRBSD_7_ALPHA:1.1.1.1.0.4
+	MIRBSD_7:1.1.1.1.0.2
+	MIRBSD_7ter:1.1.1.1
+	cvs-20011091815:1.1.1.1
+	cvs-200309162130:1.1.1.1
+	cvs-200308302005:1.1.1.1
+	ctmx-0387:1.1.1.1
+	ctmx-0384:1.1.1.1
+	MIRBSD_5:1.1.1.1
+	ctmx-0375:1.1.1.1
+	ctmx-0373:1.1.1.1
+	ctm-0371:1.1.1.1
+	ctm-0370:1.1.1.1
+	MIRBSD_4:1.1.1.1
+	ctm-0363:1.1.1.1
+	ctm-0359:1.1.1.1
+	ctm-0349:1.1.1.1
+	openbsd:1.1.1;
+locks; strict;
+comment	@ * @;
+
+
+1.1
+date	2003.03.22.20.10.22;	author tg;	state Exp;
+branches
+	1.1.1.1
+	1.1.9.1;
+next	;
+
+1.1.1.1
+date	2003.03.22.20.10.22;	author tg;	state Exp;
+branches;
+next	1.1.1.2;
+
+1.1.1.2
+date	2004.03.02.18.40.16;	author tg;	state Stab;
+branches;
+next	;
+
+1.1.9.1
+date	2004.02.14.19.28.46;	author tg;	state Exp;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@/*
+** xgc
+**
+** record.c
+*/
+/* $XFree86: xc/programs/xgc/record.c,v 1.3 2000/02/17 14:00:37 dawes Exp $ */
+
+#include <X11/Intrinsic.h>
+#include <X11/StringDefs.h>
+#include <X11/Xaw/Label.h>
+#include <X11/Xaw/Command.h>
+#include <X11/Xaw/Form.h>
+#include <X11/Shell.h>
+#include <X11/Xaw/AsciiText.h>
+#include <stdio.h>
+
+#include "xgc.h"
+
+static void start_recording();
+static void stop_recording();
+static void print_out_gc_values();
+static void chose_playback_filename();
+static void cancel_playback();
+extern void get_filename();
+extern void yyparse();
+
+extern XgcStuff TestStuff;
+extern XgcStuff FunctionStuff;
+extern XgcStuff LinestyleStuff;
+extern XgcStuff CapstyleStuff;
+extern XgcStuff JoinstyleStuff;
+extern XgcStuff FillstyleStuff;
+extern XgcStuff FillruleStuff;
+extern XgcStuff ArcmodeStuff;
+
+extern XStuff X;
+extern Boolean recording;
+extern Widget filename_text_widget, recordbutton;
+
+static void cancel_record();
+static void done_choosing_filename();
+
+FILE *recordfile;		/* the file we're recording to */
+FILE *playbackfile;		/* the file we're playing back from */
+extern FILE *yyin;		/* for yyparse */
+
+/* toggle_recordbutton(w,closure,call_data)
+** ----------------------------------------
+** This function is called when the user presses the "Record"
+** command button.  If we're not recording, we start; if we are,
+** we stop.  Also change the label to reflect the change in the
+** function of the button.
+*/
+
+/*ARGSUSED*/
+void
+toggle_recordbutton(w,closure,call_data)
+     Widget w;
+     caddr_t closure;
+     caddr_t call_data;
+{
+  /* ArgList for changing the label */
+  static Arg recordargs[] = {
+    {XtNlabel,        (XtArgVal) NULL}
+  };
+  
+  char tmp[20];			/* new label */
+  
+  if (!recording) {
+    start_recording();
+  }
+  else {
+    recording = FALSE;
+    stop_recording();
+    sprintf(tmp,"Record");
+    recordargs[0].value = (XtArgVal) tmp;
+  }
+
+  XtSetValues(recordbutton,recordargs,XtNumber(recordargs));
+}
+
+/* start_recording()
+** -----------------
+** Get the name of the file the user wants to record into, and
+** start recording into it if he doesn't cancel.
+*/
+
+static void
+start_recording() 
+{
+  get_filename(done_choosing_filename,cancel_record);
+}
+
+/* stop_recording()
+** ----------------
+** Close the output file.
+*/
+
+static void
+stop_recording() 
+{
+  fclose(recordfile);
+}
+
+/* cancel_record()
+** ---------------
+** What to do if the if the user canceled recording, i.e. nothing.
+*/
+
+static void
+cancel_record() 
+{
+}
+
+/* done_choosing_filename()
+** ------------------------
+** What to do after the user's chosen a file.  Change the label on the
+** command button, open the file, and dump the current contents of the
+** GC into it.
+*/
+
+static void
+done_choosing_filename() 
+{
+  static Arg recordargs[] = {
+    {XtNlabel,        (XtArgVal) NULL},
+    {XtNresize,       (XtArgVal) True}
+  };
+  Arg args[1];
+  char tmp[20], *filename;
+
+  XtSetArg(args[0], XtNstring, &filename);
+  XtGetValues(filename_text_widget, args, (Cardinal) 1);
+
+  if ((recordfile = fopen(filename,"w")) != NULL) {
+    recording = TRUE;
+    sprintf(tmp,"End Record");
+    recordargs[0].value = (XtArgVal) tmp;
+    XtSetValues(recordbutton,recordargs,XtNumber(recordargs));
+
+    print_out_gc_values();
+  }
+}
+
+/* print_if_recording(str)
+** -----------------------
+** If we're recording to a file, put str in it.
+*/
+
+void
+print_if_recording(str)
+     char *str;
+{
+  if (recording)
+    fprintf(recordfile,"%s",str);
+}
+
+/* close_file_if_recording()
+** -------------------------
+** If we're recording, stop.
+*/
+
+void 
+close_file_if_recording()
+{
+  if (recording)
+    fclose(recordfile);
+}
+
+/* print_out_gc_values()
+** ---------------------
+** Dump the contents of the GC to the file, so that when the file gets
+** played back, it will be correctly initialized.
+*/
+
+static void
+print_out_gc_values()
+{
+  int i;
+  for (i=0;i<NUM_TESTS;++i) {
+    if ((TestStuff.data)[i].code == X.test) {
+      fprintf(recordfile,"%s %s\n",
+	      TestStuff.choice.text,(TestStuff.data)[i].text);
+      break;
+    }
+  }
+  for (i=0;i<NUM_FUNCTIONS;++i) {
+    if ((FunctionStuff.data)[i].code == X.gcv.function) {
+      fprintf(recordfile,"%s %s\n",
+	      FunctionStuff.choice.text,(FunctionStuff.data)[i].text);
+      break;
+    }
+  }
+  for (i=0;i<NUM_LINESTYLES;++i) {
+    if ((LinestyleStuff.data)[i].code == X.gcv.line_style) {
+      fprintf(recordfile,"%s %s\n",
+	      LinestyleStuff.choice.text,(LinestyleStuff.data)[i].text);
+      break;
+    }
+  }
+  for (i=0;i<NUM_CAPSTYLES;++i) {
+    if ((CapstyleStuff.data)[i].code == X.gcv.cap_style) {
+      fprintf(recordfile,"%s %s\n",
+	      CapstyleStuff.choice.text,(CapstyleStuff.data)[i].text);
+      break;
+    }
+  }
+  for (i=0;i<NUM_JOINSTYLES;++i) {
+    if ((JoinstyleStuff.data)[i].code == X.gcv.join_style) {
+      fprintf(recordfile,"%s %s\n",
+	      JoinstyleStuff.choice.text,(JoinstyleStuff.data)[i].text);
+      break;
+    }
+  }
+  for (i=0;i<NUM_FILLSTYLES;++i) {
+    if ((FillstyleStuff.data)[i].code == X.gcv.fill_style) {
+      fprintf(recordfile,"%s %s\n",
+	      FillstyleStuff.choice.text,(FillstyleStuff.data)[i].text);
+      break;
+    }
+  }
+  for (i=0;i<NUM_FILLRULES;++i) {
+    if ((FillruleStuff.data)[i].code == X.gcv.fill_rule) {
+      fprintf(recordfile,"%s %s\n",
+	      FillruleStuff.choice.text,(FillruleStuff.data)[i].text);
+      break;
+    }
+  }
+  for (i=0;i<NUM_ARCMODES;++i) {
+    if ((ArcmodeStuff.data)[i].code == X.gcv.arc_mode) {
+      fprintf(recordfile,"%s %s\n",
+	      ArcmodeStuff.choice.text,(ArcmodeStuff.data)[i].text);
+      break;
+    }
+  }
+  fprintf(recordfile,"linewidth %d\n",X.gcv.line_width);
+  fprintf(recordfile,"foreground %ld\n",X.gcv.foreground);
+  fprintf(recordfile,"background %ld\n",X.gcv.background);
+  fprintf(recordfile,"planemask %ld\n",X.gcv.plane_mask);
+  fprintf(recordfile,"dashlist %d\n",X.gcv.dashes);
+  fprintf(recordfile,"font %s\n",X.fontname);
+}  
+
+/********************************************/
+
+/* start_playback()
+** ----------------
+** This gets called if the user wants to playback from a file.
+** Get the file name and do the appropriate thing.
+*/
+
+void
+start_playback()
+{
+  get_filename(chose_playback_filename,cancel_playback);
+}
+
+/* cancel_playback()
+** -----------------
+** What to do if the user canceled the playback request.
+*/
+
+static void
+cancel_playback()
+{
+}
+
+/* chose_playback_filename()
+** -------------------------
+** What to do once the user's selected a filename to playback.
+** Play it back.
+*/
+
+static void
+chose_playback_filename()
+{
+  Arg args[1];
+  char *filename;
+
+  XtSetArg(args[0], XtNstring, &filename);
+  XtGetValues(filename_text_widget, args, (Cardinal) 1);
+
+  if ((playbackfile = fopen(filename,"r")) != NULL) {
+    yyin = playbackfile;
+    yyparse();
+  }
+}
+
+/* read_from_keyboard()
+** --------------------
+** Do a playback from the keyboard.
+*/
+
+void
+read_from_keyboard()
+{
+  yyin = stdin;
+  yyparse();
+}
+@
+
+
+1.1.9.1
+log
+@OpenBSD just has imported exactly this tree into their vendor branch,
+called the same tag, in XF4/xc
+This is, apparently, the last XFree86 snapshot before the licence change
+(ie, addition of the advertising clause)
+
+Since the developers don't see any problems with that, and we would like
+to integrate improvements done by the remaining one or two (or so) XFree86
+developers (j/k), this prepares enabling us to update X-Window in the future.
+@
+text
+@d6 1
+a6 1
+/* $XFree86: xc/programs/xgc/record.c,v 1.4 2003/05/07 21:02:07 herrb Exp $ */
+d19 23
+a41 7
+static void start_recording(void);
+static void stop_recording(void);
+static void print_out_gc_values(void);
+static void chose_playback_filename(void);
+static void cancel_playback(void);
+static void done_choosing_filename(void) ;
+static void cancel_record(void);
+d45 1
+d57 4
+a60 1
+toggle_recordbutton(Widget w, caddr_t closure, caddr_t call_data)
+d75 1
+a75 1
+    snprintf(tmp, sizeof tmp, "Record");
+d89 1
+a89 1
+start_recording(void) 
+d100 1
+a100 1
+stop_recording(void) 
+d111 1
+a111 1
+cancel_record(void) 
+d123 1
+a123 1
+done_choosing_filename(void) 
+d137 1
+a137 1
+    snprintf(tmp, sizeof tmp, "End Record");
+d151 2
+a152 1
+print_if_recording(const char *str)
+d164 1
+a164 1
+close_file_if_recording(void)
+d177 1
+a177 1
+print_out_gc_values(void)
+d253 1
+a253 1
+start_playback(void)
+d264 1
+a264 1
+cancel_playback(void)
+d275 1
+a275 1
+chose_playback_filename(void)
+d295 1
+a295 1
+read_from_keyboard(void)
+@
+
+
+1.1.1.1
+log
+@Import OpenBSD 3.3 XF4 repository from CTM 3132 the first time
+This finalizes starting an OpenBSD-mirabile (aka MirBSD) repository.
+
+### MirBSD is:
+# Copyright (c) 1982-2003 by Thorsten "mirabile" Glaser <x86@@ePost.de>
+# Copyright © 1968-2003  The authors of And contributors to UNIX®, the
+#       C Language, BSD/Berkeley Unix; 386BSD, NetBSD 1.1 and OpenBSD.
+#
+# Anyone who obtained a copy of this work is hereby permitted to freely use,
+# distribute, modify, merge, sublicence, give away or sell it as long as the
+# authors are given due credit and the following notice is retained:
+#
+# This work is provided "as is", with no explicit or implicit warranty what-
+# soever. Use it only at your own risk. In no event may an author or contri-
+# butor be held liable for any damage, directly or indirectly, that origina-
+# ted through or is caused by creation or modification of this work.
+
+MirBSD is my private tree. MirBSD does not differ very much from OpenBSD
+and intentionally tracks OpenBSD. That's why it _is_ OpenBSD, just not the
+official one. It's like with DarrenBSD.
+
+At time of this writing, no advertising for MirBSD must be done,
+because the advertising clause has not yet been sorted out.
+
+http://templeofhate.com/tglaser/MirBSD/index.php
+@
+text
+@@
+
+
+1.1.1.2
+log
+@That's what OpenBSD will, probably, ship as XF4 in 3.5
+their last sync against XFree86 4.3-current has been
+imported into our vendor branch, too
+@
+text
+@d6 1
+a6 1
+/* $XFree86: xc/programs/xgc/record.c,v 1.4 2003/05/07 21:02:07 herrb Exp $ */
+d19 23
+a41 7
+static void start_recording(void);
+static void stop_recording(void);
+static void print_out_gc_values(void);
+static void chose_playback_filename(void);
+static void cancel_playback(void);
+static void done_choosing_filename(void) ;
+static void cancel_record(void);
+d45 1
+d57 4
+a60 1
+toggle_recordbutton(Widget w, caddr_t closure, caddr_t call_data)
+d75 1
+a75 1
+    snprintf(tmp, sizeof tmp, "Record");
+d89 1
+a89 1
+start_recording(void) 
+d100 1
+a100 1
+stop_recording(void) 
+d111 1
+a111 1
+cancel_record(void) 
+d123 1
+a123 1
+done_choosing_filename(void) 
+d137 1
+a137 1
+    snprintf(tmp, sizeof tmp, "End Record");
+d151 2
+a152 1
+print_if_recording(const char *str)
+d164 1
+a164 1
+close_file_if_recording(void)
+d177 1
+a177 1
+print_out_gc_values(void)
+d253 1
+a253 1
+start_playback(void)
+d264 1
+a264 1
+cancel_playback(void)
+d275 1
+a275 1
+chose_playback_filename(void)
+d295 1
+a295 1
+read_from_keyboard(void)
+@
+

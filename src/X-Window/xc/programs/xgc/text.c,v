@@ -1,0 +1,408 @@
+head	1.1;
+branch	1.1.1;
+access;
+symbols
+	tg-mergetmp-2:1.1.1.2
+	cvs-200410241530:1.1.1.2
+	cvs-200410012000:1.1.1.2
+	cvs-200407141120:1.1.1.2
+	cvs-200406231010:1.1.1.2
+	MIRBSD_7quater:1.1.1.1
+	cvs-200405271510:1.1.1.2
+	XFree86_4_4_0:1.1.9.1
+	cvs-200403021700:1.1.1.2
+	XFREE86_20040213:1.1.9.1
+	xc:1.1.9
+	cvs-200401291925:1.1.1.1
+	MIRBSD_7_ALPHA:1.1.1.1.0.4
+	MIRBSD_7:1.1.1.1.0.2
+	MIRBSD_7ter:1.1.1.1
+	cvs-20011091815:1.1.1.1
+	cvs-200309162130:1.1.1.1
+	cvs-200308302005:1.1.1.1
+	ctmx-0387:1.1.1.1
+	ctmx-0384:1.1.1.1
+	MIRBSD_5:1.1.1.1
+	ctmx-0375:1.1.1.1
+	ctmx-0373:1.1.1.1
+	ctm-0371:1.1.1.1
+	ctm-0370:1.1.1.1
+	MIRBSD_4:1.1.1.1
+	ctm-0363:1.1.1.1
+	ctm-0359:1.1.1.1
+	ctm-0349:1.1.1.1
+	openbsd:1.1.1;
+locks; strict;
+comment	@ * @;
+
+
+1.1
+date	2003.03.22.20.10.22;	author tg;	state Exp;
+branches
+	1.1.1.1
+	1.1.9.1;
+next	;
+
+1.1.1.1
+date	2003.03.22.20.10.22;	author tg;	state Exp;
+branches;
+next	1.1.1.2;
+
+1.1.1.2
+date	2004.03.02.18.40.18;	author tg;	state Stab;
+branches;
+next	;
+
+1.1.9.1
+date	2004.02.14.19.28.47;	author tg;	state Exp;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@/*
+** xgc
+**
+** text.c
+**
+** How to make a text widget that returns a string when the cursor
+** leaves its window.
+*/
+/* $XFree86: xc/programs/xgc/text.c,v 1.3 2000/02/17 14:00:37 dawes Exp $ */
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <X11/Intrinsic.h>
+#include <X11/StringDefs.h>
+#include <X11/Xaw/Form.h>
+#include <X11/Xaw/Label.h>
+#include <X11/Xaw/AsciiText.h>
+#include "xgc.h"
+
+static void WriteText();
+extern void interpret();
+
+extern XStuff X;
+extern XtAppContext appcontext;
+
+/* the strings which are displayed on the screen, edited, and sent
+   to interpret() */
+static char textstrings[NUMTEXTWIDGETS][80];
+
+static char oldtextstrings[NUMTEXTWIDGETS][80];
+
+static const char *defaultstrings[NUMTEXTWIDGETS] = {"0","6x10","0","1"};
+
+/* The labels displayed next to them */
+static const char *labels[NUMTEXTWIDGETS] = {"Line Width","Font","Foreground",
+					     "Background"};
+
+/* the first half of what gets sent to interpret() */
+static const char *names[NUMTEXTWIDGETS] = {"linewidth ","font ","foreground ",
+					    "background "};
+
+/* create_text_choice(w,type,length,width)
+** ---------------------------------------
+** Inside w (a form), creates an editable text widget of width width.  The
+** user can enter a string of up to length characters.  type is one of
+** the constants defined in xgc.h; it decides things like the label,
+** what string will be displayed and edited, etc.  When the pointer leaves
+** the widget, the widget does the appropriate thing with the text
+** inside it; the user doesn't have to press an "enter" button or anything.
+** Returns the text widget which the user will edit.
+*/
+
+Widget
+create_text_choice(w,type,length,width)
+     Widget w;
+     int type;
+     int length, width;
+{
+  char translationtable[600];	/* for adding the new action (calling
+				   WriteText() when the pointer leaves) */
+
+  static XtActionsRec actionTable[] = {	/* likewise */
+    {"WriteText",  WriteText},
+    {"Nothing",    NULL}
+  };
+
+  static Arg labelargs[] = {
+    {XtNborderWidth,   (XtArgVal) 0},
+    {XtNjustify,       (XtArgVal) XtJustifyRight}
+  };
+
+  static Arg textargs[] = {
+    {XtNeditType,   (XtArgVal) XawtextEdit},
+    {XtNstring,     (XtArgVal) NULL},
+    {XtNlength,     (XtArgVal) NULL},
+    {XtNwidth,      (XtArgVal) NULL},
+    {XtNhorizDistance, (XtArgVal) 10},
+    {XtNfromHoriz,  (XtArgVal) NULL},
+    {XtNinsertPosition, (XtArgVal) NULL},
+    {XtNuseStringInPlace, (XtArgVal) True}
+  };
+
+  static Widget text;		/* the text widget */
+  static Widget label;		/* the label widget */
+
+  /* Disable keys which would cause the cursor to go off the single
+  ** line that we want to display.  If the pointer leaves the window,
+  ** update the GC accordingly.  The integer passed to WriteText is
+  ** so it knows what type of widget was just updated. */
+
+  sprintf(translationtable,
+     "<Leave>:      WriteText(%d)\n\
+     Ctrl<Key>J:    Nothing()\n\
+     Ctrl<Key>M:    Nothing()\n\
+     <Key>Linefeed: Nothing()\n\
+     <Key>Return:   Nothing()\n\
+     Ctrl<Key>O:    Nothing()\n\
+     Meta<Key>I:    Nothing()\n\
+     Ctrl<Key>N:    Nothing()\n\
+     Ctrl<Key>P:    Nothing()\n\
+     Ctrl<Key>Z:    Nothing()\n\
+     Meta<Key>Z:    Nothing()\n\
+     Ctrl<Key>V:    Nothing()\n\
+     Meta<Key>V:    Nothing()",type);
+
+  /* label uses type to find out what its title is */
+  label = XtCreateManagedWidget(labels[type],labelWidgetClass,w,
+				labelargs,XtNumber(labelargs));
+  
+  /* text uses type to find out what its string is */
+  switch (type) {
+  case TForeground:
+    sprintf(textstrings[type],"%d",(int) X.gcv.foreground);
+    sprintf(oldtextstrings[type],"%d",(int) X.gcv.foreground);
+    break;
+  case TBackground:
+    sprintf(textstrings[type],"%d",(int) X.gcv.background);
+    sprintf(oldtextstrings[type],"%d",(int) X.gcv.background);
+    break;
+  default:
+    strcpy(textstrings[type],defaultstrings[type]);
+    strcpy(oldtextstrings[type],defaultstrings[type]);
+  }
+  textargs[1].value = (XtArgVal) textstrings[type];
+  textargs[2].value = (XtArgVal) length;
+  textargs[3].value = (XtArgVal) width;
+  textargs[5].value = (XtArgVal) label;
+  textargs[6].value = (XtArgVal) strlen(textstrings[type]);
+
+  text = XtCreateManagedWidget("text", asciiTextWidgetClass,w,
+			       textargs,XtNumber(textargs));
+
+  /* Register the actions and translations */
+
+  XtAppAddActions(appcontext,actionTable,XtNumber(actionTable));
+  XtOverrideTranslations(text,XtParseTranslationTable(translationtable));
+
+  return(text);
+}
+
+/* WriteText(w,event,params,num_params)
+** ------------------------------------
+** Makes an appropriate string and sends it off to interpret().
+** It's an ActionProc, thus the funny arguments.
+*/
+
+/*ARGSUSED*/
+static void
+WriteText(w,event,params,num_params)
+     Widget w;
+     XEvent *event;
+     String *params;		/* the type is in here */
+     Cardinal *num_params;
+{
+  char mbuf[80];
+  int type;			/* which string # to send */
+
+  type = atoi(params[0]);
+  if (strcmp(textstrings[type],oldtextstrings[type])) {
+    strcpy(oldtextstrings[type],textstrings[type]);
+    sprintf(mbuf,names[type]);	/* the right first half */
+    strcat(mbuf,textstrings[type]); /* the right second half */
+    strcat(mbuf,"\n");		/* the right newline */
+    interpret(mbuf);		/* send it off */
+  }
+}
+
+/* change_text(w,type,newtext)
+** ------------------------
+** Changes the text in the text widget w of type type to newtext.
+*/
+
+void
+change_text(w,newtext)
+     Widget w;
+     String newtext;
+{
+  XawTextBlock text;		/* the new text */
+  XawTextPosition first, last;	/* boundaries of the old text */
+  String oldtext;		/* the old text */
+
+  static Arg textargs[] = {
+    {XtNstring, (XtArgVal) 0}
+  };
+
+  /* Initialize the XawTextBlock. */
+
+  if (!newtext)
+      newtext = "";
+  text.firstPos = 0;
+  text.length = strlen(newtext);
+  text.ptr = newtext;
+  text.format = FMT8BIT;
+
+  /* Find the old text, so we can get its length, so we know how
+  ** much of it to update. */
+
+  textargs[0].value = (XtArgVal) &oldtext;
+  XtGetValues(w,textargs,XtNumber(textargs));
+  first = XawTextTopPosition(w);
+  if (!oldtext)
+      oldtext = "";
+  last = (XawTextPosition) strlen(oldtext)+1;
+
+  /* Replace it with the new text. */
+
+  XawTextReplace(w, first, last, &text);
+}
+
+@
+
+
+1.1.9.1
+log
+@OpenBSD just has imported exactly this tree into their vendor branch,
+called the same tag, in XF4/xc
+This is, apparently, the last XFree86 snapshot before the licence change
+(ie, addition of the advertising clause)
+
+Since the developers don't see any problems with that, and we would like
+to integrate improvements done by the remaining one or two (or so) XFree86
+developers (j/k), this prepares enabling us to update X-Window in the future.
+@
+text
+@d9 1
+a9 1
+/* $XFree86: xc/programs/xgc/text.c,v 1.4 2003/05/07 21:02:07 herrb Exp $ */
+d20 5
+a24 1
+static void WriteText(Widget, XEvent *, String *, Cardinal *);
+d54 4
+a57 1
+create_text_choice(Widget w, int type, int length, int width)
+d91 1
+a91 1
+  snprintf(translationtable,sizeof translationtable,
+d113 2
+a114 4
+    snprintf(textstrings[type],sizeof textstrings[type], 
+	"%d",(int) X.gcv.foreground);
+    snprintf(oldtextstrings[type],sizeof oldtextstrings[type],
+	"%d",(int) X.gcv.foreground);
+d117 2
+a118 4
+    snprintf(textstrings[type],sizeof textstrings[type],
+	"%d",(int) X.gcv.background);
+    snprintf(oldtextstrings[type],sizeof oldtextstrings[type],
+	"%d",(int) X.gcv.background);
+d149 5
+a153 1
+WriteText(Widget w, XEvent *event, String *params, Cardinal *num_params)
+d161 3
+a163 3
+    snprintf(mbuf,sizeof mbuf,"%s%s\n", 
+	names[type],		/* the right first half */
+	textstrings[type]);	/* the right second half */
+d174 3
+a176 1
+change_text(Widget w, String newtext)
+@
+
+
+1.1.1.1
+log
+@Import OpenBSD 3.3 XF4 repository from CTM 3132 the first time
+This finalizes starting an OpenBSD-mirabile (aka MirBSD) repository.
+
+### MirBSD is:
+# Copyright (c) 1982-2003 by Thorsten "mirabile" Glaser <x86@@ePost.de>
+# Copyright © 1968-2003  The authors of And contributors to UNIX®, the
+#       C Language, BSD/Berkeley Unix; 386BSD, NetBSD 1.1 and OpenBSD.
+#
+# Anyone who obtained a copy of this work is hereby permitted to freely use,
+# distribute, modify, merge, sublicence, give away or sell it as long as the
+# authors are given due credit and the following notice is retained:
+#
+# This work is provided "as is", with no explicit or implicit warranty what-
+# soever. Use it only at your own risk. In no event may an author or contri-
+# butor be held liable for any damage, directly or indirectly, that origina-
+# ted through or is caused by creation or modification of this work.
+
+MirBSD is my private tree. MirBSD does not differ very much from OpenBSD
+and intentionally tracks OpenBSD. That's why it _is_ OpenBSD, just not the
+official one. It's like with DarrenBSD.
+
+At time of this writing, no advertising for MirBSD must be done,
+because the advertising clause has not yet been sorted out.
+
+http://templeofhate.com/tglaser/MirBSD/index.php
+@
+text
+@@
+
+
+1.1.1.2
+log
+@That's what OpenBSD will, probably, ship as XF4 in 3.5
+their last sync against XFree86 4.3-current has been
+imported into our vendor branch, too
+@
+text
+@d9 1
+a9 1
+/* $XFree86: xc/programs/xgc/text.c,v 1.4 2003/05/07 21:02:07 herrb Exp $ */
+d20 5
+a24 1
+static void WriteText(Widget, XEvent *, String *, Cardinal *);
+d54 4
+a57 1
+create_text_choice(Widget w, int type, int length, int width)
+d91 1
+a91 1
+  snprintf(translationtable,sizeof translationtable,
+d113 2
+a114 4
+    snprintf(textstrings[type],sizeof textstrings[type], 
+	"%d",(int) X.gcv.foreground);
+    snprintf(oldtextstrings[type],sizeof oldtextstrings[type],
+	"%d",(int) X.gcv.foreground);
+d117 2
+a118 4
+    snprintf(textstrings[type],sizeof textstrings[type],
+	"%d",(int) X.gcv.background);
+    snprintf(oldtextstrings[type],sizeof oldtextstrings[type],
+	"%d",(int) X.gcv.background);
+d149 5
+a153 1
+WriteText(Widget w, XEvent *event, String *params, Cardinal *num_params)
+d161 3
+a163 3
+    snprintf(mbuf,sizeof mbuf,"%s%s\n", 
+	names[type],		/* the right first half */
+	textstrings[type]);	/* the right second half */
+d174 3
+a176 1
+change_text(Widget w, String newtext)
+@
+

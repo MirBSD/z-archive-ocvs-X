@@ -1,0 +1,1117 @@
+head	1.1;
+branch	1.1.1;
+access;
+symbols
+	tg-mergetmp-2:1.1.1.3
+	cvs-200410241530:1.1.1.3
+	cvs-200410012000:1.1.1.3
+	cvs-200407141120:1.1.1.3
+	cvs-200406231010:1.1.1.3
+	MIRBSD_7quater:1.1.1.2
+	cvs-200405271510:1.1.1.3
+	XFree86_4_4_0:1.1.9.1
+	cvs-200403021700:1.1.1.3
+	XFREE86_20040213:1.1.9.1
+	xc:1.1.9
+	cvs-200401291925:1.1.1.2
+	MIRBSD_7_ALPHA:1.1.1.2.0.4
+	MIRBSD_7:1.1.1.2.0.2
+	MIRBSD_7ter:1.1.1.2
+	cvs-20011091815:1.1.1.2
+	cvs-200309162130:1.1.1.2
+	cvs-200308302005:1.1.1.2
+	ctmx-0387:1.1.1.2
+	ctmx-0384:1.1.1.2
+	MIRBSD_5:1.1.1.2
+	ctmx-0375:1.1.1.2
+	ctmx-0373:1.1.1.2
+	ctm-0371:1.1.1.2
+	ctm-0370:1.1.1.2
+	MIRBSD_4:1.1.1.2
+	ctm-0363:1.1.1.2
+	ctm-0359:1.1.1.2
+	ctm-0349:1.1.1.1
+	openbsd:1.1.1;
+locks; strict;
+comment	@ * @;
+
+
+1.1
+date	2003.03.22.20.04.20;	author tg;	state Exp;
+branches
+	1.1.1.1
+	1.1.9.1;
+next	;
+
+1.1.1.1
+date	2003.03.22.20.04.20;	author tg;	state Exp;
+branches;
+next	1.1.1.2;
+
+1.1.1.2
+date	2003.04.08.18.31.38;	author tg;	state Exp;
+branches;
+next	1.1.1.3;
+
+1.1.1.3
+date	2004.03.02.17.59.43;	author tg;	state Stab;
+branches;
+next	;
+
+1.1.9.1
+date	2004.02.14.19.18.14;	author tg;	state Exp;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@/* -*- mode: c; c-basic-offset: 3 -*-
+ *
+ * Copyright 2000 VA Linux Systems Inc., Fremont, California.
+ *
+ * All Rights Reserved.
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a
+ * copy of this software and associated documentation files (the "Software"),
+ * to deal in the Software without restriction, including without limitation
+ * the rights to use, copy, modify, merge, publish, distribute, sublicense,
+ * and/or sell copies of the Software, and to permit persons to whom the
+ * Software is furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice (including the next
+ * paragraph) shall be included in all copies or substantial portions of the
+ * Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL
+ * VA LINUX SYSTEMS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY,
+ * WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF
+ * OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+ * SOFTWARE.
+ */
+/* $XFree86: xc/lib/GL/mesa/src/drv/tdfx/tdfx_pixels.c,v 1.3 2001/08/18 02:51:06 dawes Exp $ */
+
+/*
+ * Original rewrite:
+ *	Gareth Hughes <gareth@@valinux.com>, 29 Sep - 1 Oct 2000
+ *
+ * Authors:
+ *	Gareth Hughes <gareth@@valinux.com>
+ *	Brian Paul <brianp@@valinux.com>
+ *	Nathan Hand <nhand@@valinux.com>
+ *
+ */
+
+#include "tdfx_context.h"
+#include "tdfx_dd.h"
+#include "tdfx_vb.h"
+#include "tdfx_pipeline.h"
+#include "tdfx_pixels.h"
+#include "tdfx_render.h"
+
+#include "image.h"
+
+#if 0
+/* test if window coord (px,py) is visible */
+static GLboolean
+inClipRects(tdfxContextPtr fxMesa, int px, int py)
+{
+    int i;
+    for (i = 0; i < fxMesa->numClipRects; i++) {
+        if ((px >= fxMesa->pClipRects[i].x1) &&
+            (px < fxMesa->pClipRects[i].x2) &&
+            (py >= fxMesa->pClipRects[i].y1) &&
+            (py < fxMesa->pClipRects[i].y2)) return GL_TRUE;
+    }
+    return GL_FALSE;
+}
+#endif
+
+/* test if rectangle of pixels (px,py) (px+width,py+height) is visible */
+static GLboolean
+inClipRects_Region(tdfxContextPtr fxMesa, int x, int y, int width, int height)
+{
+    int i;
+    int x1, y1, x2, y2;
+    int xmin, xmax, ymin, ymax, pixelsleft;
+
+    y1 = y - height + 1; y2 = y;
+    x1 = x; x2 = x + width - 1;
+    pixelsleft = width * height;
+
+    for (i = 0; i < fxMesa->numClipRects; i++)
+    {
+        /* algorithm requires x1 < x2 and y1 < y2 */
+        if ((fxMesa->pClipRects[i].x1 < fxMesa->pClipRects[i].x2)) {
+            xmin = fxMesa->pClipRects[i].x1;
+            xmax = fxMesa->pClipRects[i].x2-1;
+        } else {
+            xmin = fxMesa->pClipRects[i].x2;
+            xmax = fxMesa->pClipRects[i].x1-1;
+        }
+        if ((fxMesa->pClipRects[i].y1 < fxMesa->pClipRects[i].y2)) {
+            ymin = fxMesa->pClipRects[i].y1;
+            ymax = fxMesa->pClipRects[i].y2-1;
+        } else {
+            ymin = fxMesa->pClipRects[i].y2;
+            ymax = fxMesa->pClipRects[i].y1-1;
+        }
+
+        /* reject trivial cases */
+        if (xmax < x1) continue;
+        if (ymax < y1) continue;
+        if (xmin > x2) continue;
+        if (ymin > y2) continue;
+
+        /* find the intersection */
+        if (xmin < x1) xmin = x1;
+        if (ymin < y1) ymin = y1;
+        if (xmax > x2) xmax = x2;
+        if (ymax > y2) ymax = y2;
+
+        pixelsleft -= (xmax-xmin+1) * (ymax-ymin+1);
+    }
+
+    return pixelsleft == 0;
+}
+
+#if 0
+GLboolean
+tdfx_bitmap_R5G6B5(GLcontext * ctx, GLint px, GLint py,
+		   GLsizei width, GLsizei height,
+		   const struct gl_pixelstore_attrib *unpack,
+		   const GLubyte * bitmap)
+{
+   tdfxContextPtr fxMesa = TDFX_CONTEXT(ctx);
+   GrLfbInfo_t info;
+   TdfxU16 color;
+   const struct gl_pixelstore_attrib *finalUnpack;
+   struct gl_pixelstore_attrib scissoredUnpack;
+
+   /* check if there's any raster operations enabled which we can't handle */
+   if (ctx->RasterMask & (ALPHATEST_BIT |
+			  BLEND_BIT |
+			  DEPTH_BIT |
+			  FOG_BIT |
+			  LOGIC_OP_BIT |
+			  SCISSOR_BIT |
+			  STENCIL_BIT |
+			  MASKING_BIT |
+			  ALPHABUF_BIT | MULTI_DRAW_BIT)) return GL_FALSE;
+
+   if (ctx->Scissor.Enabled) {
+      /* This is a bit tricky, but by carefully adjusting the px, py,
+       * width, height, skipPixels and skipRows values we can do
+       * scissoring without special code in the rendering loop.
+       */
+
+      /* we'll construct a new pixelstore struct */
+      finalUnpack = &scissoredUnpack;
+      scissoredUnpack = *unpack;
+      if (scissoredUnpack.RowLength == 0)
+	 scissoredUnpack.RowLength = width;
+
+      /* clip left */
+      if (px < ctx->Scissor.X) {
+	 scissoredUnpack.SkipPixels += (ctx->Scissor.X - px);
+	 width -= (ctx->Scissor.X - px);
+	 px = ctx->Scissor.X;
+      }
+      /* clip right */
+      if (px + width >= ctx->Scissor.X + ctx->Scissor.Width) {
+	 width -= (px + width - (ctx->Scissor.X + ctx->Scissor.Width));
+      }
+      /* clip bottom */
+      if (py < ctx->Scissor.Y) {
+	 scissoredUnpack.SkipRows += (ctx->Scissor.Y - py);
+	 height -= (ctx->Scissor.Y - py);
+	 py = ctx->Scissor.Y;
+      }
+      /* clip top */
+      if (py + height >= ctx->Scissor.Y + ctx->Scissor.Height) {
+	 height -= (py + height - (ctx->Scissor.Y + ctx->Scissor.Height));
+      }
+
+      if (width <= 0 || height <= 0)
+	 return GL_TRUE;     /* totally scissored away */
+   }
+   else {
+      finalUnpack = unpack;
+   }
+
+   /* compute pixel value */
+   {
+      GLint r = (GLint) (ctx->Current.RasterColor[0] * 255.0f);
+      GLint g = (GLint) (ctx->Current.RasterColor[1] * 255.0f);
+      GLint b = (GLint) (ctx->Current.RasterColor[2] * 255.0f);
+      /*GLint a = (GLint)(ctx->Current.RasterColor[3]*255.0f); */
+      if (fxMesa->bgrOrder) {
+	 color = (TdfxU16)
+	    (((TdfxU16) 0xf8 & b) << (11 - 3)) |
+	    (((TdfxU16) 0xfc & g) << (5 - 3 + 1)) |
+	    (((TdfxU16) 0xf8 & r) >> 3);
+      }
+      else
+	 color = (TdfxU16)
+	    (((TdfxU16) 0xf8 & r) << (11 - 3)) |
+	    (((TdfxU16) 0xfc & g) << (5 - 3 + 1)) |
+	    (((TdfxU16) 0xf8 & b) >> 3);
+   }
+
+   info.size = sizeof(info);
+   if (!TDFX_grLfbLock(fxMesa,
+		     GR_LFB_WRITE_ONLY,
+		     fxMesa->currentFB,
+		     GR_LFBWRITEMODE_565,
+		     GR_ORIGIN_UPPER_LEFT, FXFALSE, &info)) {
+#ifndef TDFX_SILENT
+      fprintf(stderr, "tdfx Driver: error locking the linear frame buffer\n");
+#endif
+      return GL_TRUE;
+   }
+
+   {
+      const GLint winX = fxMesa->x_offset;
+      const GLint winY = fxMesa->y_offset + fxMesa->height - 1;
+      /* The dest stride depends on the hardware and whether we're drawing
+       * to the front or back buffer.  This compile-time test seems to do
+       * the job for now.
+       */
+      const GLint dstStride = (fxMesa->glCtx->Color.DrawBuffer == GL_FRONT)
+	 ? (fxMesa->screen_width) : (info.strideInBytes / 2);
+      GLint row;
+      /* compute dest address of bottom-left pixel in bitmap */
+      GLushort *dst = (GLushort *) info.lfbPtr
+	 + (winY - py) * dstStride + (winX + px);
+
+      for (row = 0; row < height; row++) {
+	 const GLubyte *src =
+	    (const GLubyte *) _mesa_image_address(finalUnpack,
+						  bitmap, width, height,
+						  GL_COLOR_INDEX,
+						  GL_BITMAP, 0, row, 0);
+	 if (finalUnpack->LsbFirst) {
+	    /* least significan bit first */
+	    GLubyte mask = 1U << (finalUnpack->SkipPixels & 0x7);
+	    GLint col;
+	    for (col = 0; col < width; col++) {
+	       if (*src & mask) {
+		  if (inClipRects(fxMesa, winX + px + col, winY - py - row))
+		     dst[col] = color;
+	       }
+	       if (mask == 128U) {
+		  src++;
+		  mask = 1U;
+	       }
+	       else {
+		  mask = mask << 1;
+	       }
+	    }
+	    if (mask != 1)
+	       src++;
+	 }
+	 else {
+	    /* most significan bit first */
+	    GLubyte mask = 128U >> (finalUnpack->SkipPixels & 0x7);
+	    GLint col;
+	    for (col = 0; col < width; col++) {
+	       if (*src & mask) {
+		  if (inClipRects(fxMesa, winX + px + col, winY - py - row))
+		     dst[col] = color;
+	       }
+	       if (mask == 1U) {
+		  src++;
+		  mask = 128U;
+	       }
+	       else {
+		  mask = mask >> 1;
+	       }
+	    }
+	    if (mask != 128)
+	       src++;
+	 }
+	 dst -= dstStride;
+      }
+   }
+
+   TDFX_grLfbUnlock(fxMesa, GR_LFB_WRITE_ONLY, fxMesa->currentFB);
+   return GL_TRUE;
+}
+#endif
+
+#if 0
+GLboolean
+tdfx_bitmap_R8G8B8A8(GLcontext * ctx, GLint px, GLint py,
+		     GLsizei width, GLsizei height,
+		     const struct gl_pixelstore_attrib *unpack,
+		     const GLubyte * bitmap)
+{
+   tdfxContextPtr fxMesa = TDFX_CONTEXT(ctx);
+   GrLfbInfo_t info;
+   GLuint color;
+   const struct gl_pixelstore_attrib *finalUnpack;
+   struct gl_pixelstore_attrib scissoredUnpack;
+
+   /* check if there's any raster operations enabled which we can't handle */
+   if (ctx->RasterMask & (ALPHATEST_BIT |
+			  BLEND_BIT |
+			  DEPTH_BIT |
+			  FOG_BIT |
+			  LOGIC_OP_BIT |
+			  SCISSOR_BIT |
+			  STENCIL_BIT |
+			  MASKING_BIT |
+			  ALPHABUF_BIT | MULTI_DRAW_BIT)) return GL_FALSE;
+
+   if (ctx->Scissor.Enabled) {
+      /* This is a bit tricky, but by carefully adjusting the px, py,
+       * width, height, skipPixels and skipRows values we can do
+       * scissoring without special code in the rendering loop.
+       */
+
+      /* we'll construct a new pixelstore struct */
+      finalUnpack = &scissoredUnpack;
+      scissoredUnpack = *unpack;
+      if (scissoredUnpack.RowLength == 0)
+	 scissoredUnpack.RowLength = width;
+
+      /* clip left */
+      if (px < ctx->Scissor.X) {
+	 scissoredUnpack.SkipPixels += (ctx->Scissor.X - px);
+	 width -= (ctx->Scissor.X - px);
+	 px = ctx->Scissor.X;
+      }
+      /* clip right */
+      if (px + width >= ctx->Scissor.X + ctx->Scissor.Width) {
+	 width -= (px + width - (ctx->Scissor.X + ctx->Scissor.Width));
+      }
+      /* clip bottom */
+      if (py < ctx->Scissor.Y) {
+	 scissoredUnpack.SkipRows += (ctx->Scissor.Y - py);
+	 height -= (ctx->Scissor.Y - py);
+	 py = ctx->Scissor.Y;
+      }
+      /* clip top */
+      if (py + height >= ctx->Scissor.Y + ctx->Scissor.Height) {
+	 height -= (py + height - (ctx->Scissor.Y + ctx->Scissor.Height));
+      }
+
+      if (width <= 0 || height <= 0)
+	 return GL_TRUE;     /* totally scissored away */
+   }
+   else {
+      finalUnpack = unpack;
+   }
+
+   /* compute pixel value */
+   {
+      GLint r = (GLint) (ctx->Current.RasterColor[0] * 255.0f);
+      GLint g = (GLint) (ctx->Current.RasterColor[1] * 255.0f);
+      GLint b = (GLint) (ctx->Current.RasterColor[2] * 255.0f);
+      GLint a = (GLint) (ctx->Current.RasterColor[3] * 255.0f);
+      color = PACK_BGRA32(r, g, b, a);
+   }
+
+   info.size = sizeof(info);
+   if (!TDFX_grLfbLock(fxMesa, GR_LFB_WRITE_ONLY,
+		     fxMesa->currentFB, GR_LFBWRITEMODE_8888,
+		     GR_ORIGIN_UPPER_LEFT, FXFALSE, &info)) {
+#ifndef TDFX_SILENT
+      fprintf(stderr, "tdfx Driver: error locking the linear frame buffer\n");
+#endif
+      return GL_TRUE;
+   }
+
+   {
+      const GLint winX = fxMesa->x_offset;
+      const GLint winY = fxMesa->y_offset + fxMesa->height - 1;
+      GLint dstStride;
+      GLuint *dst;
+      GLint row;
+
+      if (fxMesa->glCtx->Color.DrawBuffer == GL_FRONT) {
+	 dstStride = fxMesa->screen_width;
+	 dst =
+	    (GLuint *) info.lfbPtr + (winY - py) * dstStride + (winX +
+								px);
+      }
+      else {
+	 dstStride = info.strideInBytes / 4;
+	 dst =
+	    (GLuint *) info.lfbPtr + (winY - py) * dstStride + (winX +
+								px);
+      }
+
+      /* compute dest address of bottom-left pixel in bitmap */
+      for (row = 0; row < height; row++) {
+	 const GLubyte *src =
+	    (const GLubyte *) _mesa_image_address(finalUnpack,
+						  bitmap, width, height,
+						  GL_COLOR_INDEX,
+						  GL_BITMAP, 0, row, 0);
+	 if (finalUnpack->LsbFirst) {
+	    /* least significan bit first */
+	    GLubyte mask = 1U << (finalUnpack->SkipPixels & 0x7);
+	    GLint col;
+	    for (col = 0; col < width; col++) {
+	       if (*src & mask) {
+		  if (inClipRects(fxMesa, winX + px + col, winY - py - row))
+		     dst[col] = color;
+	       }
+	       if (mask == 128U) {
+		  src++;
+		  mask = 1U;
+	       }
+	       else {
+		  mask = mask << 1;
+	       }
+	    }
+	    if (mask != 1)
+	       src++;
+	 }
+	 else {
+	    /* most significan bit first */
+	    GLubyte mask = 128U >> (finalUnpack->SkipPixels & 0x7);
+	    GLint col;
+	    for (col = 0; col < width; col++) {
+	       if (*src & mask) {
+		  if (inClipRects(fxMesa, winX + px + col, winY - py - row))
+		     dst[col] = color;
+	       }
+	       if (mask == 1U) {
+		  src++;
+		  mask = 128U;
+	       }
+	       else {
+		  mask = mask >> 1;
+	       }
+	    }
+	    if (mask != 128)
+	       src++;
+	 }
+	 dst -= dstStride;
+      }
+   }
+
+   TDFX_grLfbUnlock(fxMesa, GR_LFB_WRITE_ONLY, fxMesa->currentFB);
+   return GL_TRUE;
+}
+#endif
+
+GLboolean
+tdfx_readpixels_R5G6B5(GLcontext * ctx, GLint x, GLint y,
+		       GLsizei width, GLsizei height,
+		       GLenum format, GLenum type,
+		       const struct gl_pixelstore_attrib *packing,
+		       GLvoid * dstImage)
+{
+   if (!(format == GL_RGB && type == GL_UNSIGNED_SHORT_5_6_5)) {
+      return GL_FALSE;        /* format/type not recognised */
+   }
+
+   if (ctx->Pixel.ScaleOrBiasRGBA || ctx->Pixel.MapColorFlag) {
+      return GL_FALSE;        /* can't do this */
+   }
+
+   {
+      tdfxContextPtr fxMesa = TDFX_CONTEXT(ctx);
+      GrLfbInfo_t info;
+      GLboolean result = GL_FALSE;
+
+      const GLint winX = fxMesa->x_offset;
+      const GLint winY = fxMesa->y_offset + fxMesa->height - 1;
+      const GLint scrX = winX + x;
+      const GLint scrY = winY - y;
+
+      LOCK_HARDWARE( fxMesa );
+      info.size = sizeof(info);
+      if (fxMesa->Glide.grLfbLock(GR_LFB_READ_ONLY,
+                                  fxMesa->ReadBuffer,
+                                  GR_LFBWRITEMODE_ANY,
+                                  GR_ORIGIN_UPPER_LEFT, FXFALSE, &info)) {
+	 const GLint srcStride = (fxMesa->glCtx->Color.DrawBuffer ==
+	     GL_FRONT) ? (fxMesa->screen_width) : (info.strideInBytes / 2);
+	 const GLushort *src = (const GLushort *) info.lfbPtr
+	    + scrY * srcStride + scrX;
+	 const GLubyte *dst = (GLubyte *) _mesa_image_address(packing,
+            dstImage, width, height, format, type, 0, 0, 0);
+	 const GLint dstStride = _mesa_image_row_stride(packing,
+            width, format, type);
+
+         if (format == GL_RGB && type == GL_UNSIGNED_SHORT_5_6_5) {
+	    /* directly memcpy 5R6G5B pixels into client's buffer */
+	    const GLint widthInBytes = width * 2;
+	    GLint row;
+	    for (row = 0; row < height; row++) {
+	       MEMCPY(dst, src, widthInBytes);
+	       dst += dstStride;
+	       src -= srcStride;
+	    }
+	    result = GL_TRUE;
+	 }
+
+	 fxMesa->Glide.grLfbUnlock(GR_LFB_READ_ONLY, fxMesa->ReadBuffer);
+      }
+      UNLOCK_HARDWARE( fxMesa );
+      return result;
+   }
+}
+
+GLboolean
+tdfx_readpixels_R8G8B8A8(GLcontext * ctx, GLint x, GLint y,
+                         GLsizei width, GLsizei height,
+                         GLenum format, GLenum type,
+                         const struct gl_pixelstore_attrib *packing,
+                         GLvoid * dstImage)
+{
+   if (!(format == GL_BGRA && type == GL_UNSIGNED_INT_8_8_8_8) &&
+       !(format == GL_BGRA && type == GL_UNSIGNED_BYTE)) {
+      return GL_FALSE;        /* format/type not optimised */
+   }
+
+   if (ctx->Pixel.ScaleOrBiasRGBA || ctx->Pixel.MapColorFlag) {
+      return GL_FALSE;        /* can't do this */
+   }
+
+   {
+      tdfxContextPtr fxMesa = TDFX_CONTEXT(ctx);
+      GrLfbInfo_t info;
+      GLboolean result = GL_FALSE;
+
+      const GLint winX = fxMesa->x_offset;
+      const GLint winY = fxMesa->y_offset + fxMesa->height - 1;
+      const GLint scrX = winX + x;
+      const GLint scrY = winY - y;
+
+      LOCK_HARDWARE(fxMesa);
+      info.size = sizeof(info);
+      if (fxMesa->Glide.grLfbLock(GR_LFB_READ_ONLY,
+                                  fxMesa->ReadBuffer,
+                                  GR_LFBWRITEMODE_ANY,
+                                  GR_ORIGIN_UPPER_LEFT, FXFALSE, &info))
+      {
+         const GLint srcStride = (fxMesa->glCtx->Color.DrawBuffer == GL_FRONT)
+            ? (fxMesa->screen_width) : (info.strideInBytes / 4);
+         const GLuint *src = (const GLuint *) info.lfbPtr
+            + scrY * srcStride + scrX;
+         const GLint dstStride =
+            _mesa_image_row_stride(packing, width, format, type);
+         const GLubyte *dst = (GLubyte *) _mesa_image_address(packing,
+            dstImage, width, height, format, type, 0, 0, 0);
+         const GLint widthInBytes = width * 4;
+
+         if ((format == GL_BGRA && type == GL_UNSIGNED_INT_8_8_8_8) ||
+             (format == GL_BGRA && type == GL_UNSIGNED_BYTE)) {
+            GLint row;
+            for (row = 0; row < height; row++) {
+               MEMCPY(dst, src, widthInBytes);
+               dst += dstStride;
+               src -= srcStride;
+            }
+            result = GL_TRUE;
+         }
+
+         fxMesa->Glide.grLfbUnlock(GR_LFB_READ_ONLY, fxMesa->ReadBuffer);
+      }
+      UNLOCK_HARDWARE(fxMesa);
+      return result;
+   }
+}
+
+GLboolean
+tdfx_drawpixels_R8G8B8A8(GLcontext * ctx, GLint x, GLint y,
+                         GLsizei width, GLsizei height,
+                         GLenum format, GLenum type,
+                         const struct gl_pixelstore_attrib *unpack,
+                         const GLvoid * pixels)
+{
+   if (!(format == GL_BGRA && type == GL_UNSIGNED_INT_8_8_8_8) &&
+       !(format == GL_BGRA && type == GL_UNSIGNED_BYTE)) {
+      return GL_FALSE;        /* format/type not optimised */
+   }
+
+   if (ctx->Pixel.ZoomX!=1.0F || ctx->Pixel.ZoomY!=1.0F) {
+      return GL_FALSE;        /* can't scale pixels */
+   }
+
+   if (ctx->Pixel.ScaleOrBiasRGBA || ctx->Pixel.MapColorFlag) {
+      return GL_FALSE;        /* can't do this */
+   }
+
+   if (ctx->RasterMask & (~BLEND_BIT)) {
+      return GL_FALSE;        /* can't do any raster ops, except blend */
+   }
+
+   {
+      tdfxContextPtr fxMesa = TDFX_CONTEXT(ctx);
+      GrLfbInfo_t info;
+      GLboolean result = GL_FALSE;
+
+      const GLint winX = fxMesa->x_offset;
+      const GLint winY = fxMesa->y_offset + fxMesa->height - 1;
+      const GLint scrX = winX + x;
+      const GLint scrY = winY - y;
+
+      /* lock early to make sure cliprects are right */
+      LOCK_HARDWARE(fxMesa);
+
+      /* make sure hardware has latest blend funcs */
+      if (ctx->RasterMask & BLEND_BIT) {
+         fxMesa->dirty |= TDFX_UPLOAD_BLEND_FUNC;
+         tdfxEmitHwStateLocked( fxMesa );
+      }
+
+      /* look for clipmasks, giveup if region obscured */
+      if (fxMesa->glCtx->Color.DrawBuffer == GL_FRONT) {
+         if (!inClipRects_Region(fxMesa, scrX, scrY, width, height)) {
+            UNLOCK_HARDWARE(fxMesa);
+            return GL_FALSE;
+         }
+      }
+
+      info.size = sizeof(info);
+      if (fxMesa->Glide.grLfbLock(GR_LFB_WRITE_ONLY,
+                                  fxMesa->DrawBuffer,
+                                  GR_LFBWRITEMODE_8888,
+                                  GR_ORIGIN_UPPER_LEFT, FXTRUE, &info))
+      {
+         const GLint dstStride = (fxMesa->glCtx->Color.DrawBuffer == GL_FRONT)
+            ? (fxMesa->screen_width * 4) : (info.strideInBytes);
+         const GLubyte *dst = (const GLubyte *) info.lfbPtr
+            + scrY * dstStride + scrX * 4;
+         const GLint srcStride =
+            _mesa_image_row_stride(unpack, width, format, type);
+         const GLubyte *src = (GLubyte *) _mesa_image_address(unpack,
+            pixels, width, height, format, type, 0, 0, 0);
+         const GLint widthInBytes = width * 4;
+
+         if ((format == GL_BGRA && type == GL_UNSIGNED_INT_8_8_8_8) ||
+             (format == GL_BGRA && type == GL_UNSIGNED_BYTE)) {
+            GLint row;
+            for (row = 0; row < height; row++) {
+               MEMCPY(dst, src, widthInBytes);
+               dst -= dstStride;
+               src += srcStride;
+            }
+            result = GL_TRUE;
+         }
+
+         fxMesa->Glide.grLfbUnlock(GR_LFB_WRITE_ONLY, fxMesa->DrawBuffer);
+      }
+      UNLOCK_HARDWARE(fxMesa);
+      return result;
+   }
+}
+@
+
+
+1.1.9.1
+log
+@OpenBSD just has imported exactly this tree into their vendor branch,
+called the same tag, in XF4/xc
+This is, apparently, the last XFree86 snapshot before the licence change
+(ie, addition of the advertising clause)
+
+Since the developers don't see any problems with that, and we would like
+to integrate improvements done by the remaining one or two (or so) XFree86
+developers (j/k), this prepares enabling us to update X-Window in the future.
+@
+text
+@d26 1
+a26 1
+/* $XFree86: xc/lib/GL/mesa/src/drv/tdfx/tdfx_pixels.c,v 1.5 2003/09/28 20:15:36 alanh Exp $ */
+a40 1
+#include "tdfx_lock.h"
+d42 1
+a45 2
+#include "swrast/swrast.h"
+
+a47 42
+
+#define FX_grLfbWriteRegion(fxMesa,dst_buffer,dst_x,dst_y,src_format,src_width,src_height,src_stride,src_data)		\
+  do {				\
+    LOCK_HARDWARE(fxMesa);		\
+    fxMesa->Glide.grLfbWriteRegion(dst_buffer,dst_x,dst_y,src_format,src_width,src_height,FXFALSE,src_stride,src_data);	\
+    UNLOCK_HARDWARE(fxMesa);		\
+  } while(0)
+
+
+#define FX_grLfbReadRegion(fxMesa,src_buffer,src_x,src_y,src_width,src_height,dst_stride,dst_data)			\
+  do {				\
+    LOCK_HARDWARE(fxMesa);		\
+    fxMesa->Glide.grLfbReadRegion(src_buffer,src_x,src_y,src_width,src_height,dst_stride,dst_data);				\
+    UNLOCK_HARDWARE(fxMesa);		\
+  } while (0);
+
+
+#if 0
+static FxBool
+FX_grLfbLock(tdfxContextPtr fxMesa, GrLock_t type, GrBuffer_t buffer,
+             GrLfbWriteMode_t writeMode, GrOriginLocation_t origin,
+             FxBool pixelPipeline, GrLfbInfo_t * info)
+{
+   FxBool result;
+
+   LOCK_HARDWARE(fxMesa);
+   result = fxMesa->Glide.grLfbLock(type, buffer, writeMode, origin, pixelPipeline, info);
+   UNLOCK_HARDWARE(fxMesa);
+   return result;
+}
+#endif
+
+
+#define FX_grLfbUnlock(fxMesa, t, b)	\
+  do {					\
+    LOCK_HARDWARE(fxMesa);		\
+    fxMesa->Glide.grLfbUnlock(t, b);	\
+    UNLOCK_HARDWARE(fxMesa);		\
+  } while (0)
+
+
+
+d435 1
+a435 1
+void
+d442 6
+a447 8
+   if (format != GL_RGB ||
+       type != GL_UNSIGNED_SHORT_5_6_5 ||
+       (ctx->_ImageTransferState & (IMAGE_SCALE_BIAS_BIT|
+				    IMAGE_MAP_COLOR_BIT)))
+   {
+      _swrast_ReadPixels( ctx, x, y, width, height, format, type, packing,
+			  dstImage );
+      return;
+d453 1
+d463 3
+a465 3
+		    fxMesa->ReadBuffer,
+		    GR_LFBWRITEMODE_ANY,
+		    GR_ORIGIN_UPPER_LEFT, FXFALSE, &info)) {
+d470 1
+a470 1
+	 GLubyte *dst = (GLubyte *) _mesa_image_address(packing,
+d475 10
+a484 7
+	 /* directly memcpy 5R6G5B pixels into client's buffer */
+	 const GLint widthInBytes = width * 2;
+	 GLint row;
+	 for (row = 0; row < height; row++) {
+	    MEMCPY(dst, src, widthInBytes);
+	    dst += dstStride;
+	    src -= srcStride;
+d490 1
+a490 1
+      return;
+d494 1
+a494 1
+void
+d501 3
+a503 8
+   if ((!(format == GL_BGRA && type == GL_UNSIGNED_INT_8_8_8_8) &&
+	!(format == GL_BGRA && type == GL_UNSIGNED_BYTE)) ||
+       (ctx->_ImageTransferState & (IMAGE_SCALE_BIAS_BIT|
+				    IMAGE_MAP_COLOR_BIT)))
+   {
+      _swrast_ReadPixels( ctx, x, y, width, height, format, type, packing,
+			  dstImage );
+      return;
+d506 3
+d513 1
+d523 3
+a525 3
+                    fxMesa->ReadBuffer,
+                    GR_LFBWRITEMODE_ANY,
+                    GR_ORIGIN_UPPER_LEFT, FXFALSE, &info))
+d533 1
+a533 1
+         GLubyte *dst = (GLubyte *) _mesa_image_address(packing,
+d537 2
+a538 1
+	 {
+d545 1
+d551 1
+d555 1
+a555 1
+void
+d562 12
+a573 1
+   tdfxContextPtr fxMesa = TDFX_CONTEXT(ctx);
+d575 2
+a576 23
+   if ((!(format == GL_BGRA && type == GL_UNSIGNED_INT_8_8_8_8) &&
+	!(format == GL_BGRA && type == GL_UNSIGNED_BYTE)) ||
+       ctx->Pixel.ZoomX != 1.0F || 
+       ctx->Pixel.ZoomY != 1.0F ||
+       (ctx->_ImageTransferState & (IMAGE_SCALE_BIAS_BIT|
+				    IMAGE_MAP_COLOR_BIT)) ||
+       ctx->Color.AlphaEnabled ||
+       ctx->Depth.Test ||
+       ctx->Fog.Enabled ||
+       ctx->Scissor.Enabled ||
+       ctx->Stencil.Enabled ||
+       !ctx->Color.ColorMask[0] ||
+       !ctx->Color.ColorMask[1] ||
+       !ctx->Color.ColorMask[2] ||
+       !ctx->Color.ColorMask[3] ||
+       ctx->Color.ColorLogicOpEnabled ||
+       ctx->Texture._EnabledUnits ||
+       ctx->Depth.OcclusionTest ||
+       fxMesa->Fallback)       
+   {
+      _swrast_DrawPixels( ctx, x, y, width, height, format, type, 
+			  unpack, pixels );
+      return; 
+d593 1
+a593 1
+      if (ctx->Color.BlendEnabled) {
+d602 1
+a602 3
+	    _swrast_DrawPixels( ctx, x, y, width, height, format, type, 
+				unpack, pixels );
+            return;
+d608 3
+a610 3
+                    fxMesa->DrawBuffer,
+                    GR_LFBWRITEMODE_8888,
+                    GR_ORIGIN_UPPER_LEFT, FXTRUE, &info))
+d614 1
+a614 1
+         GLubyte *dst = (GLubyte *) info.lfbPtr
+d636 1
+@
+
+
+1.1.1.1
+log
+@Import OpenBSD 3.3 XF4 repository from CTM 3132 the first time
+This finalizes starting an OpenBSD-mirabile (aka MirBSD) repository.
+
+### MirBSD is:
+# Copyright (c) 1982-2003 by Thorsten "mirabile" Glaser <x86@@ePost.de>
+# Copyright © 1968-2003  The authors of And contributors to UNIX®, the
+#       C Language, BSD/Berkeley Unix; 386BSD, NetBSD 1.1 and OpenBSD.
+#
+# Anyone who obtained a copy of this work is hereby permitted to freely use,
+# distribute, modify, merge, sublicence, give away or sell it as long as the
+# authors are given due credit and the following notice is retained:
+#
+# This work is provided "as is", with no explicit or implicit warranty what-
+# soever. Use it only at your own risk. In no event may an author or contri-
+# butor be held liable for any damage, directly or indirectly, that origina-
+# ted through or is caused by creation or modification of this work.
+
+MirBSD is my private tree. MirBSD does not differ very much from OpenBSD
+and intentionally tracks OpenBSD. That's why it _is_ OpenBSD, just not the
+official one. It's like with DarrenBSD.
+
+At time of this writing, no advertising for MirBSD must be done,
+because the advertising clause has not yet been sorted out.
+
+http://templeofhate.com/tglaser/MirBSD/index.php
+@
+text
+@@
+
+
+1.1.1.2
+log
+@The X-Windowing System
+
+Import XFree86 4.3 from OpenBSD by CTM, in the hope it's stable
+@
+text
+@d26 1
+a26 1
+/* $XFree86: xc/lib/GL/mesa/src/drv/tdfx/tdfx_pixels.c,v 1.4 2002/02/22 21:45:03 dawes Exp $ */
+a40 1
+#include "tdfx_lock.h"
+d42 1
+a45 2
+#include "swrast/swrast.h"
+
+a47 41
+
+#define FX_grLfbWriteRegion(fxMesa,dst_buffer,dst_x,dst_y,src_format,src_width,src_height,src_stride,src_data)		\
+  do {				\
+    LOCK_HARDWARE(fxMesa);		\
+    fxMesa->Glide.grLfbWriteRegion(dst_buffer,dst_x,dst_y,src_format,src_width,src_height,FXFALSE,src_stride,src_data);	\
+    UNLOCK_HARDWARE(fxMesa);		\
+  } while(0)
+
+
+#define FX_grLfbReadRegion(fxMesa,src_buffer,src_x,src_y,src_width,src_height,dst_stride,dst_data)			\
+  do {				\
+    LOCK_HARDWARE(fxMesa);		\
+    fxMesa->Glide.grLfbReadRegion(src_buffer,src_x,src_y,src_width,src_height,dst_stride,dst_data);				\
+    UNLOCK_HARDWARE(fxMesa);		\
+  } while (0);
+
+
+static FxBool
+FX_grLfbLock(tdfxContextPtr fxMesa, GrLock_t type, GrBuffer_t buffer,
+             GrLfbWriteMode_t writeMode, GrOriginLocation_t origin,
+             FxBool pixelPipeline, GrLfbInfo_t * info)
+{
+   FxBool result;
+
+   LOCK_HARDWARE(fxMesa);
+   result = fxMesa->Glide.grLfbLock(type, buffer, writeMode, origin, pixelPipeline, info);
+   UNLOCK_HARDWARE(fxMesa);
+   return result;
+}
+
+
+
+#define FX_grLfbUnlock(fxMesa, t, b)	\
+  do {					\
+    LOCK_HARDWARE(fxMesa);		\
+    fxMesa->Glide.grLfbUnlock(t, b);	\
+    UNLOCK_HARDWARE(fxMesa);		\
+  } while (0)
+
+
+
+d435 1
+a435 1
+void
+d442 6
+a447 8
+   if (format != GL_RGB ||
+       type != GL_UNSIGNED_SHORT_5_6_5 ||
+       (ctx->_ImageTransferState & (IMAGE_SCALE_BIAS_BIT|
+				    IMAGE_MAP_COLOR_BIT)))
+   {
+      _swrast_ReadPixels( ctx, x, y, width, height, format, type, packing,
+			  dstImage );
+      return;
+d453 1
+d463 3
+a465 3
+		    fxMesa->ReadBuffer,
+		    GR_LFBWRITEMODE_ANY,
+		    GR_ORIGIN_UPPER_LEFT, FXFALSE, &info)) {
+d475 10
+a484 7
+	 /* directly memcpy 5R6G5B pixels into client's buffer */
+	 const GLint widthInBytes = width * 2;
+	 GLint row;
+	 for (row = 0; row < height; row++) {
+	    MEMCPY(dst, src, widthInBytes);
+	    dst += dstStride;
+	    src -= srcStride;
+d490 1
+a490 1
+      return;
+d494 1
+a494 1
+void
+d501 3
+a503 8
+   if ((!(format == GL_BGRA && type == GL_UNSIGNED_INT_8_8_8_8) &&
+	!(format == GL_BGRA && type == GL_UNSIGNED_BYTE)) ||
+       (ctx->_ImageTransferState & (IMAGE_SCALE_BIAS_BIT|
+				    IMAGE_MAP_COLOR_BIT)))
+   {
+      _swrast_ReadPixels( ctx, x, y, width, height, format, type, packing,
+			  dstImage );
+      return;
+d506 3
+d513 1
+d523 3
+a525 3
+                    fxMesa->ReadBuffer,
+                    GR_LFBWRITEMODE_ANY,
+                    GR_ORIGIN_UPPER_LEFT, FXFALSE, &info))
+d537 2
+a538 1
+	 {
+d545 1
+d551 1
+d555 1
+a555 1
+void
+d562 12
+a573 1
+   tdfxContextPtr fxMesa = TDFX_CONTEXT(ctx);
+d575 2
+a576 23
+   if ((!(format == GL_BGRA && type == GL_UNSIGNED_INT_8_8_8_8) &&
+	!(format == GL_BGRA && type == GL_UNSIGNED_BYTE)) ||
+       ctx->Pixel.ZoomX != 1.0F || 
+       ctx->Pixel.ZoomY != 1.0F ||
+       (ctx->_ImageTransferState & (IMAGE_SCALE_BIAS_BIT|
+				    IMAGE_MAP_COLOR_BIT)) ||
+       ctx->Color.AlphaEnabled ||
+       ctx->Depth.Test ||
+       ctx->Fog.Enabled ||
+       ctx->Scissor.Enabled ||
+       ctx->Stencil.Enabled ||
+       !ctx->Color.ColorMask[0] ||
+       !ctx->Color.ColorMask[1] ||
+       !ctx->Color.ColorMask[2] ||
+       !ctx->Color.ColorMask[3] ||
+       ctx->Color.ColorLogicOpEnabled ||
+       ctx->Texture._ReallyEnabled ||
+       ctx->Depth.OcclusionTest ||
+       fxMesa->Fallback)       
+   {
+      _swrast_DrawPixels( ctx, x, y, width, height, format, type, 
+			  unpack, pixels );
+      return; 
+d593 1
+a593 1
+      if (ctx->Color.BlendEnabled) {
+d602 1
+a602 3
+	    _swrast_DrawPixels( ctx, x, y, width, height, format, type, 
+				unpack, pixels );
+            return;
+d608 3
+a610 3
+                    fxMesa->DrawBuffer,
+                    GR_LFBWRITEMODE_8888,
+                    GR_ORIGIN_UPPER_LEFT, FXTRUE, &info))
+d636 1
+@
+
+
+1.1.1.3
+log
+@That's what OpenBSD will, probably, ship as XF4 in 3.5
+their last sync against XFree86 4.3-current has been
+imported into our vendor branch, too
+@
+text
+@d26 1
+a26 1
+/* $XFree86: xc/lib/GL/mesa/src/drv/tdfx/tdfx_pixels.c,v 1.5 2003/09/28 20:15:36 alanh Exp $ */
+a66 1
+#if 0
+d79 1
+a79 1
+#endif
+d514 1
+a514 1
+	 GLubyte *dst = (GLubyte *) _mesa_image_address(packing,
+d575 1
+a575 1
+         GLubyte *dst = (GLubyte *) _mesa_image_address(packing,
+d619 1
+a619 1
+       ctx->Texture._EnabledUnits ||
+d665 1
+a665 1
+         GLubyte *dst = (GLubyte *) info.lfbPtr
+@
+
+

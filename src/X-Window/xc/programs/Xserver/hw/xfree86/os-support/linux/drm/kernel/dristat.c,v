@@ -1,0 +1,436 @@
+head	1.1;
+branch	1.1.1;
+access;
+symbols
+	tg-mergetmp-2:1.1.1.2
+	cvs-200410241530:1.1.1.2
+	cvs-200410012000:1.1.1.2
+	cvs-200407221130:1.1.1.2
+	cvs-200407141120:1.1.1.2
+	cvs-200406231010:1.1.1.2
+	MIRBSD_7quater:1.1.1.1
+	cvs-200405271510:1.1.1.2
+	XFree86_4_4_0:1.1.9.1
+	cvs-200403021700:1.1.1.2
+	XFREE86_20040213:1.1.9.1
+	xc:1.1.9
+	cvs-200401291925:1.1.1.1
+	MIRBSD_7_ALPHA:1.1.1.1.0.4
+	MIRBSD_7:1.1.1.1.0.2
+	MIRBSD_7ter:1.1.1.1
+	cvs-20011091815:1.1.1.1
+	cvs-200309162130:1.1.1.1
+	cvs-200308302005:1.1.1.1
+	ctmx-0387:1.1.1.1
+	ctmx-0384:1.1.1.1
+	MIRBSD_5:1.1.1.1
+	ctmx-0375:1.1.1.1
+	ctmx-0373:1.1.1.1
+	ctm-0371:1.1.1.1
+	ctm-0370:1.1.1.1
+	MIRBSD_4:1.1.1.1
+	ctm-0363:1.1.1.1
+	ctm-0359:1.1.1.1
+	ctm-0349:1.1.1.1
+	openbsd:1.1.1;
+locks; strict;
+comment	@ * @;
+
+
+1.1
+date	2003.03.22.20.08.43;	author tg;	state Exp;
+branches
+	1.1.1.1
+	1.1.9.1;
+next	;
+
+1.1.1.1
+date	2003.03.22.20.08.43;	author tg;	state Exp;
+branches;
+next	1.1.1.2;
+
+1.1.1.2
+date	2004.03.02.18.25.10;	author tg;	state Stab;
+branches;
+next	;
+
+1.1.9.1
+date	2004.02.14.19.25.12;	author tg;	state Exp;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@/* dristat.c -- 
+ * Created: Mon Jan 15 05:05:07 2001 by faith@@acm.org
+ *
+ * Copyright 2000 VA Linux Systems, Inc., Fremont, California.
+ * All Rights Reserved.
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a
+ * copy of this software and associated documentation files (the "Software"),
+ * to deal in the Software without restriction, including without limitation
+ * the rights to use, copy, modify, merge, publish, distribute, sublicense,
+ * and/or sell copies of the Software, and to permit persons to whom the
+ * Software is furnished to do so, subject to the following conditions:
+ * 
+ * The above copyright notice and this permission notice (including the next
+ * paragraph) shall be included in all copies or substantial portions of the
+ * Software.
+ * 
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL
+ * PRECISION INSIGHT AND/OR ITS SUPPLIERS BE LIABLE FOR ANY CLAIM, DAMAGES OR
+ * OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE,
+ * ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+ * DEALINGS IN THE SOFTWARE.
+ * 
+ * Authors: Rickard E. (Rik) Faith <faith@@valinux.com>
+ * 
+ */
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <unistd.h>
+#include "../../../xf86drm.h"
+#include "../xf86drmRandom.c"
+#include "../xf86drmHash.c"
+#include "../xf86drm.c"
+
+#define DRM_VERSION 0x00000001
+#define DRM_MEMORY  0x00000002
+#define DRM_CLIENTS 0x00000004
+#define DRM_STATS   0x00000008
+#define DRM_BUSID   0x00000010
+
+static void getversion(int fd)
+{
+    drmVersionPtr version;
+    
+    version = drmGetVersion(fd);
+    if (version) {
+	printf("  Version information:\n");
+	printf("    Name: %s\n", version->name ? version->name : "?");
+	printf("    Version: %d.%d.%d\n",
+	       version->version_major,
+	       version->version_minor,
+	       version->version_patchlevel);
+	printf("    Date: %s\n", version->date ? version->date : "?");
+	printf("    Desc: %s\n", version->desc ? version->desc : "?");
+	drmFreeVersion(version);
+    } else {
+	printf("  No version information available\n");
+    }
+}
+
+static void getbusid(int fd)
+{
+    const char *busid = drmGetBusid(fd);
+    
+    printf("  Busid: %s\n", *busid ? busid : "(not set)");
+    drmFreeBusid(busid);
+}
+
+#if 0
+typedef struct {
+    unsigned long	offset;	 /* Requested physical address (0 for SAREA)*/
+    unsigned long	size;	 /* Requested physical size (bytes)	    */
+    drm_map_type_t	type;	 /* Type of memory to map		    */
+    drm_map_flags_t flags;	 /* Flags				    */
+    void		*handle; /* User-space: "Handle" to pass to mmap    */
+    /* Kernel-space: kernel-virtual address    */
+    int		mtrr;	 /* MTRR slot used			    */
+				 /* Private data			    */
+} drmVmRec, *drmVmPtr;
+#endif
+
+static void getvm(int fd)
+{
+    int             i;
+    const char      *typename;
+    char            flagname[33];
+    drmHandle       offset;
+    drmSize         size;
+    drmMapType      type;
+    drmMapFlags     flags;
+    drmHandle       handle;
+    int             mtrr;
+
+    printf("  VM map information (Restricted locked kernel WC Lock):\n");
+    printf("    slot     offset       size type flags    address mtrr\n");
+
+    for (i = 0;
+	 !drmGetMap(fd, i, &offset, &size, &type, &flags, &handle, &mtrr);
+	 i++) {
+	
+	switch (type) {
+	case DRM_FRAME_BUFFER: typename = "FB";  break;
+	case DRM_REGISTERS:    typename = "REG"; break;
+	case DRM_SHM:          typename = "SHM"; break;
+	case DRM_AGP:          typename = "AGP"; break;
+	default:               typename = "???"; break;
+	}
+
+	flagname[0] = (flags & DRM_RESTRICTED)      ? 'R' : ' ';
+	flagname[1] = (flags & DRM_READ_ONLY)       ? 'r' : 'w';
+	flagname[2] = (flags & DRM_LOCKED)          ? 'l' : ' ';
+	flagname[3] = (flags & DRM_KERNEL)          ? 'k' : ' ';
+	flagname[4] = (flags & DRM_WRITE_COMBINING) ? 'W' : ' ';
+	flagname[5] = (flags & DRM_CONTAINS_LOCK)   ? 'L' : ' ';
+	flagname[6] = '\0';
+	
+	printf("    %4d 0x%08lx 0x%08lx %3.3s %6.6s 0x%08lx ",
+	       i, offset, (unsigned long)size, typename, flagname, handle);
+	if (mtrr < 0) printf("none\n");
+	else          printf("%4d\n", mtrr);
+    }
+}
+
+static void getclients(int fd)
+{
+    int           i;
+    int           auth;
+    int           pid;
+    int           uid;
+    unsigned long magic;
+    unsigned long iocs;
+    char          buf[64];
+    char          cmd[40];
+    int           procfd;
+    
+    printf("  DRI client information:\n");
+    printf("    a   pid   uid      magic     ioctls   prog\n");
+
+    for (i = 0; !drmGetClient(fd, i, &auth, &pid, &uid, &magic, &iocs); i++) {
+	sprintf(buf, "/proc/%d/cmdline", pid);
+	memset(cmd, sizeof(cmd), 0);
+	if ((procfd = open(buf, O_RDONLY, 0)) >= 0) {
+	    read(procfd, cmd, sizeof(cmd)-1);
+	    close(procfd);
+	}
+	if (*cmd) {
+	    char *pt;
+
+	    for (pt = cmd; *pt; pt++) if (!isprint(*pt)) *pt = ' ';
+	    printf("    %c %5d %5d %10lu %10lu   %s\n",
+		   auth ? 'y' : 'n', pid, uid, magic, iocs, cmd);
+	} else {
+	    printf("    %c %5d %5d %10lu %10lu\n",
+		   auth ? 'y' : 'n', pid, uid, magic, iocs);
+	}
+    }
+}
+
+static void printhuman(unsigned long value, const char *name, int mult)
+{
+    const char *p;
+    double     f;
+				/* Print width 5 number in width 6 space */
+    if (value < 100000) {
+	printf(" %5lu", value);
+	return;
+    }
+
+    p = name;
+    f = (double)value / (double)mult;
+    if (f < 10.0) {
+	printf(" %4.2f%c", f, *p);
+	return;
+    }
+
+    p++;
+    f = (double)value / (double)mult;
+    if (f < 10.0) {
+	printf(" %4.2f%c", f, *p);
+	return;
+    }
+    
+    p++;
+    f = (double)value / (double)mult;
+    if (f < 10.0) {
+	printf(" %4.2f%c", f, *p);
+	return;
+    }
+}
+
+static void getstats(int fd, int i)
+{
+    drmStatsT prev, curr;
+    int       j;
+    double    rate;
+    
+    printf("  System statistics:\n");
+
+    if (drmGetStats(fd, &prev)) return;
+    if (!i) {
+	for (j = 0; j < prev.count; j++) {
+	    printf("    ");
+	    printf(prev.data[j].long_format, prev.data[j].long_name);
+	    if (prev.data[j].isvalue) printf(" 0x%08lx\n", prev.data[j].value);
+	    else                      printf(" %10lu\n", prev.data[j].value);
+	}
+	return;
+    }
+
+    printf("    ");
+    for (j = 0; j < prev.count; j++)
+	if (!prev.data[j].verbose) {
+	    printf(" ");
+	    printf(prev.data[j].rate_format, prev.data[j].rate_name);
+	}
+    printf("\n");
+    
+    for (;;) {
+	sleep(i);
+	if (drmGetStats(fd, &curr)) return;
+	printf("    ");
+	for (j = 0; j < curr.count; j++) {
+	    if (curr.data[j].verbose) continue;
+	    if (curr.data[j].isvalue) {
+		printf(" %08lx", curr.data[j].value);
+	    } else {
+		rate = (curr.data[j].value - prev.data[j].value) / (double)i;
+		printhuman(rate, curr.data[j].mult_names, curr.data[j].mult);
+	    }
+	}
+	printf("\n");
+	memcpy(&prev, &curr, sizeof(prev));
+    }
+    
+}
+
+int main(int argc, char **argv)
+{
+    int  c;
+    int  mask     = 0;
+    int  minor    = 0;
+    int  interval = 0;
+    int  fd;
+    char buf[64];
+    int  i;
+
+    while ((c = getopt(argc, argv, "avmcsbM:i:")) != EOF)
+	switch (c) {
+	case 'a': mask = ~0;                          break;
+	case 'v': mask |= DRM_VERSION;                break;
+	case 'm': mask |= DRM_MEMORY;                 break;
+	case 'c': mask |= DRM_CLIENTS;                break;
+	case 's': mask |= DRM_STATS;                  break;
+	case 'b': mask |= DRM_BUSID;                  break;
+	case 'i': interval = strtol(optarg, NULL, 0); break;
+	case 'M': minor = strtol(optarg, NULL, 0);    break;
+	default:
+	    fprintf( stderr, "Usage: dristat [options]\n" );
+	    return 1;
+	}
+
+    for (i = 0; i < 16; i++) if (!minor || i == minor) {
+	sprintf(buf, DRM_DEV_NAME, DRM_DIR_NAME, i);
+	fd = drmOpenMinor(i, 1);
+	if (fd >= 0) {
+	    printf("%s\n", buf);
+	    if (mask & DRM_BUSID)   getbusid(fd);
+	    if (mask & DRM_VERSION) getversion(fd);
+	    if (mask & DRM_MEMORY)  getvm(fd);
+	    if (mask & DRM_CLIENTS) getclients(fd);
+	    if (mask & DRM_STATS)   getstats(fd, interval);
+	    close(fd);
+	}
+    }
+
+    return 0; 
+}
+@
+
+
+1.1.9.1
+log
+@OpenBSD just has imported exactly this tree into their vendor branch,
+called the same tag, in XF4/xc
+This is, apparently, the last XFree86 snapshot before the licence change
+(ie, addition of the advertising clause)
+
+Since the developers don't see any problems with that, and we would like
+to integrate improvements done by the remaining one or two (or so) XFree86
+developers (j/k), this prepares enabling us to update X-Window in the future.
+@
+text
+@d72 12
+d97 1
+a97 2
+    printf("  VM map information:\n");
+    printf("  flags: (R)estricted (r)ead/(w)rite (l)ocked (k)ernel (W)rite-combine (L)ock:\n");
+d105 5
+a109 6
+	case DRM_FRAME_BUFFER:   typename = "FB";  break;
+	case DRM_REGISTERS:      typename = "REG"; break;
+	case DRM_SHM:            typename = "SHM"; break;
+	case DRM_AGP:            typename = "AGP"; break;
+	case DRM_SCATTER_GATHER: typename = "SG";  break;
+	default:                 typename = "???"; break;
+@
+
+
+1.1.1.1
+log
+@Import OpenBSD 3.3 XF4 repository from CTM 3132 the first time
+This finalizes starting an OpenBSD-mirabile (aka MirBSD) repository.
+
+### MirBSD is:
+# Copyright (c) 1982-2003 by Thorsten "mirabile" Glaser <x86@@ePost.de>
+# Copyright © 1968-2003  The authors of And contributors to UNIX®, the
+#       C Language, BSD/Berkeley Unix; 386BSD, NetBSD 1.1 and OpenBSD.
+#
+# Anyone who obtained a copy of this work is hereby permitted to freely use,
+# distribute, modify, merge, sublicence, give away or sell it as long as the
+# authors are given due credit and the following notice is retained:
+#
+# This work is provided "as is", with no explicit or implicit warranty what-
+# soever. Use it only at your own risk. In no event may an author or contri-
+# butor be held liable for any damage, directly or indirectly, that origina-
+# ted through or is caused by creation or modification of this work.
+
+MirBSD is my private tree. MirBSD does not differ very much from OpenBSD
+and intentionally tracks OpenBSD. That's why it _is_ OpenBSD, just not the
+official one. It's like with DarrenBSD.
+
+At time of this writing, no advertising for MirBSD must be done,
+because the advertising clause has not yet been sorted out.
+
+http://templeofhate.com/tglaser/MirBSD/index.php
+@
+text
+@@
+
+
+1.1.1.2
+log
+@That's what OpenBSD will, probably, ship as XF4 in 3.5
+their last sync against XFree86 4.3-current has been
+imported into our vendor branch, too
+@
+text
+@d72 12
+d97 1
+a97 2
+    printf("  VM map information:\n");
+    printf("  flags: (R)estricted (r)ead/(w)rite (l)ocked (k)ernel (W)rite-combine (L)ock:\n");
+d105 5
+a109 6
+	case DRM_FRAME_BUFFER:   typename = "FB";  break;
+	case DRM_REGISTERS:      typename = "REG"; break;
+	case DRM_SHM:            typename = "SHM"; break;
+	case DRM_AGP:            typename = "AGP"; break;
+	case DRM_SCATTER_GATHER: typename = "SG";  break;
+	default:                 typename = "???"; break;
+@
+

@@ -1,0 +1,381 @@
+head	1.1;
+branch	1.1.1;
+access;
+symbols
+	tg-mergetmp-2:1.1.1.3
+	cvs-200410241530:1.1.1.3
+	cvs-200410012000:1.1.1.3
+	cvs-200407141120:1.1.1.3
+	cvs-200406231010:1.1.1.3
+	MIRBSD_7quater:1.1.1.2
+	cvs-200405271510:1.1.1.3
+	XFree86_4_4_0:1.1.9.1
+	cvs-200403021700:1.1.1.3
+	XFREE86_20040213:1.1.9.1
+	xc:1.1.9
+	cvs-200401291925:1.1.1.2
+	MIRBSD_7_ALPHA:1.1.1.2.0.4
+	MIRBSD_7:1.1.1.2.0.2
+	MIRBSD_7ter:1.1.1.2
+	cvs-20011091815:1.1.1.2
+	cvs-200309162130:1.1.1.2
+	cvs-200308302005:1.1.1.2
+	ctmx-0387:1.1.1.2
+	ctmx-0384:1.1.1.2
+	MIRBSD_5:1.1.1.2
+	ctmx-0375:1.1.1.2
+	ctmx-0373:1.1.1.2
+	ctm-0371:1.1.1.2
+	ctm-0370:1.1.1.2
+	MIRBSD_4:1.1.1.2
+	ctm-0363:1.1.1.2
+	ctm-0359:1.1.1.2
+	ctm-0349:1.1.1.1
+	openbsd:1.1.1;
+locks; strict;
+comment	@ * @;
+
+
+1.1
+date	2003.03.22.20.04.11;	author tg;	state Exp;
+branches
+	1.1.1.1
+	1.1.9.1;
+next	;
+
+1.1.1.1
+date	2003.03.22.20.04.11;	author tg;	state Exp;
+branches;
+next	1.1.1.2;
+
+1.1.1.2
+date	2003.04.08.18.31.20;	author tg;	state Exp;
+branches;
+next	1.1.1.3;
+
+1.1.1.3
+date	2004.03.02.17.57.50;	author tg;	state Stab;
+branches;
+next	;
+
+1.1.9.1
+date	2004.02.14.19.17.46;	author tg;	state Exp;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@/* $XFree86: xc/lib/GL/mesa/src/drv/ffb/ffb_dd.c,v 1.2 2001/04/10 16:07:50 dawes Exp $
+ *
+ * GLX Hardware Device Driver for Sun Creator/Creator3D
+ * Copyright (C) 2000 David S. Miller
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a
+ * copy of this software and associated documentation files (the "Software"),
+ * to deal in the Software without restriction, including without limitation
+ * the rights to use, copy, modify, merge, publish, distribute, sublicense,
+ * and/or sell copies of the Software, and to permit persons to whom the
+ * Software is furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included
+ * in all copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
+ * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL
+ * DAVID MILLER, OR ANY OTHER CONTRIBUTORS BE LIABLE FOR ANY CLAIM,
+ * DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR
+ * OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE
+ * OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+ *
+ *
+ *    David S. Miller <davem@@redhat.com>
+ */
+
+#include "types.h"
+#include "vbrender.h"
+
+#include <stdio.h>
+#include <stdlib.h>
+
+#include "mm.h"
+#include "ffb_dd.h"
+#include "ffb_span.h"
+#include "ffb_depth.h"
+#include "ffb_context.h"
+#include "ffb_vb.h"
+#include "ffb_tris.h"
+#include "ffb_clear.h"
+#include "ffb_pipeline.h"
+#include "ffb_lock.h"
+#include "extensions.h"
+#include "vb.h"
+#include "dd.h"
+
+/* Mesa's Driver Functions */
+
+static const GLubyte *ffbDDGetString(GLcontext *ctx, GLenum name)
+{
+	switch (name) {
+	case GL_VENDOR:
+		return (GLubyte *) "David S. Miller";
+	case GL_RENDERER:
+		return (GLubyte *) "Mesa DRI FFB 20010321";
+	default:
+		return NULL;
+	};
+}
+
+static GLint ffbGetParameteri(const GLcontext *ctx, GLint param)
+{
+	switch (param) {
+	case DD_HAVE_HARDWARE_FOG:
+		/* XXX We have per-fragment fog, once fog code is done,
+		 * XXX set this.
+		 */
+		return 0;
+	default:
+#if 0
+		ffbError("ffbGetParameteri(): unknown parameter!\n");
+#endif
+		return 0;
+	};
+}
+
+static void ffbBufferSize(GLcontext *ctx, GLuint *width, GLuint *height)
+{
+	ffbContextPtr fmesa = FFB_CONTEXT(ctx);
+
+/*      LOCK_HARDWARE(fmesa); */
+	*width = fmesa->driDrawable->w;
+	*height = fmesa->driDrawable->h;
+/*      UNLOCK_HARDWARE(fmesa); */
+}
+
+void ffbDDExtensionsInit(GLcontext *ctx)
+{
+	/* Nothing for now until we start to add
+	 * real acceleration. -DaveM
+	 */
+
+	/* XXX Need to turn off GL_EXT_blend_func_separate for one.
+	 * XXX Also BlendEquation should be turned off too, what
+	 * XXX EXT is that assosciated with?
+	 */
+}
+
+static void ffbDDFinish(GLcontext *ctx)
+{
+	ffbContextPtr fmesa = FFB_CONTEXT(ctx);
+
+	LOCK_HARDWARE(fmesa);
+	FFBWait(fmesa, fmesa->regs);
+	UNLOCK_HARDWARE(fmesa);
+}
+
+void ffbDDInitDriverFuncs(GLcontext *ctx)
+{
+	ctx->Driver.GetBufferSize	 = ffbBufferSize;
+	ctx->Driver.GetString		 = ffbDDGetString;
+	ctx->Driver.GetParameteri	 = ffbGetParameteri;
+	ctx->Driver.Clear		 = ffbDDClear;
+
+	ctx->Driver.Finish		 = ffbDDFinish;
+
+	/* VB hooks */
+	ctx->Driver.RegisterVB		 = ffbDDRegisterVB;
+	ctx->Driver.UnregisterVB	 = ffbDDUnregisterVB;
+
+	ctx->Driver.BuildPrecalcPipeline = ffbDDBuildPrecalcPipeline;
+}
+@
+
+
+1.1.9.1
+log
+@OpenBSD just has imported exactly this tree into their vendor branch,
+called the same tag, in XF4/xc
+This is, apparently, the last XFree86 snapshot before the licence change
+(ie, addition of the advertising clause)
+
+Since the developers don't see any problems with that, and we would like
+to integrate improvements done by the remaining one or two (or so) XFree86
+developers (j/k), this prepares enabling us to update X-Window in the future.
+@
+text
+@d1 1
+a1 1
+/* $XFree86: xc/lib/GL/mesa/src/drv/ffb/ffb_dd.c,v 1.5 2003/09/28 20:15:07 alanh Exp $
+d4 1
+a4 1
+ * Copyright (C) 2000, 2001 David S. Miller
+d28 6
+a33 1
+#include "mtypes.h"
+d42 1
+d45 2
+a46 2
+
+#define FFB_DATE	"20021125"
+a51 3
+	ffbContextPtr fmesa = FFB_CONTEXT(ctx);
+	static char buffer[128];
+
+a54 1
+
+d56 1
+a56 17
+		sprintf(buffer, "Mesa DRI FFB " FFB_DATE);
+
+		if (fmesa->ffb_sarea->flags & FFB_DRI_FFB2)
+			strncat(buffer, " FFB2", 5);
+		if (fmesa->ffb_sarea->flags & FFB_DRI_FFB2PLUS)
+			strncat(buffer, " FFB2PLUS", 9);
+		if (fmesa->ffb_sarea->flags & FFB_DRI_PAC1)
+			strncat(buffer, " PAC1", 5);
+		if (fmesa->ffb_sarea->flags & FFB_DRI_PAC2)
+			strncat(buffer, " PAC2", 5);
+
+#ifdef USE_SPARC_ASM
+		strncat(buffer, " Sparc", 6);
+#endif
+
+		return (GLubyte *) buffer;
+
+d62 15
+d78 1
+a78 1
+static void ffbBufferSize(GLframebuffer *buffer, GLuint *width, GLuint *height)
+a79 1
+	GET_CURRENT_CONTEXT(ctx);
+d82 1
+a82 1
+	LOCK_HARDWARE(fmesa);
+d85 1
+a85 1
+	UNLOCK_HARDWARE(fmesa);
+d113 1
+d117 6
+@
+
+
+1.1.1.1
+log
+@Import OpenBSD 3.3 XF4 repository from CTM 3132 the first time
+This finalizes starting an OpenBSD-mirabile (aka MirBSD) repository.
+
+### MirBSD is:
+# Copyright (c) 1982-2003 by Thorsten "mirabile" Glaser <x86@@ePost.de>
+# Copyright © 1968-2003  The authors of And contributors to UNIX®, the
+#       C Language, BSD/Berkeley Unix; 386BSD, NetBSD 1.1 and OpenBSD.
+#
+# Anyone who obtained a copy of this work is hereby permitted to freely use,
+# distribute, modify, merge, sublicence, give away or sell it as long as the
+# authors are given due credit and the following notice is retained:
+#
+# This work is provided "as is", with no explicit or implicit warranty what-
+# soever. Use it only at your own risk. In no event may an author or contri-
+# butor be held liable for any damage, directly or indirectly, that origina-
+# ted through or is caused by creation or modification of this work.
+
+MirBSD is my private tree. MirBSD does not differ very much from OpenBSD
+and intentionally tracks OpenBSD. That's why it _is_ OpenBSD, just not the
+official one. It's like with DarrenBSD.
+
+At time of this writing, no advertising for MirBSD must be done,
+because the advertising clause has not yet been sorted out.
+
+http://templeofhate.com/tglaser/MirBSD/index.php
+@
+text
+@@
+
+
+1.1.1.2
+log
+@The X-Windowing System
+
+Import XFree86 4.3 from OpenBSD by CTM, in the hope it's stable
+@
+text
+@d1 1
+a1 1
+/* $XFree86: xc/lib/GL/mesa/src/drv/ffb/ffb_dd.c,v 1.4 2002/09/11 19:49:07 tsi Exp $
+d4 1
+a4 1
+ * Copyright (C) 2000, 2001 David S. Miller
+d28 2
+a29 1
+#include "mtypes.h"
+d42 1
+d45 2
+a46 2
+
+#define FFB_DATE	"20010624"
+a51 3
+	ffbContextPtr fmesa = FFB_CONTEXT(ctx);
+	static char buffer[128];
+
+a54 1
+
+d56 1
+a56 17
+		sprintf(buffer, "Mesa DRI FFB " FFB_DATE);
+
+		if (fmesa->ffb_sarea->flags & FFB_DRI_FFB2)
+			strncat(buffer, " FFB2", 5);
+		if (fmesa->ffb_sarea->flags & FFB_DRI_FFB2PLUS)
+			strncat(buffer, " FFB2PLUS", 9);
+		if (fmesa->ffb_sarea->flags & FFB_DRI_PAC1)
+			strncat(buffer, " PAC1", 5);
+		if (fmesa->ffb_sarea->flags & FFB_DRI_PAC2)
+			strncat(buffer, " PAC2", 5);
+
+#ifdef USE_SPARC_ASM
+		strncat(buffer, " Sparc", 6);
+#endif
+
+		return (GLubyte *) buffer;
+
+d62 15
+d78 1
+a78 1
+static void ffbBufferSize(GLframebuffer *buffer, GLuint *width, GLuint *height)
+a79 1
+	GET_CURRENT_CONTEXT(ctx);
+d82 1
+a82 1
+	LOCK_HARDWARE(fmesa);
+d85 1
+a85 1
+	UNLOCK_HARDWARE(fmesa);
+d113 1
+d117 6
+@
+
+
+1.1.1.3
+log
+@That's what OpenBSD will, probably, ship as XF4 in 3.5
+their last sync against XFree86 4.3-current has been
+imported into our vendor branch, too
+@
+text
+@d1 1
+a1 1
+/* $XFree86: xc/lib/GL/mesa/src/drv/ffb/ffb_dd.c,v 1.5 2003/09/28 20:15:07 alanh Exp $
+d29 4
+d44 1
+a44 1
+#define FFB_DATE	"20021125"
+@
+
+

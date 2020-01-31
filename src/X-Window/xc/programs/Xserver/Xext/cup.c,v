@@ -1,0 +1,604 @@
+head	1.1;
+branch	1.1.1;
+access;
+symbols
+	tg-mergetmp-2:1.1.1.2
+	cvs-200410241530:1.1.1.2
+	cvs-200410012000:1.1.1.2
+	cvs-200407141120:1.1.1.2
+	cvs-200406231010:1.1.1.2
+	MIRBSD_7quater:1.1.1.1
+	cvs-200405271510:1.1.1.2
+	XFree86_4_4_0:1.1.9.1
+	cvs-200403021700:1.1.1.2
+	XFREE86_20040213:1.1.9.1
+	xc:1.1.9
+	cvs-200401291925:1.1.1.1
+	MIRBSD_7_ALPHA:1.1.1.1.0.4
+	MIRBSD_7:1.1.1.1.0.2
+	MIRBSD_7ter:1.1.1.1
+	cvs-20011091815:1.1.1.1
+	cvs-200309162130:1.1.1.1
+	cvs-200308302005:1.1.1.1
+	ctmx-0387:1.1.1.1
+	ctmx-0384:1.1.1.1
+	MIRBSD_5:1.1.1.1
+	ctmx-0375:1.1.1.1
+	ctmx-0373:1.1.1.1
+	ctm-0371:1.1.1.1
+	ctm-0370:1.1.1.1
+	MIRBSD_4:1.1.1.1
+	ctm-0363:1.1.1.1
+	ctm-0359:1.1.1.1
+	ctm-0349:1.1.1.1
+	openbsd:1.1.1;
+locks; strict;
+comment	@ * @;
+
+
+1.1
+date	2003.03.22.20.05.53;	author tg;	state Exp;
+branches
+	1.1.1.1
+	1.1.9.1;
+next	;
+
+1.1.1.1
+date	2003.03.22.20.05.53;	author tg;	state Exp;
+branches;
+next	1.1.1.2;
+
+1.1.1.2
+date	2004.03.02.18.09.39;	author tg;	state Stab;
+branches;
+next	;
+
+1.1.9.1
+date	2004.02.14.19.20.45;	author tg;	state Exp;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@/* $Xorg: cup.c,v 1.4 2001/02/09 02:04:32 xorgcvs Exp $ */
+/*
+
+Copyright 1997, 1998  The Open Group
+
+Permission to use, copy, modify, distribute, and sell this software and its
+documentation for any purpose is hereby granted without fee, provided that
+the above copyright notice appear in all copies and that both that
+copyright notice and this permission notice appear in supporting
+documentation.
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
+OPEN GROUP BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN
+AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
+CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+Except as contained in this notice, the name of The Open Group shall not be
+used in advertising or otherwise to promote the sale, use or other dealings
+in this Software without prior written authorization from The Open Group.
+
+*/
+/* $XFree86: xc/programs/Xserver/Xext/cup.c,v 1.10 2001/12/14 19:58:48 dawes Exp $ */
+
+#define NEED_REPLIES
+#define NEED_EVENTS
+#include "X.h"
+#include "Xproto.h"
+#include "misc.h"
+#include "dixstruct.h"
+#include "extnsionst.h"
+#include "colormapst.h"
+#include "scrnintstr.h"
+#include "servermd.h"
+#include "swapreq.h"
+#define _XCUP_SERVER_
+#include "Xcupstr.h"
+#include "Xfuncproto.h"
+
+#ifndef EXTMODULE
+#include "../os/osdep.h"
+#else
+#include "xf86_ansic.h"
+#endif
+
+static int		ProcDispatch (), SProcDispatch ();
+static void		ResetProc ();
+
+static unsigned char	ReqCode = 0;
+static int		ErrorBase;
+
+#if defined(WIN32) || defined(TESTWIN32)
+#define HAVE_SPECIAL_DESKTOP_COLORS
+#endif
+
+static xColorItem citems[] = {
+#ifndef HAVE_SPECIAL_DESKTOP_COLORS
+#define CUP_BLACK_PIXEL 0
+#define CUP_WHITE_PIXEL 1
+  /*  pix     red   green    blue        */ 
+    {   0,      0,      0,      0, 0, 0 },
+    {   1, 0xffff, 0xffff, 0xffff, 0, 0 }
+#else
+#ifndef WIN32
+    /* 
+	This approximates the MS-Windows desktop colormap for testing 
+        purposes but has black and white pixels in the typical Unix 
+        locations, which should be switched if necessary if your system
+        has blackPixel and whitePixel swapped. No entries are provided
+        for colormap entries 254 and 255 because AllocColor/FindColor
+        will reuse entries zero and one.
+    */
+    {   0,      0,      0,      0, 0, 0 },
+    {   1, 0xffff, 0xffff, 0xffff, 0, 0 },
+    {   2, 0x8000,      0,      0, 0, 0 },
+    {   3,      0, 0x8000,      0, 0, 0 },
+    {   4, 0x8000, 0x8000,      0, 0, 0 },
+    {   5,      0,      0, 0x8000, 0, 0 },
+    {   6, 0x8000,      0, 0x8000, 0, 0 },
+    {   7,      0, 0x8000, 0x8000, 0, 0 },
+    {   8, 0xc000, 0xc000, 0xc000, 0, 0 },
+    {   9, 0xc000, 0xdc00, 0xc000, 0, 0 },
+    { 246, 0xa000, 0xa000, 0xa000, 0, 0 },
+    { 247, 0x8000, 0x8000, 0x8000, 0, 0 },
+    { 248, 0xffff,      0,      0, 0, 0 },
+    { 249,      0, 0xffff,      0, 0, 0 },
+    { 250, 0xffff, 0xffff,      0, 0, 0 },
+    { 251,      0,      0, 0xffff, 0, 0 },
+    { 252, 0xffff,      0, 0xffff, 0, 0 },
+    { 253,      0, 0xffff, 0xffff, 0, 0 }
+#else
+    /* 
+	this is the MS-Windows desktop, adjusted for X's 16-bit color
+	specifications.
+    */
+    {   0,      0,      0,      0, 0, 0 },
+    {   1, 0x8000,      0,      0, 0, 0 },
+    {   2,      0, 0x8000,      0, 0, 0 },
+    {   3, 0x8000, 0x8000,      0, 0, 0 },
+    {   4,      0,      0, 0x8000, 0, 0 },
+    {   5, 0x8000,      0, 0x8000, 0, 0 },
+    {   6,      0, 0x8000, 0x8000, 0, 0 },
+    {   7, 0xc000, 0xc000, 0xc000, 0, 0 },
+    {   8, 0xc000, 0xdc00, 0xc000, 0, 0 },
+    {   9, 0xa600, 0xca00, 0xf000, 0, 0 },
+    { 246, 0xff00, 0xfb00, 0xf000, 0, 0 },
+    { 247, 0xa000, 0xa000, 0xa400, 0, 0 },
+    { 248, 0x8000, 0x8000, 0x8000, 0, 0 },
+    { 249, 0xff00,      0,      0, 0, 0 },
+    { 250,      0, 0xff00,      0, 0, 0 },
+    { 251, 0xff00, 0xff00,      0, 0, 0 },
+    { 252,      0,      0, 0xff00, 0, 0 },
+    { 253, 0xff00,      0, 0xff00, 0, 0 },
+    { 254,      0, 0xff00, 0xff00, 0, 0 },
+    { 255, 0xff00, 0xff00, 0xff00, 0, 0 }
+#endif
+#endif
+};
+#define NUM_DESKTOP_COLORS (sizeof citems / sizeof citems[0])
+
+void
+XcupExtensionInit ()
+{
+    ExtensionEntry* extEntry;
+
+    if ((extEntry = AddExtension (XCUPNAME,
+				0,
+				XcupNumberErrors,
+				ProcDispatch,
+				SProcDispatch,
+				ResetProc,
+				StandardMinorOpcode))) {
+	ReqCode = (unsigned char)extEntry->base;
+	ErrorBase = extEntry->errorBase;
+    }
+
+    /* PC servers initialize the desktop colors (citems) here! */
+}
+
+/*ARGSUSED*/
+static 
+void ResetProc (extEntry)
+    ExtensionEntry* extEntry;
+{
+}
+
+static 
+int ProcQueryVersion (client)
+    register ClientPtr client;
+{
+    /* REQUEST (xXcupQueryVersionReq); */
+    xXcupQueryVersionReply rep;
+    register int n;
+
+    REQUEST_SIZE_MATCH (xXcupQueryVersionReq);
+    rep.type = X_Reply;
+    rep.length = 0;
+    rep.sequence_number = client->sequence;
+    rep.server_major_version = XCUP_MAJOR_VERSION;
+    rep.server_minor_version = XCUP_MINOR_VERSION;
+    if (client->swapped) {
+    	swaps (&rep.sequence_number, n);
+    	swapl (&rep.length, n);
+    	swaps (&rep.server_major_version, n);
+    	swaps (&rep.server_minor_version, n);
+    }
+    WriteToClient (client, sizeof (xXcupQueryVersionReply), (char *)&rep);
+    return client->noClientException;
+}
+
+static
+int ProcGetReservedColormapEntries (client)
+    register ClientPtr client;
+{
+    REQUEST (xXcupGetReservedColormapEntriesReq);
+    xXcupGetReservedColormapEntriesReply rep;
+    xColorItem* cptr;
+    register int n;
+
+    REQUEST_SIZE_MATCH (xXcupGetReservedColormapEntriesReq);
+
+#ifndef HAVE_SPECIAL_DESKTOP_COLORS
+    citems[CUP_BLACK_PIXEL].pixel = 
+	screenInfo.screens[stuff->screen]->blackPixel;
+    citems[CUP_WHITE_PIXEL].pixel = 
+	screenInfo.screens[stuff->screen]->whitePixel;
+#endif
+
+    rep.type = X_Reply;
+    rep.sequence_number = client->sequence;
+    rep.length = NUM_DESKTOP_COLORS * 3;
+    if (client->swapped) {
+    	swaps (&rep.sequence_number, n);
+    	swapl (&rep.length, n);
+    }
+    WriteToClient (client, sizeof (xXcupGetReservedColormapEntriesReply), (char *)&rep);
+    for (n = 0, cptr = citems; n < NUM_DESKTOP_COLORS; n++, cptr++) {
+	if (client->swapped) SwapColorItem (cptr);
+	WriteToClient (client, SIZEOF(xColorItem), (char *)cptr);
+    }
+    return client->noClientException;
+}
+
+static
+int ProcStoreColors (client)
+    register ClientPtr client;
+{
+    REQUEST (xXcupStoreColorsReq);
+    ColormapPtr pcmp;
+
+    REQUEST_AT_LEAST_SIZE (xXcupStoreColorsReq);
+    pcmp = (ColormapPtr) SecurityLookupIDByType (client, stuff->cmap,
+						 RT_COLORMAP, SecurityWriteAccess);
+
+    if (pcmp) {
+	int ncolors, n;
+	xXcupStoreColorsReply rep;
+	xColorItem* cptr;
+
+	if (!(pcmp->class & DynamicClass))
+	    return BadMatch;
+
+	ncolors = (client->req_len << 2) - SIZEOF (xXcupStoreColorsReq);
+	if (ncolors % SIZEOF(xColorItem))
+	    return BadLength;
+
+	ncolors /= SIZEOF (xColorItem);
+
+
+	for (n = 0, cptr = (xColorItem*) &stuff[1]; n < ncolors; n++) {
+	    Pixel pixel = cptr->pixel;
+
+	    if (AllocColor (pcmp,
+			    &cptr->red, &cptr->green, &cptr->blue,
+			    &pixel, client->index) == Success) {
+		cptr->pixel = pixel;
+		cptr->flags = 0x08;
+	    } else
+		cptr->flags = 0;
+	    cptr = (xColorItem*) (((char*)cptr) + SIZEOF(xColorItem));
+	}
+
+	rep.type = X_Reply;
+	rep.sequence_number = client->sequence;
+	rep.length = ncolors * 3;
+	if (client->swapped) {
+    	    swaps (&rep.sequence_number, n);
+    	    swapl (&rep.length, n);
+	}
+	WriteToClient (client, sizeof (xXcupGetReservedColormapEntriesReply), (char *)&rep);
+	for (n = 0, cptr = (xColorItem*) &stuff[1]; n < ncolors; n++) {
+	    if (client->swapped) SwapColorItem (cptr);
+	    WriteToClient (client, SIZEOF(xColorItem), (char *)cptr);
+	    cptr = (xColorItem*) (((char*)cptr) + SIZEOF(xColorItem));
+	}
+	return client->noClientException;
+    } else {
+	client->errorValue = stuff->cmap;
+	return BadColor;
+    }
+}
+
+static 
+int ProcDispatch (client)
+    register ClientPtr	client;
+{
+    REQUEST (xReq);
+    switch (stuff->data)
+    {
+    case X_XcupQueryVersion:
+	return ProcQueryVersion (client);
+    case X_XcupGetReservedColormapEntries:
+	return ProcGetReservedColormapEntries (client);
+    case X_XcupStoreColors:
+	return ProcStoreColors (client);
+    default:
+	return BadRequest;
+    }
+}
+
+static 
+int SProcQueryVersion (client)
+    register ClientPtr	client;
+{
+    register int n;
+
+    REQUEST(xXcupQueryVersionReq);
+    swaps(&stuff->length, n);
+    return ProcQueryVersion(client);
+}
+
+static 
+int SProcGetReservedColormapEntries (client)
+    ClientPtr client;
+{
+    register int n;
+
+    REQUEST (xXcupGetReservedColormapEntriesReq);
+    swaps (&stuff->length, n);
+    swapl (&stuff->screen, n);
+    REQUEST_AT_LEAST_SIZE (xXcupGetReservedColormapEntriesReq);
+    return ProcGetReservedColormapEntries (client);
+}
+
+static 
+int SProcXcupStoreColors (client)
+    ClientPtr client;
+{
+    register int n;
+    int count;
+    xColorItem* pItem;
+
+    REQUEST (xXcupStoreColorsReq);
+    swaps (&stuff->length, n);
+    REQUEST_AT_LEAST_SIZE (xXcupStoreColorsReq);
+    swapl(&stuff->cmap, n);
+    pItem = (xColorItem*) &stuff[1];
+    for(count = LengthRestB(stuff)/sizeof(xColorItem); --count >= 0; )
+        SwapColorItem(pItem++);
+    return ProcStoreColors (client);
+}
+
+static 
+int SProcDispatch (client)
+    register ClientPtr	client;
+{
+    REQUEST(xReq);
+    switch (stuff->data)
+    {
+    case X_XcupQueryVersion:
+	return SProcQueryVersion (client);
+    case X_XcupGetReservedColormapEntries:
+	return SProcGetReservedColormapEntries (client);
+    case X_XcupStoreColors:
+	return SProcXcupStoreColors (client);
+    default:
+	return BadRequest;
+    }
+}
+
+
+@
+
+
+1.1.9.1
+log
+@OpenBSD just has imported exactly this tree into their vendor branch,
+called the same tag, in XF4/xc
+This is, apparently, the last XFree86 snapshot before the licence change
+(ie, addition of the advertising clause)
+
+Since the developers don't see any problems with that, and we would like
+to integrate improvements done by the remaining one or two (or so) XFree86
+developers (j/k), this prepares enabling us to update X-Window in the future.
+@
+text
+@d27 1
+a27 1
+/* $XFree86: xc/programs/Xserver/Xext/cup.c,v 1.12 2003/10/28 23:08:43 tsi Exp $ */
+d50 2
+a51 1
+#include "modinit.h"
+a52 5
+static int		ProcDispatch(ClientPtr client);
+static int              SProcDispatch(ClientPtr client);
+static void		ResetProc(ExtensionEntry* extEntry);
+
+#if 0
+a54 1
+#endif
+d126 1
+a126 1
+XcupExtensionInit (INITARGS)
+a127 1
+#if 0
+a139 9
+#else
+    (void) AddExtension (XCUPNAME,
+			0,
+			XcupNumberErrors,
+			ProcDispatch,
+			SProcDispatch,
+			ResetProc,
+			StandardMinorOpcode);
+#endif
+d146 2
+a147 2
+void ResetProc(
+    ExtensionEntry* extEntry)
+d152 2
+a153 2
+int ProcQueryVersion(
+    register ClientPtr client)
+d176 2
+a177 2
+int ProcGetReservedColormapEntries(
+    register ClientPtr client)
+d209 2
+a210 2
+int ProcStoreColors(
+    register ClientPtr client)
+d268 2
+a269 2
+int ProcDispatch(
+    register ClientPtr client)
+d286 2
+a287 2
+int SProcQueryVersion(
+    register ClientPtr client)
+d297 2
+a298 2
+int SProcGetReservedColormapEntries(
+    ClientPtr client)
+d310 2
+a311 2
+int SProcXcupStoreColors(
+    ClientPtr client)
+d328 2
+a329 2
+int SProcDispatch(
+    register ClientPtr client)
+@
+
+
+1.1.1.1
+log
+@Import OpenBSD 3.3 XF4 repository from CTM 3132 the first time
+This finalizes starting an OpenBSD-mirabile (aka MirBSD) repository.
+
+### MirBSD is:
+# Copyright (c) 1982-2003 by Thorsten "mirabile" Glaser <x86@@ePost.de>
+# Copyright © 1968-2003  The authors of And contributors to UNIX®, the
+#       C Language, BSD/Berkeley Unix; 386BSD, NetBSD 1.1 and OpenBSD.
+#
+# Anyone who obtained a copy of this work is hereby permitted to freely use,
+# distribute, modify, merge, sublicence, give away or sell it as long as the
+# authors are given due credit and the following notice is retained:
+#
+# This work is provided "as is", with no explicit or implicit warranty what-
+# soever. Use it only at your own risk. In no event may an author or contri-
+# butor be held liable for any damage, directly or indirectly, that origina-
+# ted through or is caused by creation or modification of this work.
+
+MirBSD is my private tree. MirBSD does not differ very much from OpenBSD
+and intentionally tracks OpenBSD. That's why it _is_ OpenBSD, just not the
+official one. It's like with DarrenBSD.
+
+At time of this writing, no advertising for MirBSD must be done,
+because the advertising clause has not yet been sorted out.
+
+http://templeofhate.com/tglaser/MirBSD/index.php
+@
+text
+@@
+
+
+1.1.1.2
+log
+@That's what OpenBSD will, probably, ship as XF4 in 3.5
+their last sync against XFree86 4.3-current has been
+imported into our vendor branch, too
+@
+text
+@d27 1
+a27 1
+/* $XFree86: xc/programs/Xserver/Xext/cup.c,v 1.12 2003/10/28 23:08:43 tsi Exp $ */
+d50 2
+a51 1
+#include "modinit.h"
+a52 5
+static int		ProcDispatch(ClientPtr client);
+static int              SProcDispatch(ClientPtr client);
+static void		ResetProc(ExtensionEntry* extEntry);
+
+#if 0
+a54 1
+#endif
+d126 1
+a126 1
+XcupExtensionInit (INITARGS)
+a127 1
+#if 0
+a139 9
+#else
+    (void) AddExtension (XCUPNAME,
+			0,
+			XcupNumberErrors,
+			ProcDispatch,
+			SProcDispatch,
+			ResetProc,
+			StandardMinorOpcode);
+#endif
+d146 2
+a147 2
+void ResetProc(
+    ExtensionEntry* extEntry)
+d152 2
+a153 2
+int ProcQueryVersion(
+    register ClientPtr client)
+d176 2
+a177 2
+int ProcGetReservedColormapEntries(
+    register ClientPtr client)
+d209 2
+a210 2
+int ProcStoreColors(
+    register ClientPtr client)
+d268 2
+a269 2
+int ProcDispatch(
+    register ClientPtr client)
+d286 2
+a287 2
+int SProcQueryVersion(
+    register ClientPtr client)
+d297 2
+a298 2
+int SProcGetReservedColormapEntries(
+    ClientPtr client)
+d310 2
+a311 2
+int SProcXcupStoreColors(
+    ClientPtr client)
+d328 2
+a329 2
+int SProcDispatch(
+    register ClientPtr client)
+@
+

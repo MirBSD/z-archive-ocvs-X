@@ -1,0 +1,410 @@
+head	1.1;
+branch	1.1.1;
+access;
+symbols
+	tg-mergetmp-2:1.1.1.2
+	cvs-200410241530:1.1.1.2
+	cvs-200410012000:1.1.1.2
+	cvs-200407141120:1.1.1.2
+	cvs-200406231010:1.1.1.2
+	MIRBSD_7quater:1.1.1.2
+	cvs-200405271510:1.1.1.2
+	XFree86_4_4_0:1.1.9.1
+	cvs-200403021700:1.1.1.2
+	XFREE86_20040213:1.1.9.1
+	xc:1.1.9
+	cvs-200401291925:1.1.1.2
+	MIRBSD_7_ALPHA:1.1.1.2.0.4
+	MIRBSD_7:1.1.1.2.0.2
+	MIRBSD_7ter:1.1.1.2
+	cvs-20011091815:1.1.1.2
+	cvs-200309162130:1.1.1.2
+	cvs-200308302005:1.1.1.2
+	ctmx-0387:1.1.1.2
+	ctmx-0384:1.1.1.2
+	MIRBSD_5:1.1.1.2
+	ctmx-0375:1.1.1.2
+	ctmx-0373:1.1.1.2
+	ctm-0371:1.1.1.2
+	ctm-0370:1.1.1.2
+	MIRBSD_4:1.1.1.2
+	ctm-0363:1.1.1.2
+	ctm-0359:1.1.1.2
+	ctm-0349:1.1.1.1
+	openbsd:1.1.1;
+locks; strict;
+comment	@ * @;
+
+
+1.1
+date	2003.03.22.20.09.25;	author tg;	state Exp;
+branches
+	1.1.1.1
+	1.1.9.1;
+next	;
+
+1.1.1.1
+date	2003.03.22.20.09.25;	author tg;	state Exp;
+branches;
+next	1.1.1.2;
+
+1.1.1.2
+date	2003.04.08.18.38.01;	author tg;	state Stab;
+branches;
+next	;
+
+1.1.9.1
+date	2004.02.14.19.26.05;	author tg;	state Exp;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@/*
+ *Copyright (C) 1994-2000 The XFree86 Project, Inc. All Rights Reserved.
+ *
+ *Permission is hereby granted, free of charge, to any person obtaining
+ * a copy of this software and associated documentation files (the
+ *"Software"), to deal in the Software without restriction, including
+ *without limitation the rights to use, copy, modify, merge, publish,
+ *distribute, sublicense, and/or sell copies of the Software, and to
+ *permit persons to whom the Software is furnished to do so, subject to
+ *the following conditions:
+ *
+ *The above copyright notice and this permission notice shall be
+ *included in all copies or substantial portions of the Software.
+ *
+ *THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+ *EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+ *MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
+ *NONINFRINGEMENT. IN NO EVENT SHALL THE XFREE86 PROJECT BE LIABLE FOR
+ *ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF
+ *CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
+ *WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+ *
+ *Except as contained in this notice, the name of the XFree86 Project
+ *shall not be used in advertising or otherwise to promote the sale, use
+ *or other dealings in this Software without prior written authorization
+ *from the XFree86 Project.
+ *
+ * Authors:	Keith Packard, MIT X Consortium
+ *		Harold L Hunt II
+ */
+/* $XFree86: xc/programs/Xserver/hw/xwin/winallpriv.c,v 1.8 2001/10/29 21:10:23 alanh Exp $ */
+
+#include "win.h"
+
+
+
+/* See Porting Layer Definition - p. 58 */
+/*
+ * Allocate indexes for the privates that we use.
+ * Allocate memory directly for the screen privates.
+ * Reserve space in GCs and Pixmaps for our privates.
+ * Colormap privates are handled in winAllocateCmapPrivates ()
+ */
+
+Bool
+winAllocatePrivates (ScreenPtr pScreen)
+{
+  winPrivScreenPtr	pScreenPriv;
+
+#if CYGDEBUG
+  ErrorF ("winAllocateScreenPrivates () - g_ulServerGeneration: %d "
+	  "serverGeneration: %d\n",
+	  g_ulServerGeneration, serverGeneration);
+#endif
+
+  /* We need a new slot for our privates if the screen gen has changed */
+  if (g_ulServerGeneration != serverGeneration)
+    {
+      /* Get an index that we can store our privates at */
+      g_iScreenPrivateIndex = AllocateScreenPrivateIndex ();
+      g_iGCPrivateIndex = AllocateGCPrivateIndex ();
+      g_iPixmapPrivateIndex = AllocatePixmapPrivateIndex ();
+
+      g_ulServerGeneration = serverGeneration;
+    }
+
+  /* Allocate memory for the screen private structure */
+  pScreenPriv = (winPrivScreenPtr) xalloc (sizeof (winPrivScreenRec));
+  if (!pScreenPriv)
+    {
+      ErrorF ("winAllocateScreenPrivates () - xalloc () failed\n");
+      return FALSE;
+    }
+
+  /* Initialize the memory of the private structure */
+  ZeroMemory (pScreenPriv, sizeof (winPrivScreenRec));
+
+  /* Intialize private structure members */
+  pScreenPriv->fActive = TRUE;
+  pScreenPriv->fCursor = TRUE;
+
+  /* Save the screen private pointer */
+  winSetScreenPriv (pScreen, pScreenPriv);
+
+  /* Reserve GC memory for our privates */
+  if (!AllocateGCPrivate (pScreen, g_iGCPrivateIndex,
+			  sizeof (winPrivGCRec)))
+    {
+      ErrorF ("winAllocatePrivates () - AllocateGCPrivate () failed\n");
+      return FALSE;
+    }
+
+  /* Reserve Pixmap memory for our privates */
+  if (!AllocatePixmapPrivate (pScreen, g_iPixmapPrivateIndex,
+			      sizeof (winPrivPixmapRec)))
+    {
+      ErrorF ("winAllocatePrivates () - AllocatePixmapPrivates () failed\n");
+      return FALSE;
+    }
+
+  return TRUE;
+}
+
+
+/*
+ * Colormap privates may be allocated after the default colormap has
+ * already been created for some screens.  This initialization procedure
+ * is called for each default colormap that is found.
+ */
+
+Bool
+winInitCmapPrivates (ColormapPtr pcmap)
+{
+#if CYGDEBUG
+  ErrorF ("winInitCmapPrivates ()\n");
+#endif
+  
+  /*
+   * I see no way that this function can do anything useful
+   * with only a ColormapPtr.  We don't have the index for
+   * our dev privates yet, so we can't really initialize
+   * anything.  Perhaps I am misunderstanding the purpose
+   * of this function.
+   */
+  
+  return TRUE;
+}
+
+
+/*
+ * Allocate memory for our colormap privates
+ */
+
+Bool
+winAllocateCmapPrivates (ColormapPtr pCmap)
+{
+  winPrivCmapPtr		pCmapPriv;
+  static unsigned long		ulPrivateGeneration = 0;
+
+#if CYGDEBUG
+  ErrorF ("winAllocateCmapPrivates ()\n");
+#endif
+
+  /* Get a new privates index when the server generation changes */
+  if (ulPrivateGeneration != serverGeneration)
+    {
+      /* Get an index that we can store our privates at */
+      g_iCmapPrivateIndex = AllocateColormapPrivateIndex (winInitCmapPrivates);
+      
+      /* Save the new server generation */
+      ulPrivateGeneration = serverGeneration;
+    }
+
+  /* Allocate memory for our private structure */
+  pCmapPriv = (winPrivCmapPtr) xalloc (sizeof (winPrivCmapRec));
+  if (!pCmapPriv)
+    {
+      ErrorF ("winAllocateCmapPrivates () - xalloc () failed\n");
+      return FALSE;
+    }
+
+  /* Initialize the memory of the private structure */
+  ZeroMemory (pCmapPriv, sizeof (winPrivCmapRec));
+
+  /* Save the cmap private pointer */
+  winSetCmapPriv (pCmap, pCmapPriv);
+
+#if CYGDEBUG
+  ErrorF ("winAllocateCmapPrivates () - Returning\n");
+#endif
+
+  return TRUE;
+}
+@
+
+
+1.1.9.1
+log
+@OpenBSD just has imported exactly this tree into their vendor branch,
+called the same tag, in XF4/xc
+This is, apparently, the last XFree86 snapshot before the licence change
+(ie, addition of the advertising clause)
+
+Since the developers don't see any problems with that, and we would like
+to integrate improvements done by the remaining one or two (or so) XFree86
+developers (j/k), this prepares enabling us to update X-Window in the future.
+@
+text
+@d31 1
+a31 1
+/* $XFree86: xc/programs/Xserver/hw/xwin/winallpriv.c,v 1.12 2002/10/31 23:04:39 alanh Exp $ */
+d51 1
+a51 1
+  ErrorF ("winAllocateScreenPrivates - g_ulServerGeneration: %d "
+a62 1
+      g_iWindowPrivateIndex = AllocateWindowPrivateIndex ();
+d68 1
+a68 1
+  pScreenPriv = (winPrivScreenPtr) malloc (sizeof (winPrivScreenRec));
+d71 1
+a71 1
+      ErrorF ("winAllocateScreenPrivates - malloc () failed\n");
+d80 1
+d89 1
+a89 1
+      ErrorF ("winAllocatePrivates - AllocateGCPrivate () failed\n");
+d97 1
+a97 1
+      ErrorF ("winAllocatePrivates - AllocatePixmapPrivates () failed\n");
+a100 8
+  /* Reserve Window memory for our privates */
+  if (!AllocateWindowPrivate (pScreen, g_iWindowPrivateIndex,
+			      sizeof (winPrivWinRec)))
+    {
+      ErrorF ("winAllocatePrivates () - AllocateWindowPrivates () failed\n");
+       return FALSE;
+     }
+
+d115 1
+a115 1
+  ErrorF ("winInitCmapPrivates\n");
+d138 1
+a138 1
+  static unsigned long		s_ulPrivateGeneration = 0;
+d141 1
+a141 1
+  ErrorF ("winAllocateCmapPrivates\n");
+d145 1
+a145 1
+  if (s_ulPrivateGeneration != serverGeneration)
+d151 1
+a151 1
+      s_ulPrivateGeneration = serverGeneration;
+d155 1
+a155 1
+  pCmapPriv = (winPrivCmapPtr) malloc (sizeof (winPrivCmapRec));
+d158 1
+a158 1
+      ErrorF ("winAllocateCmapPrivates - malloc () failed\n");
+d169 1
+a169 1
+  ErrorF ("winAllocateCmapPrivates - Returning\n");
+@
+
+
+1.1.1.1
+log
+@Import OpenBSD 3.3 XF4 repository from CTM 3132 the first time
+This finalizes starting an OpenBSD-mirabile (aka MirBSD) repository.
+
+### MirBSD is:
+# Copyright (c) 1982-2003 by Thorsten "mirabile" Glaser <x86@@ePost.de>
+# Copyright © 1968-2003  The authors of And contributors to UNIX®, the
+#       C Language, BSD/Berkeley Unix; 386BSD, NetBSD 1.1 and OpenBSD.
+#
+# Anyone who obtained a copy of this work is hereby permitted to freely use,
+# distribute, modify, merge, sublicence, give away or sell it as long as the
+# authors are given due credit and the following notice is retained:
+#
+# This work is provided "as is", with no explicit or implicit warranty what-
+# soever. Use it only at your own risk. In no event may an author or contri-
+# butor be held liable for any damage, directly or indirectly, that origina-
+# ted through or is caused by creation or modification of this work.
+
+MirBSD is my private tree. MirBSD does not differ very much from OpenBSD
+and intentionally tracks OpenBSD. That's why it _is_ OpenBSD, just not the
+official one. It's like with DarrenBSD.
+
+At time of this writing, no advertising for MirBSD must be done,
+because the advertising clause has not yet been sorted out.
+
+http://templeofhate.com/tglaser/MirBSD/index.php
+@
+text
+@@
+
+
+1.1.1.2
+log
+@The X-Windowing System
+
+Import XFree86 4.3 from OpenBSD by CTM, in the hope it's stable
+@
+text
+@d31 1
+a31 1
+/* $XFree86: xc/programs/Xserver/hw/xwin/winallpriv.c,v 1.12 2002/10/31 23:04:39 alanh Exp $ */
+d51 1
+a51 1
+  ErrorF ("winAllocateScreenPrivates - g_ulServerGeneration: %d "
+a62 1
+      g_iWindowPrivateIndex = AllocateWindowPrivateIndex ();
+d68 1
+a68 1
+  pScreenPriv = (winPrivScreenPtr) malloc (sizeof (winPrivScreenRec));
+d71 1
+a71 1
+      ErrorF ("winAllocateScreenPrivates - malloc () failed\n");
+d80 1
+d89 1
+a89 1
+      ErrorF ("winAllocatePrivates - AllocateGCPrivate () failed\n");
+d97 1
+a97 1
+      ErrorF ("winAllocatePrivates - AllocatePixmapPrivates () failed\n");
+a100 8
+  /* Reserve Window memory for our privates */
+  if (!AllocateWindowPrivate (pScreen, g_iWindowPrivateIndex,
+			      sizeof (winPrivWinRec)))
+    {
+      ErrorF ("winAllocatePrivates () - AllocateWindowPrivates () failed\n");
+       return FALSE;
+     }
+
+d115 1
+a115 1
+  ErrorF ("winInitCmapPrivates\n");
+d138 1
+a138 1
+  static unsigned long		s_ulPrivateGeneration = 0;
+d141 1
+a141 1
+  ErrorF ("winAllocateCmapPrivates\n");
+d145 1
+a145 1
+  if (s_ulPrivateGeneration != serverGeneration)
+d151 1
+a151 1
+      s_ulPrivateGeneration = serverGeneration;
+d155 1
+a155 1
+  pCmapPriv = (winPrivCmapPtr) malloc (sizeof (winPrivCmapRec));
+d158 1
+a158 1
+      ErrorF ("winAllocateCmapPrivates - malloc () failed\n");
+d169 1
+a169 1
+  ErrorF ("winAllocateCmapPrivates - Returning\n");
+@
+

@@ -1,0 +1,287 @@
+head	1.4;
+access;
+symbols;
+locks; strict;
+comment	@# @;
+
+
+1.4
+date	2004.02.26.19.16.29;	author tg;	state Stab;
+branches;
+next	1.3;
+
+1.3
+date	2004.02.02.19.17.59;	author tg;	state Exp;
+branches;
+next	1.2;
+
+1.2
+date	2004.01.25.17.48.00;	author tg;	state Exp;
+branches;
+next	1.1;
+
+1.1
+date	2004.01.24.04.34.20;	author tg;	state Exp;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.4
+log
+@upgrade to current of today winex
+
+the distfiles are already on advo, happy hacking
+XXX it doesn't find the xrender/xrandr and freetype libs,
+XXX which are said to be dynamically loaded. someone?
+@
+text
+@$MirBSD: patch-library_port_c,v 1.3 2004/02/02 19:17:59 tg Exp $
+--- library/port.c.orig	2003-12-17 20:50:56.000000000 +0000
++++ library/port.c	2004-02-26 18:03:58.000000000 +0000
+@@@@ -433,8 +433,13 @@@@ int getrlimit (int resource, struct rlim
+ }
+ #endif /* HAVE_GETRLIMIT */
+ 
++#ifndef	ASSUME_BSDSAFE_VFORK
++#if defined(__OpenBSD__) && !defined(__MirBSD__)
++#define	ASSUME_BSDSAFE_VFORK
++#endif
++#endif
+ 
+-#if defined(__svr4__) || defined(__NetBSD__)
++#if defined(__svr4__) || defined(__NetBSD__) || defined(__OpenBSD__)
+ /***********************************************************************
+  *             try_mmap_fixed
+  *
+@@@@ -457,7 +462,9 @@@@ static int try_mmap_fixed (void *addr, s
+ {
+     char * volatile result = NULL;
+     int pagesize = getpagesize();
++#ifndef	ASSUME_BSDSAFE_VFORK
+     pid_t pid;
++#endif
+ 
+     /* We only try to map to a fixed address if
+        addr is non-NULL and properly aligned,
+@@@@ -470,6 +477,16 @@@@ static int try_mmap_fixed (void *addr, s
+     if ( flags & MAP_FIXED )
+         return 0;
+ 
++#ifndef	ASSUME_BSDSAFE_VFORK
++	/*
++	 * vfork on OpenBSD has the semantics of fork, except for
++	 * having the parent sleep. ("safe" vfork)
++	 * Thus, the changes in result, even if it's volatile,
++	 * are not reflected back in the parent.
++	 * This is not a problem in recent MirOS with the kernel
++	 * option VFORK_SHM set however.
++	 */
++
+     /* We use vfork() to freeze all threads of the
+        current process.  This allows us to check without
+        race condition whether the desired memory range is
+@@@@ -483,6 +500,7 @@@@ static int try_mmap_fixed (void *addr, s
+         exit(1);
+     }
+     if ( pid == 0 ) /* Child process */
++#endif
+     {
+         int i;
+         char vec;
+@@@@ -492,11 +510,18 @@@@ static int try_mmap_fixed (void *addr, s
+            mapped and we must fail. */
+         for ( i = 0; i < len; i += pagesize )
+             if ( mincore( (caddr_t)addr + i, pagesize, &vec ) != -1 )
++#ifdef	ASSUME_BSDSAFE_VFORK
++		return 0;
++#else
+                _exit(1);
++#endif
+ 
+         /* Perform the mapping with MAP_FIXED set.  This is safe
+            now, as none of the pages is currently in use. */
+         result = mmap( addr, len, prot, flags | MAP_FIXED, fildes, off );
++#ifdef	ASSUME_BSDSAFE_VFORK
++    }
++#else
+         if ( result == addr )
+             _exit(0);
+ 
+@@@@ -509,6 +534,7 @@@@ static int try_mmap_fixed (void *addr, s
+     /* vfork() lets the parent continue only after the child
+        has exited.  Furthermore, Wine sets SIGCHLD to SIG_IGN,
+        so we don't need to wait for the child. */
++#endif
+ 
+     return result == addr;
+ }
+@@@@ -545,7 +571,7 @@@@ void *wine_anon_mmap( void *start, size_
+     flags |= MAP_PRIVATE;
+ #endif
+ 
+-#if defined(__svr4__) || defined(__NetBSD__)
++#if defined(__svr4__) || defined(__NetBSD__) || defined(__OpenBSD__)
+     if ( try_mmap_fixed( start, size, prot, flags, fdzero, 0 ) )
+         return start;
+ #endif
+@@@@ -574,7 +600,7 @@@@ void *wine_dlopen( const char *filename,
+     char *s;
+     dlerror(); dlerror();
+     ret = dlopen( filename, flag );
+-    s = dlerror();
++    s = (char *)dlerror();
+     if (error)
+     {
+ 	strncpy( error, s ? s : "", errorsize );
+@@@@ -602,7 +628,7 @@@@ void *wine_dlsym( void *handle, const ch
+     char *s;
+     dlerror(); dlerror();
+     ret = dlsym( handle, symbol );
+-    s = dlerror();
++    s = (char *)dlerror();
+     if (error)
+     {
+ 	strncpy( error, s ? s : "", errorsize );
+@@@@ -630,7 +656,7 @@@@ int wine_dlclose( void *handle, char *er
+     char *s;
+     dlerror(); dlerror();
+     ret = dlclose( handle );
+-    s = dlerror();
++    s = (char *)dlerror();
+     if (error)
+     {
+ 	strncpy( error, s ? s : "", errorsize );
+@
+
+
+1.3
+log
+@hand-edit to cope for
+option	VFORK_SHM
+@
+text
+@d1 5
+a5 4
+$MirBSD: patch-library_port_c,v 1.2 2004/01/25 17:48:00 tg Exp $
+--- library/port.c.orig	2003-06-11 15:55:26.000000000 +0000
++++ library/port.c	2004-01-25 01:13:49.000000000 +0000
+@@@@ -433,7 +433,7 @@@@ int getrlimit (int resource, struct rlim
+d8 5
+d19 1
+a19 1
+@@@@ -456,7 +456,9 @@@@ static int try_mmap_fixed (void *addr, s
+d23 1
+a23 1
++#if !defined(__OpenBSD__) || defined(__MirBSD__)
+d29 1
+a29 1
+@@@@ -469,6 +471,16 @@@@ static int try_mmap_fixed (void *addr, s
+d33 1
+a33 1
++#if defined(__OpenBSD__) && !defined(__MirBSD__)
+d36 1
+a36 1
++	 * having the parent sleep.
+d46 1
+a46 1
+@@@@ -482,6 +492,7 @@@@ static int try_mmap_fixed (void *addr, s
+d50 1
+a50 1
++#endif	/* defined(__OpenBSD__) && !defined(__MirBSD__) */
+d54 1
+a54 1
+@@@@ -491,11 +502,18 @@@@ static int try_mmap_fixed (void *addr, s
+d58 1
+a58 1
++#if defined(__OpenBSD__) && !defined(__MirBSD__)
+d67 1
+a67 1
++#if defined(__OpenBSD__) && !defined(__MirBSD__)
+d73 1
+a73 1
+@@@@ -508,6 +526,7 @@@@ static int try_mmap_fixed (void *addr, s
+d77 1
+a77 1
++#endif	/* defined(__OpenBSD__) && !defined(__MirBSD__) */
+d81 1
+a81 1
+@@@@ -544,7 +563,7 @@@@ void *wine_anon_mmap( void *start, size_
+d90 1
+a90 1
+@@@@ -573,7 +592,7 @@@@ void *wine_dlopen( const char *filename,
+d99 1
+a99 1
+@@@@ -601,7 +620,7 @@@@ void *wine_dlsym( void *handle, const ch
+d108 1
+a108 1
+@@@@ -629,7 +648,7 @@@@ int wine_dlclose( void *handle, char *er
+a116 13
+@@@@ -745,10 +764,10 @@@@ char *gcvt (double number, size_t  ndigi
+ /* Get the id of a thread */
+ pid_t wine_gettid(void)
+ {
+-    pid_t ret;
+-  
+ #if defined( __linux__ ) && defined( __i386__ ) /* && defined( USE_PTHREADS ) */
+ 
++    pid_t ret;
++  
+     /* fprintf( stderr, "Attempting linux gettid syscall\n" ); */
+ 
+     __asm__("int $0x80" : "=a" (ret) : "0" (SYS_gettid));
+@
+
+
+1.2
+log
+@make this port _really_ work well
+@
+text
+@d1 1
+a1 1
+$MirBSD: patch-library_port_c,v 1.1 2004/01/24 04:34:20 tg Exp $
+d17 1
+a17 1
++#ifndef	__OpenBSD__
+d23 1
+a23 1
+@@@@ -469,6 +471,14 @@@@ static int try_mmap_fixed (void *addr, s
+d27 1
+a27 1
++#ifndef	__OpenBSD__
+d33 2
+d44 1
+a44 1
++#endif	/* ndef __OpenBSD__ */
+d52 1
+a52 1
++#ifdef	__OpenBSD__
+d61 1
+a61 1
++#ifdef	__OpenBSD__
+d71 1
+a71 1
++#endif	/* ndef __OpenBSD__ */
+@
+
+
+1.1
+log
+@Improve usability under -current
+@
+text
+@d1 3
+a3 3
+$MirBSD$
+--- library/port.c.orig	2004-01-24 04:14:14.000000000 +0000
++++ library/port.c	2004-01-24 04:14:31.000000000 +0000
+d13 61
+a73 1
+@@@@ -544,7 +544,7 @@@@ void *wine_anon_mmap( void *start, size_
+d82 40
+@
+

@@ -1,0 +1,169 @@
+head	1.1;
+access;
+symbols
+	cvs-200405281530:1.1.1.1
+	cvs-200402211630:1.1.1.1
+	openbsd:1.1.1;
+locks; strict;
+comment	@# @;
+
+
+1.1
+date	2003.12.18.00.03.00;	author wbx;	state Stab;
+branches
+	1.1.1.1;
+next	;
+
+1.1.1.1
+date	2004.02.21.17.08.26;	author bsiegert;	state Exp;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.1
+log
+@- new upstream version
+- corrected dependencies to new db4 port
+- tested with postfix2 client authentication (PLAIN)
+- compiles fine with sendmail (can someone verify it please!)
+
+I have no idea how to make correct patches for upstream developers.
+After a long autoconf/libtool analysis, I think the problem is the following:
+- libc from MirBSD includes resolver functionality
+- autoconf tests didn't fail when -lresolv is added to the compiler
+- libtool try to resolv all shared library dependencies for dynamic loaded
+  libraries (sasl-plugins) and fail, because libresolv.so is not found.
+  On Linux systems there is such a library.
+
+The macro AC_CHECK_LIB(resolv,res_search) is the problem.
+It is defined in autoconf/libs.m4, a standard macro for software using
+autotools.
+
+any ideas are welcome...
+@
+text
+@$MirBSD$
+--- config/ltconfig.orig	2003-06-12 02:32:21.000000000 +0200
++++ config/ltconfig	2003-12-17 06:45:52.000000000 +0100
+@@@@ -2066,6 +2066,9 @@@@ openbsd*)
+     need_lib_prefix=no
+     need_version=no
+   fi
++  deplibs_check_method='file_magic ELF [0-9][0-9]-bit [LM]SB shared object'
++  file_magic_cmd=/usr/bin/file
++  file_magic_test_file=`echo /usr/lib/libc.so*`
+   library_names_spec='${libname}${release}.so$versuffix ${libname}.so$versuffix'
+   finish_cmds='PATH="\$PATH:/sbin" ldconfig -m $libdir'
+   shlibpath_var=LD_LIBRARY_PATH
+@
+
+
+1.1.1.1
+log
+@Import OpenBSD ports again. This will give us lots of new toys :).
+@
+text
+@d1 6
+a6 21
+$OpenBSD: patch-config_ltconfig,v 1.1 2004/02/16 11:08:48 kevlo Exp $
+--- config/ltconfig.orig	2002-09-05 19:21:12.000000000 +0000
++++ config/ltconfig	2004-02-16 18:26:29.000000000 +0000
+@@@@ -501,7 +501,14 @@@@ fi
+ 
+ if test -n "$RANLIB"; then
+   old_archive_cmds="$old_archive_cmds~\$RANLIB \$oldlib"
+-  old_postinstall_cmds="\$RANLIB \$oldlib~$old_postinstall_cmds"
++  case "$host_os" in
++  openbsd*)
++    old_postinstall_cmds="\$RANLIB -t \$oldlib~$old_postinstall_cmds"
++  ;;
++  *)
++    old_postinstall_cmds="\$RANLIB \$oldlib~$old_postinstall_cmds"
++  ;;
++  esac
+ fi
+ 
+ # Set sane defaults for `DLLTOOL', `OBJDUMP', and `AS', used on cygwin.
+@@@@ -1110,7 +1117,9 @@@@ cygwin* | mingw*)
+     with_gnu_ld=no
+d8 1
+a8 55
+   ;;
+-
++openbsd*)
++  with_gnu_ld=no
++  ;;
+ esac
+ 
+ ld_shlibs=yes
+@@@@ -1417,10 +1426,31 @@@@ else
+     ;;
+ 
+   openbsd*)
+-    archive_cmds='$LD -Bshareable -o $lib $libobjs $deplibs $linkopts'
+-    hardcode_libdir_flag_spec='-R$libdir'
+-    hardcode_direct=yes
+-    hardcode_shlibpath_var=no
++    case "$host_cpu" in
++    m88k|hppa|vax)
++      ld_shlibs=no
++      ;;
++    *)
++      hardcode_direct=yes
++      hardcode_shlibpath_var=no
++      if test -z "`echo __ELF__ | $CC -E - | grep __ELF__`" || test "$host_os-$host_cpu" = "openbsd2.8-powerpc"; then
++	archive_cmds='$CC -shared $pic_flag -o $lib $libobjs $deplibs $linkopts'
++	hardcode_libdir_flag_spec='${wl}-R$libdir'
++	export_dynamic_flag_spec='${wl}-E'
++      else
++	case "$host_os" in
++	openbsd[01].* | openbsd2.[0-7] | openbsd2.[0-7].*)
++	  archive_cmds='$LD -Bshareable -o $lib $libobjs $deplibs $linkopts'
++	  hardcode_libdir_flag_spec='-R$libdir'
++	  ;;
++	*)
++	  archive_cmds='$CC -shared $pic_flag -o $lib $libobjs $deplibs $linkopts'
++	  hardcode_libdir_flag_spec='${wl}-R$libdir'
++	  ;;
++	esac
++      fi
++      ;;
++    esac
+     ;;
+ 
+   os2*)
+@@@@ -2051,9 +2081,25 @@@@ netbsd*)
+ 
+ openbsd*)
+   version_type=sunos
+-  if test "$with_gnu_ld" = yes; then
+-    need_lib_prefix=no
+-    need_version=no
++  need_lib_prefix=no
++  need_version=no
++  sys_lib_search_path_spec="/usr/lib"
++  sys_lib_dlsearch_path_spec="/usr/lib /usr/local/lib"
+d10 1
+a10 15
++  file_magic_test_file=`echo /usr/lib/libc.so.*`
++  if test "`echo __ELF__ | $CC -E - | grep __ELF__`" = "" || test "$host_os-$host_cpu" = "openbsd2.8-powerpc"; then
++    deplibs_check_method='file_magic ELF [0-9][0-9]*-bit [LM]SB shared object'
++    case "$host_os" in
++    openbsd2.[89] | openbsd2.[89].*)
++      shlibpath_overrides_runpath=no
++    ;;
++    *)
++      shlibpath_overrides_runpath=yes
++    ;;
++    esac
++  else
++    deplibs_check_method='file_magic OpenBSD.* shared library'
++    shlibpath_overrides_runpath=yes
+   fi
+d13 1
+@
+
